@@ -66,18 +66,18 @@ impl<T> Partial<T> {
 /// 1. [`Deserialiser::into_leaf_raw`] The proof is a leaf and raw bytes are obtained.
 /// 2. [`Deserialiser::into_leaf<T>`] The proof is a leaf and the type `T` is parsed.
 /// 3. [`Deserialiser::into_node`] The proof is a node in the tree.
-pub trait Deserialiser {
+pub trait Deserialiser<'f> {
     /// After deserialising a proof, a [`Suspended<R>`] computation is obtained.
-    type Suspended<R>: Suspended<Output = R, Parent = Self>;
+    type Suspended<R: 'f>: Suspended<'f, Output = R, Parent = Self>;
 
     /// In case the proof is a node, [`Deserialiser::DeserialiserNode`] is the deserialiser for the branch case.
-    type DeserialiserNode<R>: DeserialiserNode<R, Parent = Self>;
+    type DeserialiserNode<R: 'f>: DeserialiserNode<'f, R, Parent = Self>;
 
     /// It is expected for the proof to be a leaf. Obtain the raw bytes from that leaf.
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    fn into_leaf<T: DeserializeOwned + 'static>(self) -> Result<Self::Suspended<Partial<T>>>;
+    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<T>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
@@ -86,64 +86,66 @@ pub trait Deserialiser {
 /// The trait used for deserialising a proof's node.
 /// Having an object of this trait is equivalent to knowing the current proof is a node.
 /// Deserialisers for each of its branches are expected to be provided to continue the deserialisation.
-pub trait DeserialiserNode<R> {
-    type Parent: Deserialiser;
+pub trait DeserialiserNode<'f, R> {
+    type Parent: Deserialiser<'f>;
 
     /// The next branch of the current node is deserialised using the provided deserialiser `br_deser`.
-    fn next_branch<'ret, T>(
+    fn next_branch<T>(
         self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
         )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
+            -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<T>>
+        + 'static,
+    ) -> Result<<Self::Parent as Deserialiser<'f>>::DeserialiserNode<(R, T)>>
     where
-        T: 'ret,
-        R: 'ret;
+        T: 'f,
+        R: 'f;
 
     /// Helper for mapping the current result into a new type.
-    fn map<'ret, T>(
+    fn map<T>(
         self,
-        f: impl FnOnce(R) -> T + 'ret,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
+        f: impl FnOnce(R) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::DeserialiserNode<T>
     where
-        T: 'ret,
-        R: 'ret;
+        T: 'f,
+        R: 'f;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>>;
+    fn done(self) -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<R>>;
 }
 
 /// The trait represents a computation function obtained after deserialising a proof.
-pub trait Suspended {
+pub trait Suspended<'f> {
     /// End result of the computation.
     type Output;
 
-    type Parent: Deserialiser;
+    type Parent: Deserialiser<'f>;
 
     /// Helper to map the current result into a new type.
-    fn map<'ret, T>(
+    fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'ret,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
+        f: impl FnOnce(Self::Output) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<T>
     where
-        Self::Output: 'ret;
+        Self::Output: 'f;
 
     /// Helper to zip the current result with another result.
-    fn zip<'ret, T>(
+    fn zip<T>(
         self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
+        other: <Self::Parent as Deserialiser<'f>>::Suspended<T>,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<(Self::Output, T)>
     where
-        Self::Output: 'ret,
-        T: 'ret;
+        Self::Output: 'f,
+        T: 'f;
 }
+
 /// Helper trait for transforming `Self`` to a suspended computation from a given serialiser.
 pub trait FromProof {
     type Output: Sized;
 
-    fn from_proof<D: Deserialiser>(de: D) -> Result<D::Suspended<Self::Output>>;
+    fn from_proof<'f, D: Deserialiser<'f>>(de: D) -> Result<D::Suspended<Self::Output>>;
 }
 
 #[cfg(test)]
@@ -161,9 +163,9 @@ mod tests {
     use crate::state_backend::proof_backend::proof::deserialiser::DeserError;
     use crate::storage::Hash;
 
-    fn create_computation<D: Deserialiser>(
+    fn create_computation<'f, D: Deserialiser<'f>>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser<'f>>::Suspended<i32>> {
         // The tree structure:
         // Node (root)
         // ├── Leaf (type: Hash)
@@ -193,9 +195,9 @@ mod tests {
         }))
     }
 
-    fn create_computation_2<D: Deserialiser>(
+    fn create_computation_2<'f, D: Deserialiser<'f>>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser<'f>>::Suspended<i32>> {
         // The tree structure
         // Node (root)
         // ├── Leaf 1 (type: i32)
