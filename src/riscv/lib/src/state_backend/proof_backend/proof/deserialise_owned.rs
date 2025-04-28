@@ -43,7 +43,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_leaf<T: DeserializeOwned + 'static>(self) -> Result<Self::Suspended<Partial<T>>> {
+    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<T>>> {
         self.deserialise_as_leaf()?
             .map_present_fallible(|data| Ok(binary::deserialise::<T>(data.as_ref())?))
             .map(OwnedParserComb::new)
@@ -149,8 +149,8 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
     ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
-        R: 'static,
         T: 'static,
+        R: 'static,
     {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
