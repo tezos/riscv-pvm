@@ -22,6 +22,7 @@ use super::proof_backend::merkle::MerkleTree;
 use super::proof_backend::merkle::MerkleWriter;
 use super::proof_backend::merkle::build_custom_merkle_tree;
 use super::proof_backend::merkle::chunks_to_writer;
+use super::proof_backend::proof::DeserialiseError;
 use super::proof_backend::proof::MerkleProof;
 use super::proof_backend::proof::MerkleProofLeaf;
 use super::proof_backend::tree::Tree;
@@ -39,6 +40,12 @@ pub enum FromProofError {
 
     #[error("Error during deserialisation: {0}")]
     Deserialise(#[from] bincode::Error),
+
+    #[error("Error during tag deserialisation: {0}")]
+    TagDeserialise(#[from] DeserialiseError),
+
+    #[error("Deserialising as a stream and not all bytes are parsed")]
+    RemainingBytes,
 
     #[error("Encountered an invalid hash in a blinded node or leaf")]
     InvalidHash,
