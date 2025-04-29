@@ -18,7 +18,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
-use crate::state_backend::FromProofResult;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -33,7 +32,12 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::VerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
+use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
+use crate::state_backend::proof_backend::proof::deserialiser::Result;
+use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
 
@@ -96,7 +100,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: Layout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-
             }
 
             impl<B: CommitmentLayout> CommitmentLayout for [<$name Layout>]<B> {
@@ -105,14 +108,18 @@ macro_rules! combined_buddy_branch {
                 }
             }
 
-            impl<B: ProofLayout> ProofLayout for [<$name Layout>]<B> {
+            impl<B: ProofLayout> ProofLayout for [<$name Layout>]<B>
+            where
+                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, Verifier>: 'static,
+                [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
+            {
                 fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_merkle_tree(state.0)
                 }
 
-                fn from_proof(proof: ProofTree) -> FromProofResult<Self> {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::from_proof(proof)?;
-                    Ok([<$name Alloc>](inner))
+                fn to_verifier_alloc<D: Deserialiser>(proof: D) -> Result<D::Suspended<VerifierAlloc<Self>>> {
+                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_verifier_alloc(proof)?;
+                    Ok(inner.map(|inner| [<$name Alloc>](inner)))
                 }
 
                 fn partial_state_hash(
@@ -123,7 +130,9 @@ macro_rules! combined_buddy_branch {
                 }
             }
 
-            impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B> {
+            impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B>
+                where [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: 'static,
+            {
                 type Buddy<M: ManagerBase> = $name<B::Buddy<M>, M>;
 
                 fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {

@@ -10,13 +10,15 @@ use crate::default::ConstDefault;
 use crate::machine_state::memory::Address;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
-use crate::state_backend::FromProofResult;
+use crate::state_backend::FromProofError;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::Many;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofTree;
+use crate::state_backend::VerifierAlloc;
+use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
 
@@ -102,6 +104,8 @@ impl<const BITS: usize, const SIZE: usize, CachedLayout: CommitmentLayout> Commi
 
 impl<const BITS: usize, const SIZE: usize, CachedLayout: ProofLayout> ProofLayout
     for Sizes<BITS, SIZE, CachedLayout>
+where
+    AllocatedOf<CachedLayout, Verifier>: 'static,
 {
     fn to_merkle_tree(
         state: crate::state_backend::RefProofGenOwnedAlloc<Self>,
@@ -109,8 +113,10 @@ impl<const BITS: usize, const SIZE: usize, CachedLayout: ProofLayout> ProofLayou
         Many::<CachedLayout, SIZE>::to_merkle_tree(state)
     }
 
-    fn from_proof(proof: ProofTree) -> FromProofResult<Self> {
-        Many::<CachedLayout, SIZE>::from_proof(proof)
+    fn to_verifier_alloc<D: Deserialiser>(
+        proof: D,
+    ) -> Result<D::Suspended<VerifierAlloc<Self>>, FromProofError> {
+        Many::<CachedLayout, SIZE>::to_verifier_alloc(proof)
     }
 
     fn partial_state_hash(
