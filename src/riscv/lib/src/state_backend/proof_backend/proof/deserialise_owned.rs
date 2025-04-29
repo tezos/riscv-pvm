@@ -13,11 +13,14 @@ use super::deserialiser::DeserialiserNode;
 use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
+use crate::state_backend::AllocatedOf;
 use crate::state_backend::FromProofError;
+use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::tree::Tree;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::binary;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
@@ -147,11 +150,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
-    where
-        T: 'static,
-        R: 'static,
-    {
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
             Partial::Absent | Partial::Blinded(_) => ProofTreeDeserialiser(ProofTree::Absent),
@@ -167,7 +166,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         let br_comb = branch_deserialiser(next_branch)?;
 
         Ok(OwnedBranchComb {
-            f: self.f.zip(br_comb),
+            f: OwnedParserComb::new((self.f.result, br_comb.result)),
             node_data: self.node_data,
         })
     }
@@ -176,9 +175,9 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         self,
         f: impl FnOnce(R) -> T + 'static,
     ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
-    where
-        T: 'static,
-        R: 'static,
+// where
+    //     T: 'static,
+    //     R: 'static,
     {
         OwnedBranchComb {
             f: self.f.map(f),
@@ -208,23 +207,12 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 
     fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
+        f: impl FnOnce(Self::Output) -> T,
     ) -> <Self::Parent as Deserialiser>::Suspended<T>
-    where
-        Self::Output: 'static,
+where
+        // Self::Output: 'static,
     {
         OwnedParserComb::new(f(self.result))
-    }
-
-    fn zip<T>(
-        self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
-    where
-        Self::Output: 'static,
-        T: 'static,
-    {
-        OwnedParserComb::new((self.result, other.result))
     }
 }
 
@@ -232,4 +220,12 @@ impl<R> OwnedParserComb<'_, R> {
     pub fn into_result(self) -> R {
         self.result
     }
+}
+
+/// Given a [`ProofTree`] deseerialise it into an allocated [`Verifier`] backend.
+pub fn deserialise<L: ProofLayout>(
+    proof: ProofTree,
+) -> Result<AllocatedOf<L, Verifier>, DeserError> {
+    let comp_fn = L::to_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?;
+    Ok(comp_fn.into_result())
 }

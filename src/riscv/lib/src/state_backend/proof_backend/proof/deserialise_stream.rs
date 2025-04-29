@@ -16,10 +16,12 @@ use super::Tag;
 use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
-use super::deserialiser::FromProof;
 use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
+use crate::state_backend::AllocatedOf;
+use crate::state_backend::ProofLayout;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 
 /// Wrapper type over the raw byte data to parse tags.
@@ -206,21 +208,6 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
             Ok(map_f(r))
         })
     }
-
-    fn zip<T>(
-        self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
-    where
-        Self::Output: 'static,
-        T: 'static,
-    {
-        StreamParserComb::new(|input| {
-            let r = (self.f)(input)?;
-            let t = (other.f)(input)?;
-            Ok((r, t))
-        })
-    }
 }
 
 impl<R> StreamParserComb<'_, R> {
@@ -252,12 +239,9 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
         branch_deserialiser: impl FnOnce(
             Self::Parent,
         )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
-    where
-        T: 'static,
-        R: 'static,
-    {
+            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>
+        + 'static,
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
         let child_proof = match &self.node_state {
             Some(tags) => StreamDeserialiser::new_present(tags.clone()),
             None => StreamDeserialiser::Absent,
@@ -323,9 +307,11 @@ impl<R> StreamParserComb<'_, R> {
 /// Deserialise into a type `T::Output` given the raw bytes.
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
-pub fn deserialise<T: FromProof>(proof_tree_raw_bytes: &[u8]) -> Result<T::Output> {
+pub fn deserialise<L: ProofLayout>(
+    proof_tree_raw_bytes: &[u8],
+) -> Result<AllocatedOf<L, Verifier>, DeserError> {
     let tags_rc = Rc::new(RefCell::new(TagIter::new(proof_tree_raw_bytes)));
-    let comp_fn = T::from_proof(StreamDeserialiser::new_present(tags_rc.clone()))?;
+    let comp_fn = L::to_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation

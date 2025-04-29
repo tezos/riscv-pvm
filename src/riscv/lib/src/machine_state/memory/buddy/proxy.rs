@@ -13,7 +13,6 @@ use super::leaf::BuddyLeafLayout;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
-use crate::state_backend::FromProofResult;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerSerialise;
@@ -23,7 +22,9 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::VerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
+use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::storage::Hash;
 use crate::storage::HashError;
 
@@ -54,8 +55,10 @@ where
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
 
-    fn from_proof(proof: ProofTree) -> FromProofResult<Self> {
-        <PickLayout<PAGES> as ProofLayout>::from_proof(proof)
+    fn to_verifier_alloc<D: deserialiser::Deserialiser>(
+        proof: D,
+    ) -> deserialiser::Result<D::Suspended<VerifierAlloc<Self>>> {
+        <PickLayout<PAGES> as ProofLayout>::to_verifier_alloc(proof)
     }
 
     fn partial_state_hash(
