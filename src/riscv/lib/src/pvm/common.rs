@@ -27,6 +27,7 @@ use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
+use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CommitmentLayout;
@@ -40,6 +41,7 @@ use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
+use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
@@ -447,7 +449,10 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
     Pvm<MC, CL, B, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
-    pub(crate) fn to_proof(&self) -> Result<Proof, HashError> {
+    pub(crate) fn to_proof(&self) -> Result<Proof, HashError>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
         let refs = self.struct_ref::<FnManagerIdent>();
         let merkle_proof = PvmLayout::<MC, CL>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
@@ -461,9 +466,12 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
 
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, Verifier> {
     /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self> {
+    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
         let space =
-            <PvmLayout<MC, CL> as ProofLayout>::from_proof(ProofTree::Present(proof)).ok()?;
+            deserialise_owned::deserialise::<PvmLayout<MC, CL>>(ProofTree::Present(proof)).ok()?;
         Some(Self::bind(space, block_builder))
     }
 }

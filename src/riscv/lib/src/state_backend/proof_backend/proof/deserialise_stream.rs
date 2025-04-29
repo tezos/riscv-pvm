@@ -16,10 +16,12 @@ use super::Tag;
 use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
-use super::deserialiser::FromProof;
 use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
+use crate::state_backend::AllocatedOf;
+use crate::state_backend::ProofLayout;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 
 /// Wrapper type over the raw byte data to parse tags.
@@ -308,9 +310,11 @@ impl<R> StreamParserComb<'_, R> {
 /// Deserialise into a type `T::Output` given the raw bytes.
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
-pub fn deserialise<T: FromProof>(proof_tree_raw_bytes: &[u8]) -> Result<T::Output> {
+pub fn deserialise<L: ProofLayout>(
+    proof_tree_raw_bytes: &[u8],
+) -> Result<AllocatedOf<L, Verifier>, DeserError> {
     let tags_rc = Rc::new(RefCell::new(TagIter::new(proof_tree_raw_bytes)));
-    let comp_fn = T::from_proof(StreamDeserialiser::new_present(tags_rc.clone()))?;
+    let comp_fn = L::to_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation
