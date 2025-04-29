@@ -98,8 +98,8 @@ pub trait DeserialiserNode<R> {
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
     ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
-        R: 'static,
-        T: 'static;
+        T: 'static,
+        R: 'static;
 
     /// Helper for mapping the current result into a new type.
     fn map<T>(
@@ -129,13 +129,6 @@ pub trait Suspended {
     ) -> <Self::Parent as Deserialiser>::Suspended<T>
     where
         Self::Output: 'static;
-}
-
-/// Helper trait for transforming `Self`` to a suspended computation from a given serialiser.
-pub trait FromProof {
-    type Output: Sized;
-
-    fn from_proof<D: Deserialiser>(de: D) -> Result<D::Suspended<Self::Output>>;
 }
 
 #[cfg(test)]
