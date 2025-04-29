@@ -115,6 +115,7 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
 use crate::state_backend::proof_backend;
+use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
 use crate::storage::Hash;
 use crate::storage::HashError;
 use crate::traps::EnvironException;
@@ -193,8 +194,11 @@ impl state_backend::ProofLayout for AddressCellLayout {
         <Atom<Address> as state_backend::ProofLayout>::to_merkle_tree(state)
     }
 
-    fn from_proof(proof: state_backend::ProofTree) -> state_backend::FromProofResult<Self> {
-        <Atom<Address> as state_backend::ProofLayout>::from_proof(proof)
+    fn to_verifier_alloc<'f, D: Deserialiser<'f>>(
+        proof: D,
+    ) -> Result<D::Suspended<state_backend::VerifierAlloc<Self>>, state_backend::FromProofError>
+    {
+        <Atom<Address> as state_backend::ProofLayout>::to_verifier_alloc(proof)
     }
 
     fn partial_state_hash(

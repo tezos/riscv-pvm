@@ -42,6 +42,7 @@ use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
+use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::state_backend::verify_backend::Verifier;
 use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -272,7 +273,7 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = PvmLayout::<MC, CL>::from_proof(proof_tree)
+        let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
         let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);

@@ -23,7 +23,6 @@ use crate::state_backend::CommitmentLayout;
 use crate::state_backend::EffectCell;
 use crate::state_backend::EffectCellLayout;
 use crate::state_backend::FnManager;
-use crate::state_backend::FromProofResult;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -33,16 +32,19 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::VerifierAlloc;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::hash::HashError;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::merkle::AccessInfoAggregatable;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
+use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
+use crate::state_backend::proof_backend::proof::deserialiser::Partial;
+use crate::state_backend::proof_layout;
 use crate::state_backend::verify_backend;
 use crate::storage::binary;
 
@@ -191,69 +193,42 @@ impl ProofLayout for CSRValuesLayout {
         MerkleTree::make_merkle_leaf(serialised, state.aggregate_access_info())
     }
 
-    fn from_proof(proof: ProofTree) -> FromProofResult<Self> {
-        fn make_absent() -> AllocatedOf<CSRValuesLayout, verify_backend::Verifier> {
-            CSRValuesF::new_with(
-                || mstatus::MStatusLayoutF {
-                    sie: Cell::absent(),
-                    mie: Cell::absent(),
-                    spie: Cell::absent(),
-                    ube: Cell::absent(),
-                    mpie: Cell::absent(),
-                    spp: Cell::absent(),
-                    mpp: Cell::absent(),
-                    fs: Cell::absent(),
-                    xs: Cell::absent(),
-                    mprv: Cell::absent(),
-                    sum: Cell::absent(),
-                    mxr: Cell::absent(),
-                    tvm: Cell::absent(),
-                    tw: Cell::absent(),
-                    tsr: Cell::absent(),
-                    uxl: Cell::absent(),
-                    sxl: Cell::absent(),
-                    sbe: Cell::absent(),
-                    mbe: Cell::absent(),
+    fn to_verifier_alloc<'f, D: Deserialiser<'f>>(
+        proof: D,
+    ) -> Result<D::Suspended<VerifierAlloc<Self>>, proof_layout::FromProofError> {
+        use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
+        let ctx = proof.into_leaf::<AllocatedOf<CSRValuesLayout, Owned>>()?;
+
+        let handler = ctx.map(move |data| match data {
+            Partial::Absent | Partial::Blinded(_) => Self::make_absent(),
+            Partial::Present(data) => data.map(
+                |mstatus| mstatus::MStatusLayoutF {
+                    sie: Cell::from_owned(mstatus.sie),
+                    mie: Cell::from_owned(mstatus.mie),
+                    spie: Cell::from_owned(mstatus.spie),
+                    ube: Cell::from_owned(mstatus.ube),
+                    mpie: Cell::from_owned(mstatus.mpie),
+                    spp: Cell::from_owned(mstatus.spp),
+                    mpp: Cell::from_owned(mstatus.mpp),
+                    fs: Cell::from_owned(mstatus.fs),
+                    xs: Cell::from_owned(mstatus.xs),
+                    mprv: Cell::from_owned(mstatus.mprv),
+                    sum: Cell::from_owned(mstatus.sum),
+                    mxr: Cell::from_owned(mstatus.mxr),
+                    tvm: Cell::from_owned(mstatus.tvm),
+                    tw: Cell::from_owned(mstatus.tw),
+                    tsr: Cell::from_owned(mstatus.tsr),
+                    uxl: Cell::from_owned(mstatus.uxl),
+                    sxl: Cell::from_owned(mstatus.sxl),
+                    sbe: Cell::from_owned(mstatus.sbe),
+                    mbe: Cell::from_owned(mstatus.mbe),
                 },
-                || (),
-                || Cell::bind(verify_backend::Region::Absent),
-            )
-        }
+                |()| (),
+                Cell::from_owned,
+            ),
+        });
 
-        let leaf = proof.into_leaf()?;
-        let cell = match leaf {
-            ProofPart::Absent => make_absent(),
-            ProofPart::Present(data) => {
-                let values: AllocatedOf<CSRValuesLayout, Owned> = binary::deserialise(data)?;
-                values.map(
-                    |mstatus| mstatus::MStatusLayoutF {
-                        sie: Cell::from_owned(mstatus.sie),
-                        mie: Cell::from_owned(mstatus.mie),
-                        spie: Cell::from_owned(mstatus.spie),
-                        ube: Cell::from_owned(mstatus.ube),
-                        mpie: Cell::from_owned(mstatus.mpie),
-                        spp: Cell::from_owned(mstatus.spp),
-                        mpp: Cell::from_owned(mstatus.mpp),
-                        fs: Cell::from_owned(mstatus.fs),
-                        xs: Cell::from_owned(mstatus.xs),
-                        mprv: Cell::from_owned(mstatus.mprv),
-                        sum: Cell::from_owned(mstatus.sum),
-                        mxr: Cell::from_owned(mstatus.mxr),
-                        tvm: Cell::from_owned(mstatus.tvm),
-                        tw: Cell::from_owned(mstatus.tw),
-                        tsr: Cell::from_owned(mstatus.tsr),
-                        uxl: Cell::from_owned(mstatus.uxl),
-                        sxl: Cell::from_owned(mstatus.sxl),
-                        sbe: Cell::from_owned(mstatus.sbe),
-                        mbe: Cell::from_owned(mstatus.mbe),
-                    },
-                    |()| (),
-                    Cell::from_owned,
-                )
-            }
-        };
-
-        Ok(cell)
+        Ok(handler)
     }
 
     fn partial_state_hash(
@@ -290,6 +265,36 @@ impl ProofLayout for CSRValuesLayout {
             Ok(state) => Ok(Self::state_hash(state)?),
             Err(_) => proof.partial_hash_leaf(),
         }
+    }
+}
+
+impl CSRValuesLayout {
+    fn make_absent() -> AllocatedOf<CSRValuesLayout, verify_backend::Verifier> {
+        CSRValuesF::new_with(
+            || mstatus::MStatusLayoutF {
+                sie: Cell::absent(),
+                mie: Cell::absent(),
+                spie: Cell::absent(),
+                ube: Cell::absent(),
+                mpie: Cell::absent(),
+                spp: Cell::absent(),
+                mpp: Cell::absent(),
+                fs: Cell::absent(),
+                xs: Cell::absent(),
+                mprv: Cell::absent(),
+                sum: Cell::absent(),
+                mxr: Cell::absent(),
+                tvm: Cell::absent(),
+                tw: Cell::absent(),
+                tsr: Cell::absent(),
+                uxl: Cell::absent(),
+                sxl: Cell::absent(),
+                sbe: Cell::absent(),
+                mbe: Cell::absent(),
+            },
+            || (),
+            || Cell::bind(verify_backend::Region::Absent),
+        )
     }
 }
 

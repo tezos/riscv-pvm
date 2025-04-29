@@ -40,6 +40,7 @@ use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
+use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
@@ -463,7 +464,7 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, 
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self> {
         let space =
-            <PvmLayout<MC, CL> as ProofLayout>::from_proof(ProofTree::Present(proof)).ok()?;
+            deserialise_owned::deserialise::<PvmLayout<MC, CL>>(ProofTree::Present(proof)).ok()?;
         Some(Self::bind(space, block_builder))
     }
 }
