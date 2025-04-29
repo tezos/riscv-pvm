@@ -235,11 +235,15 @@ pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
         .chain(nodes_encoding)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum DeserialiseError {
-    ExpectedLeaf,
+    #[error("Expected a leaf tag, but got a node tag")]
+    UnexpectedNode,
+    #[error("Invalid tag")]
     InvalidTag,
+    #[error("Not enough bytes")]
     NotEnoughBytes,
+    #[error("Too many bytes")]
     TooManyBytes,
 }
 
@@ -304,7 +308,7 @@ fn deserialise_merkle_proof_tags(
             },
             Tag::Node => match subtree {
                 Tree::Node(children) => Ok(ModifyResult::NodeContinue((), children)),
-                Tree::Leaf(_) => Err(DeserialiseError::ExpectedLeaf),
+                Tree::Leaf(_) => Err(DeserialiseError::UnexpectedNode),
             },
         }
     })
@@ -805,7 +809,7 @@ mod tests {
             (TAG_READ << 6) | (TAG_BLIND << 4),
         ];
         let raw_bytes = [fh.as_ref(), &tag_bytes_bad, &val_bytes].concat();
-        check_bad_deserialisation(&raw_bytes, root.clone(), DeserialiseError::ExpectedLeaf);
+        check_bad_deserialisation(&raw_bytes, root.clone(), DeserialiseError::UnexpectedNode);
     }
 
     #[test]
