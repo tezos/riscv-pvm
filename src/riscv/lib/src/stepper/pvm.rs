@@ -36,6 +36,7 @@ use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ProofLayout;
+use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::hash::Hash;
@@ -43,6 +44,8 @@ use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
+use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
+use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::state_backend::verify_backend::Verifier;
 use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -272,6 +275,22 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
         }
     }
 
+    /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
+    ///
+    /// Useful for testing the stream deserialisation.
+    /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation
+    pub fn verify_proof_using_raw_bytes(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
+        let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).collect();
+        let space = deserialise_stream::deserialise::<PvmLayout<MC, CL>>(&tree_serialisation)
+            .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+        let stepper = self.as_verify_stepper(space)?;
+
+        stepper.verify_proof_internal(ProofPart::Present(proof.tree()), proof.final_state_hash())
+    }
+
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
@@ -281,8 +300,20 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
         let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
-        let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
-        let stepper = PvmStepper {
+        let stepper = self.as_verify_stepper(space)?;
+        stepper.verify_proof_internal(proof_tree, proof.final_state_hash())
+    }
+
+    fn as_verify_stepper(
+        &self,
+        space: AllocatedOf<PvmLayout<MC, CL>, Verifier>,
+    ) -> Result<PvmStepper<MC, CL, Verifier, Interpreted<MC, Verifier>>, ProofVerificationFailure>
+    {
+        let pvm = Pvm::<MC, CL, Interpreted<MC, Verifier>, Verifier>::bind(
+            space,
+            InterpretedBlockBuilder,
+        );
+        Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
             origination_level: self.origination_level,
@@ -296,20 +327,7 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
             hooks: PvmHooks::none(),
 
             reveal_request_response_map: self.reveal_request_response_map.clone(),
-        };
-
-        let stepper = stepper.try_step_partial()?;
-
-        let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, CL>::partial_state_hash(refs, proof_tree)?;
-        if final_hash != proof.final_state_hash() {
-            return Err(ProofVerificationFailure::FinalHashMismatch {
-                expected: proof.final_state_hash(),
-                computed: final_hash,
-            });
-        }
-
-        Ok(())
+        })
     }
 }
 
@@ -345,6 +363,28 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>>
             // the mutex cannot be poisoned.
             Ok(mutex.into_inner().unwrap())
         })?
+    }
+
+    fn verify_proof_internal(
+        self,
+        proof_tree: ProofTree,
+        expected_final_hash: Hash,
+    ) -> Result<(), ProofVerificationFailure>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
+        let stepper = self.try_step_partial()?;
+
+        let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
+        let final_hash = PvmLayout::<MC, CL>::partial_state_hash(refs, proof_tree)?;
+        if final_hash != expected_final_hash {
+            return Err(ProofVerificationFailure::FinalHashMismatch {
+                expected: expected_final_hash,
+                computed: final_hash,
+            });
+        }
+
+        Ok(())
     }
 }
 
