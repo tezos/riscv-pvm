@@ -156,7 +156,8 @@ macro_rules! struct_layout {
                 $(
                     [<$field_name:camel>]
                 ),+
-            > {
+            >
+            {
                 #[inline]
                 fn to_merkle_tree(
                     state: $crate::state_backend::RefProofGenOwnedAlloc<Self>,
@@ -171,15 +172,30 @@ macro_rules! struct_layout {
                 }
 
                 #[inline]
-                fn from_proof(
-                    proof: $crate::state_backend::ProofTree,
-                ) -> Result<Self::Allocated<$crate::state_backend::verify_backend::Verifier>, $crate::state_backend::FromProofError> {
-                    let [ $($field_name),+ ] = *proof.into_branches()?;
-                    Ok(Self::Allocated {
+                fn to_verifier_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
+                    proof: D,
+                ) -> Result<
+                    D::Suspended<$crate::state_backend::VerifierAlloc<Self>>,
+                    $crate::state_backend::FromProofError> {
+
+                    use $crate::tuple_branches_proof_layout;
+                    use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
+
+                    let ctx = proof
+                        .into_node()?.map(|_unit_partial_res| ());
+
+                    let ctx = tuple_branches_proof_layout!(ctx, [] $(, [<$field_name:camel>])+);
+
+                    let ctx = ctx.map(|res| {
+                        let ( $($field_name,)+ ) = res;
+                        Self::Allocated {
                         $(
-                            $field_name: [<$field_name:camel>]::from_proof($field_name)?
+                            $field_name
                         ),+
-                    })
+                        }
+                    });
+
+                    ctx.done()
                 }
 
                 #[inline]
@@ -300,6 +316,7 @@ mod tests {
     use crate::state_backend::ProofPart;
     use crate::state_backend::owned_backend::Owned;
     use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -395,7 +412,8 @@ mod tests {
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
-                let mut verify_foo = Foo::from_proof(ProofPart::Present(&proof)).unwrap();
+                let mut verify_foo =
+                    deserialise_owned::deserialise::<Foo>(ProofPart::Present(&proof)).unwrap();
                 assert_eq!(bar, verify_foo.bar.read());
                 assert_eq!(qux, verify_foo.qux.read_all().as_slice());
 
