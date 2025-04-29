@@ -1329,6 +1329,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "try-blocks",
+ "tuples",
  "vm-fdt",
 ]
 
@@ -2505,6 +2506,12 @@ name = "try-blocks"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "296cc7892cc05ae83e113b20c113d3fd9020eac7abbbaaeaf69c424ef872be7a"
+
+[[package]]
+name = "tuples"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5dcfa8dec45d3bff92d209a183499f95bf6298c5fea5852a210f15e066e7ca7"
 
 [[package]]
 name = "typenum"
