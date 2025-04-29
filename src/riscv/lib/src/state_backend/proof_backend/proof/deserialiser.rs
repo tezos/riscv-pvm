@@ -90,7 +90,7 @@ pub trait DeserialiserNode<R> {
     type Parent: Deserialiser;
 
     /// The next branch of the current node is deserialised using the provided deserialiser `br_deser`.
-    fn next_branch<T>(
+    fn next_branch<'ret, T>(
         self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
@@ -98,17 +98,17 @@ pub trait DeserialiserNode<R> {
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
     ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
-        R: 'static,
-        T: 'static;
+        T: 'ret,
+        R: 'ret;
 
     /// Helper for mapping the current result into a new type.
-    fn map<T>(
+    fn map<'ret, T>(
         self,
-        f: impl FnOnce(R) -> T + 'static,
+        f: impl FnOnce(R) -> T + 'ret,
     ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
     where
-        T: 'static,
-        R: 'static;
+        T: 'ret,
+        R: 'ret;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
@@ -123,21 +123,21 @@ pub trait Suspended {
     type Parent: Deserialiser;
 
     /// Helper to map the current result into a new type.
-    fn map<T>(
+    fn map<'ret, T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
+        f: impl FnOnce(Self::Output) -> T + 'ret,
     ) -> <Self::Parent as Deserialiser>::Suspended<T>
     where
-        Self::Output: 'static;
+        Self::Output: 'ret;
 
     /// Helper to zip the current result with another result.
-    fn zip<T>(
+    fn zip<'ret, T>(
         self,
         other: <Self::Parent as Deserialiser>::Suspended<T>,
     ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
     where
-        Self::Output: 'static,
-        T: 'static;
+        Self::Output: 'ret,
+        T: 'ret;
 }
 /// Helper trait for transforming `Self`` to a suspended computation from a given serialiser.
 pub trait FromProof {
@@ -302,6 +302,10 @@ mod tests {
                 Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap(),
             )),
         ]);
+        let bad_shape_4 = MerkleProof::Node(vec![
+            MerkleProof::Leaf(MerkleProofLeaf::Read([42_u8; 32].to_vec())),
+            MerkleProof::Leaf(MerkleProofLeaf::Read(100_i32.to_le_bytes().to_vec())),
+        ]);
         // Tree is missing branches
         let comp_fn =
             create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_1).into());
@@ -312,16 +316,19 @@ mod tests {
         // Ideally, we would like to have expected: 2, got: 5, but the implemenetation for `ProofTreeDeserialiser`
         // does not track this information (the original number of chilren)
         assert!(comp_fn.is_err_and(|e| {
-            println!("{e:?}");
             matches!(e, DeserError::BadNumberOfBranches {
                 expected: 0,
                 got: 3
             })
         }));
+        // The first child is a node, but is expected to be a leaf
         let comp_fn =
             create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
-        // The first child is a node, but is expected to be a leaf
         assert!(comp_fn.is_err_and(|e| matches!(e, DeserError::UnexpectedNode)));
+        // The second child is a leaf, but is expected to be a node
+        let comp_fn =
+            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_4).into());
+        assert!(comp_fn.is_err_and(|e| { matches!(e, DeserError::UnexpectedLeaf) }));
     }
 
     #[test]
