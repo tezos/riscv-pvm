@@ -16,7 +16,6 @@ use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
-use crate::state_backend::FromProofResult;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -31,7 +30,9 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::VerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
+use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 use crate::storage::Hash;
 use crate::storage::HashError;
 
@@ -53,10 +54,15 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         Atom::to_merkle_tree(state.set)
     }
 
-    fn from_proof(proof: ProofTree) -> FromProofResult<Self> {
-        Ok(Self::Allocated {
-            set: Atom::from_proof(proof)?,
-        })
+    fn to_verifier_alloc<
+        D: crate::state_backend::proof_backend::proof::deserialiser::Deserialiser,
+    >(
+        proof: D,
+    ) -> crate::state_backend::proof_backend::proof::deserialiser::Result<
+        D::Suspended<VerifierAlloc<Self>>,
+    > {
+        let parser = Atom::to_verifier_alloc(proof)?;
+        Ok(parser.map(|cell| Self::Allocated { set: cell }))
     }
 
     fn partial_state_hash(

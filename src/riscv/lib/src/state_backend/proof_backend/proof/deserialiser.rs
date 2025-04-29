@@ -302,6 +302,10 @@ mod tests {
                 Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap(),
             )),
         ]);
+        let bad_shape_4 = MerkleProof::Node(vec![
+            MerkleProof::Leaf(MerkleProofLeaf::Read([42_u8; 32].to_vec())),
+            MerkleProof::Leaf(MerkleProofLeaf::Read(100_i32.to_le_bytes().to_vec())),
+        ]);
         // Tree is missing branches
         let comp_fn =
             create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_1).into());
@@ -312,16 +316,19 @@ mod tests {
         // Ideally, we would like to have expected: 2, got: 5, but the implemenetation for `ProofTreeDeserialiser`
         // does not track this information (the original number of chilren)
         assert!(comp_fn.is_err_and(|e| {
-            println!("{e:?}");
             matches!(e, DeserError::BadNumberOfBranches {
                 expected: 0,
                 got: 3
             })
         }));
+        // The first child is a node, but is expected to be a leaf
         let comp_fn =
             create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
-        // The first child is a node, but is expected to be a leaf
         assert!(comp_fn.is_err_and(|e| matches!(e, DeserError::UnexpectedNode)));
+        // The second child is a leaf, but is expected to be a node
+        let comp_fn =
+            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_4).into());
+        assert!(comp_fn.is_err_and(|e| { matches!(e, DeserError::UnexpectedLeaf) }));
     }
 
     #[test]
