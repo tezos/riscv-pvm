@@ -20,10 +20,13 @@ use super::tree::ModifyResult;
 use super::tree::Tree;
 use super::tree::impl_modify_map_collect;
 use crate::bits::ones;
+use crate::pvm::node_pvm::NodePvm;
+use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::FromProofError;
 use crate::state_backend::Layout;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::hash::Hash;
+use crate::state_backend::proof_backend::merkle;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
 use crate::storage::HashError;
@@ -247,12 +250,12 @@ fn serialise_proof_values(proof: &MerkleProof) -> impl Iterator<Item = u8> + '_ 
         .copied()
 }
 
-/// Serialise a Merkle proof to an array of bytes.
+/// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
 pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
-    // Here we collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
+    // Collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
     // by compressing the tags to a byte-array, fully utilising the bytes capacity.
     let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
     let tags_encoding = serialise_raw_tags(iter_raw_tags(&proof.partial_tree)).into_iter();
@@ -292,10 +295,33 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
     Ok(Hash::from(digest))
 }
 
+/// Deserialise a [`Proof`] from an iterator of bytes.
+///
+/// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
+pub fn deserialise_proof<I: Iterator<Item = u8>>(
+    bytes: I,
+) -> Result<(Proof, NodePvm<Verifier>), FromProofError> {
+    let mut bytes_iter = bytes;
+    let final_state_hash = deserialise_final_hash(&mut bytes_iter)?;
+
+    let (space, proof_tree) =
+        deserialise_stream::deserialise::<NodePvmLayout>(bytes_iter.collect::<Vec<u8>>().as_ref())?;
+
+    let pvm = NodePvm::bind(space);
+
+    let merkle_tree = match proof_tree {
+        OwnedProofPart::Absent => return Err(FromProofError::AbsentProof),
+        OwnedProofPart::Present(tree) => tree,
+    };
+
+    Ok((Proof::new(merkle_tree, final_state_hash), pvm))
+}
+
 /// Proof parser which contains all the raw bytes of the serialisation
 pub struct ProofParserStart<I: Iterator<Item = u8>>(I);
 
 impl<I: Iterator<Item = u8>> ProofParserStart<I> {
+    /// Create a new [`ProofParserStart`] from a byte iterator.
     pub fn from_bytes_iter(bytes: I) -> Self {
         Self(bytes)
     }
@@ -315,6 +341,9 @@ impl<I: Iterator<Item = u8>> ProofParserStart<I> {
 pub struct ProofParserHash<I: Iterator<Item = u8>>(I);
 
 impl<I: Iterator<Item = u8>> ProofParserHash<I> {
+    /// Copy the remaining bytes into a slice.
+    ///
+    /// The raw bytes represent the serialised Merkle proof tree.
     pub fn raw_proof_tree_serialisation(&self) -> Box<[u8]>
     where
         I: Clone,
@@ -323,6 +352,8 @@ impl<I: Iterator<Item = u8>> ProofParserHash<I> {
         bytes.clone().collect()
     }
 
+    /// Parse the remaining bytes into a [`Verifier`] backend for
+    /// the generic `L`: [`ProofLayout`].
     pub fn parse_into_backend<L: ProofLayout>(
         self,
     ) -> Result<<L as Layout>::Allocated<Verifier>, FromProofError> {
