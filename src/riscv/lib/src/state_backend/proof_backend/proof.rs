@@ -239,12 +239,12 @@ fn serialise_proof_values(proof: &MerkleProof) -> impl Iterator<Item = u8> + '_ 
         .copied()
 }
 
-/// Serialise a Merkle proof to an array of bytes.
+/// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
 pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
-    // Here we collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
+    // Collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
     // by compressing the tags to a byte-array, fully utilising the bytes capacity.
     let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
     let tags_encoding = serialise_raw_tags(iter_raw_tags(&proof.partial_tree)).into_iter();
