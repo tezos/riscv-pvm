@@ -20,7 +20,12 @@ use super::tree::ModifyResult;
 use super::tree::Tree;
 use super::tree::impl_modify_map_collect;
 use crate::bits::ones;
+use crate::pvm::node_pvm::NodePvm;
+use crate::pvm::node_pvm::NodePvmLayout;
+use crate::state_backend::FromProofError;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::hash::Hash;
+use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
 use crate::storage::HashError;
 
@@ -54,6 +59,11 @@ impl Proof {
     /// Get the proof tree.
     pub fn tree(&self) -> &MerkleProof {
         &self.partial_tree
+    }
+
+    /// Convert the proof into a Merkle proof tree.
+    pub fn into_tree(self) -> MerkleProof {
+        self.partial_tree
     }
 
     /// Get the initial state hash of the proof.
@@ -253,12 +263,12 @@ fn serialise_proof_values(proof: &MerkleProof) -> impl Iterator<Item = u8> + '_ 
         .copied()
 }
 
-/// Serialise a Merkle proof to an array of bytes.
+/// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
 pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
-    // Here we collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
+    // Collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
     // by compressing the tags to a byte-array, fully utilising the bytes capacity.
     let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
     let proof_tree_encoding = serialise_merkle_tree(proof.tree());
@@ -299,6 +309,25 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
     Ok(Hash::from(digest))
 }
 
+/// Deserialise a [`Proof`] from an iterator of bytes.
+///
+/// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
+pub fn deserialise_proof<I: Iterator<Item = u8>>(
+    mut bytes: I,
+) -> Result<(Proof, NodePvm<Verifier>), FromProofError> {
+    let final_state_hash = deserialise_final_hash(&mut bytes)?;
+
+    let (space, proof_tree) =
+        deserialise_stream::deserialise::<NodePvmLayout>(bytes.collect::<Vec<u8>>().as_slice())?;
+
+    let merkle_tree = match proof_tree {
+        OwnedProofPart::Absent => return Err(FromProofError::AbsentProof),
+        OwnedProofPart::Present(tree) => tree,
+    };
+
+    let pvm = NodePvm::bind(space);
+    Ok((Proof::new(merkle_tree, final_state_hash), pvm))
+}
 #[cfg(test)]
 mod tests {
     use proptest::proptest;
