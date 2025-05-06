@@ -39,7 +39,7 @@ pub enum PvmError {
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
-type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheLayouts>;
+pub type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheLayouts>;
 
 type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheLayouts, Interpreted<NodePvmMemConfig, M>, M>;
 
@@ -195,19 +195,18 @@ impl NodePvm {
 }
 
 impl NodePvm<Verifier> {
-    /// Verify the proof with the given input. Upon success, return the input
-    /// request which corresponds to the initial state of the proof.
-    pub fn verify_proof(
+    /// Verify the proof with the given input by evaluating one step.
+    /// Upon success, return the input request which corresponds to the initial state of the proof.      
+    pub fn verify(
+        &mut self,
         proof: &Proof,
         input: Option<PvmInput>,
         pvm_hooks: &mut PvmHooks,
     ) -> Option<()> {
+        let expected_final_hash = proof.final_state_hash();
         let proof_tree = proof.tree();
-        let mut pvm = Pvm::from_proof(proof_tree, InterpretedBlockBuilder).map(|state| Self {
-            state: Box::new(state),
-        })?;
 
-        pvm.with_backend_mut(|pvm| {
+        self.with_backend_mut(|pvm| {
             match input {
                 None => pvm.eval_one(pvm_hooks),
                 Some(input) => {
@@ -220,7 +219,8 @@ impl NodePvm<Verifier> {
             let refs = pvm.struct_ref::<FnManagerIdent>();
             let final_hash =
                 NodePvmLayout::partial_state_hash(refs, ProofTree::Present(proof_tree)).ok()?;
-            if final_hash != proof.final_state_hash() {
+
+            if final_hash != expected_final_hash {
                 return None;
             }
 

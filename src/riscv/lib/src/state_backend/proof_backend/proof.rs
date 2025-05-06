@@ -247,12 +247,12 @@ fn serialise_proof_values(proof: &MerkleProof) -> impl Iterator<Item = u8> + '_ 
         .copied()
 }
 
-/// Serialise a Merkle proof to an array of bytes.
+/// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
 pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
-    // Here we collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
+    // Collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
     // by compressing the tags to a byte-array, fully utilising the bytes capacity.
     let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
     let tags_encoding = serialise_raw_tags(iter_raw_tags(&proof.partial_tree)).into_iter();
@@ -315,6 +315,9 @@ impl<I: Iterator<Item = u8>> ProofParserStart<I> {
 pub struct ProofParserHash<I: Iterator<Item = u8>>(I);
 
 impl<I: Iterator<Item = u8>> ProofParserHash<I> {
+    /// Copy the remaining bytes into a slice.
+    ///
+    /// The raw bytes represent the serialised Merkle proof tree.
     pub fn raw_proof_tree_serialisation(&self) -> Box<[u8]>
     where
         I: Clone,
@@ -323,6 +326,8 @@ impl<I: Iterator<Item = u8>> ProofParserHash<I> {
         bytes.clone().collect()
     }
 
+    /// Parse the remaining bytes into a [`Verifier`] backend for
+    /// the generic `L`: [`ProofLayout`].
     pub fn parse_into_backend<L: ProofLayout>(
         self,
     ) -> Result<<L as Layout>::Allocated<Verifier>, FromProofError> {
