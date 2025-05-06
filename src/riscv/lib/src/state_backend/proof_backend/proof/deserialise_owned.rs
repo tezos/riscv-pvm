@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
+use super::deserialiser::FromProof;
 use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
@@ -141,7 +142,7 @@ impl<B> OwnedBranchComb<'_, Partial<()>, B> {
 impl<'f, 't, R: 'f> DeserialiserNode<'f, R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser<'t>> {
     type Parent = ProofTreeDeserialiser<'t>;
 
-    fn next_branch<T>(
+    fn next_branch<'ret, T>(
         mut self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
@@ -172,7 +173,7 @@ impl<'f, 't, R: 'f> DeserialiserNode<'f, R> for OwnedBranchComb<'t, R, ProofTree
         })
     }
 
-    fn map<T>(
+    fn map<'ret, T>(
         self,
         f: impl FnOnce(R) -> T + 'f,
     ) -> <Self::Parent as Deserialiser<'f>>::DeserialiserNode<T>
@@ -206,24 +207,23 @@ impl<'f, 't, R> Suspended<'f> for OwnedParserComb<'t, R> {
 
     type Parent = ProofTreeDeserialiser<'t>;
 
-    fn map<T>(
+    fn map<'ret, T>(
         self,
         f: impl FnOnce(Self::Output) -> T + 'f,
     ) -> <Self::Parent as Deserialiser<'f>>::Suspended<T>
     where
         T: 'f,
-        Self::Output: 'f,
     {
         OwnedParserComb::new(f(self.result))
     }
 
-    fn zip<T>(
+    fn zip<'ret, T>(
         self,
         other: <Self::Parent as Deserialiser<'f>>::Suspended<T>,
     ) -> <Self::Parent as Deserialiser<'f>>::Suspended<(Self::Output, T)>
     where
-        Self::Output: 'f,
         T: 'f,
+        R: 'f,
     {
         OwnedParserComb::new((self.result, other.result))
     }
@@ -233,4 +233,12 @@ impl<R> OwnedParserComb<'_, R> {
     pub fn into_result(self) -> R {
         self.result
     }
+}
+
+/// Deserialise into a type `T::Output` given a [`ProofTree`].
+///
+/// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
+pub fn deserialise<T: FromProof>(proof: ProofTree) -> Result<T::Output, DeserError> {
+    let comp_fn = T::from_proof::<ProofTreeDeserialiser>(proof.into())?;
+    Ok(comp_fn.into_result())
 }

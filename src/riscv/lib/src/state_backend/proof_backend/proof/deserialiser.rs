@@ -399,6 +399,7 @@ mod tests {
         // The first child is a node, but is expected to be a leaf
         let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
         assert!(comp_fn.is_err_and(|e| matches!(e, DeserError::UnexpectedNode)));
+
         // The second child is a leaf, but is expected to be a node
         let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_4).into());
         assert!(comp_fn.is_err_and(|e| { matches!(e, DeserError::UnexpectedLeaf) }));

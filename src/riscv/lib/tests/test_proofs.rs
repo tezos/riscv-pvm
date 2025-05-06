@@ -170,12 +170,13 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, CL: CacheLayouts>(
     assert!(
         stepper
             .verify_proof(invalid_final_hash_proof)
-            .is_err_and(
-                |e| matches!(e, ProofVerificationFailure::FinalHashMismatch {
+            .is_err_and(|e| {
+                println!("{e:?}");
+                matches!(e, ProofVerificationFailure::FinalHashMismatch {
                     expected: _,
                     computed: _
                 })
-            )
+            })
     );
 }
 
