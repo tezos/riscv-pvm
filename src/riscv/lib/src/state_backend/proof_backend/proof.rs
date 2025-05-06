@@ -307,15 +307,19 @@ impl<I: Iterator<Item = u8>> ProofParserStart<I> {
 pub struct ProofParserHash<I: Iterator<Item = u8>>(I);
 
 impl<I: Iterator<Item = u8>> ProofParserHash<I> {
+    /// Copy the remaining bytes into a slice.
+    ///
+    /// The raw bytes represent the serialised Merkle proof tree.
     pub fn raw_proof_tree_serialisation(&self) -> Box<[u8]>
     where
         I: Clone,
     {
-        let x = &self.0;
-        let data = x.clone().collect();
-        data
+        // Collect the remaining bytes into a boxed slice
+        self.0.clone().collect()
     }
 
+    /// Parse the remaining bytes into a [`Verifier`] backend for
+    /// the generic `L`: [`ProofLayout`].
     pub fn parse_into_backend<L: ProofLayout>(
         self,
     ) -> Result<<L as Layout>::Allocated<Verifier>, FromProofError> {
