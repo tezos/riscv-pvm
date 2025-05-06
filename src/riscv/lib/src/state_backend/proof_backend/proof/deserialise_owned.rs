@@ -152,8 +152,8 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
     ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
-        T: 'static,
         R: 'static,
+        T: 'static,
     {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.

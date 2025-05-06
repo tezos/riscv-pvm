@@ -509,7 +509,7 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
 /// use octez_riscv::state_backend::VerifierAlloc;
 /// use octez_riscv::state_backend::FromProofError;
 ///
-/// fn compute_branch_case<A: ProofLayout, B: ProofLayout, D: Deserialiser>(
+/// fn compute_branch_case<A: ProofLayout, B: ProofLayout, D: Deserialiser<'f>>(
 ///     de: D,
 /// ) -> Result<D::Suspended<VerifierAlloc<(A, B)>>, FromProofError>
 /// {
