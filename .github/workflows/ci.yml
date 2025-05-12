@@ -1,0 +1,108 @@
+name: Continuous Integration
+
+on:
+  # Trigger this workflow on PRs
+  pull_request:
+
+  # Trigger this workflow on pushes to these branches
+  push:
+    branches: [main]
+
+concurrency:
+  # Cancel previous workflow runs for the same ref (e.g. same PR or branch) 
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+  # Cancel only if it is not the main branch
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+env:
+  # Make Cargo output pretty
+  CARGO_TERM_COLOR: "always"
+
+  # Enable Sccache
+  RUSTC_WRAPPER: "sccache"
+
+  # Make sure Sccache automatically uses the GitHub Actions cache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  run-make-target:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            make-target: check build audit
+            title: Linux Checks
+          - runs-on: ubuntu-latest
+            make-target: test test-long test-miri
+            title: Linux Tests
+          - runs-on: macos-latest
+            make-target: check build
+            title: MacOS Checks
+
+    name: ${{ matrix.title }}
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Nix setup
+        uses: nixbuild/nix-quick-install-action@v30
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-derivations = true
+            keep-outputs = true
+            experimental-features = nix-command flakes
+
+      - name: Nix cache
+        id: nix-cache
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-v1
+          restore-prefixes-first-match: |
+            nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
+            nix-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Rustup and Cargo cache
+        id: rust-cache
+        uses: actions/cache@v4.2.3
+        with:
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/rust-toolchain*') }}-v1
+          restore-keys: |
+            rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/rust-toolchain*') }}-
+            rust-${{ runner.os }}-${{ runner.arch }}-
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+
+      - name: Rust compilation cache 
+        uses: Mozilla-Actions/sccache-action@v0.0.9
+
+      - name: Pre-build Nix development shell
+        run: nix develop --profile ~/dev-shell --command true
+
+      # All downloads should be cached. If there is a cache miss, we should ensure that the cache
+      # contains all downloads.
+      - name: Prefetch Cargo downloads
+        if: steps.rust-cache.outputs.cache-hit != 'true' 
+        run: nix develop --command find src/riscv -iname Cargo.lock -execdir cargo fetch \;
+
+      - name: Build dependencies
+        run: nix develop --command make build-deps-slim
+        working-directory: src/riscv
+
+      - name: Run 'make ${{ matrix.make-target }}'
+        run: nix develop --command make ${{ matrix.make-target }}
+        working-directory: src/riscv
+      
+      # Only when the primary-key cache was not found do we actually produce a cache. In that case
+      # we need to clean up the Nix store a little to save space.
+      - name: Clean up Nix store
+        if: steps.nix-cache.outputs.hit-primary-key != 'true' 
+        run: nix store gc
