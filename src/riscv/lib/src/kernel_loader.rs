@@ -64,14 +64,10 @@ impl MemoryPermissions {
 
             // This is a simplified version of the permissions. It is aligned with what to
             // expect in an ELF file.
-            permissions: if perms_exec {
-                Permissions::ReadExec
-            } else if perms_write {
-                Permissions::ReadWrite
-            } else if perms_read {
-                Permissions::Read
-            } else {
-                Permissions::None
+            permissions: Permissions {
+                read: perms_read,
+                write: perms_write,
+                exec: perms_exec,
             },
         }
     }

@@ -235,7 +235,7 @@ where
         self.machine_state.core.main_memory.protect_pages(
             program_start,
             program_length,
-            Permissions::Write,
+            Permissions::WRITE,
         )?;
 
         // Write program to main memory
@@ -247,7 +247,7 @@ where
         self.machine_state.core.main_memory.protect_pages(
             program_start,
             program_length,
-            Permissions::None,
+            Permissions::NONE,
         )?;
 
         // Configure memory permissions using the ELF program headers, if present
@@ -305,14 +305,14 @@ where
         self.machine_state.core.main_memory.protect_pages(
             stack_guard.to_machine_address(),
             PAGE_SIZE.get() as usize,
-            Permissions::None,
+            Permissions::NONE,
         )?;
 
         // Make sure the stack region is readable and writable
         self.machine_state.core.main_memory.protect_pages(
             stack_bottom.to_machine_address(),
             stack_space,
-            Permissions::ReadWrite,
+            Permissions::READ_WRITE,
         )?;
 
         self.machine_state
@@ -1015,7 +1015,7 @@ mod tests {
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::ReadWrite)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         for fd in [0i32, 1, 2] {
@@ -1070,7 +1070,7 @@ mod tests {
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::ReadWrite)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new(&mut manager);
@@ -1216,7 +1216,7 @@ mod tests {
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::ReadWrite)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new(&mut manager);
@@ -1275,7 +1275,7 @@ mod tests {
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::ReadWrite)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new(&mut manager);
@@ -1355,7 +1355,7 @@ mod tests {
             .allocate_and_protect_pages(
                 Some(0),
                 MemLayout::TOTAL_BYTES,
-                Permissions::ReadWrite,
+                Permissions::READ_WRITE,
                 true,
             )
             .unwrap();
@@ -1373,7 +1373,7 @@ mod tests {
         {
             let addr = 0; // will be ignored with AddressHint::Hint
             let length = NonZeroU64::new(PAGE_SIZE.get() * 4).unwrap(); // Arbitrary non-zero size
-            let perms = Permissions::ReadWrite;
+            let perms = Permissions::READ_WRITE;
             let flags = Flags {
                 addr_hint: AddressHint::Hint,
                 visibility: Visibility::Private,
@@ -1399,7 +1399,7 @@ mod tests {
         {
             let addr = PAGE_SIZE.get() * 10; // Some arbitrary page-aligned address
             let length = NonZeroU64::new(PAGE_SIZE.get() * 4).unwrap();
-            let perms = Permissions::ReadWrite;
+            let perms = Permissions::READ_WRITE;
             let flags = Flags {
                 addr_hint: AddressHint::Fixed {
                     allow_replace: false,

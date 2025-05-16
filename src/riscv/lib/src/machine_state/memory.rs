@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
+use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
@@ -59,64 +60,77 @@ pub const FIRST_ADDRESS: Address = 0;
 
 /// Memory access permissions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Permissions {
-    None,
-    Read,
-    Write,
-    ReadWrite,
-    ReadExec,
-    ReadWriteExec,
+pub struct Permissions {
+    /// Readable?
+    pub(crate) read: bool,
+
+    /// Writable?
+    pub(crate) write: bool,
+
+    /// Executable?
+    pub(crate) exec: bool,
 }
 
 impl Permissions {
+    /// Allow nothing
+    pub(crate) const NONE: Self = Self {
+        read: false,
+        write: false,
+        exec: false,
+    };
+
+    /// Allow write
+    pub(crate) const WRITE: Self = Self {
+        read: false,
+        write: true,
+        exec: false,
+    };
+
+    /// Allow read and write
+    pub(crate) const READ_WRITE: Self = Self {
+        read: true,
+        write: true,
+        exec: false,
+    };
+
+    /// Allow everything
+    #[cfg(test)]
+    pub(crate) const READ_WRITE_EXEC: Self = Self {
+        read: true,
+        write: true,
+        exec: true,
+    };
+
     /// Do the permissions allow reading?
     pub const fn can_read(&self) -> bool {
-        match self {
-            Self::None | Self::Write => false,
-            Self::Read | Self::ReadWrite | Self::ReadExec | Self::ReadWriteExec => true,
-        }
+        self.read
     }
 
     /// Do the permissions allow writing?
     pub const fn can_write(&self) -> bool {
-        match self {
-            Self::None | Self::Read | Self::ReadExec => false,
-            Self::ReadWrite | Self::ReadWriteExec | Self::Write => true,
-        }
+        self.write
     }
 
     /// Do the permissions allow execution?
     pub const fn can_exec(&self) -> bool {
-        match self {
-            Self::None | Self::Read | Self::ReadWrite | Self::Write => false,
-            Self::ReadExec | Self::ReadWriteExec => true,
-        }
+        self.exec
     }
 }
 
 impl TryFrom<XValue> for Permissions {
-    type Error = crate::pvm::linux::error::Error;
+    type Error = linux::error::Error;
 
     fn try_from(value: XValue) -> Result<Self, Self::Error> {
-        const READ: u64 = 0b1;
-        const WRITE: u64 = 0b10;
-        const EXEC: u64 = 0b100;
-        const READ_WRITE: u64 = READ | WRITE;
-        const READ_EXEC: u64 = READ | EXEC;
-        const READ_WRITE_EXEC: u64 = READ | WRITE | EXEC;
-        const NONE: u64 = 0;
-
-        match value {
-            READ_WRITE_EXEC => Ok(Self::ReadWriteExec),
-            READ_WRITE => Ok(Self::ReadWrite),
-            READ_EXEC => Ok(Self::ReadExec),
-            READ => Ok(Self::Read),
-            WRITE => Ok(Self::Write),
-            NONE => Ok(Self::None),
-
-            // Unknown protections value
-            _ => Err(crate::pvm::linux::error::Error::InvalidArgument),
+        // Validate that no bits beyond the low three are set
+        if value & !0b111 != 0 {
+            return Err(linux::error::Error::InvalidArgument);
         }
+
+        let read = value & 0b001 != 0;
+        let write = value & 0b010 != 0;
+        let exec = value & 0b100 != 0;
+
+        Ok(Self { read, write, exec })
     }
 }
 
@@ -228,7 +242,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerReadWrite,
     {
         self.deallocate_pages(address, length)?;
-        self.protect_pages(address, length, Permissions::None)
+        self.protect_pages(address, length, Permissions::NONE)
     }
 }
 
