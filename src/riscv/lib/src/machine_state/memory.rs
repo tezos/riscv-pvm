@@ -65,7 +65,6 @@ pub enum Permissions {
     Write,
     ReadWrite,
     ReadExec,
-    #[cfg(test)]
     ReadWriteExec,
 }
 
@@ -74,9 +73,7 @@ impl Permissions {
     pub const fn can_read(&self) -> bool {
         match self {
             Self::None | Self::Write => false,
-            Self::Read | Self::ReadWrite | Self::ReadExec => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
+            Self::Read | Self::ReadWrite | Self::ReadExec | Self::ReadWriteExec => true,
         }
     }
 
@@ -84,9 +81,7 @@ impl Permissions {
     pub const fn can_write(&self) -> bool {
         match self {
             Self::None | Self::Read | Self::ReadExec => false,
-            Self::ReadWrite | Self::Write => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
+            Self::ReadWrite | Self::ReadWriteExec | Self::Write => true,
         }
     }
 
@@ -94,9 +89,7 @@ impl Permissions {
     pub const fn can_exec(&self) -> bool {
         match self {
             Self::None | Self::Read | Self::ReadWrite | Self::Write => false,
-            Self::ReadExec => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
+            Self::ReadExec | Self::ReadWriteExec => true,
         }
     }
 }
@@ -110,9 +103,11 @@ impl TryFrom<XValue> for Permissions {
         const EXEC: u64 = 0b100;
         const READ_WRITE: u64 = READ | WRITE;
         const READ_EXEC: u64 = READ | EXEC;
+        const READ_WRITE_EXEC: u64 = READ | WRITE | EXEC;
         const NONE: u64 = 0;
 
         match value {
+            READ_WRITE_EXEC => Ok(Self::ReadWriteExec),
             READ_WRITE => Ok(Self::ReadWrite),
             READ_EXEC => Ok(Self::ReadExec),
             READ => Ok(Self::Read),
