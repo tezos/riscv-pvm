@@ -288,7 +288,10 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
 
     /// Fetch the 16 bits of an instruction at the given physical address.
     #[inline(always)]
-    fn fetch_instr_halfword(&self, phys_addr: Address) -> Result<u16, Exception>
+    fn fetch_instr_halfword(
+        &self,
+        phys_addr: Address,
+    ) -> Result<memory::InstructionData<u16>, Exception>
     where
         M: backend::ManagerRead,
     {
@@ -309,16 +312,20 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     where
         M: backend::ManagerReadWrite,
     {
-        let first_halfword = self.fetch_instr_halfword(addr)?;
+        let lower = self.fetch_instr_halfword(addr)?;
 
         // The reasons to provide the second half in the lambda is
         // because those bytes may be inaccessible or may trigger an exception when read.
         // Hence we can't read all 4 bytes eagerly.
-        let instr = if is_compressed(first_halfword) {
-            let instr = parse_compressed_instruction(first_halfword);
-            if let Instr::Cacheable(instr) = instr {
-                let instr = Instruction::from(&instr);
-                self.block_cache.push_instr_compressed(addr, instr);
+        let instr = if is_compressed(lower.data) {
+            let instr = parse_compressed_instruction(lower.data);
+
+            // Writable memory means that the instruction is not cacheable
+            if !lower.writable {
+                if let Instr::Cacheable(instr) = instr {
+                    let instr = Instruction::from(&instr);
+                    self.block_cache.push_instr_compressed(addr, instr);
+                }
             }
 
             instr
@@ -326,11 +333,15 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
             let next_addr = addr + 2;
             let upper = self.fetch_instr_halfword(next_addr)?;
 
-            let combined = ((upper as u32) << 16) | (first_halfword as u32);
-            let instr = parse_uncompressed_instruction(combined);
-            if let Instr::Cacheable(instr) = instr {
-                let instr = Instruction::from(&instr);
-                self.block_cache.push_instr_uncompressed(addr, instr);
+            let combined = lower.combine_with_upper(upper);
+            let instr = parse_uncompressed_instruction(combined.data);
+
+            // Writable memory means that the instruction is not cacheable
+            if !combined.writable {
+                if let Instr::Cacheable(instr) = instr {
+                    let instr = Instruction::from(&instr);
+                    self.block_cache.push_instr_uncompressed(addr, instr);
+                }
             }
 
             instr

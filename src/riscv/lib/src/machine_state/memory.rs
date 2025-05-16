@@ -134,6 +134,47 @@ impl TryFrom<XValue> for Permissions {
     }
 }
 
+/// Represents data fetched from instruction memory.
+///
+/// This struct encapsulates the raw instruction data and its associated metadata,
+/// such as whether the instruction memory is writable. It is used to manage and
+/// process instructions in the RISC-V machine state.
+pub struct InstructionData<E> {
+    /// The raw instruction data.
+    ///
+    /// This field contains the actual instruction or part of an instruction
+    /// fetched from memory. The type `E` allows flexibility in representing
+    /// the data, such as a half-word (`u16`) or a full word (`u32`).
+    pub data: E,
+
+    /// Indicates whether the instruction memory is writable.
+    ///
+    /// If `true`, the instruction memory can be modified by the program.
+    /// Writable instructions are generally not ideal for caching, as any
+    /// changes to the memory would require invalidating or updating the cache.
+    pub writable: bool,
+}
+
+impl InstructionData<u16> {
+    /// Combines two half-word pieces of instruction data into a full word.
+    ///
+    /// This method takes the lower and upper half-word parts of an instruction
+    /// and combines them into a single 32-bit word. The `writable` flag of the
+    /// resulting instruction is set to `true` if either of the input parts is
+    /// writable.
+    #[inline]
+    pub fn combine_with_upper(self, upper: Self) -> InstructionData<u32> {
+        let data = (self.data as u32) | ((upper.data as u32) << 16);
+
+        // If either part of the instruction is writable, then we consider the whole instruction
+        // writable as it may be changed by the program at any time. Writable instructions are not
+        // ideal for caching as we would need to track every write to ensure correctness.
+        let writable = self.writable || upper.writable;
+
+        InstructionData { data, writable }
+    }
+}
+
 /// Something went wrong when accessing the memory
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("Bad memory access")]
@@ -159,7 +200,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerRead;
 
     /// Read an element in the region that will be used in execution. `address` is in bytes.
-    fn read_exec<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
+    fn read_exec<E>(&self, address: Address) -> Result<InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
         M: ManagerRead;
