@@ -34,7 +34,7 @@ pub struct DispatchTarget<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitSt
     /// See <https://doc.rust-lang.org/std/primitive.fn.html#casting-to-and-from-integers> for
     /// considerations taken whilst converting pointer <--> usize.
     fun: Arc<AtomicUsize>,
-    called_times: usize,
+    remaining_calls: usize,
     _pd: PhantomData<(D, MC, M)>,
 }
 
@@ -50,7 +50,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> DispatchTa
             Jitted::<D, MC, M>::run_block_interpreted as usize,
         ));
 
-        self.called_times = 0;
+        self.remaining_calls = 1000;
     }
 
     /// Set the dispatch target to use the given `block_run` function.
@@ -84,7 +84,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Default
             fun: Arc::new(AtomicUsize::new(
                 Jitted::<D, MC, M>::run_block_interpreted as usize,
             )),
-            called_times: 0,
+            remaining_calls: 1000,
             _pd: PhantomData,
         }
     }
@@ -209,10 +209,16 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompil
     for OutlineCompiler<MC, M>
 {
     fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool {
-        const COMPILATION_THRESHOLD: usize = 1000;
-
-        target.called_times += 1;
-        target.called_times > COMPILATION_THRESHOLD
+        unsafe {
+            match target.remaining_calls {
+                0 => true,
+                _ => {
+                    //SAFETY: `remaining_calls` (a usize) can only be a positive, non-zero integer
+                    target.remaining_calls = target.remaining_calls.unchecked_sub(1);
+                    false
+                }
+            }
+        }
     }
 
     fn compile(
