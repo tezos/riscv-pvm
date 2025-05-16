@@ -57,7 +57,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         B: Buddy<M>,
         M: ManagerReadWrite,
     {
-        self.protect_pages(0, TOTAL_BYTES, Permissions::ReadWrite)
+        self.protect_pages(0, TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
     }
 
@@ -386,7 +386,7 @@ pub mod tests {
         // Request size that's not a multiple of page size
         let requested_size = (PAGE_SIZE.get() as usize) - 100;
         let address = memory
-            .allocate_and_protect_pages(None, requested_size, Permissions::ReadWrite, false)
+            .allocate_and_protect_pages(None, requested_size, Permissions::READ_WRITE, false)
             .expect("Memory allocation should succeed");
 
         // Verify that memory is zeroed for the entire page, not just the requested length
