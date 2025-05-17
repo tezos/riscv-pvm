@@ -438,7 +438,7 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();
 
-            let res = match self.block_cache.get_block(instr_pc) {
+            let res = match self.block_cache.get_block(instr_pc, steps, max_steps) {
                 Some(mut block) => {
                     block.run_block(&mut self.core, instr_pc, steps, max_steps)?;
 
@@ -616,6 +616,7 @@ mod tests {
     use crate::default::ConstDefault;
     use crate::machine_state::DefaultCacheLayouts;
     use crate::machine_state::TestCacheLayouts;
+    use crate::machine_state::block_cache::CACHE_INSTR;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -917,15 +918,30 @@ mod tests {
 
         state.step_max(Bound::Included(3));
 
-        assert!(state.block_cache.get_block(phys_addr).is_some());
+        assert!(
+            state
+                .block_cache
+                .get_block(phys_addr, &mut 0, CACHE_INSTR)
+                .is_some()
+        );
         assert_eq!(
             vec![uncompressed],
             state.block_cache.get_block_instr(phys_addr)
         );
 
-        assert!(state.block_cache.get_block(phys_addr + 4).is_none());
+        assert!(
+            state
+                .block_cache
+                .get_block(phys_addr + 4, &mut 0, CACHE_INSTR)
+                .is_none()
+        );
 
-        assert!(state.block_cache.get_block(phys_addr + 8).is_some());
+        assert!(
+            state
+                .block_cache
+                .get_block(phys_addr + 8, &mut 0, CACHE_INSTR)
+                .is_some()
+        );
         assert_eq!(
             vec![uncompressed],
             state.block_cache.get_block_instr(phys_addr + 8)
@@ -1097,13 +1113,23 @@ mod tests {
         state.step_max(Bound::Included(block_b.len()));
         assert_eq!(phys_addr, state.core.hart.pc.read());
 
-        assert!(state.block_cache.get_block(phys_addr).is_some());
+        assert!(
+            state
+                .block_cache
+                .get_block(phys_addr, &mut 0, CACHE_INSTR)
+                .is_some()
+        );
         assert_eq!(
             block_a.as_slice(),
             state.block_cache.get_block_instr(phys_addr).as_slice()
         );
 
-        assert!(state.block_cache.get_block(block_b_addr).is_some());
+        assert!(
+            state
+                .block_cache
+                .get_block(block_b_addr, &mut 0, CACHE_INSTR)
+                .is_some()
+        );
         assert_eq!(
             block_b.as_slice(),
             state.block_cache.get_block_instr(block_b_addr).as_slice()

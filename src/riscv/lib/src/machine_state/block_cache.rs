@@ -229,162 +229,6 @@ pub const TEST_CACHE_BITS: usize = 12;
 /// The default instruction cache for tests.
 pub const TEST_CACHE_SIZE: usize = 1 << TEST_CACHE_BITS;
 
-/// Layout of a partial block.
-pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
-
-/// Structure used to remember that a block was only partway executed
-/// before needing to pause due to `steps == steps_max`.
-///
-/// If a block is being partially executed, if either:
-/// - an error occurs
-/// - a jump or branch occurs then the partial block is reset, and execution will continue with a
-///   potentially different block.
-pub struct PartialBlock<M: ManagerBase> {
-    phys_addr: Cell<Address, M>,
-    in_progress: Cell<bool, M>,
-    progress: Cell<u8, M>,
-}
-
-impl<M: ManagerClone> Clone for PartialBlock<M> {
-    fn clone(&self) -> Self {
-        Self {
-            phys_addr: self.phys_addr.clone(),
-            in_progress: self.in_progress.clone(),
-            progress: self.progress.clone(),
-        }
-    }
-}
-
-impl<M: ManagerBase> PartialBlock<M> {
-    fn bind(space: AllocatedOf<PartialBlockLayout, M>) -> Self {
-        Self {
-            phys_addr: space.0,
-            in_progress: space.1,
-            progress: space.2,
-        }
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
-        &'a self,
-    ) -> AllocatedOf<PartialBlockLayout, F::Output> {
-        (
-            self.phys_addr.struct_ref::<F>(),
-            self.in_progress.struct_ref::<F>(),
-            self.progress.struct_ref::<F>(),
-        )
-    }
-
-    fn reset(&mut self)
-    where
-        M: ManagerWrite,
-    {
-        self.in_progress.write(false);
-        self.phys_addr.write(0);
-        self.progress.write(0);
-    }
-
-    /// Run a block against the machine state.
-    ///
-    /// When calling this function, there must be no partial block in progress. To ensure
-    /// this, you must always run [`BlockCache::complete_current_block`] prior to fetching
-    /// and running a new block.
-    #[cold]
-    fn run_block_partial<B: Block<MC, M>, MC: MemoryConfig>(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
-        max_steps: usize,
-        entry: &mut Cached<MC, B, M>,
-    ) -> Result<(), EnvironException>
-    where
-        M: ManagerReadWrite,
-    {
-        // start a new block
-        self.in_progress.write(true);
-        self.progress.write(0);
-        self.phys_addr.write(entry.address);
-
-        self.run_partial_inner(core, steps, max_steps, entry)
-    }
-
-    fn run_partial_inner<B: Block<MC, M>, MC: MemoryConfig>(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
-        max_steps: usize,
-        entry: &mut Cached<MC, B, M>,
-    ) -> Result<(), EnvironException>
-    where
-        M: ManagerReadWrite,
-    {
-        // Protect against partial blocks being executed when
-        // no steps are remaining
-        if *steps >= max_steps {
-            return Ok(());
-        }
-
-        let mut progress = self.progress.read();
-        let mut instr_pc = core.hart.pc.read();
-
-        let range = progress as usize..;
-        for instr in entry.block.instr()[range].iter() {
-            match run_instr(instr, core) {
-                Ok(ProgramCounterUpdate::Next(width)) => {
-                    instr_pc += width as u64;
-                    core.hart.pc.write(instr_pc);
-                    *steps += 1;
-                    progress += 1;
-
-                    if *steps >= max_steps {
-                        break;
-                    }
-                }
-                Ok(ProgramCounterUpdate::Set(instr_pc)) => {
-                    // Setting the instr_pc implies execution continuing
-                    // elsewhere - and no longer within the current block.
-                    core.hart.pc.write(instr_pc);
-                    *steps += 1;
-                    self.reset();
-                    return Ok(());
-                }
-                Err(e) => {
-                    self.reset();
-                    // Exceptions lead to a new address being set to handle it,
-                    // with no guarantee of it being the next instruction.
-                    core.handle_step_result(instr_pc, Err(e))?;
-                    // If we succesfully handled an error, need to increment steps one more.
-                    *steps += 1;
-                    return Ok(());
-                }
-            }
-        }
-
-        if progress as usize == entry.block.num_instr() {
-            // We finished the block in exactly the number of steps left
-            self.reset();
-        } else {
-            // Remember the progress made through the block, when we later
-            // continue executing it
-            self.progress.write(progress);
-        }
-
-        Ok(())
-    }
-}
-
-impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            phys_addr: Cell::new(manager),
-            in_progress: Cell::new(manager),
-            progress: Cell::new(manager),
-        }
-    }
-}
-
 /// Trait for capturing the different possible layouts of the instruction cache (i.e.
 /// controlling the number of cache entries present).
 pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::ProofLayout {
@@ -441,31 +285,20 @@ pub struct Layout<const BITS: usize, const SIZE: usize>(
     AddressCellLayout,
     AddressCellLayout,
     Atom<FenceCounter>,
-    PartialBlockLayout,
 );
 
 impl<const BITS: usize, const SIZE: usize> state_backend::Layout for Layout<BITS, SIZE> {
-    type Allocated<M: state_backend::ManagerBase> = AllocatedOf<
-        (
-            AddressCellLayout,
-            AddressCellLayout,
-            Atom<FenceCounter>,
-            PartialBlockLayout,
-        ),
-        M,
-    >;
+    type Allocated<M: state_backend::ManagerBase> =
+        AllocatedOf<(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>), M>;
 }
 
 impl<const BITS: usize, const SIZE: usize> state_backend::CommitmentLayout for Layout<BITS, SIZE> {
     fn state_hash<M: state_backend::ManagerSerialise>(
         state: AllocatedOf<Self, M>,
     ) -> Result<Hash, HashError> {
-        <(
-            AddressCellLayout,
-            AddressCellLayout,
-            Atom<FenceCounter>,
-            PartialBlockLayout,
-        )>::state_hash((state.0, state.1, state.2, state.3))
+        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::state_hash((
+            state.0, state.1, state.2,
+        ))
     }
 }
 
@@ -473,33 +306,22 @@ impl<const BITS: usize, const SIZE: usize> state_backend::ProofLayout for Layout
     fn to_merkle_tree(
         state: state_backend::RefProofGenOwnedAlloc<Self>,
     ) -> Result<proof_backend::merkle::MerkleTree, HashError> {
-        <(
-            AddressCellLayout,
-            AddressCellLayout,
-            Atom<FenceCounter>,
-            PartialBlockLayout,
-        )>::to_merkle_tree((state.0, state.1, state.2, state.3))
+        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::to_merkle_tree((
+            state.0, state.1, state.2,
+        ))
     }
 
     fn from_proof(proof: state_backend::ProofTree) -> state_backend::FromProofResult<Self> {
-        <(
-            AddressCellLayout,
-            AddressCellLayout,
-            Atom<FenceCounter>,
-            PartialBlockLayout,
-        )>::from_proof(proof)
+        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::from_proof(proof)
     }
 
     fn partial_state_hash(
         state: state_backend::RefVerifierAlloc<Self>,
         proof: state_backend::ProofTree,
     ) -> Result<Hash, state_backend::PartialHashError> {
-        <(
-            AddressCellLayout,
-            AddressCellLayout,
-            Atom<FenceCounter>,
-            PartialBlockLayout,
-        )>::partial_state_hash(state, proof)
+        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::partial_state_hash(
+            state, proof,
+        )
     }
 }
 
@@ -534,7 +356,6 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
             current_block_addr: space.0,
             next_instr_addr: space.1,
             fence_counter: space.2,
-            partial_block: PartialBlock::bind(space.3),
             entries: Self::new_entries(),
             block_builder,
         }
@@ -573,7 +394,6 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
             cache.current_block_addr.struct_ref::<F>(),
             cache.next_instr_addr.struct_ref::<F>(),
             cache.fence_counter.struct_ref::<F>(),
-            cache.partial_block.struct_ref::<F>(),
         )
     }
 
@@ -595,7 +415,6 @@ pub struct BlockCache<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, 
     current_block_addr: Cell<Address, M>,
     next_instr_addr: Cell<Address, M>,
     fence_counter: Cell<FenceCounter, M>,
-    partial_block: PartialBlock<M>,
     entries: BCL::Entries<MC, B, M>,
     /// The block builder is the mechanism used to construct blocks for calling in a
     /// (potentially) more efficient manner. For example - by JIT compiling them.
@@ -614,7 +433,6 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             current_block_addr: Cell::new_with(manager, !0),
             next_instr_addr: Cell::new_with(manager, !0),
             fence_counter: Cell::new(manager),
-            partial_block: PartialBlock::new(manager),
             entries: BCL::new_entries(),
             block_builder,
         }
@@ -649,7 +467,6 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         self.fence_counter.write(FenceCounter::INITIAL);
         self.reset_to(!0);
         BCL::entries_reset(&mut self.entries);
-        self.partial_block.reset();
     }
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
@@ -787,25 +604,25 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// *NB* before running any block, you must ensure no partial block
     /// is in progress with [`BlockCache::complete_current_block`].
     #[inline(always)]
-    pub fn get_block(&mut self, phys_addr: Address) -> Option<BlockCall<'_, B, MC, M>>
+    pub fn get_block(
+        &mut self,
+        phys_addr: Address,
+        steps: &mut usize,
+        max_steps: usize,
+    ) -> Option<BlockCall<'_, B, MC, M>>
     where
         M: ManagerRead,
     {
-        debug_assert!(
-            !self.partial_block.in_progress.read(),
-            "Get block was called with a partial block in progress"
-        );
-
         let entry = BCL::entry_mut(&mut self.entries, phys_addr);
 
         if entry.address == phys_addr
             && self.fence_counter.read() == entry.fence_counter
             && entry.block.num_instr() > 0
+            && *steps + entry.block.num_instr() <= max_steps
         {
             Some(BlockCall {
                 entry,
                 builder: &mut self.block_builder,
-                partial: &mut self.partial_block,
             })
         } else {
             None
@@ -818,21 +635,14 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// which case we only executed instructions until `steps == steps_max`.
     pub fn complete_current_block(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
-        max_steps: usize,
+        _core: &mut MachineCoreState<MC, M>,
+        _steps: &mut usize,
+        _max_steps: usize,
     ) -> Result<(), EnvironException>
     where
         M: ManagerReadWrite,
     {
-        if !self.partial_block.in_progress.read() {
-            return Ok(());
-        }
-
-        let entry = BCL::entry_mut(&mut self.entries, self.partial_block.phys_addr.read());
-
-        self.partial_block
-            .run_partial_inner(core, steps, max_steps, entry)
+        Ok(())
     }
 
     /// *TEST ONLY* - retrieve the underlying instructions contained in the entry at the given
@@ -857,7 +667,6 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M> + Clone, MC: MemoryConfig, M: Manage
             current_block_addr: self.current_block_addr.clone(),
             fence_counter: self.fence_counter.clone(),
             next_instr_addr: self.next_instr_addr.clone(),
-            partial_block: self.partial_block.clone(),
             entries: BCL::clone_entries(&self.entries),
             block_builder: Default::default(),
         }
@@ -877,7 +686,6 @@ pub struct BlockCall<'a, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     ///
     /// The same block builder must always be passed through to `run_block`.
     builder: &'a mut B::BlockBuilder,
-    partial: &'a mut PartialBlock<M>,
 }
 
 impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC, M> {
@@ -888,18 +696,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
         steps: &mut usize,
-        max_steps: usize,
+        _max_steps: usize,
     ) -> Result<(), EnvironException> {
-        if *steps + self.entry.block.num_instr() <= max_steps {
-            // Safety: the same block builder is passed through every time.
-            unsafe {
-                self.entry
-                    .block
-                    .run_block(core, instr_pc, steps, self.builder)
-            }
-        } else {
-            self.partial
-                .run_block_partial(core, steps, max_steps, self.entry)
+        // Safety: the same block builder is passed through every time.
+        unsafe {
+            self.entry
+                .block
+                .run_block(core, instr_pc, steps, self.builder)
         }
     }
 }
@@ -920,7 +723,6 @@ mod tests {
     use super::*;
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
     use crate::machine_state::TestCacheLayouts;
     use crate::machine_state::block_cache::block::Interpreted;
@@ -930,10 +732,8 @@ mod tests {
     use crate::machine_state::instruction::tagged_instruction::TaggedArgs;
     use crate::machine_state::instruction::tagged_instruction::TaggedInstruction;
     use crate::machine_state::instruction::tagged_instruction::TaggedRegister;
-    use crate::machine_state::memory;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::XRegister;
-    use crate::machine_state::registers::a1;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
@@ -966,7 +766,7 @@ mod tests {
             state.push_instr_uncompressed(phys_addr + offset * 4, uncompressed);
         }
 
-        let block = state.get_block(phys_addr);
+        let block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
     });
@@ -996,7 +796,7 @@ mod tests {
             state.push_instr_compressed(phys_addr + offset * 2, compressed);
         }
 
-        let block = state.get_block(phys_addr);
+        let block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
     });
@@ -1027,7 +827,7 @@ mod tests {
             state.push_instr_compressed(phys_addr + offset * 2, compressed);
         }
 
-        let block = state.get_block(phys_addr);
+        let block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR / 2, block.unwrap().entry.block.num_instr());
     });
@@ -1057,11 +857,11 @@ mod tests {
             state.push_instr_compressed(phys_addr + offset * 2, compressed);
         }
 
-        let block = state.get_block(phys_addr);
+        let block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
 
-        let block = state.get_block(phys_addr + 2 * CACHE_INSTR as u64);
+        let block = state.get_block(phys_addr + 2 * CACHE_INSTR as u64, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
     });
@@ -1092,92 +892,13 @@ mod tests {
             state.push_instr_compressed(phys_addr + offset * 2, compressed);
         }
 
-        let block = state.get_block(phys_addr);
+        let block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(5, block.unwrap().entry.block.num_instr());
 
-        let block = state.get_block(phys_addr + 10);
+        let block = state.get_block(phys_addr + 10, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(5, block.unwrap().entry.block.num_instr());
-    });
-
-    backend_test!(test_partial_block_executes, F, {
-        let mut manager = F::manager();
-        let mut core_state = MachineCoreState::<M4K, _>::new(&mut manager);
-        let mut block_state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut manager,
-            InterpretedBlockBuilder,
-        );
-
-        let addiw = Instruction::try_from(TaggedInstruction {
-            opcode: OpCode::AddWordImmediate,
-            args: TaggedArgs {
-                rd: nz::a1.into(),
-                rs1: a1.into(),
-                imm: 257,
-                rs2: TaggedRegister::X(XRegister::x1),
-                ..TaggedArgs::DEFAULT
-            },
-        })
-        .unwrap();
-
-        let block_addr = memory::FIRST_ADDRESS;
-
-        for offset in 0..10 {
-            block_state.push_instr_uncompressed(block_addr + offset * 4, addiw);
-        }
-
-        core_state.hart.pc.write(block_addr);
-
-        // Execute the first 5 instructions
-        let mut steps = 0;
-        let block = block_state.get_block(block_addr).unwrap();
-        block
-            .partial
-            .run_block_partial(&mut core_state, &mut steps, 5, block.entry)
-            .unwrap();
-
-        assert_eq!(steps, 5);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.phys_addr.read());
-        assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
-
-        // Execute no steps
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 0)
-            .unwrap();
-
-        assert_eq!(steps, 0);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.phys_addr.read());
-        assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
-
-        // Execute the next 2 instructions
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 2)
-            .unwrap();
-
-        assert_eq!(steps, 2);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(7, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.phys_addr.read());
-        assert_eq!(block_addr + 7 * 4, core_state.hart.pc.read());
-
-        // Finish the block. We don't consume all the steps
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 5)
-            .unwrap();
-
-        assert_eq!(steps, 3);
-        assert!(!block_state.partial_block.in_progress.read());
-        assert_eq!(0, block_state.partial_block.progress.read());
-        assert_eq!(0, block_state.partial_block.phys_addr.read());
-        assert_eq!(block_addr + 10 * 4, core_state.hart.pc.read());
     });
 
     backend_test!(test_concat_blocks_suitable, F, {
@@ -1212,11 +933,11 @@ mod tests {
             );
         }
 
-        let block = state.get_block(phys_addr - 20);
+        let block = state.get_block(phys_addr - 20, &mut 0, CACHE_INSTR);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
 
-        let old_block = state.get_block(phys_addr);
+        let old_block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(old_block.is_some());
         assert_eq!(15, old_block.unwrap().entry.block.num_instr());
     });
@@ -1253,14 +974,14 @@ mod tests {
             );
         }
 
-        let first_block = state.get_block(phys_addr - preceding_num_instr * 4);
+        let first_block = state.get_block(phys_addr - preceding_num_instr * 4, &mut 0, CACHE_INSTR);
         assert!(first_block.is_some());
         assert_eq!(
             preceding_num_instr,
             first_block.unwrap().entry.block.num_instr() as u64
         );
 
-        let second_block = state.get_block(phys_addr);
+        let second_block = state.get_block(phys_addr, &mut 0, CACHE_INSTR);
         assert!(second_block.is_some());
         assert_eq!(
             CACHE_INSTR - preceding_num_instr as usize + 1,
@@ -1281,7 +1002,7 @@ mod tests {
 
         let check_block = |block: &mut BlockCache<Layout, _, M4K, Owned>| {
             for i in 0..TEST_CACHE_SIZE {
-                assert!(block.get_block(i as Address).is_none());
+                assert!(block.get_block(i as Address, &mut 0, CACHE_INSTR).is_none());
             }
         };
 
@@ -1357,11 +1078,11 @@ mod tests {
             BlockCache::new(&mut Owned, InterpretedBlockBuilder);
 
         // Fetching empty block fails
-        assert!(block_cache.get_block(0).is_none());
+        assert!(block_cache.get_block(0, &mut 0, CACHE_INSTR).is_none());
 
         block_cache.push_instr_compressed(0, Instruction::new_nop(InstrWidth::Compressed));
 
         // Fetching non-empty block succeeds
-        assert!(block_cache.get_block(0).is_some());
+        assert!(block_cache.get_block(0, &mut 0, CACHE_INSTR).is_some());
     }
 }
