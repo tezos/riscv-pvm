@@ -93,6 +93,7 @@ use super::memory::Address;
 use super::memory::MemoryConfig;
 use crate::cache_utils::FenceCounter;
 use crate::cache_utils::Sizes;
+use crate::default::ConstDefault;
 use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
@@ -151,30 +152,29 @@ impl state_backend::ProofLayout for AddressCellLayout {
     }
 }
 
-/// The layout of block cache entries, see [`Cached`] for more information.
-pub type CachedLayout = (AddressCellLayout, Atom<FenceCounter>);
-
 /// Block cache entry.
 ///
 /// Contains the physical address & fence counter for validity checks, the
 /// underlying [`Block`] state.
 pub struct Cached<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     block: B,
-    address: Cell<Address, M>,
-    fence_counter: Cell<FenceCounter, M>,
-    _pd: PhantomData<MC>,
+    address: Address,
+    fence_counter: FenceCounter,
+    _pd_mc: PhantomData<MC>,
+    _pd_m: PhantomData<M>,
 }
 
 impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
-    fn bind(space: AllocatedOf<CachedLayout, M>) -> Self
+    fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            address: space.0,
-            fence_counter: space.1,
+            address: !0,
+            fence_counter: FenceCounter::DEFAULT,
             block: B::new(),
-            _pd: PhantomData,
+            _pd_mc: PhantomData,
+            _pd_m: PhantomData,
         }
     }
 
@@ -182,7 +182,7 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerWrite,
     {
-        self.address.write(!0);
+        self.address = !0;
         self.block.invalidate();
     }
 
@@ -190,8 +190,8 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerReadWrite,
     {
-        self.address.write(!0);
-        self.fence_counter.write(FenceCounter::INITIAL);
+        self.address = !0;
+        self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
@@ -199,40 +199,20 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerWrite,
     {
-        self.address.write(block_addr);
+        self.address = block_addr;
         self.block.start_block();
-        self.fence_counter.write(fence_counter);
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<CachedLayout, F::Output> {
-        (
-            self.address.struct_ref::<F>(),
-            self.fence_counter.struct_ref::<F>(),
-        )
-    }
-}
-
-impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<MC, B, M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            address: Cell::new_with(manager, !0),
-            block: B::new(),
-            fence_counter: Cell::new(manager),
-            _pd: PhantomData,
-        }
+        self.fence_counter = fence_counter;
     }
 }
 
 impl<MC: MemoryConfig, B: Block<MC, M> + Clone, M: ManagerClone> Clone for Cached<MC, B, M> {
     fn clone(&self) -> Self {
         Self {
-            address: self.address.clone(),
+            address: self.address,
             block: self.block.clone(),
-            fence_counter: self.fence_counter.clone(),
-            _pd: PhantomData,
+            fence_counter: self.fence_counter,
+            _pd_mc: PhantomData,
+            _pd_m: PhantomData,
         }
     }
 }
@@ -322,7 +302,7 @@ impl<M: ManagerBase> PartialBlock<M> {
         // start a new block
         self.in_progress.write(true);
         self.progress.write(0);
-        self.phys_addr.write(entry.address.read());
+        self.phys_addr.write(entry.address);
 
         self.run_partial_inner(core, steps, max_steps, entry)
     }
@@ -408,9 +388,17 @@ impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
 /// Trait for capturing the different possible layouts of the instruction cache (i.e.
 /// controlling the number of cache entries present).
 pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::ProofLayout {
-    type Entries<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>: NewState<M>;
+    type Entries<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>;
 
     type Sizes;
+
+    fn new_entries<MC, B, M>() -> Self::Entries<MC, B, M>
+    where
+        Self: Sized,
+        M: ManagerBase,
+        M::ManagerRoot: ManagerReadWrite,
+        MC: MemoryConfig,
+        B: Block<MC, M>;
 
     fn bind<MC, B, M>(
         space: state_backend::AllocatedOf<Self, M>,
@@ -449,18 +437,87 @@ pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::Pro
 }
 
 /// The layout of the block cache.
-pub type Layout<const BITS: usize, const SIZE: usize> = (
+pub struct Layout<const BITS: usize, const SIZE: usize>(
     AddressCellLayout,
     AddressCellLayout,
     Atom<FenceCounter>,
     PartialBlockLayout,
-    Sizes<BITS, SIZE, CachedLayout>,
 );
+
+impl<const BITS: usize, const SIZE: usize> state_backend::Layout for Layout<BITS, SIZE> {
+    type Allocated<M: state_backend::ManagerBase> = AllocatedOf<
+        (
+            AddressCellLayout,
+            AddressCellLayout,
+            Atom<FenceCounter>,
+            PartialBlockLayout,
+        ),
+        M,
+    >;
+}
+
+impl<const BITS: usize, const SIZE: usize> state_backend::CommitmentLayout for Layout<BITS, SIZE> {
+    fn state_hash<M: state_backend::ManagerSerialise>(
+        state: AllocatedOf<Self, M>,
+    ) -> Result<Hash, HashError> {
+        <(
+            AddressCellLayout,
+            AddressCellLayout,
+            Atom<FenceCounter>,
+            PartialBlockLayout,
+        )>::state_hash((state.0, state.1, state.2, state.3))
+    }
+}
+
+impl<const BITS: usize, const SIZE: usize> state_backend::ProofLayout for Layout<BITS, SIZE> {
+    fn to_merkle_tree(
+        state: state_backend::RefProofGenOwnedAlloc<Self>,
+    ) -> Result<proof_backend::merkle::MerkleTree, HashError> {
+        <(
+            AddressCellLayout,
+            AddressCellLayout,
+            Atom<FenceCounter>,
+            PartialBlockLayout,
+        )>::to_merkle_tree((state.0, state.1, state.2, state.3))
+    }
+
+    fn from_proof(proof: state_backend::ProofTree) -> state_backend::FromProofResult<Self> {
+        <(
+            AddressCellLayout,
+            AddressCellLayout,
+            Atom<FenceCounter>,
+            PartialBlockLayout,
+        )>::from_proof(proof)
+    }
+
+    fn partial_state_hash(
+        state: state_backend::RefVerifierAlloc<Self>,
+        proof: state_backend::ProofTree,
+    ) -> Result<Hash, state_backend::PartialHashError> {
+        <(
+            AddressCellLayout,
+            AddressCellLayout,
+            Atom<FenceCounter>,
+            PartialBlockLayout,
+        )>::partial_state_hash(state, proof)
+    }
+}
 
 impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZE> {
     type Entries<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = Box<[Cached<MC, B, M>; SIZE]>;
 
-    type Sizes = Sizes<BITS, SIZE, CachedLayout>;
+    type Sizes = Sizes<BITS, SIZE, Atom<u8>>;
+
+    fn new_entries<MC, B, M>() -> Self::Entries<MC, B, M>
+    where
+        Self: Sized,
+        M: state_backend::ManagerBase,
+        M::ManagerRoot: ManagerReadWrite,
+        MC: MemoryConfig,
+        B: Block<MC, M>,
+    {
+        crate::array_utils::boxed_from_fn(|| Cached::new())
+    }
 
     fn bind<MC, B, M>(
         space: state_backend::AllocatedOf<Self, M>,
@@ -478,14 +535,7 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
             next_instr_addr: space.1,
             fence_counter: space.2,
             partial_block: PartialBlock::bind(space.3),
-            entries: space
-                .4
-                .into_iter()
-                .map(|c| Cached::bind(c))
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| "mismatching vector lengths for instruction cache")
-                .unwrap(),
+            entries: Self::new_entries(),
             block_builder,
         }
     }
@@ -524,11 +574,6 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
             cache.next_instr_addr.struct_ref::<F>(),
             cache.fence_counter.struct_ref::<F>(),
             cache.partial_block.struct_ref::<F>(),
-            cache
-                .entries
-                .iter()
-                .map(|entry| entry.struct_ref::<F>())
-                .collect(),
         )
     }
 
@@ -570,7 +615,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             next_instr_addr: Cell::new_with(manager, !0),
             fence_counter: Cell::new(manager),
             partial_block: PartialBlock::new(manager),
-            entries: NewState::new(manager),
+            entries: BCL::new_entries(),
             block_builder,
         }
     }
@@ -688,7 +733,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let fence_counter = self.fence_counter.read();
 
         let mut entry = BCL::entry_mut(&mut self.entries, block_addr);
-        let start = entry.address.read();
+        let start = entry.address;
 
         let mut len_instr = entry.block.num_instr();
 
@@ -713,8 +758,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         self.next_instr_addr.write(next_phys_addr);
 
         let possible_block = BCL::entry(&self.entries, next_phys_addr);
-        let adjacent_block_found = possible_block.address.read() == next_phys_addr
-            && possible_block.fence_counter.read() == fence_counter
+        let adjacent_block_found = possible_block.address == next_phys_addr
+            && possible_block.fence_counter == fence_counter
             && next_phys_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
@@ -753,8 +798,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
         let entry = BCL::entry_mut(&mut self.entries, phys_addr);
 
-        if entry.address.read() == phys_addr
-            && self.fence_counter.read() == entry.fence_counter.read()
+        if entry.address == phys_addr
+            && self.fence_counter.read() == entry.fence_counter
             && entry.block.num_instr() > 0
         {
             Some(BlockCall {
