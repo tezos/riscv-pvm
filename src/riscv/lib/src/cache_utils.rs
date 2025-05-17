@@ -6,7 +6,6 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 
-use crate::default::ConstDefault;
 use crate::machine_state::memory::Address;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
@@ -19,30 +18,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::storage::Hash;
 use crate::storage::HashError;
-
-/// Integer to keep track of the fence counter
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-pub struct FenceCounter(pub u32);
-
-impl FenceCounter {
-    /// Initial fence counter
-    pub const INITIAL: Self = Self(0);
-
-    /// Maximum fence counter value
-    pub const MAX: Self = Self(u32::MAX);
-
-    /// Increment the fence counter.
-    #[inline]
-    pub fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
-    }
-}
-
-impl ConstDefault for FenceCounter {
-    const DEFAULT: Self = Self::INITIAL;
-}
 
 /// Configuration object for the size of a cache indexed by physical address.
 ///
@@ -60,10 +35,7 @@ impl<const BITS: usize, const SIZE: usize, CachedLayout> Sizes<BITS, SIZE, Cache
         panic!("BITS parameter does not match SIZE parameter");
     };
 
-    const CACHE_MASK: usize = {
-        Self::fence_counter_wrapping_protection();
-        Self::CACHE_SIZE - 1
-    };
+    const CACHE_MASK: usize = { Self::CACHE_SIZE - 1 };
 
     // We know that phys_addr here is always u16-aligned.
     // Therefore, we can safely halve the number of buckets we
@@ -71,18 +43,6 @@ impl<const BITS: usize, const SIZE: usize, CachedLayout> Sizes<BITS, SIZE, Cache
     #[inline(always)]
     pub const fn cache_index(phys_addr: Address) -> usize {
         (phys_addr >> 1) as usize & Self::CACHE_MASK
-    }
-
-    /// Assert that the fence counter would not wrap before every cache entry has been invalidated
-    /// _at least_ once.
-    const fn fence_counter_wrapping_protection() {
-        let invalidation_count_until_wrapping = FenceCounter::MAX.0 as usize;
-        let cache_entries = Self::CACHE_SIZE;
-
-        assert!(
-            invalidation_count_until_wrapping > cache_entries,
-            "The fence counter does a full cycle before all cache entries could be invalidated!"
-        );
     }
 }
 

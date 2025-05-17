@@ -19,7 +19,5 @@ where
 {
     /// Execute a `fence.i` instruction.
     #[inline(always)]
-    pub fn run_fencei(&mut self) {
-        self.block_cache.invalidate();
-    }
+    pub fn run_fencei(&mut self) {}
 }

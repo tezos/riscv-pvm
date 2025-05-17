@@ -92,8 +92,8 @@ pub enum PvmInput<'a> {
 }
 
 struct_layout! {
-    pub struct PvmLayout<MC, CL> {
-        machine_state: machine_state::MachineStateLayout<MC, CL>,
+    pub struct PvmLayout<MC> {
+        machine_state: machine_state::MachineStateLayout<MC>,
         reveal_request: RevealRequestLayout,
         system_state: linux::SupervisorStateLayout,
         version: Atom<u64>,
@@ -195,7 +195,7 @@ impl<
     ///
     /// [block builder]: block::Block::BlockBuilder
     pub(crate) fn bind(
-        space: state_backend::AllocatedOf<PvmLayout<MC, CL>, M>,
+        space: state_backend::AllocatedOf<PvmLayout<MC>, M>,
         block_builder: B::BlockBuilder,
     ) -> Self
     where
@@ -218,7 +218,7 @@ impl<
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub(crate) fn struct_ref<'a, F: state_backend::FnManager<state_backend::Ref<'a, M>>>(
         &'a self,
-    ) -> state_backend::AllocatedOf<PvmLayout<MC, CL>, F::Output> {
+    ) -> state_backend::AllocatedOf<PvmLayout<MC>, F::Output> {
         PvmLayoutF {
             machine_state: self.machine_state.struct_ref::<F>(),
             reveal_request: self.reveal_request.struct_ref::<F>(),
@@ -439,7 +439,7 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Owned>> Pvm<MC, CL, B, Own
 
     pub(crate) fn hash(&self) -> Result<Hash, HashError> {
         let refs = self.struct_ref::<FnManagerIdent>();
-        PvmLayout::<MC, CL>::state_hash(refs)
+        PvmLayout::<MC>::state_hash(refs)
     }
 }
 
@@ -449,10 +449,10 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
     /// Produce a proof.
     pub(crate) fn to_proof(&self) -> Result<Proof, HashError> {
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC, CL>::to_merkle_tree(refs)?.to_merkle_proof()?;
+        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, CL>::state_hash(refs)?;
+        let final_hash = PvmLayout::<MC>::state_hash(refs)?;
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
@@ -462,8 +462,7 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, Verifier> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self> {
-        let space =
-            <PvmLayout<MC, CL> as ProofLayout>::from_proof(ProofTree::Present(proof)).ok()?;
+        let space = <PvmLayout<MC> as ProofLayout>::from_proof(ProofTree::Present(proof)).ok()?;
         Some(Self::bind(space, block_builder))
     }
 }

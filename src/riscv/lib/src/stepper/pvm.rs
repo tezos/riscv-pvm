@@ -219,7 +219,7 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC, CL>, Ref<'_, M>> {
+    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC>, Ref<'_, M>> {
         self.pvm.struct_ref::<FnManagerIdent>()
     }
 
@@ -232,8 +232,8 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
     /// [`BlockBuilder`]: Block::BlockBuilder
     pub fn rebind_via_serde(&mut self, block_builder: B::BlockBuilder)
     where
-        for<'a> AllocatedOf<PvmLayout<MC, CL>, Ref<'a, M>>: Serialize,
-        AllocatedOf<PvmLayout<MC, CL>, M>: DeserializeOwned,
+        for<'a> AllocatedOf<PvmLayout<MC>, Ref<'a, M>>: Serialize,
+        AllocatedOf<PvmLayout<MC>, M>: DeserializeOwned,
     {
         let space = {
             let refs = self.pvm.struct_ref::<FnManagerIdent>();
@@ -272,7 +272,7 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = PvmLayout::<MC, CL>::from_proof(proof_tree)
+        let space = PvmLayout::<MC>::from_proof(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
         let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
@@ -296,7 +296,7 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
         let stepper = stepper.try_step_partial()?;
 
         let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, CL>::partial_state_hash(refs, proof_tree)?;
+        let final_hash = PvmLayout::<MC>::partial_state_hash(refs, proof_tree)?;
         if final_hash != proof.final_state_hash() {
             return Err(ProofVerificationFailure::FinalHashMismatch {
                 expected: proof.final_state_hash(),

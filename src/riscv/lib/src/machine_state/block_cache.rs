@@ -91,26 +91,20 @@ use super::ProgramCounterUpdate;
 use super::instruction::Instruction;
 use super::memory::Address;
 use super::memory::MemoryConfig;
-use crate::cache_utils::FenceCounter;
 use crate::cache_utils::Sizes;
-use crate::default::ConstDefault;
 use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
-use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::state_backend::proof_backend;
 use crate::storage::Hash;
 use crate::storage::HashError;
@@ -154,12 +148,11 @@ impl state_backend::ProofLayout for AddressCellLayout {
 
 /// Block cache entry.
 ///
-/// Contains the physical address & fence counter for validity checks, the
+/// Contains the physical address checks, the
 /// underlying [`Block`] state.
 pub struct Cached<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     block: B,
     address: Address,
-    fence_counter: FenceCounter,
     _pd_mc: PhantomData<MC>,
     _pd_m: PhantomData<M>,
 }
@@ -171,7 +164,6 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     {
         Self {
             address: !0,
-            fence_counter: FenceCounter::DEFAULT,
             block: B::new(),
             _pd_mc: PhantomData,
             _pd_m: PhantomData,
@@ -191,17 +183,15 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         M: ManagerReadWrite,
     {
         self.address = !0;
-        self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
-    fn start_block(&mut self, block_addr: Address, fence_counter: FenceCounter)
+    fn start_block(&mut self, block_addr: Address)
     where
         M: ManagerWrite,
     {
         self.address = block_addr;
         self.block.start_block();
-        self.fence_counter = fence_counter;
     }
 }
 
@@ -210,7 +200,6 @@ impl<MC: MemoryConfig, B: Block<MC, M> + Clone, M: ManagerClone> Clone for Cache
         Self {
             address: self.address,
             block: self.block.clone(),
-            fence_counter: self.fence_counter,
             _pd_mc: PhantomData,
             _pd_m: PhantomData,
         }
@@ -231,7 +220,7 @@ pub const TEST_CACHE_SIZE: usize = 1 << TEST_CACHE_BITS;
 
 /// Trait for capturing the different possible layouts of the instruction cache (i.e.
 /// controlling the number of cache entries present).
-pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::ProofLayout {
+pub trait BlockCacheLayout {
     type Entries<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>;
 
     type Sizes;
@@ -240,17 +229,6 @@ pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::Pro
     where
         Self: Sized,
         M: ManagerBase,
-        M::ManagerRoot: ManagerReadWrite,
-        MC: MemoryConfig,
-        B: Block<MC, M>;
-
-    fn bind<MC, B, M>(
-        space: state_backend::AllocatedOf<Self, M>,
-        block_builder: B::BlockBuilder,
-    ) -> BlockCache<Self, B, MC, M>
-    where
-        Self: Sized,
-        M: state_backend::ManagerBase,
         M::ManagerRoot: ManagerReadWrite,
         MC: MemoryConfig,
         B: Block<MC, M>;
@@ -269,61 +247,13 @@ pub trait BlockCacheLayout: state_backend::CommitmentLayout + state_backend::Pro
         entries: &mut Self::Entries<MC, B, M>,
     );
 
-    fn struct_ref<'a, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase, F: FnManager<Ref<'a, M>>>(
-        cache: &'a BlockCache<Self, B, MC, M>,
-    ) -> AllocatedOf<Self, F::Output>
-    where
-        Self: Sized;
-
     fn clone_entries<MC: MemoryConfig, B: Block<MC, M> + Clone, M: ManagerClone>(
         entries: &Self::Entries<MC, B, M>,
     ) -> Self::Entries<MC, B, M>;
 }
 
 /// The layout of the block cache.
-pub struct Layout<const BITS: usize, const SIZE: usize>(
-    AddressCellLayout,
-    AddressCellLayout,
-    Atom<FenceCounter>,
-);
-
-impl<const BITS: usize, const SIZE: usize> state_backend::Layout for Layout<BITS, SIZE> {
-    type Allocated<M: state_backend::ManagerBase> =
-        AllocatedOf<(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>), M>;
-}
-
-impl<const BITS: usize, const SIZE: usize> state_backend::CommitmentLayout for Layout<BITS, SIZE> {
-    fn state_hash<M: state_backend::ManagerSerialise>(
-        state: AllocatedOf<Self, M>,
-    ) -> Result<Hash, HashError> {
-        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::state_hash((
-            state.0, state.1, state.2,
-        ))
-    }
-}
-
-impl<const BITS: usize, const SIZE: usize> state_backend::ProofLayout for Layout<BITS, SIZE> {
-    fn to_merkle_tree(
-        state: state_backend::RefProofGenOwnedAlloc<Self>,
-    ) -> Result<proof_backend::merkle::MerkleTree, HashError> {
-        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::to_merkle_tree((
-            state.0, state.1, state.2,
-        ))
-    }
-
-    fn from_proof(proof: state_backend::ProofTree) -> state_backend::FromProofResult<Self> {
-        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::from_proof(proof)
-    }
-
-    fn partial_state_hash(
-        state: state_backend::RefVerifierAlloc<Self>,
-        proof: state_backend::ProofTree,
-    ) -> Result<Hash, state_backend::PartialHashError> {
-        <(AddressCellLayout, AddressCellLayout, Atom<FenceCounter>)>::partial_state_hash(
-            state, proof,
-        )
-    }
-}
+pub struct Layout<const BITS: usize, const SIZE: usize>(AddressCellLayout, AddressCellLayout);
 
 impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZE> {
     type Entries<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = Box<[Cached<MC, B, M>; SIZE]>;
@@ -339,26 +269,6 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
         B: Block<MC, M>,
     {
         crate::array_utils::boxed_from_fn(|| Cached::new())
-    }
-
-    fn bind<MC, B, M>(
-        space: state_backend::AllocatedOf<Self, M>,
-        block_builder: B::BlockBuilder,
-    ) -> BlockCache<Self, B, MC, M>
-    where
-        Self: Sized,
-        M: state_backend::ManagerBase,
-        M::ManagerRoot: ManagerReadWrite,
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-    {
-        BlockCache {
-            current_block_addr: space.0,
-            next_instr_addr: space.1,
-            fence_counter: space.2,
-            entries: Self::new_entries(),
-            block_builder,
-        }
     }
 
     fn entry<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>(
@@ -381,22 +291,6 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
         entries.iter_mut().for_each(Cached::reset)
     }
 
-    fn struct_ref<
-        'a,
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        F: FnManager<Ref<'a, M>>,
-    >(
-        cache: &'a BlockCache<Self, B, MC, M>,
-    ) -> AllocatedOf<Self, F::Output> {
-        (
-            cache.current_block_addr.struct_ref::<F>(),
-            cache.next_instr_addr.struct_ref::<F>(),
-            cache.fence_counter.struct_ref::<F>(),
-        )
-    }
-
     fn clone_entries<MC: MemoryConfig, B: Block<MC, M> + Clone, M: ManagerClone>(
         entries: &Self::Entries<MC, B, M>,
     ) -> Self::Entries<MC, B, M> {
@@ -412,9 +306,8 @@ impl<const BITS: usize, const SIZE: usize> BlockCacheLayout for Layout<BITS, SIZ
 ///
 /// The number of entries is controlled by the `BCL` layout parameter.
 pub struct BlockCache<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
-    current_block_addr: Cell<Address, M>,
-    next_instr_addr: Cell<Address, M>,
-    fence_counter: Cell<FenceCounter, M>,
+    current_block_addr: Address,
+    next_instr_addr: Address,
     entries: BCL::Entries<MC, B, M>,
     /// The block builder is the mechanism used to construct blocks for calling in a
     /// (potentially) more efficient manner. For example - by JIT compiling them.
@@ -425,27 +318,16 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     BlockCache<BCL, B, MC, M>
 {
     /// Allocate a new block cache.
-    pub fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            current_block_addr: Cell::new_with(manager, !0),
-            next_instr_addr: Cell::new_with(manager, !0),
-            fence_counter: Cell::new(manager),
-            entries: BCL::new_entries(),
-            block_builder,
-        }
-    }
-
-    /// Bind the block cache to the given allocated state and the given [block builder].
-    ///
-    /// [block builder]: Block::BlockBuilder
-    pub fn bind(space: AllocatedOf<BCL, M>, block_builder: B::BlockBuilder) -> Self
+    pub fn new(block_builder: B::BlockBuilder) -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
-        BCL::bind(space, block_builder)
+        Self {
+            current_block_addr: !0,
+            next_instr_addr: !0,
+            entries: BCL::new_entries(),
+            block_builder,
+        }
     }
 
     /// Invalidate all entries in the block cache.
@@ -453,10 +335,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        let counter = self.fence_counter.read();
-        self.fence_counter.write(counter.next());
         self.reset_to(!0);
-        BCL::entry_mut(&mut self.entries, counter.0 as Address).invalidate();
+        BCL::entry_mut(&mut self.entries, !0).invalidate();
     }
 
     /// Reset the underlying storage.
@@ -464,15 +344,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        self.fence_counter.write(FenceCounter::INITIAL);
         self.reset_to(!0);
         BCL::entries_reset(&mut self.entries);
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BCL, F::Output> {
-        BCL::struct_ref::<_, _, _, F>(self)
     }
 
     /// Push a compressed instruction to the block cache.
@@ -486,7 +359,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             "expected compressed instruction, found: {instr:?}"
         );
 
-        let next_addr = self.next_instr_addr.read();
+        let next_addr = self.next_instr_addr;
 
         // If the instruction is at the start of the page, we _must_ start a new block,
         // as we cannot allow blocks to cross page boundaries.
@@ -514,7 +387,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             return;
         }
 
-        let next_addr = self.next_instr_addr.read();
+        let next_addr = self.next_instr_addr;
 
         // If the instruction is at the start of the page, we _must_ start a new block,
         // as we cannot allow blocks to cross page boundaries.
@@ -529,8 +402,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerWrite,
     {
-        self.current_block_addr.write(phys_addr);
-        self.next_instr_addr.write(0);
+        self.current_block_addr = phys_addr;
+        self.next_instr_addr = 0;
     }
 
     /// Add the instruction into a block.
@@ -546,8 +419,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        let mut block_addr = self.current_block_addr.read();
-        let fence_counter = self.fence_counter.read();
+        let mut block_addr = self.current_block_addr;
 
         let mut entry = BCL::entry_mut(&mut self.entries, block_addr);
         let start = entry.address;
@@ -555,7 +427,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let mut len_instr = entry.block.num_instr();
 
         if start != block_addr || start == phys_addr {
-            entry.start_block(block_addr, fence_counter);
+            entry.start_block(block_addr);
             len_instr = 0;
         } else if len_instr == CACHE_INSTR {
             // The current block is full, start a new one
@@ -563,7 +435,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             block_addr = phys_addr;
 
             entry = BCL::entry_mut(&mut self.entries, block_addr);
-            entry.start_block(block_addr, fence_counter);
+            entry.start_block(block_addr);
 
             len_instr = 0;
         }
@@ -572,11 +444,10 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let new_len = len_instr + 1;
 
         let next_phys_addr = phys_addr + WIDTH;
-        self.next_instr_addr.write(next_phys_addr);
+        self.next_instr_addr = next_phys_addr;
 
         let possible_block = BCL::entry(&self.entries, next_phys_addr);
         let adjacent_block_found = possible_block.address == next_phys_addr
-            && possible_block.fence_counter == fence_counter
             && next_phys_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
@@ -592,8 +463,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
                 let current_entry = BCL::entry_mut(&mut self.entries, block_addr);
                 current_entry.block.push_instr(new_instr);
             }
-            self.next_instr_addr.write(!0);
-            self.current_block_addr.write(!0);
+            self.next_instr_addr = !0;
+            self.current_block_addr = !0;
         }
     }
 
@@ -616,7 +487,6 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let entry = BCL::entry_mut(&mut self.entries, phys_addr);
 
         if entry.address == phys_addr
-            && self.fence_counter.read() == entry.fence_counter
             && entry.block.num_instr() > 0
             && *steps + entry.block.num_instr() <= max_steps
         {
@@ -664,9 +534,8 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M> + Clone, MC: MemoryConfig, M: Manage
 {
     fn clone(&self) -> Self {
         Self {
-            current_block_addr: self.current_block_addr.clone(),
-            fence_counter: self.fence_counter.clone(),
-            next_instr_addr: self.next_instr_addr.clone(),
+            current_block_addr: self.current_block_addr,
+            next_instr_addr: self.next_instr_addr,
             entries: BCL::clone_entries(&self.entries),
             block_builder: Default::default(),
         }
@@ -743,8 +612,7 @@ mod tests {
 
     // writing CACHE_INSTR to the block cache creates new block
     backend_test!(test_writing_full_block_fetchable_uncompressed, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -772,8 +640,7 @@ mod tests {
     });
 
     backend_test!(test_writing_full_block_fetchable_compressed, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -803,8 +670,7 @@ mod tests {
 
     // writing instructions immediately creates block
     backend_test!(test_writing_half_block_fetchable_compressed, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -833,8 +699,7 @@ mod tests {
     });
 
     backend_test!(test_writing_two_blocks_fetchable_compressed, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -868,8 +733,7 @@ mod tests {
 
     // writing across pages offset two blocks next to each other
     backend_test!(test_crossing_page_exactly_creates_new_block, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -902,8 +766,7 @@ mod tests {
     });
 
     backend_test!(test_concat_blocks_suitable, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -943,8 +806,7 @@ mod tests {
     });
 
     backend_test!(test_concat_blocks_too_big, F, {
-        let mut state = BlockCache::<TestLayout, Interpreted<M4K, _>, _, _>::new(
-            &mut F::manager(),
+        let mut state = BlockCache::<TestLayout, Interpreted<M4K, F::Manager>, _, F::Manager>::new(
             InterpretedBlockBuilder,
         );
 
@@ -1025,7 +887,7 @@ mod tests {
         };
 
         let mut block: BlockCache<Layout, Interpreted<M4K, Owned>, M4K, Owned> =
-            BlockCache::new(&mut Owned, InterpretedBlockBuilder);
+            BlockCache::new(InterpretedBlockBuilder);
 
         // The initial block cache should not return any blocks.
         check_block(&mut block);
@@ -1075,7 +937,7 @@ mod tests {
         type Layout = super::Layout<TEST_CACHE_BITS, TEST_CACHE_SIZE>;
 
         let mut block_cache: BlockCache<Layout, Interpreted<M4K, Owned>, M4K, Owned> =
-            BlockCache::new(&mut Owned, InterpretedBlockBuilder);
+            BlockCache::new(InterpretedBlockBuilder);
 
         // Fetching empty block fails
         assert!(block_cache.get_block(0, &mut 0, CACHE_INSTR).is_none());
