@@ -12,39 +12,28 @@ use dispatch::DispatchTarget;
 pub use dispatch::OutlineCompiler;
 
 use super::CACHE_INSTR;
-use super::ICallPlaced;
 use super::run_instr;
 use crate::default::ConstDefault;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::instruction::RunInstr;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Atom;
-use crate::state_backend::Cell;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
-
-/// State Layout for Blocks
-pub type BlockLayout = (Atom<u8>, [Atom<Instruction>; CACHE_INSTR]);
 
 /// Functionality required to construct & execute blocks.
 ///
 /// A block is a sequence of at least one instruction, which may be executed sequentially.
 /// Blocks will never contain more than [`CACHE_INSTR`] instructions.
-pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
+pub trait Block<MC: MemoryConfig, M: ManagerBase> {
     /// Block construction may require additional state not kept in storage,
     /// this is then passed as a parameter to [`Block::run_block`].
     ///
@@ -53,13 +42,9 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
     type BlockBuilder: Default + Sized;
 
     /// Bind the block to the given allocated state.
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self
+    fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite;
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output>;
 
     /// Ready a block for construction.
     ///
@@ -88,7 +73,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         M: ManagerReadWrite;
 
     /// Returns the underlying slice of instructions stored in the block.
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[BlockInstruction<MC, M>]
     where
         M: ManagerRead;
 
@@ -120,6 +105,20 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         M: ManagerReadWrite;
 }
 
+pub struct BlockInstruction<MC: MemoryConfig, M: ManagerBase> {
+    pub instr: Instruction,
+    pub runner: RunInstr<MC, M::ManagerRoot>,
+}
+
+impl<MC: MemoryConfig, M: ManagerBase> Clone for BlockInstruction<MC, M> {
+    fn clone(&self) -> Self {
+        Self {
+            instr: self.instr,
+            runner: self.runner,
+        }
+    }
+}
+
 /// Interpreted blocks are built automatically, and require no additional context.
 #[derive(Debug, Default)]
 pub struct InterpretedBlockBuilder;
@@ -132,20 +131,8 @@ pub struct InterpretedBlockBuilder;
 ///
 /// [`ICall`]: super::ICall
 pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
-    instr: [EnrichedCell<ICallPlaced<MC, M>, M>; CACHE_INSTR],
-    len_instr: Cell<u8, M>,
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> NewState<M> for Interpreted<MC, M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            len_instr: Cell::new(manager),
-            instr: NewState::new(manager),
-        }
-    }
+    instr: [BlockInstruction<MC, M>; CACHE_INSTR],
+    len_instr: usize,
 }
 
 impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
@@ -155,65 +142,69 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
     where
         M: ManagerRead,
     {
-        self.len_instr.read() as usize
+        self.len_instr
     }
 
     #[inline]
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[BlockInstruction<MC, M>]
     where
         M: ManagerRead,
     {
-        &self.instr[..self.num_instr()]
+        &self.instr[..self.len_instr]
     }
 
     fn invalidate(&mut self)
     where
         M: ManagerWrite,
     {
-        self.len_instr.write(0);
+        self.len_instr = 0;
     }
 
     fn push_instr(&mut self, instr: Instruction)
     where
         M: ManagerReadWrite,
     {
-        let len = self.len_instr.read();
-        self.instr[len as usize].write(instr);
-        self.len_instr.write(len + 1);
+        // if self.len_instr >= CACHE_INSTR {
+        //     return;
+        // }
+
+        let runner = instr.opcode.to_run();
+        let block_instr = BlockInstruction { instr, runner };
+
+        self.instr[self.len_instr] = block_instr;
+        self.len_instr += 1;
     }
 
     fn reset(&mut self)
     where
         M: ManagerReadWrite,
     {
-        self.len_instr.write(0);
-        self.instr
-            .iter_mut()
-            .for_each(|lc| lc.write(Instruction::DEFAULT));
+        self.len_instr = 0;
+        for instr in &mut self.instr[..self.len_instr] {
+            instr.instr = Instruction::DEFAULT;
+            instr.runner = instr.instr.opcode.to_run();
+        }
     }
 
     fn start_block(&mut self)
     where
         M: ManagerWrite,
     {
-        self.len_instr.write(0);
+        self.len_instr = 0;
     }
 
-    fn bind(space: AllocatedOf<BlockLayout, M>) -> Self
+    fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
-        Self {
-            len_instr: space.0,
-            instr: space.1.map(EnrichedCell::bind),
-        }
-    }
+        let instr = Instruction::DEFAULT;
+        let runner = instr.opcode.to_run();
+        let default_instr = BlockInstruction { instr, runner };
 
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
-        (
-            self.len_instr.struct_ref::<F>(),
-            self.instr.each_ref().map(|entry| entry.struct_ref::<F>()),
-        )
+        Self {
+            len_instr: 0,
+            instr: std::array::from_fn(|_| default_instr.clone()),
+        }
     }
 
     /// # SAFETY
@@ -243,7 +234,7 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
 impl<MC: MemoryConfig, M: ManagerClone> Clone for Interpreted<MC, M> {
     fn clone(&self) -> Self {
         Self {
-            len_instr: self.len_instr.clone(),
+            len_instr: self.len_instr,
             instr: self.instr.clone(),
         }
     }
@@ -310,7 +301,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
             .instr
             .iter()
             .take(<Self as Block<MC, M>>::num_instr(self))
-            .map(|i| i.read_stored())
+            .map(|i| i.instr)
             .collect::<Vec<_>>();
 
         let fun = block_builder.0.compile(&mut self.dispatch, instr);
@@ -341,20 +332,6 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
             self.fallback
                 .run_block(core, instr_pc, steps, &mut block_builder.1)
         };
-    }
-}
-
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M>
-    for Jitted<D, MC, M>
-{
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            fallback: Interpreted::new(manager),
-            dispatch: DispatchTarget::default(),
-        }
     }
 }
 
@@ -395,22 +372,18 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         self.fallback.push_instr(instr)
     }
 
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[BlockInstruction<MC, M>]
     where
         M: ManagerRead,
     {
         self.fallback.instr()
     }
 
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self {
+    fn new() -> Self {
         Self {
-            fallback: Interpreted::bind(allocated),
+            fallback: Interpreted::new(),
             dispatch: DispatchTarget::default(),
         }
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
-        self.fallback.struct_ref::<F>()
     }
 
     /// Run a block, using the currently selected dispatch mechanism
@@ -462,7 +435,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess + ManagerCl
 }
 
 fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
-    instr: &[EnrichedCell<ICallPlaced<MC, M>, M>],
+    instr: &[BlockInstruction<MC, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
     steps: &mut usize,

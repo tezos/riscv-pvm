@@ -89,12 +89,10 @@ use block::Block;
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
 use super::instruction::Instruction;
-use super::instruction::RunInstr;
 use super::memory::Address;
 use super::memory::MemoryConfig;
 use crate::cache_utils::FenceCounter;
 use crate::cache_utils::Sizes;
-use crate::machine_state::instruction::Args;
 use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
@@ -103,8 +101,6 @@ use crate::state_backend;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::EnrichedValue;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -122,56 +118,6 @@ use crate::traps::Exception;
 
 /// The maximum number of instructions that may be contained in a block.
 pub const CACHE_INSTR: usize = 20;
-
-/// Bindings for deriving an [`ICall`] from an [`Instruction`] via the [`EnrichedCell`] mechanism.
-pub struct ICallPlaced<MC: MemoryConfig, M: ManagerBase> {
-    _pd0: PhantomData<MC>,
-    _pd1: PhantomData<M>,
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> EnrichedValue for ICallPlaced<MC, M> {
-    type E = Instruction;
-
-    type D = ICall<MC, M::ManagerRoot>;
-}
-
-/// A function derived from an [OpCode] that can be directly run over the [MachineCoreState].
-///
-/// This allows static dispatch of this function during block construction,
-/// rather than for each instruction, during each block execution.
-///
-/// [OpCode]: super::instruction::OpCode
-pub struct ICall<MC: MemoryConfig, M: ManagerBase> {
-    run_instr: RunInstr<MC, M>,
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> Clone for ICall<MC, M> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> Copy for ICall<MC, M> {}
-
-impl<MC: MemoryConfig, M: ManagerReadWrite> ICall<MC, M> {
-    // SAFETY: This function must be called with an `Args` belonging to the same `OpCode` as
-    // the one used to dispatch this function.
-    #[inline(always)]
-    unsafe fn run(
-        &self,
-        args: &Args,
-        core: &mut MachineCoreState<MC, M>,
-    ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-        unsafe { (self.run_instr)(args, core) }
-    }
-}
-
-impl<'a, MC: MemoryConfig, M: ManagerReadWrite> From<&'a Instruction> for ICall<MC, M> {
-    fn from(value: &'a Instruction) -> Self {
-        let run_instr = value.opcode.to_run::<MC, M>();
-        Self { run_instr }
-    }
-}
 
 /// Layout for an address cell
 pub struct AddressCellLayout;
@@ -206,12 +152,7 @@ impl state_backend::ProofLayout for AddressCellLayout {
 }
 
 /// The layout of block cache entries, see [`Cached`] for more information.
-pub type CachedLayout = (
-    AddressCellLayout,
-    Atom<FenceCounter>,
-    Atom<u8>,
-    [Atom<Instruction>; CACHE_INSTR],
-);
+pub type CachedLayout = (AddressCellLayout, Atom<FenceCounter>);
 
 /// Block cache entry.
 ///
@@ -232,7 +173,7 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         Self {
             address: space.0,
             fence_counter: space.1,
-            block: B::bind((space.2, space.3)),
+            block: B::new(),
             _pd: PhantomData,
         }
     }
@@ -264,12 +205,9 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     }
 
     fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<CachedLayout, F::Output> {
-        let (len_instr, instr) = self.block.struct_ref::<'a, F>();
         (
             self.address.struct_ref::<F>(),
             self.fence_counter.struct_ref::<F>(),
-            len_instr,
-            instr,
         )
     }
 }
@@ -281,7 +219,7 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<M
     {
         Self {
             address: Cell::new_with(manager, !0),
-            block: B::new(manager),
+            block: B::new(),
             fence_counter: Cell::new(manager),
             _pd: PhantomData,
         }
@@ -786,7 +724,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
                 // Need to resolve the adjacent block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let new_block = BCL::entry(&self.entries, next_phys_addr);
-                let new_instr = new_block.block.instr()[i].read_stored();
+                let new_instr = new_block.block.instr()[i].instr;
                 // Need to resolve the target block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let current_entry = BCL::entry_mut(&mut self.entries, block_addr);
@@ -862,7 +800,7 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let entry = BCL::entry_mut(&mut self.entries, phys_addr);
 
         let instr = entry.block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
+        instr.iter().map(|cell| cell.instr).collect()
     }
 }
 
@@ -923,16 +861,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
 
 #[inline(always)]
 fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
-    instr: &EnrichedCell<ICallPlaced<MC, M>, M>,
+    instr: &block::BlockInstruction<MC, M>,
     core: &mut MachineCoreState<MC, M>,
 ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-    let args = instr.read_ref_stored().args();
-    let icall = instr.read_derived();
-
     // SAFETY: This is safe, as the function we are calling is derived directly from the
     // same instruction as the `Args` we are calling with. Therefore `args` will be of the
     // required shape.
-    unsafe { icall.run(args, core) }
+    unsafe { (instr.runner)(instr.instr.args(), core) }
 }
 
 #[cfg(test)]
