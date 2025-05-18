@@ -5,7 +5,7 @@
 //! Implementation of load and store instructions for RISC-V over the ICB.
 
 use crate::instruction_context::ICB;
-use crate::instruction_context::LoadStoreWidth;
+use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
@@ -41,12 +41,11 @@ pub fn run_li(icb: &mut impl ICB, imm: i64, rd_rs1: NonZeroXRegister) {
 /// The value is taken from `rs2`, but only the lowest `width` bytes
 /// are written to memory.
 #[inline(always)]
-pub fn run_store<I: ICB>(
+pub fn run_store<V: StoreLoadInt, I: ICB>(
     icb: &mut I,
     imm: i64,
     rs1: XRegister,
     rs2: XRegister,
-    width: LoadStoreWidth,
 ) -> I::IResult<()> {
     let base_address = icb.xregister_read(rs1);
     let offset = icb.xvalue_of_imm(imm);
@@ -55,7 +54,7 @@ pub fn run_store<I: ICB>(
 
     let value = icb.xregister_read(rs2);
 
-    icb.main_memory_store(address, value, width)
+    icb.main_memory_store::<V>(address, value)
 }
 
 /// Loads a value from the address starting at `val(rs1) + imm`.
@@ -65,20 +64,18 @@ pub fn run_store<I: ICB>(
 ///
 /// The result is written to `rd`.
 #[inline(always)]
-pub fn run_load<I: ICB>(
+pub fn run_load<V: StoreLoadInt, I: ICB>(
     icb: &mut I,
     imm: i64,
     rs1: XRegister,
     rd: XRegister,
-    signed: bool,
-    width: LoadStoreWidth,
 ) -> I::IResult<()> {
     let base_address = icb.xregister_read(rs1);
     let offset = icb.xvalue_of_imm(imm);
 
     let address = base_address.add(offset, icb);
 
-    let value = icb.main_memory_load(address, signed, width);
+    let value = icb.main_memory_load::<V>(address);
     I::and_then(value, |value| {
         icb.xregister_write(rd, value);
         icb.ok(())
@@ -94,7 +91,6 @@ mod test {
 
     use super::*;
     use crate::backend_test;
-    use crate::instruction_context::LoadStoreWidth;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::a1;
@@ -167,15 +163,22 @@ mod test {
                 state.hart.xregisters.write(t0, offset);
 
                 // Perform the stores
-                run_store(&mut *state, 0, t0, a4,  LoadStoreWidth::Double)?;
-                run_store(&mut *state, 8, t0, a3,  LoadStoreWidth::Word)?;
-                run_store(&mut *state, 12, t0, a2, LoadStoreWidth::Half)?;
-                run_store(&mut *state, 14, t0, a1, LoadStoreWidth::Byte)?;
+                run_store::<u64, _>(&mut *state, 0, t0, a4)?;
+                run_store::<u32, _>(&mut *state, 8, t0, a3)?;
+                run_store::<u16, _>(&mut *state, 12, t0, a2)?;
+                run_store::<u8, _>(&mut *state, 14, t0, a1)?;
 
-                run_load(&mut *state, 0, t0, t4, true, LoadStoreWidth::Double)?;
-                run_load(&mut *state, 8, t0, t3, signed, LoadStoreWidth::Word)?;
-                run_load(&mut *state, 12, t0, t2, signed, LoadStoreWidth::Half)?;
-                run_load(&mut *state, 14, t0, t1, signed, LoadStoreWidth::Byte)?;
+                run_load::<i64, _>(&mut *state, 0, t0, t4)?;
+
+                if signed {
+                    run_load::<i32, _>(&mut *state, 8, t0, t3)?;
+                    run_load::<i16, _>(&mut *state, 12, t0, t2)?;
+                    run_load::<i8, _>(&mut *state, 14, t0, t1)?;
+                } else {
+                    run_load::<u32, _>(&mut *state, 8, t0, t3)?;
+                    run_load::<u16, _>(&mut *state, 12, t0, t2)?;
+                    run_load::<u8, _>(&mut *state, 14, t0, t1)?;
+                }
 
                 assert_eq!(state.hart.xregisters.read(t4), v_4);
 

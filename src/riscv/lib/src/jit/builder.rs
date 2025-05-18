@@ -30,6 +30,7 @@ use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::MulHighType;
 use crate::instruction_context::PhiValue;
 use crate::instruction_context::Predicate;
+use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::jit::builder::block_state::PCUpdate;
@@ -475,18 +476,16 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         None
     }
 
-    fn main_memory_store(
+    fn main_memory_store<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
         value: Self::XValue,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()> {
-        let errno = self.jsa_call.memory_store(
+        let errno = self.jsa_call.memory_store::<V>(
             &mut self.builder,
             self.core_ptr_val,
             phys_address,
             value,
-            width,
         );
 
         errno.handle(self);
@@ -494,19 +493,13 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         Some(())
     }
 
-    fn main_memory_load(
+    fn main_memory_load<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
-        signed: bool,
-        width: LoadStoreWidth,
     ) -> Self::IResult<Self::XValue> {
-        let errno = self.jsa_call.memory_load(
-            &mut self.builder,
-            self.core_ptr_val,
-            phys_address,
-            signed,
-            width,
-        );
+        let errno =
+            self.jsa_call
+                .memory_load::<V>(&mut self.builder, self.core_ptr_val, phys_address);
 
         let res = errno.handle(self);
 

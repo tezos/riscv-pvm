@@ -9,12 +9,14 @@
 
 pub(super) mod arithmetic;
 pub(super) mod comparable;
+pub(crate) mod value;
 
 use arithmetic::Arithmetic;
 use comparable::Comparable;
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::types::I64;
 
+pub use self::value::StoreLoadInt;
 use crate::jit::state_access::JitStateAccess;
 use crate::jit::{self};
 use crate::machine_state::MachineCoreState;
@@ -239,21 +241,18 @@ pub(crate) trait ICB {
     /// Write value to main memory, at the given address.
     ///
     /// The value is truncated to the width given by [`LoadStoreWidth`].
-    fn main_memory_store(
+    fn main_memory_store<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
         value: Self::XValue,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()>;
 
     /// Read value from main memory, at the given address.
     ///
     /// The value is truncated to the width given by [`LoadStoreWidth`].
-    fn main_memory_load(
+    fn main_memory_load<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
-        signed: bool,
-        width: LoadStoreWidth,
     ) -> Self::IResult<Self::XValue>;
 
     // ----------------
@@ -455,52 +454,25 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     }
 
     #[inline(always)]
-    fn main_memory_store(
+    fn main_memory_store<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
         value: Self::XValue,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()> {
-        let res = match width {
-            LoadStoreWidth::Byte => self.main_memory.write::<u8>(address, value as u8),
-            LoadStoreWidth::Half => self.main_memory.write::<u16>(address, value as u16),
-            LoadStoreWidth::Word => self.main_memory.write::<u32>(address, value as u32),
-            LoadStoreWidth::Double => self.main_memory.write::<u64>(address, value),
-        };
-
-        res.map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault(address))
+        self.main_memory
+            .write(address, V::from_xvalue(value))
+            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault(address))
     }
 
     #[inline(always)]
-    fn main_memory_load(
+    fn main_memory_load<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        signed: bool,
-        width: LoadStoreWidth,
     ) -> Self::IResult<Self::XValue> {
-        let res = match (signed, width) {
-            (true, LoadStoreWidth::Byte) => {
-                self.main_memory.read::<u8>(address).map(|v| v as i8 as u64)
-            }
-            (true, LoadStoreWidth::Half) => self
-                .main_memory
-                .read::<u16>(address)
-                .map(|v| v as i16 as u64),
-            (true, LoadStoreWidth::Word) => self
-                .main_memory
-                .read::<u32>(address)
-                .map(|v| v as i32 as u64),
-            (_, LoadStoreWidth::Double) => self.main_memory.read::<u64>(address),
-            (false, LoadStoreWidth::Byte) => self.main_memory.read::<u8>(address).map(|v| v as u64),
-            (false, LoadStoreWidth::Half) => {
-                self.main_memory.read::<u16>(address).map(|v| v as u64)
-            }
-            (false, LoadStoreWidth::Word) => {
-                self.main_memory.read::<u32>(address).map(|v| v as u64)
-            }
-        };
-
-        res.map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
+        self.main_memory
+            .read(address)
+            .map(V::to_xvalue)
+            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
     }
 }
 
@@ -558,16 +530,4 @@ impl LoadStoreWidth {
     const HALF_WIDTH: u8 = std::mem::size_of::<u16>() as u8;
     const WORD_WIDTH: u8 = std::mem::size_of::<u32>() as u8;
     const DOUBLE_WIDTH: u8 = std::mem::size_of::<u64>() as u8;
-
-    /// Convert a value-width in bytes to the appropriate
-    /// `LoadStoreWidth`, if supported.
-    pub fn new(val: u8) -> Option<Self> {
-        match val {
-            Self::BYTE_WIDTH => Some(Self::Byte),
-            Self::HALF_WIDTH => Some(Self::Half),
-            Self::WORD_WIDTH => Some(Self::Word),
-            Self::DOUBLE_WIDTH => Some(Self::Double),
-            _ => None,
-        }
-    }
 }

@@ -93,14 +93,6 @@ impl AbiCall<4> {
     impl_abicall!(A1, A2, A3, A4);
 }
 
-impl AbiCall<5> {
-    impl_abicall!(A1, A2, A3, A4, A5);
-}
-
-impl AbiCall<6> {
-    impl_abicall!(A1, A2, A3, A4, A5, A6);
-}
-
 /// Holds the IR representation of a function parameter's type, which is needed for
 /// registering the function's [`Signature`] in the [`JITModule`].
 pub(super) enum CraneliftRepr {
@@ -142,6 +134,10 @@ impl ToCraneliftRepr for u64 {
     const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
 }
 
+impl ToCraneliftRepr for i64 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
 impl ToCraneliftRepr for bool {
     const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
 }
@@ -151,6 +147,26 @@ impl ToCraneliftRepr for NonZeroXRegister {
 }
 
 impl ToCraneliftRepr for u8 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for i8 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for i16 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for u16 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for i32 {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for u32 {
     const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
 }
 
