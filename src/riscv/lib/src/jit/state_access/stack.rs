@@ -50,6 +50,9 @@ use cranelift::codegen::ir::Type;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::types::I8;
+use cranelift::prelude::types::I16;
+use cranelift::prelude::types::I32;
 
 use crate::machine_state::registers::XValue;
 use crate::traps::Exception;
@@ -113,6 +116,30 @@ impl StackAddressable for XValue {
 
 impl Stackable for XValue {
     const IR_TYPE: Type = I64;
+}
+
+impl StackAddressable for u8 {
+    type Underlying = u8;
+}
+
+impl Stackable for u8 {
+    const IR_TYPE: Type = I8;
+}
+
+impl StackAddressable for u16 {
+    type Underlying = u16;
+}
+
+impl Stackable for u16 {
+    const IR_TYPE: Type = I16;
+}
+
+impl StackAddressable for u32 {
+    type Underlying = u32;
+}
+
+impl Stackable for u32 {
+    const IR_TYPE: Type = I32;
 }
 
 impl StackAddressable for Exception {

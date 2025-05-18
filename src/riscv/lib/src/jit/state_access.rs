@@ -48,10 +48,13 @@ use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
+use crate::machine_state::memory::BadMemoryAccess;
+use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
+use crate::state_backend::Elem;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
@@ -105,8 +108,18 @@ register_jsa_functions!(
     raise_illegal_instruction_exception => (JSA::raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (JSA::raise_store_amo_access_fault_exception, AbiCall<2>::args),
     ecall_from_mode => (JSA::ecall::<MC>, AbiCall<2>::args),
-    memory_store => (JSA::memory_store::<MC>, AbiCall<5>::args),
-    memory_load => (JSA::memory_load::<MC>, AbiCall::<6>::args)
+    memory_store_u8 => (JSA::memory_store_fast::<u8, MC>, AbiCall<4>::args),
+    memory_store_u16 => (JSA::memory_store_fast::<u16, MC>, AbiCall<4>::args),
+    memory_store_u32 => (JSA::memory_store_fast::<u32, MC>, AbiCall<4>::args),
+    memory_store_u64 => (JSA::memory_store_fast::<u64, MC>, AbiCall<4>::args),
+    memory_load_i8 => (JSA::memory_load_fast::<i8, MC>, AbiCall<4>::args),
+    memory_load_u8 => (JSA::memory_load_fast::<u8, MC>, AbiCall<4>::args),
+    memory_load_i16 => (JSA::memory_load_fast::<i16, MC>, AbiCall<4>::args),
+    memory_load_u16 => (JSA::memory_load_fast::<u16, MC>, AbiCall<4>::args),
+    memory_load_i32 => (JSA::memory_load_fast::<i32, MC>, AbiCall<4>::args),
+    memory_load_u32 => (JSA::memory_load_fast::<u32, MC>, AbiCall<4>::args),
+    memory_load_i64 => (JSA::memory_load_fast::<i64, MC>, AbiCall<4>::args),
+    memory_load_u64 => (JSA::memory_load_fast::<u64, MC>, AbiCall<4>::args),
 );
 
 /// State Access that a JIT-compiled block may use.
@@ -231,6 +244,22 @@ pub trait JitStateAccess: ManagerReadWrite {
         }
     }
 
+    /// Fast memory store
+    extern "C" fn memory_store_fast<E: Elem, MC: MemoryConfig>(
+        core: &mut MachineCoreState<MC, Self>,
+        address: u64,
+        value: E,
+        exception_out: &mut MaybeUninit<Exception>,
+    ) -> bool {
+        match core.main_memory.write(address, value) {
+            Ok(()) => false,
+            Err(BadMemoryAccess) => {
+                exception_out.write(Exception::StoreAMOAccessFault(address));
+                true
+            }
+        }
+    }
+
     /// Load `width` bytes from memory, at the physical address, into lowest `width` bytes of an
     /// `XValue`, with (un)signed extension.
     ///
@@ -262,6 +291,25 @@ pub trait JitStateAccess: ManagerReadWrite {
             }
             Err(exception) => {
                 exception_out.write(exception);
+                true
+            }
+        }
+    }
+
+    /// Fas memory load
+    extern "C" fn memory_load_fast<E: Elem, MC: MemoryConfig>(
+        core: &mut MachineCoreState<MC, Self>,
+        address: u64,
+        xval_out: &mut MaybeUninit<E>,
+        exception_out: &mut MaybeUninit<Exception>,
+    ) -> bool {
+        match core.main_memory.read::<E>(address) {
+            Ok(value) => {
+                xval_out.write(value);
+                false
+            }
+            Err(BadMemoryAccess) => {
+                exception_out.write(Exception::LoadAccessFault(address));
                 true
             }
         }
@@ -358,8 +406,18 @@ pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     raise_illegal_instruction_exception: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
-    memory_store: Option<FuncRef>,
-    memory_load: Option<FuncRef>,
+    memory_store_u8: Option<FuncRef>,
+    memory_store_u16: Option<FuncRef>,
+    memory_store_u32: Option<FuncRef>,
+    memory_store_u64: Option<FuncRef>,
+    memory_load_i8: Option<FuncRef>,
+    memory_load_u8: Option<FuncRef>,
+    memory_load_i16: Option<FuncRef>,
+    memory_load_u16: Option<FuncRef>,
+    memory_load_i32: Option<FuncRef>,
+    memory_load_u32: Option<FuncRef>,
+    memory_load_i64: Option<FuncRef>,
+    memory_load_u64: Option<FuncRef>,
     _pd: PhantomData<(MC, JSA)>,
 }
 
@@ -381,8 +439,18 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
             raise_illegal_instruction_exception: None,
             raise_store_amo_access_fault_exception: None,
             ecall_from_mode: None,
-            memory_store: None,
-            memory_load: None,
+            memory_store_u8: None,
+            memory_store_u16: None,
+            memory_store_u32: None,
+            memory_store_u64: None,
+            memory_load_i8: None,
+            memory_load_u8: None,
+            memory_load_i16: None,
+            memory_load_u16: None,
+            memory_load_i32: None,
+            memory_load_u32: None,
+            memory_load_i64: None,
+            memory_load_u64: None,
             _pd: PhantomData,
         }
     }
@@ -526,21 +594,39 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         value: X64,
         width: LoadStoreWidth,
     ) -> impl Errno<(), MC, JSA> + 'static {
-        let memory_store = self.memory_store.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.memory_store, builder.func)
-        });
+        let memory_store = match width {
+            LoadStoreWidth::Byte => self.memory_store_u8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u8, builder.func)
+            }),
+            LoadStoreWidth::Half => self.memory_store_u16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u16, builder.func)
+            }),
+            LoadStoreWidth::Word => self.memory_store_u32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u32, builder.func)
+            }),
+            LoadStoreWidth::Double => self.memory_store_u64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u64, builder.func)
+            }),
+        };
 
         let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let width = builder.ins().iconst(I8, width as u8 as i64);
+        let value = match width {
+            LoadStoreWidth::Byte => builder.ins().ireduce(ir::types::I8, value.0),
+            LoadStoreWidth::Half => builder.ins().ireduce(ir::types::I16, value.0),
+            LoadStoreWidth::Word => builder.ins().ireduce(ir::types::I32, value.0),
+            LoadStoreWidth::Double => value.0,
+        };
 
         let call = builder.ins().call(*memory_store, &[
             core_ptr,
             phys_address.0,
-            value.0,
-            width,
+            value,
             exception_ptr,
         ]);
 
@@ -560,25 +646,66 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         signed: bool,
         width: LoadStoreWidth,
     ) -> impl Errno<X64, MC, JSA> + 'static {
-        let memory_load = self.memory_load.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.memory_load, builder.func)
-        });
-
         let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let xval_slot = stack::Slot::<XValue>::new(self.ptr_type, builder);
-        let xval_ptr = xval_slot.ptr(builder);
+        let (xval_ty, xval_ptr) = match width {
+            LoadStoreWidth::Byte => (
+                <u8 as stack::Stackable>::IR_TYPE,
+                stack::Slot::<u8>::new(self.ptr_type, builder).ptr(builder),
+            ),
+            LoadStoreWidth::Half => (
+                <u16 as stack::Stackable>::IR_TYPE,
+                stack::Slot::<u16>::new(self.ptr_type, builder).ptr(builder),
+            ),
+            LoadStoreWidth::Word => (
+                <u32 as stack::Stackable>::IR_TYPE,
+                stack::Slot::<u32>::new(self.ptr_type, builder).ptr(builder),
+            ),
+            LoadStoreWidth::Double => (
+                <u64 as stack::Stackable>::IR_TYPE,
+                stack::Slot::<u64>::new(self.ptr_type, builder).ptr(builder),
+            ),
+        };
 
-        let width = builder.ins().iconst(I8, width as u8 as i64);
-        let signed = builder.ins().iconst(I8, signed as i64);
+        let memory_load = match (width, signed) {
+            (LoadStoreWidth::Byte, true) => self.memory_load_i8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i8, builder.func)
+            }),
+            (LoadStoreWidth::Byte, false) => self.memory_load_u8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u8, builder.func)
+            }),
+            (LoadStoreWidth::Half, true) => self.memory_load_i16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i16, builder.func)
+            }),
+            (LoadStoreWidth::Half, false) => self.memory_load_u16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u16, builder.func)
+            }),
+            (LoadStoreWidth::Word, true) => self.memory_load_i32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i32, builder.func)
+            }),
+            (LoadStoreWidth::Word, false) => self.memory_load_u32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u32, builder.func)
+            }),
+            (LoadStoreWidth::Double, true) => self.memory_load_i64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i64, builder.func)
+            }),
+            (LoadStoreWidth::Double, false) => self.memory_load_u64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u64, builder.func)
+            }),
+        };
 
         let call = builder.ins().call(*memory_load, &[
             core_ptr,
             phys_address.0,
-            width,
-            signed,
             xval_ptr,
             exception_ptr,
         ]);
@@ -586,9 +713,18 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         let errno = builder.inst_results(call)[0];
 
         ErrnoImpl::new(errno, exception_ptr, move |builder| {
-            // Safety: the xval is initialised prior to the call, and is guaranteed to
-            // remain initialised regardless of the result of external call.
-            let xval = unsafe { xval_slot.load(builder) };
+            let xval = builder
+                .ins()
+                .load(xval_ty, MemFlags::trusted(), xval_ptr, 0);
+
+            let xval = if xval_ty == ir::types::I64 {
+                xval
+            } else if signed {
+                builder.ins().sextend(ir::types::I64, xval)
+            } else {
+                builder.ins().uextend(ir::types::I64, xval)
+            };
+
             X64(xval)
         })
     }
