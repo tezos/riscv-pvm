@@ -57,11 +57,10 @@ pub type JitFn<MC, JSA> = unsafe extern "C" fn(
     *const c_void,
     &mut MachineCoreState<MC, JSA>,
     u64,
-    &mut usize,
     &mut Result<(), EnvironException>,
     // ignored
     *const c_void,
-);
+) -> usize;
 
 /// Errors that may arise from the initialisation of the JIT.
 #[derive(Debug, Error)]
@@ -191,7 +190,6 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
     ///
     /// | `core: &mut MachineCoreState` | `int (ptr) -> MachineCoreState` |
     /// | `pc: Address`                 | `I64`                           |
-    /// | `steps: &mut usize`           | `int (ptr) -> int`              |
     ///
     /// # Return
     ///
@@ -205,14 +203,16 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
         self.ctx.func.signature.params.push(AbiParam::new(I64));
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
-        self.ctx.func.signature.params.push(AbiParam::new(ptr));
         // last param ignored
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
+
+        // return steps
+        self.ctx.func.signature.returns.push(AbiParam::new(I64));
 
         let builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
         let jsa_call = JsaCalls::func_calls(&mut self.module, &self.jsa_imports, ptr);
 
-        Builder::<'_, MC, JSA>::new(ptr, builder, jsa_call)
+        Builder::<'_, MC, JSA>::new(builder, jsa_call)
     }
 
     /// Finalise and cache the function under construction.
@@ -275,6 +275,7 @@ mod tests {
     use crate::backend_test;
     use crate::instruction_context::LoadStoreWidth;
     use crate::machine_state::MachineCoreState;
+    use crate::machine_state::StepManyResult;
     use crate::machine_state::block_cache::block::Block;
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -350,10 +351,8 @@ mod tests {
                 (hook)(&mut jitted)
             }
 
-            // initialise starting parameters: pc, steps
+            // initialise starting parameters: pc
             let initial_pc = self.initial_pc.unwrap_or_default();
-            let mut interpreted_steps = 0;
-            let mut jitted_steps = 0;
             interpreted.hart.pc.write(initial_pc);
             jitted.hart.pc.write(initial_pc);
 
@@ -365,33 +364,26 @@ mod tests {
             // Run the block in both interpreted and jitted mode.
             let interpreted_res = unsafe {
                 // SAFETY: interpreted blocks are always callable
-                block.run_block(
-                    &mut interpreted,
-                    initial_pc,
-                    &mut interpreted_steps,
-                    interpreted_bb,
-                )
+                block.run_block(&mut interpreted, initial_pc, interpreted_bb)
             };
 
             let mut jitted_res = Ok(());
-            unsafe {
+            let jitted_steps = unsafe {
                 // # Safety - the block builder is alive for at least
                 //            the duration of the `run` function.
-                (fun)(
-                    null(),
-                    &mut jitted,
-                    initial_pc,
-                    &mut jitted_steps,
-                    &mut jitted_res,
-                    null(),
-                )
+                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
+            };
+            let jitted_res = StepManyResult {
+                steps: jitted_steps,
+                error: jitted_res.err(),
             };
 
             // Assert state equality.
             assert_eq!(jitted_res, interpreted_res);
             assert_eq!(
-                interpreted_steps, jitted_steps,
-                "Interpreted mode ran for {interpreted_steps}, compared to jit-mode of {jitted_steps}"
+                interpreted_res.steps, jitted_steps,
+                "Interpreted mode ran for {}, compared to jit-mode of {jitted_steps}",
+                interpreted_res.steps
             );
             assert_eq_struct(
                 &interpreted.struct_ref::<FnManagerIdent>(),
@@ -401,8 +393,9 @@ mod tests {
             // Only check steps against one state, as we know both interpreted/jit steps are equal.
             let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
             assert_eq!(
-                interpreted_steps, expected_steps,
-                "Scenario ran for {interpreted_steps} steps, but expected {expected_steps}"
+                interpreted_res.steps, expected_steps,
+                "Scenario ran for {} steps, but expected {expected_steps}",
+                interpreted_res.steps
             );
 
             // Run the assert hooks. Since we have already verified that the states are equal,
@@ -1708,8 +1701,6 @@ mod tests {
                 block.push_instr(*instr);
             }
 
-            let mut jitted_steps = 0;
-
             let initial_pc = 0;
             jitted.hart.pc.write(initial_pc);
 
@@ -1733,17 +1724,10 @@ mod tests {
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_res = Ok(());
-            unsafe {
+            let jitted_steps = unsafe {
                 // # Safety - the jit is not dropped until after we
                 //            exit the block.
-                (fun)(
-                    null(),
-                    &mut jitted,
-                    initial_pc,
-                    &mut jitted_steps,
-                    &mut jitted_res,
-                    null(),
-                )
+                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
             };
 
             assert!(jitted_res.is_ok());

@@ -88,6 +88,7 @@ use block::Block;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
+use super::StepManyResult;
 use super::instruction::Instruction;
 use super::instruction::RunInstr;
 use super::memory::Address;
@@ -315,7 +316,7 @@ pub const TEST_CACHE_SIZE: usize = 1 << TEST_CACHE_BITS;
 pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 
 /// Structure used to remember that a block was only partway executed
-/// before needing to pause due to `steps == steps_max`.
+/// before needing to pause due to `max_steps == 0`.
 ///
 /// If a block is being partially executed, if either:
 /// - an error occurs
@@ -374,10 +375,9 @@ impl<M: ManagerBase> PartialBlock<M> {
     fn run_block_partial<B: Block<MC, M>, MC: MemoryConfig>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
@@ -386,23 +386,24 @@ impl<M: ManagerBase> PartialBlock<M> {
         self.progress.write(0);
         self.phys_addr.write(entry.address.read());
 
-        self.run_partial_inner(core, steps, max_steps, entry)
+        self.run_partial_inner(core, max_steps, entry)
     }
 
     fn run_partial_inner<B: Block<MC, M>, MC: MemoryConfig>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
+        let mut result = StepManyResult::ZERO;
+
         // Protect against partial blocks being executed when
         // no steps are remaining
-        if *steps >= max_steps {
-            return Ok(());
+        if max_steps == 0 {
+            return result;
         }
 
         let mut progress = self.progress.read();
@@ -414,29 +415,36 @@ impl<M: ManagerBase> PartialBlock<M> {
                 Ok(ProgramCounterUpdate::Next(width)) => {
                     instr_pc += width as u64;
                     core.hart.pc.write(instr_pc);
-                    *steps += 1;
+                    result.steps += 1;
                     progress += 1;
 
-                    if *steps >= max_steps {
+                    if result.steps >= max_steps {
                         break;
                     }
                 }
+
                 Ok(ProgramCounterUpdate::Set(instr_pc)) => {
                     // Setting the instr_pc implies execution continuing
                     // elsewhere - and no longer within the current block.
                     core.hart.pc.write(instr_pc);
-                    *steps += 1;
+                    result.steps += 1;
                     self.reset();
-                    return Ok(());
+                    return result;
                 }
+
                 Err(e) => {
                     self.reset();
+
                     // Exceptions lead to a new address being set to handle it,
                     // with no guarantee of it being the next instruction.
-                    core.handle_step_result(instr_pc, Err(e))?;
+                    if let Err(error) = core.handle_step_result(instr_pc, Err(e)) {
+                        result.error = Some(error);
+                        return result;
+                    }
+
                     // If we succesfully handled an error, need to increment steps one more.
-                    *steps += 1;
-                    return Ok(());
+                    result.steps += 1;
+                    return result;
                 }
             }
         }
@@ -450,7 +458,7 @@ impl<M: ManagerBase> PartialBlock<M> {
             self.progress.write(progress);
         }
 
-        Ok(())
+        result
     }
 }
 
@@ -831,25 +839,23 @@ impl<BCL: BlockCacheLayout, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
     /// Complete a block that was only partially executed.
     ///
-    /// This can happen when `steps + block.len_instr() > steps_max`, in
-    /// which case we only executed instructions until `steps == steps_max`.
+    /// This can happen when `block.len_instr() > max_steps`, in which case we only executed
+    /// instructions until `max_steps == 0`.
     pub fn complete_current_block(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        steps: &mut usize,
         max_steps: usize,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
         if !self.partial_block.in_progress.read() {
-            return Ok(());
+            return StepManyResult::ZERO;
         }
 
         let entry = BCL::entry_mut(&mut self.entries, self.partial_block.phys_addr.read());
 
-        self.partial_block
-            .run_partial_inner(core, steps, max_steps, entry)
+        self.partial_block.run_partial_inner(core, max_steps, entry)
     }
 
     /// *TEST ONLY* - retrieve the underlying instructions contained in the entry at the given
@@ -904,19 +910,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
-        steps: &mut usize,
         max_steps: usize,
-    ) -> Result<(), EnvironException> {
-        if *steps + self.entry.block.num_instr() <= max_steps {
+    ) -> StepManyResult<EnvironException> {
+        if self.entry.block.num_instr() <= max_steps {
             // Safety: the same block builder is passed through every time.
-            unsafe {
-                self.entry
-                    .block
-                    .run_block(core, instr_pc, steps, self.builder)
-            }
+            unsafe { self.entry.block.run_block(core, instr_pc, self.builder) }
         } else {
-            self.partial
-                .run_block_partial(core, steps, max_steps, self.entry)
+            self.partial.run_block_partial(core, max_steps, self.entry)
         }
     }
 }
@@ -1150,12 +1150,14 @@ mod tests {
         core_state.hart.pc.write(block_addr);
 
         // Execute the first 5 instructions
-        let mut steps = 0;
         let block = block_state.get_block(block_addr).unwrap();
-        block
-            .partial
-            .run_block_partial(&mut core_state, &mut steps, 5, block.entry)
-            .unwrap();
+        let StepManyResult { steps, error: None } =
+            block
+                .partial
+                .run_block_partial(&mut core_state, 5, block.entry)
+        else {
+            panic!()
+        };
 
         assert_eq!(steps, 5);
         assert!(block_state.partial_block.in_progress.read());
@@ -1164,10 +1166,11 @@ mod tests {
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute no steps
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 0)
-            .unwrap();
+        let StepManyResult { steps, error: None } =
+            block_state.complete_current_block(&mut core_state, 0)
+        else {
+            panic!()
+        };
 
         assert_eq!(steps, 0);
         assert!(block_state.partial_block.in_progress.read());
@@ -1176,10 +1179,11 @@ mod tests {
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute the next 2 instructions
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 2)
-            .unwrap();
+        let StepManyResult { steps, error: None } =
+            block_state.complete_current_block(&mut core_state, 2)
+        else {
+            panic!()
+        };
 
         assert_eq!(steps, 2);
         assert!(block_state.partial_block.in_progress.read());
@@ -1188,10 +1192,11 @@ mod tests {
         assert_eq!(block_addr + 7 * 4, core_state.hart.pc.read());
 
         // Finish the block. We don't consume all the steps
-        let mut steps = 0;
-        block_state
-            .complete_current_block(&mut core_state, &mut steps, 5)
-            .unwrap();
+        let StepManyResult { steps, error: None } =
+            block_state.complete_current_block(&mut core_state, 5)
+        else {
+            panic!()
+        };
 
         assert_eq!(steps, 3);
         assert!(!block_state.partial_block.in_progress.read());
