@@ -34,6 +34,7 @@ pub(crate) use block_metrics;
 
 use super::ICallPlaced;
 use super::block::Block;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::EnrichedCell;
@@ -41,6 +42,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::storage::Hash;
+use crate::traps::EnvironException;
 
 #[cfg(feature = "metrics")]
 #[doc(hidden)]
@@ -315,9 +317,8 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         &mut self,
         core: &mut crate::machine_state::MachineCoreState<MC, M>,
         instr_pc: crate::machine_state::memory::Address,
-        steps: &mut usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> Result<(), crate::traps::EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: crate::state_backend::ManagerReadWrite,
     {
@@ -330,7 +331,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
 
         block_metrics!(hash = &self.block_hash, record_called);
 
-        unsafe { self.block.run_block(core, instr_pc, steps, block_builder) }
+        unsafe { self.block.run_block(core, instr_pc, block_builder) }
     }
 
     fn num_instr(&self) -> usize

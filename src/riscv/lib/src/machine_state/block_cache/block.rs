@@ -18,6 +18,7 @@ use crate::default::ConstDefault;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -113,9 +114,8 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
-        steps: &mut usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite;
 }
@@ -224,19 +224,29 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         mut instr_pc: Address,
-        steps: &mut usize,
         _block_builder: &mut Self::BlockBuilder,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
-        if let Err(e) = run_block_inner(self.instr(), core, &mut instr_pc, steps) {
-            core.handle_step_result(instr_pc, Err(e))?;
+        let mut result = run_block_inner(self.instr(), core, &mut instr_pc);
+
+        if let Some(exc) = result.error {
+            if let Err(err) = core.handle_step_result(instr_pc, Err(exc)) {
+                return StepManyResult {
+                    steps: result.steps,
+                    error: Some(err),
+                };
+            }
+
             // If we succesfully handled an error, need to increment steps one more.
-            *steps += 1;
+            result.steps += 1;
         }
 
-        Ok(())
+        StepManyResult {
+            steps: result.steps,
+            error: None,
+        }
     }
 }
 
@@ -263,10 +273,9 @@ pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
     &mut Jitted<D, MC, M>,
     &mut MachineCoreState<MC, M>,
     Address,
-    &mut usize,
     &mut Result<(), EnvironException>,
     &mut <Jitted<D, MC, M> as Block<MC, M>>::BlockBuilder,
-);
+) -> usize;
 
 /// Blocks that are compiled to native code for execution, when possible.
 ///
@@ -295,13 +304,11 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
-        steps: &mut usize,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
-    ) {
+    ) -> usize {
         if !block_builder.0.should_compile(&mut self.dispatch) {
-            unsafe { self.run_block_not_compiled(core, instr_pc, steps, result, block_builder) }
-            return;
+            return unsafe { self.run_block_not_compiled(core, instr_pc, result, block_builder) };
         }
 
         // trigger JIT compilation
@@ -317,7 +324,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
-        unsafe { (fun)(self, core, instr_pc, steps, result, block_builder) }
+        unsafe { (fun)(self, core, instr_pc, result, block_builder) }
     }
 
     /// Run a block where JIT-compilation has been attempted, but failed for any reason.
@@ -332,15 +339,21 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
-        steps: &mut usize,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
-    ) {
-        *result = unsafe {
+    ) -> usize {
+        let block_result = unsafe {
             // Safety: this function is always safe to call
             self.fallback
-                .run_block(core, instr_pc, steps, &mut block_builder.1)
+                .run_block(core, instr_pc, &mut block_builder.1)
         };
+
+        *result = match block_result.error {
+            Some(exc) => Err(exc),
+            None => Ok(()),
+        };
+
+        block_result.steps
     }
 }
 
@@ -425,9 +438,8 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
-        steps: &mut usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> Result<(), EnvironException>
+    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
@@ -437,9 +449,12 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
 
         // Safety: the block builder is always the same instance, guarantee-ing that any
         // jit-compiled function is still alive.
-        unsafe { (fun)(self, core, instr_pc, steps, &mut result, block_builder) };
+        let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
 
-        result
+        StepManyResult {
+            steps,
+            error: result.err(),
+        }
     }
 
     fn num_instr(&self) -> usize
@@ -465,29 +480,33 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
     instr: &[EnrichedCell<ICallPlaced<MC, M>, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
-    steps: &mut usize,
-) -> Result<(), Exception> {
+) -> StepManyResult<Exception> {
+    let mut result = StepManyResult::ZERO;
+
     for instr in instr.iter() {
         match run_instr(instr, core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 *instr_pc += width as u64;
                 core.hart.pc.write(*instr_pc);
-                *steps += 1;
+                result.steps += 1;
             }
+
             Ok(ProgramCounterUpdate::Set(instr_pc)) => {
                 // Setting the instr_pc implies execution continuing
                 // elsewhere - and no longer within the current block.
                 core.hart.pc.write(instr_pc);
-                *steps += 1;
+                result.steps += 1;
                 break;
             }
+
             Err(e) => {
                 // Exceptions lead to a new address being set to handle it,
                 // with no guarantee of it being the next instruction.
-                return Err(e);
+                result.error = Some(e);
+                break;
             }
         }
     }
 
-    Ok(())
+    result
 }

@@ -13,8 +13,6 @@ pub(super) mod errno;
 
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
-use cranelift::codegen::ir::MemFlags;
-use cranelift::codegen::ir::Type;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::condcodes::IntCC;
 use cranelift::codegen::ir::types::I32;
@@ -56,16 +54,10 @@ pub(crate) struct Builder<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     /// Helpers for calling locally imported [JitStateAccess] methods.
     jsa_call: JsaCalls<'a, MC, JSA>,
 
-    /// The IR-type of pointers on the current native platform
-    ptr: Type,
-
     /// Value representing a pointer to [`MachineCoreState<MC, JSA>`]
     ///
     /// [`MachineCoreState<MC, JSA>`]: crate::machine_state::MachineCoreState
     core_ptr_val: Value,
-
-    /// Value representing a pointer to `steps: usize`
-    steps_ptr_val: Value,
 
     /// Values that are dynamically updated throughout lowering.
     dynamic: DynamicValues,
@@ -73,7 +65,8 @@ pub(crate) struct Builder<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     /// The final Cranelift-IR block that is last executed on exit from a JIT-compiled
     /// block cache block.
     ///
-    /// It is responsible for writing the final values of `steps` and the `instr_pc` back to the state.
+    /// It is responsible for writing the final values of the `instr_pc` back to the state and
+    /// returning the number of steps taken by the block.
     /// *N.B.* the end block can be jumped-to from multiple places, for example by every branching
     /// point, and also once all instructions have been executed--if no branching took place.
     end_block: Option<ir::Block>,
@@ -85,13 +78,8 @@ pub(crate) struct Builder<'a, MC: MemoryConfig, JSA: JitStateAccess> {
 impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
     /// Create a new block builder.
     ///
-    /// The function constructed after compilation takes
-    /// `core_ptr`, `instr_pc` & `steps_ptr` as arguments.
-    pub(super) fn new(
-        ptr: ir::Type,
-        mut builder: FunctionBuilder<'a>,
-        jsa_call: JsaCalls<'a, MC, JSA>,
-    ) -> Self {
+    /// The function constructed after compilation takes the parameters as described by [`super::JitFn`].
+    pub(super) fn new(mut builder: FunctionBuilder<'a>, jsa_call: JsaCalls<'a, MC, JSA>) -> Self {
         // Create the entry block, to start emitting code in.
         let entry_block = builder.create_block();
         builder.append_block_params_for_function_params(entry_block);
@@ -101,24 +89,21 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         // first param ignored
         let core_ptr_val = builder.block_params(entry_block)[1];
         let pc_val = X64(builder.block_params(entry_block)[2]);
-        let steps_ptr_val = builder.block_params(entry_block)[3];
-        let result_ptr_val = builder.block_params(entry_block)[4];
+        let result_ptr_val = builder.block_params(entry_block)[3];
         // last param ignored
 
         Self {
-            ptr,
             builder,
             jsa_call,
             core_ptr_val,
-            steps_ptr_val,
             result_ptr_val,
             dynamic: DynamicValues::new(pc_val),
             end_block: None,
         }
     }
 
-    /// Construct the end block - which writes the updated `pc` and `steps`
-    /// back to the state.
+    /// Construct the end block - which writes the updated `pc` back to the state and returns the
+    /// number of steps taken.
     ///
     /// Since the end block can be jumped to from multiple places, it takes
     /// `pc` and `steps` as dynamic-parameters. These are provided by the caller.
@@ -132,16 +117,11 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         let pc_val = self.builder.append_block_param(end_block, I64);
         let steps_val = self.builder.append_block_param(end_block, I64);
 
-        // write steps back to the `steps: &mut usize` reference.
-        self.builder
-            .ins()
-            .store(MemFlags::trusted(), steps_val, self.steps_ptr_val, 0);
-
         // write the final pc to the state.
         self.jsa_call
             .pc_write(&mut self.builder, self.core_ptr_val, X64(pc_val));
 
-        self.builder.ins().return_(&[]);
+        self.builder.ins().return_(&[steps_val]);
 
         self.end_block = Some(end_block);
     }
@@ -188,15 +168,8 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
 
     /// Jump from the current block to the end block, exiting the function.
     fn jump_to_end(&mut self) {
-        // update steps taken so far
-        let steps_val =
-            self.builder
-                .ins()
-                .load(self.ptr, ir::MemFlags::trusted(), self.steps_ptr_val, 0);
-        let steps_val = self
-            .builder
-            .ins()
-            .iadd_imm(steps_val, self.dynamic.steps() as i64);
+        // compute steps taken so far
+        let steps_val = self.builder.ins().iconst(I64, self.dynamic.steps() as i64);
 
         // get the new value of the pc to write back to the state
         let pc_val = self.dynamic.read_pc(&mut self.builder);
