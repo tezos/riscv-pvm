@@ -39,7 +39,6 @@ use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::instruction_context::IcbFnResult;
 use crate::instruction_context::IcbLoweringFn;
-use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::MulHighType;
 use crate::instruction_context::Predicate;
 use crate::instruction_context::Shift;
@@ -1020,18 +1019,14 @@ macro_rules! impl_load_type {
         }
     };
 
-    ($fn: ident, $width: expr, $signed: ident) => {
+    ($fn: ident, $value: ty) => {
         /// SAFETY: This function must only be called on an `Args` belonging
         /// to the same OpCode as the OpCode used to derive this function.
         unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res = load_store::run_load(
-                icb,
-                self.imm,
-                unsafe { self.rs1.x },
-                unsafe { self.rd.x },
-                $signed,
-                $width,
-            );
+            let res =
+                load_store::run_load::<$value, I>(icb, self.imm, unsafe { self.rs1.x }, unsafe {
+                    self.rd.x
+                });
             I::map(res, |_| Next(self.width))
         }
     };
@@ -1064,17 +1059,14 @@ macro_rules! impl_store_type {
         }
     };
 
-    ($fn: ident, $width: expr) => {
+    ($fn: ident, $value: ty) => {
         /// SAFETY: This function must only be called on an `Args` belonging
         /// to the same OpCode as the OpCode used to derive this function.
         unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res = load_store::run_store(
-                icb,
-                self.imm,
-                unsafe { self.rs1.x },
-                unsafe { self.rs2.x },
-                $width,
-            );
+            let res =
+                load_store::run_store::<$value, I>(icb, self.imm, unsafe { self.rs1.x }, unsafe {
+                    self.rs2.x
+                });
             I::map(res, |_| Next(self.width))
         }
     };
@@ -1426,19 +1418,19 @@ impl Args {
         run_set_less_than_immediate_unsigned,
         non_zero_rd
     );
-    impl_load_type!(run_x8_load_unsigned, LoadStoreWidth::Byte, false);
-    impl_load_type!(run_x16_load_unsigned, LoadStoreWidth::Half, false);
-    impl_load_type!(run_x32_load_unsigned, LoadStoreWidth::Word, false);
-    impl_load_type!(run_x64_load_signed, LoadStoreWidth::Double, true);
-    impl_load_type!(run_x32_load_signed, LoadStoreWidth::Word, true);
-    impl_load_type!(run_x16_load_signed, LoadStoreWidth::Half, true);
-    impl_load_type!(run_x8_load_signed, LoadStoreWidth::Byte, true);
+    impl_load_type!(run_x8_load_unsigned, u8);
+    impl_load_type!(run_x16_load_unsigned, u16);
+    impl_load_type!(run_x32_load_unsigned, u32);
+    impl_load_type!(run_x64_load_signed, i64);
+    impl_load_type!(run_x32_load_signed, i32);
+    impl_load_type!(run_x16_load_signed, i16);
+    impl_load_type!(run_x8_load_signed, i8);
 
     // RV64I S-type instructions
-    impl_store_type!(run_x64_store, LoadStoreWidth::Double);
-    impl_store_type!(run_x32_store, LoadStoreWidth::Word);
-    impl_store_type!(run_x16_store, LoadStoreWidth::Half);
-    impl_store_type!(run_x8_store, LoadStoreWidth::Byte);
+    impl_store_type!(run_x64_store, u64);
+    impl_store_type!(run_x32_store, u32);
+    impl_store_type!(run_x16_store, u16);
+    impl_store_type!(run_x8_store, u8);
 
     // Branching instructions
     impl_branch!(run_branch_equal, Predicate::Equal);

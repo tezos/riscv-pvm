@@ -176,9 +176,7 @@ fn run_x64_atomic<I: ICB>(
     let result = icb.atomic_access_fault_guard(address_rs1, LoadStoreWidth::Double);
 
     // Continue with the operation if the address is aligned.
-    let val_rs1_result = I::and_then(result, |_| {
-        icb.main_memory_load(address_rs1, false, LoadStoreWidth::Double)
-    });
+    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
 
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
@@ -190,7 +188,7 @@ fn run_x64_atomic<I: ICB>(
         icb.xregister_write(rd, val_rs1);
 
         // Store the resulting value to the address in rs1
-        icb.main_memory_store(address_rs1, res, LoadStoreWidth::Double)
+        icb.main_memory_store::<u64>(address_rs1, res)
     })
 }
 

@@ -21,7 +21,7 @@
 //! [direct function call]: cranelift::codegen::ir::InstBuilder::call
 
 mod abi;
-mod stack;
+pub(crate) mod stack;
 
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -45,16 +45,19 @@ use super::builder::F64;
 use super::builder::X64;
 use super::builder::errno::Errno;
 use super::builder::errno::ErrnoImpl;
-use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
+use crate::instruction_context::StoreLoadInt;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
+use crate::machine_state::memory::BadMemoryAccess;
+use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
+use crate::state_backend::Elem;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
@@ -110,8 +113,18 @@ register_jsa_functions!(
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
     ecall_from_mode => (ecall::<MC, JSA>, AbiCall<2>::args),
-    memory_store => (memory_store::<MC, JSA>, AbiCall<5>::args),
-    memory_load => (memory_load::<MC, JSA>, AbiCall::<6>::args)
+    memory_store_u8 => (memory_store::<u8, MC, JSA>, AbiCall<4>::args),
+    memory_store_u16 => (memory_store::<u16, MC, JSA>, AbiCall<4>::args),
+    memory_store_u32 => (memory_store::<u32, MC, JSA>, AbiCall<4>::args),
+    memory_store_u64 => (memory_store::<u64, MC, JSA>, AbiCall<4>::args),
+    memory_load_i8 => (memory_load::<i8, MC, JSA>, AbiCall<4>::args),
+    memory_load_u8 => (memory_load::<u8, MC, JSA>, AbiCall<4>::args),
+    memory_load_i16 => (memory_load::<i16, MC, JSA>, AbiCall<4>::args),
+    memory_load_u16 => (memory_load::<u16, MC, JSA>, AbiCall<4>::args),
+    memory_load_i32 => (memory_load::<i32, MC, JSA>, AbiCall<4>::args),
+    memory_load_u32 => (memory_load::<u32, MC, JSA>, AbiCall<4>::args),
+    memory_load_i64 => (memory_load::<i64, MC, JSA>, AbiCall<4>::args),
+    memory_load_u64 => (memory_load::<u64, MC, JSA>, AbiCall<4>::args),
 );
 
 /// Update the instruction pc in the state.
@@ -231,21 +244,16 @@ extern "C" fn ecall<MC: MemoryConfig, M: ManagerReadWrite>(
 /// # Panics
 ///
 /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-extern "C" fn memory_store<MC: MemoryConfig, M: ManagerReadWrite>(
+extern "C" fn memory_store<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     address: u64,
-    value: u64,
-    width: u8,
+    value: E,
     exception_out: &mut MaybeUninit<Exception>,
 ) -> bool {
-    let Some(width) = LoadStoreWidth::new(width) else {
-        panic!("The given width {width} is not a supported LoadStoreWidth");
-    };
-
-    match <MachineCoreState<MC, M> as ICB>::main_memory_store(core, address, value, width) {
+    match core.main_memory.write(address, value) {
         Ok(()) => false,
-        Err(exception) => {
-            exception_out.write(exception);
+        Err(BadMemoryAccess) => {
+            exception_out.write(Exception::StoreAMOAccessFault(address));
             true
         }
     }
@@ -263,25 +271,19 @@ extern "C" fn memory_store<MC: MemoryConfig, M: ManagerReadWrite>(
 /// # Panics
 ///
 /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-extern "C" fn memory_load<MC: MemoryConfig, M: ManagerReadWrite>(
+extern "C" fn memory_load<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     address: u64,
-    width: u8,
-    signed: bool,
-    xval_out: &mut MaybeUninit<XValue>,
+    xval_out: &mut MaybeUninit<E>,
     exception_out: &mut MaybeUninit<Exception>,
 ) -> bool {
-    let Some(width) = LoadStoreWidth::new(width) else {
-        panic!("The given width {width} is not a supported LoadStoreWidth");
-    };
-
-    match <MachineCoreState<MC, M> as ICB>::main_memory_load(core, address, signed, width) {
+    match core.main_memory.read::<E>(address) {
         Ok(value) => {
             xval_out.write(value);
             false
         }
-        Err(exception) => {
-            exception_out.write(exception);
+        Err(BadMemoryAccess) => {
+            exception_out.write(Exception::LoadAccessFault(address));
             true
         }
     }
@@ -418,8 +420,18 @@ pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     raise_illegal_instruction_exception: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
-    memory_store: Option<FuncRef>,
-    memory_load: Option<FuncRef>,
+    memory_store_u8: Option<FuncRef>,
+    memory_store_u16: Option<FuncRef>,
+    memory_store_u32: Option<FuncRef>,
+    memory_store_u64: Option<FuncRef>,
+    memory_load_i8: Option<FuncRef>,
+    memory_load_u8: Option<FuncRef>,
+    memory_load_i16: Option<FuncRef>,
+    memory_load_u16: Option<FuncRef>,
+    memory_load_i32: Option<FuncRef>,
+    memory_load_u32: Option<FuncRef>,
+    memory_load_i64: Option<FuncRef>,
+    memory_load_u64: Option<FuncRef>,
     _pd: PhantomData<(MC, JSA)>,
 }
 
@@ -443,8 +455,18 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
             raise_illegal_instruction_exception: None,
             raise_store_amo_access_fault_exception: None,
             ecall_from_mode: None,
-            memory_store: None,
-            memory_load: None,
+            memory_store_u8: None,
+            memory_store_u16: None,
+            memory_store_u32: None,
+            memory_store_u64: None,
+            memory_load_i8: None,
+            memory_load_u8: None,
+            memory_load_i16: None,
+            memory_load_u16: None,
+            memory_load_i32: None,
+            memory_load_u32: None,
+            memory_load_i64: None,
+            memory_load_u64: None,
             _pd: PhantomData,
         }
     }
@@ -580,29 +602,46 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
     /// Emit the required IR to call `memory_store`.
     ///
     /// Returns `errno` - on success, no additional values are returned.
-    pub(super) fn memory_store(
+    pub(super) fn memory_store<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         core_ptr: Value,
         phys_address: X64,
         value: X64,
-        width: LoadStoreWidth,
     ) -> impl Errno<(), MC, JSA> + 'static {
-        let memory_store = self.memory_store.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.memory_store, builder.func)
-        });
+        let memory_store = match V::WIDTH {
+            LoadStoreWidth::Byte => self.memory_store_u8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u8, builder.func)
+            }),
+            LoadStoreWidth::Half => self.memory_store_u16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u16, builder.func)
+            }),
+            LoadStoreWidth::Word => self.memory_store_u32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u32, builder.func)
+            }),
+            LoadStoreWidth::Double => self.memory_store_u64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_store_u64, builder.func)
+            }),
+        };
 
         let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let width = builder.ins().iconst(I8, width as u8 as i64);
+        let value = match V::WIDTH {
+            LoadStoreWidth::Byte | LoadStoreWidth::Half | LoadStoreWidth::Word => {
+                builder.ins().ireduce(V::IR_TYPE, value.0)
+            }
+            LoadStoreWidth::Double => value.0,
+        };
 
         let call = builder.ins().call(*memory_store, &[
             core_ptr,
             phys_address.0,
-            value.0,
-            width,
+            value,
             exception_ptr,
         ]);
 
@@ -614,33 +653,55 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
     /// Emit the required IR to call `memory_load`.
     ///
     /// Returns `errno` - on success, the loaded value is returned.
-    pub(super) fn memory_load(
+    pub(super) fn memory_load<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         core_ptr: Value,
         phys_address: X64,
-        signed: bool,
-        width: LoadStoreWidth,
     ) -> impl Errno<X64, MC, JSA> + 'static {
-        let memory_load = self.memory_load.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.memory_load, builder.func)
-        });
-
         let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let xval_slot = stack::Slot::<XValue>::new(self.ptr_type, builder);
-        let xval_ptr = xval_slot.ptr(builder);
+        let xval_ptr = stack::Slot::<V>::new(self.ptr_type, builder).ptr(builder);
 
-        let width = builder.ins().iconst(I8, width as u8 as i64);
-        let signed = builder.ins().iconst(I8, signed as i64);
+        let memory_load = match (V::WIDTH, V::SIGNED) {
+            (LoadStoreWidth::Byte, true) => self.memory_load_i8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i8, builder.func)
+            }),
+            (LoadStoreWidth::Byte, false) => self.memory_load_u8.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u8, builder.func)
+            }),
+            (LoadStoreWidth::Half, true) => self.memory_load_i16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i16, builder.func)
+            }),
+            (LoadStoreWidth::Half, false) => self.memory_load_u16.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u16, builder.func)
+            }),
+            (LoadStoreWidth::Word, true) => self.memory_load_i32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i32, builder.func)
+            }),
+            (LoadStoreWidth::Word, false) => self.memory_load_u32.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u32, builder.func)
+            }),
+            (LoadStoreWidth::Double, true) => self.memory_load_i64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_i64, builder.func)
+            }),
+            (LoadStoreWidth::Double, false) => self.memory_load_u64.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.memory_load_u64, builder.func)
+            }),
+        };
 
         let call = builder.ins().call(*memory_load, &[
             core_ptr,
             phys_address.0,
-            width,
-            signed,
             xval_ptr,
             exception_ptr,
         ]);
@@ -648,9 +709,18 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         let errno = builder.inst_results(call)[0];
 
         ErrnoImpl::new(errno, exception_ptr, move |builder| {
-            // Safety: the xval is initialised prior to the call, and is guaranteed to
-            // remain initialised regardless of the result of external call.
-            let xval = unsafe { xval_slot.load(builder) };
+            let xval = builder
+                .ins()
+                .load(V::IR_TYPE, MemFlags::trusted(), xval_ptr, 0);
+
+            let xval = if V::IR_TYPE == ir::types::I64 {
+                xval
+            } else if V::SIGNED {
+                builder.ins().sextend(ir::types::I64, xval)
+            } else {
+                builder.ins().uextend(ir::types::I64, xval)
+            };
+
             X64(xval)
         })
     }
