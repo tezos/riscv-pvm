@@ -217,10 +217,40 @@ pub enum ProgramCounterUpdate<AddressRepr> {
 }
 
 /// Result type when running multiple steps at a time with [`MachineState::step_max`]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StepManyResult<E> {
     pub steps: usize,
     pub error: Option<E>,
+}
+
+impl<E> StepManyResult<E> {
+    /// Initial/zero result - no steps taken, no error
+    const ZERO: Self = Self {
+        steps: 0,
+        error: None,
+    };
+
+    /// Merge the result of two step results, returning true if an error occurred.
+    ///
+    /// # Behaviour
+    ///
+    /// Combines the number of steps from both results. The `error` field is taken from the `other`
+    /// instance, overwriting the error stored in `self`.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if an error has been merged.
+    fn merge_and_return(&mut self, other: StepManyResult<E>) -> bool {
+        self.steps += other.steps;
+        self.error = other.error;
+        self.error.is_some()
+    }
+}
+
+impl<E> Default for StepManyResult<E> {
+    fn default() -> Self {
+        Self::ZERO
+    }
 }
 
 /// Runs a syscall instruction (ecall, ebreak)
@@ -408,38 +438,56 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     where
         M: ManagerReadWrite,
     {
-        self.step_max_inner(&mut 0, 1)
+        match self.step_max_inner(1).error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
-    fn step_max_inner(
-        &mut self,
-        steps: &mut usize,
-        max_steps: usize,
-    ) -> Result<(), EnvironException>
+    fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<EnvironException>
     where
         M: backend::ManagerReadWrite,
     {
-        self.block_cache
-            .complete_current_block(&mut self.core, steps, max_steps)?;
+        let mut result = StepManyResult::ZERO;
 
-        'run: while *steps < max_steps {
+        let current_block_result = self
+            .block_cache
+            .complete_current_block(&mut self.core, max_steps);
+
+        // Executing the current block may fail
+        if result.merge_and_return(current_block_result) {
+            return result;
+        }
+
+        while result.steps < max_steps {
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();
 
             let res = match self.block_cache.get_block(instr_pc) {
                 Some(mut block) => {
-                    block.run_block(&mut self.core, instr_pc, steps, max_steps)?;
+                    let steps_remaining = max_steps - result.steps;
+                    let block_result = block.run_block(&mut self.core, instr_pc, steps_remaining);
 
-                    continue 'run;
+                    // Short-circuit if the block failed
+                    if result.merge_and_return(block_result) {
+                        return result;
+                    }
+
+                    continue;
                 }
+
                 None => self.run_instr_at(instr_pc),
             };
 
-            self.core.handle_step_result(instr_pc, res)?;
-            *steps += 1;
+            if let Err(error) = self.core.handle_step_result(instr_pc, res) {
+                result.error = Some(error);
+                return result;
+            }
+
+            result.steps += 1;
         }
 
-        Ok(())
+        result
     }
 
     /// Perform as many steps as the given `max_steps` bound allows. Returns the number of retired
@@ -449,25 +497,20 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     where
         M: backend::ManagerReadWrite,
     {
-        let mut steps = 0;
+        let mut result = StepManyResult::ZERO;
 
         loop {
-            match self.step_max_inner(&mut steps, unwrap_bound(max_steps)) {
-                Ok(_) => {}
-                Err(e) => {
-                    return StepManyResult {
-                        steps,
-                        error: Some(e),
-                    };
-                }
-            };
+            let iter_result = self.step_max_inner(unwrap_bound(max_steps));
 
-            if !less_than_bound(steps, max_steps) {
+            let errored = result.merge_and_return(iter_result);
+            let out_of_steps = !less_than_bound(result.steps, max_steps);
+
+            if errored || out_of_steps {
                 break;
             }
         }
 
-        StepManyResult { steps, error: None }
+        result
     }
 
     /// Similar to [`Self::step_max`] but lets the user handle environment exceptions inside the
