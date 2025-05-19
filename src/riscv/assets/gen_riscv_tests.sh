@@ -2,7 +2,7 @@
 # shellcheck disable=SC2320,SC3044
 
 # This script builds the riscv unit tests, located here: https://github.com/trilitech/riscv-tests
-# It assumes that a GNU riscv toolchin is installed locally.
+# It assumes that a GNU riscv toolchain is installed locally.
 # To install the GNU riscv toolchain, follow the instructions here: https://github.com/riscv-collab/riscv-gnu-toolchain
 
 set -e
@@ -40,6 +40,7 @@ autoconf || {
 
 git apply "$self/riscv-tests-entry-0.patch"
 git apply "$self/riscv-tests-setup.patch"
+git apply "$self/riscv-tests-no-mcause.patch"
 
 # If this cross-compilation toolchain is in scope, use it.
 # This would be the case in the Nix shell for example.

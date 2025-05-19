@@ -1,0 +1,22 @@
+diff --git a/env/p/riscv_test.h b/env/p/riscv_test.h
+index 7bf35cf..7a346b0 100644
+--- a/env/p/riscv_test.h
++++ b/env/p/riscv_test.h
+@@ -177,7 +177,7 @@ _start:                                                                 \
+         .align 2;                                                       \
+ trap_vector:                                                            \
+         /* test whether the test came from pass/fail */                 \
+-        csrr t5, mcause;                                                \
++        li t5, 0;                                                       \
+         li t6, CAUSE_USER_ECALL;                                        \
+         beq t5, t6, write_tohost;                                       \
+         li t6, CAUSE_SUPERVISOR_ECALL;                                  \
+@@ -189,7 +189,7 @@ trap_vector:                                                            \
+         beqz t5, 1f;                                                    \
+         jr t5;                                                          \
+         /* was it an interrupt or an exception? */                      \
+-  1:    csrr t5, mcause;                                                \
++  1:    li t5, 0;                                                       \
+         bgez t5, handle_exception;                                      \
+         INTERRUPT_HANDLER;                                              \
+ handle_exception:                                                       \
