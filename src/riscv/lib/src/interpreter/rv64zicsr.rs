@@ -44,7 +44,6 @@ where
         rd: registers::XRegister,
     ) -> csregisters::Result<()> {
         csregisters::check_write(csr)?;
-        csregisters::access_checks(csr, self)?;
 
         // When `rd = x0`, we don't want to trigger any CSR read effects.
         if rd.is_zero() {
@@ -64,8 +63,6 @@ where
         rs1: registers::XRegister,
         rd: registers::XRegister,
     ) -> csregisters::Result<()> {
-        csregisters::access_checks(csr, self)?;
-
         // When `rs1 = x0`, we don't want to trigger any CSR write effects.
         let old = if rs1.is_zero() {
             self.csregisters.read(csr)
@@ -89,7 +86,6 @@ where
         rd: registers::XRegister,
     ) -> csregisters::Result<()> {
         let imm = imm & 0b11111;
-        csregisters::access_checks(csr, self)?;
 
         // When `imm = 0`, we don't want to trigger any CSR write effects.
         let old = if imm == 0 {
@@ -112,8 +108,6 @@ where
         rs1: registers::XRegister,
         rd: registers::XRegister,
     ) -> csregisters::Result<()> {
-        csregisters::access_checks(csr, self)?;
-
         // When `rs1 = x0`, we don't want to trigger any CSR write effects.
         let old = if rs1.is_zero() {
             self.csregisters.read(csr)
@@ -137,7 +131,6 @@ where
         rd: registers::XRegister,
     ) -> csregisters::Result<()> {
         let imm = imm & 0b11111;
-        csregisters::access_checks(csr, self)?;
 
         // When `imm = 0`, we don't want to trigger any CSR write effects.
         let old = if imm == 0 {

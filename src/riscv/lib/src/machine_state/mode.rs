@@ -44,20 +44,3 @@ impl From<Mode> for u8 {
         value as u8
     }
 }
-
-/// Modes the hardware state can trap into, a sub-enum of [`Mode`]
-#[derive(Debug, PartialEq, PartialOrd, Eq, Copy, Clone, strum::EnumIter)]
-pub enum TrapMode {
-    Supervisor,
-    Machine,
-}
-
-impl TrapMode {
-    /// Construct the mode corresponding to the trap mode.
-    pub fn as_mode(&self) -> Mode {
-        match self {
-            Self::Supervisor => Mode::Supervisor,
-            Self::Machine => Mode::Machine,
-        }
-    }
-}

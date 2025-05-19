@@ -23,7 +23,6 @@ use block_cache::block::Block;
 pub use cache_layouts::CacheLayouts;
 pub use cache_layouts::DefaultCacheLayouts;
 pub use cache_layouts::TestCacheLayouts;
-use csregisters::values::CSRValue;
 use hart_state::HartState;
 use hart_state::HartStateLayout;
 use instruction::Instruction;
@@ -90,7 +89,11 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
             return Err(exc);
         }
 
-        Ok(self.hart.take_trap(exception, current_pc))
+        // TODO: RV-653: Traps are no longer supported. In this place we would need to trigger a
+        // signal handler instead.
+        let trap_pc = 0;
+
+        Ok(trap_pc)
     }
 
     #[inline]
@@ -102,15 +105,12 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     where
         M: backend::ManagerReadWrite,
     {
-        let pc_update = match result {
-            Err(exc) => ProgramCounterUpdate::Set(self.address_on_exception(exc, instr_pc)?),
-            Ok(upd) => upd,
-        };
-
-        // Update program couter
-        let pc = match pc_update {
-            ProgramCounterUpdate::Set(address) => address,
-            ProgramCounterUpdate::Next(width) => instr_pc + width as u64,
+        let pc = match result {
+            Err(exc) => self.address_on_exception(exc, instr_pc)?,
+            Ok(update) => match update {
+                ProgramCounterUpdate::Set(address) => address,
+                ProgramCounterUpdate::Next(width) => instr_pc + width as u64,
+            },
         };
 
         self.hart.pc.write(pc);
@@ -563,16 +563,6 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
         // Point DTB boot argument (a1) at the written device tree
         self.core.hart.xregisters.write(registers::a1, dtb_addr);
 
-        // Make sure to forward all exceptions and interrupts to supervisor mode
-        self.core
-            .hart
-            .csregisters
-            .write(csregisters::CSRegister::medeleg, CSRValue::from(!0u64));
-        self.core
-            .hart
-            .csregisters
-            .write(csregisters::CSRegister::mideleg, CSRValue::from(!0u64));
-
         Ok(())
     }
 }
@@ -615,10 +605,6 @@ mod tests {
     use crate::default::ConstDefault;
     use crate::machine_state::DefaultCacheLayouts;
     use crate::machine_state::TestCacheLayouts;
-    use crate::machine_state::csregisters::CSRRepr;
-    use crate::machine_state::csregisters::CSRegister;
-    use crate::machine_state::csregisters::xstatus;
-    use crate::machine_state::csregisters::xstatus::MStatus;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -644,8 +630,6 @@ mod tests {
     use crate::state_backend::test_helpers::assert_eq_struct;
     use crate::state_backend::test_helpers::copy_via_serde;
     use crate::traps::EnvironException;
-    use crate::traps::Exception;
-    use crate::traps::TrapContext;
 
     backend_test!(test_step, F, {
         let state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
@@ -703,24 +687,13 @@ mod tests {
 
         let state_cell = std::cell::RefCell::new(state);
 
-        proptest!(|(
-            pc_addr_offset in 0..200_u64,
-            stvec_offset in 10..20_u64,
-            mtvec_offset in 25..35_u64,
-        )| {
+        proptest!(|(pc_addr_offset in 0..200_u64)| {
             let mut state = state_cell.borrow_mut();
             state.reset();
 
             let init_pc_addr = memory::FIRST_ADDRESS + pc_addr_offset * 4;
-            let stvec_addr = init_pc_addr + 4 * stvec_offset;
-            let mtvec_addr = init_pc_addr + 4 * mtvec_offset;
 
             const ECALL: u32 = 0b111_0011;
-
-            // stvec is in DIRECT mode
-            state.core.hart.csregisters.write(CSRegister::stvec, stvec_addr);
-            // mtvec is in VECTORED mode
-            state.core.hart.csregisters.write(CSRegister::mtvec, mtvec_addr | 1);
 
             // TEST: Raise ECALL exception ==>> environment exception
             state.core.hart.pc.write(init_pc_addr);
@@ -742,31 +715,16 @@ mod tests {
 
         proptest!(|(
             pc_addr_offset in 0..200_u64,
-            stvec_offset in 10..20_u64,
         )| {
             // Raise exception, take trap from U-mode to S-mode (test delegation takes place)
             let mut state = state_cell.borrow_mut();
             state.reset();
 
-            let init_pc_addr = memory::FIRST_ADDRESS + pc_addr_offset * 4;
-            let stvec_addr = init_pc_addr + 4 * stvec_offset;
-
-            // stvec is in VECTORED mode
-            state.core.hart.csregisters.write(CSRegister::stvec, stvec_addr | 1);
-
             let bad_address = memory::FIRST_ADDRESS.wrapping_sub((pc_addr_offset + 10) * 4);
-            let medeleg_val = (1 << Exception::IllegalInstruction.exception_code()) | (1 << Exception::InstructionAccessFault(bad_address).exception_code());
             state.core.hart.pc.write(bad_address);
-            state.core.hart.csregisters.write(CSRegister::medeleg, medeleg_val);
 
             state.step().expect("should not raise environment exception");
-            // pc should be stvec_addr since exceptions aren't offsetted
-            // even in VECTORED mode, only interrupts
-            let mstatus: MStatus = state.core.hart.csregisters.read(CSRegister::mstatus);
-            assert_eq!(state.core.hart.pc.read(), stvec_addr);
-            assert_eq!(mstatus.spp(), xstatus::SPPValue::User);
-            assert_eq!(state.core.hart.csregisters.read::<CSRRepr>(CSRegister::sepc), bad_address);
-            assert_eq!(state.core.hart.csregisters.read::<CSRRepr>(CSRegister::scause), 1);
+            assert_eq!(state.core.hart.pc.read(), 0);
         });
     });
 
