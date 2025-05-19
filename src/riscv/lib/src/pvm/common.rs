@@ -261,10 +261,10 @@ impl<
         M: state_backend::ManagerReadWrite,
     {
         // We want to just slightly modify the state without interfering with normal execution.
-        // dscratch1 is a debug register, any reasonable (test) kernel shouldn't interact with it.
+        // Increasing the number of instructions executed is a good candidate.
         let csregs = &mut self.machine_state.core.hart.csregisters;
-        let dscratch1 = csregs.read::<u64>(CSRegister::dscratch1);
-        csregs.write(CSRegister::dscratch1, dscratch1 + 1);
+        let instrs_retired = csregs.read::<u64>(CSRegister::instret);
+        csregs.write(CSRegister::instret, instrs_retired + 1);
     }
 
     /// Handle an exception using the defined Execution Environment.

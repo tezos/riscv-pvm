@@ -1443,7 +1443,7 @@ mod tests {
     use super::instruction::SBTypeArgs;
     use super::instruction::UJTypeArgs;
     use super::parse_block;
-    use crate::machine_state::csregisters::CSRegister::mcause;
+    use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::machine_state::registers::XRegister::*;
     use crate::parser::NonZeroRdUJTypeArgs;
@@ -1459,12 +1459,12 @@ mod tests {
     //     80000000:	0500006f          	jal	zero,80000050 <reset_vector>
 
     // 0000000080000004 <trap_vector>:
-    //     80000004:	34202f73          	csrrs	t5,mcause,zero
+    //     80000004:	c0202f73          	csrrs	t5,instret,zero
     //     80000008:	00800f93          	addi	t6,zero,8
     #[test]
     fn test_1() {
         let bytes: [u8; 12] = [
-            0x6f, 0x0, 0x0, 0x5, 0x73, 0x2f, 0x20, 0x34, 0x93, 0xf, 0x80, 0x0,
+            0x6f, 0x0, 0x0, 0x5, 0x73, 0x2f, 0x20, 0xc0, 0x93, 0xf, 0x80, 0x0,
         ];
 
         let expected = [
@@ -1472,7 +1472,7 @@ mod tests {
             Instr::Cacheable(Csrrs(CsrArgs {
                 rd: x30,
                 rs1: x0,
-                csr: mcause,
+                csr: CSRegister::instret,
             })),
             Instr::Cacheable(Addi(SplitITypeArgs {
                 rd: NonZero(NonZeroXRegister::x31),

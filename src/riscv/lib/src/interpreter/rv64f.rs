@@ -59,8 +59,6 @@ where
     ///
     /// See [Self::run_fclass].
     pub fn run_fclass_s(&mut self, rs1: FRegister, rd: XRegister) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fclass::<Single>(rs1, rd);
         Ok(())
     }
@@ -74,8 +72,6 @@ where
         rs2: FRegister,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_feq::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -89,8 +85,6 @@ where
         rs2: FRegister,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fle::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -104,8 +98,6 @@ where
         rs2: FRegister,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_flt::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -120,8 +112,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fadd::<Single>(rs1, rs2, rm, rd)
     }
 
@@ -135,8 +125,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fsub::<Single>(rs1, rs2, rm, rd)
     }
 
@@ -150,8 +138,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fmul::<Single>(rs1, rs2, rm, rd)
     }
 
@@ -165,8 +151,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fdiv::<Single>(rs1, rs2, rm, rd)
     }
 
@@ -177,8 +161,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         let rval = self.fregisters.read(rs1);
         let rm = self.f_rounding_mode(rm)?;
 
@@ -204,8 +186,6 @@ where
         rs2: FRegister,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fmin::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -219,8 +199,6 @@ where
         rs2: FRegister,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fmax::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -236,8 +214,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fmadd::<Single>(rs1, rs2, rs3, rm, rd)
     }
 
@@ -252,8 +228,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fmsub::<Single>(rs1, rs2, rs3, rm, rd)
     }
 
@@ -268,8 +242,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fnmsub::<Single>(rs1, rs2, rs3, rm, rd)
     }
 
@@ -284,8 +256,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fnmadd::<Single>(rs1, rs2, rs3, rm, rd)
     }
 
@@ -298,8 +268,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as i32 as i128, Single::from_i128_r)
     }
 
@@ -312,8 +280,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as u32 as u128, Single::from_u128_r)
     }
 
@@ -326,8 +292,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as i64 as i128, Single::from_i128_r)
     }
 
@@ -340,8 +304,6 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as u128, Single::from_u128_r)
     }
 
@@ -352,8 +314,6 @@ where
         rm: InstrRoundingMode,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_fmt_int(
             rs1,
             rm,
@@ -370,8 +330,6 @@ where
         rm: InstrRoundingMode,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_fmt_int(
             rs1,
             rm,
@@ -388,8 +346,6 @@ where
         rm: InstrRoundingMode,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_fmt_int(
             rs1,
             rm,
@@ -406,8 +362,6 @@ where
         rm: InstrRoundingMode,
         rd: XRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fcvt_fmt_int(
             rs1,
             rm,
@@ -426,8 +380,6 @@ where
         rs2: FRegister,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fsgnj::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -441,8 +393,6 @@ where
         rs2: FRegister,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fsgnjn::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -456,8 +406,6 @@ where
         rs2: FRegister,
         rd: FRegister,
     ) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         self.run_fsgnjx::<Single>(rs1, rs2, rd);
         Ok(())
     }
@@ -474,8 +422,6 @@ where
     /// The higher 32 bits of the destination register are filled with copies
     /// of the floating-point number’s sign bit.
     pub fn run_fmv_x_w(&mut self, rs1: FRegister, rd: XRegister) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         let rval: u64 = self.fregisters.read(rs1).into();
         let rval = rval as i32 as u64;
 
@@ -492,8 +438,6 @@ where
     /// The bits are not modified in the transfer,
     /// and in particular, the payloads of non-canonical NaNs are preserved.
     pub fn run_fmv_w_x(&mut self, rs1: XRegister, rd: FRegister) -> Result<(), Exception> {
-        self.check_fs_on()?;
-
         let rval = self.xregisters.read(rs1) as u32;
         let rval = f32_to_fvalue(rval);
 
@@ -512,8 +456,6 @@ where
     /// Loads a single-precision floating point value from memory into `rd`.
     /// It uses the same address format as integer-base ISA.
     pub fn run_flw(&mut self, imm: i64, rs1: XRegister, rd: FRegister) -> Result<(), Exception> {
-        self.hart.check_fs_on()?;
-
         let val: u32 = self.read_from_bus(imm, rs1)?;
         let val = f32_to_fvalue(val);
 
@@ -526,8 +468,6 @@ where
     /// Stores a single-precision floating point value into memory from `rs2`.
     /// It uses the same address format as integer-base ISA.
     pub fn run_fsw(&mut self, imm: i64, rs1: XRegister, rs2: FRegister) -> Result<(), Exception> {
-        self.hart.check_fs_on()?;
-
         let val: u64 = self.hart.fregisters.read(rs2).into();
         self.write_to_bus(imm, rs1, val as u32)
     }
@@ -561,11 +501,7 @@ mod tests {
 
     use super::f32_to_fvalue;
     use crate::backend_test;
-    use crate::bits::Bits64;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::csregisters::CSRegister;
-    use crate::machine_state::csregisters::xstatus::ExtensionValue;
-    use crate::machine_state::csregisters::xstatus::MStatus;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::fa1;
@@ -584,10 +520,6 @@ mod tests {
             rs2 in (1_u8..31).prop_map(u5::new).prop_map(parse_xregister),
         )| {
             let mut state = HartState::new(&mut F::manager());
-
-            // Turn fs on
-            let mstatus = MStatus::from_bits(0u64).with_fs(ExtensionValue::Dirty);
-            state.csregisters.write(CSRegister::mstatus, mstatus);
 
             state.xregisters.write(rs1, f as u64);
 
@@ -624,10 +556,6 @@ mod tests {
             let mut state = state_cell.borrow_mut();
             state.reset();
             state.main_memory.set_all_readable_writeable();
-
-            // Turn fs on
-            let mstatus = MStatus::from_bits(0u64).with_fs(ExtensionValue::Dirty);
-            state.hart.csregisters.write(CSRegister::mstatus, mstatus);
 
             let mut perform_test = |offset: u64| -> Result<(), Exception> {
                 // Save test values v_i in registers ai
