@@ -393,7 +393,7 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
                 push_work_items_for_branches(
                     start,
                     length,
-                    branches.as_slice(),
+                    branches.as_ref(),
                     |branch_start, branch_length, branch| {
                         pipeline.push((branch_start, branch_length, branch));
                     },
@@ -768,7 +768,7 @@ where
                 push_work_items_for_branches(
                     start,
                     length,
-                    branches.as_slice(),
+                    branches.as_ref(),
                     |branch_start, branch_length, branch| {
                         pipeline.push((branch_start, branch_length, branch));
                     },
@@ -904,24 +904,36 @@ pub fn combine_partial_hashes(
     proof_hash.ok_or(PartialHashError::PotentiallyRecoverable)
 }
 
-fn push_work_items_for_branches<'a>(
-    mut branch_start: usize,
-    mut length_left: usize,
-    branches: &'_ [ProofTree<'a>],
+fn push_work_items_for_branches<'a, const CHILDREN: usize>(
+    branch_start: usize,
+    length_left: usize,
+    branches: &'_ [ProofTree<'a>; CHILDREN],
     mut push: impl FnMut(usize, usize, ProofTree<'a>),
 ) {
+    let children = work_merkle_params::<CHILDREN>(branch_start, length_left);
+    for (branch, (child_start, child_length)) in branches.iter().zip(children) {
+        if child_length > 0 {
+            push(child_start, child_length, *branch);
+        }
+    }
+}
+
+fn work_merkle_params<const CHILDREN: usize>(
+    mut branch_start: usize,
+    mut length_left: usize,
+) -> impl Iterator<Item = (usize, usize)> {
     let branch_max_length = length_left.div_ceil(MERKLE_ARITY);
 
-    for branch in branches.iter() {
+    (0..CHILDREN).map(move |_| {
         let this_branch_length = branch_max_length.min(length_left);
 
-        if this_branch_length > 0 {
-            push(branch_start, this_branch_length, *branch);
-        }
+        let item = (branch_start, this_branch_length);
 
         branch_start = branch_start.saturating_add(this_branch_length);
         length_left = length_left.saturating_sub(this_branch_length);
-    }
+
+        item
+    })
 }
 
 #[cfg(test)]
