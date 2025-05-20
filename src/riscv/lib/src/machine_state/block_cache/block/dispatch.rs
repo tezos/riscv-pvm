@@ -172,6 +172,12 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompile
 
                 while let Ok(msg) = receiver.recv() {
                     if let Some(jitfn) = jit.compile(&msg.instr) {
+                        debug_assert_eq!(
+                            msg.fun.load(Ordering::Acquire),
+                            Jitted::<Self, MC, M>::run_block_not_compiled as usize,
+                            "Unexpected function pointer in dispatch target"
+                        );
+
                         // Safety: this function will be retrieved as a DispatchFn, rather than a
                         // JitFn. The two function signatures are identical, apart from the first and
                         // last parameters. These are both thin-pointers, and ignored by the JitFn.
@@ -226,6 +232,9 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompil
         target: &mut DispatchTarget<Self, MC, M>,
         instr: Vec<Instruction>,
     ) -> DispatchFn<Self, MC, M> {
+        let fun = Jitted::run_block_not_compiled;
+        target.set(fun);
+
         let request = CompilationRequest {
             instr,
             fun: target.fun.clone(),
@@ -242,8 +251,6 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompil
         // our reference to it, despite the lock itself being poisoned.
         let _ = self.sender.send(request);
 
-        let fun = Jitted::run_block_not_compiled;
-        target.set(fun);
         fun
     }
 }
