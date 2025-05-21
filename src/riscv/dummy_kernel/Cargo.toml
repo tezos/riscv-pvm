@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies.tezos_crypto_rs]
 version = "0.6.0"
-path = "../../../sdk/rust/crypto"
+git = "https://gitlab.com/tezos/tezos.git"
 default-features = false
 
 [dependencies.tezos-smart-rollup]
-path = "../../kernel_sdk/sdk"
+git = "https://gitlab.com/tezos/tezos.git"
 version = "0.2.2"
 default-features = false
 features = [
@@ -22,7 +22,7 @@ features = [
 ]
 
 [dependencies.tezos-smart-rollup-constants]
-path = "../../kernel_sdk/constants"
+git = "https://gitlab.com/tezos/tezos.git"
 
 [dependencies]
 hex = "0.4.3"
