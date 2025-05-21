@@ -3,8 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![allow(clippy::reversed_empty_ranges)]
-
 pub mod instruction;
 
 use core::ops::Range;

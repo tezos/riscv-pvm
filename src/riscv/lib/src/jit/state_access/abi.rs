@@ -121,8 +121,7 @@ const fn get_repr<T>() -> CraneliftRepr {
             assert!(Self::SIZE == 1 || Self::SIZE == 2 || Self::SIZE == 4 || Self::SIZE == 8);
     }
 
-    #[expect(clippy::let_unit_value)]
-    let _ = SupportedSize::<T>::IS_SUPPORTED;
+    let () = SupportedSize::<T>::IS_SUPPORTED;
 
     match SupportedSize::<T>::SIZE {
         1 => CraneliftRepr::Value(I8),
