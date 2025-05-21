@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![allow(non_upper_case_globals)]
-
 pub mod effects;
 mod root;
 pub mod values;

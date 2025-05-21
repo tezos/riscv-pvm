@@ -472,9 +472,6 @@ mod tests {
     fn serialise_1_level() {
         // Check serialisation of a node containing some leaves.
 
-        // To allow more readable arrays of bit manipulated values
-        #![allow(clippy::identity_op)]
-
         let h1 = Hash::blake2b_hash_bytes(&[1, 2, 3]).unwrap();
         let h2 = Hash::blake2b_hash_bytes(&[20, 30, 1, 5, 6]).unwrap();
 
@@ -672,7 +669,7 @@ mod tests {
         // Originial shapes
 
         // For readability (tag << 0 operations)
-        #![allow(clippy::identity_op)]
+        #![expect(clippy::identity_op, reason = "For readability")]
 
         let gen_hash_data = |length| {
             let mut data = vec![0; length];
@@ -741,7 +738,7 @@ mod tests {
         // Originial shapes
 
         // For readability (tag << 0 operations)
-        #![allow(clippy::identity_op)]
+        #![allow(clippy::identity_op, reason = "For readability")]
 
         let gen_hash_data = |length| {
             let mut data = vec![0; length];

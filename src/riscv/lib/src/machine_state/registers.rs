@@ -4,7 +4,10 @@
 
 // We have several globals whose names we want to align with the RISC-V
 // specification.
-#![allow(non_upper_case_globals)]
+#![expect(
+    non_upper_case_globals,
+    reason = "Consistent with RISC-V specification"
+)]
 #![expect(
     dead_code,
     reason = "Aliases for register ABI names might not be used everywhere"

@@ -143,7 +143,7 @@ pub(crate) trait ICB {
     fn extend_signed(&mut self, value: Self::XValue32) -> Self::XValue;
 
     /// Zero-extend an [`XValue32`] to an [`XValue`].
-    #[expect(dead_code)]
+    #[expect(dead_code, reason = "Will Be Used Soon™")]
     fn extend_unsigned(&mut self, value: Self::XValue32) -> Self::XValue;
 
     /// Multiply two [`XValue`] values and return the high 64 bits of the result, with
