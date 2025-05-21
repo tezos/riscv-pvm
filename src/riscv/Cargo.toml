@@ -39,9 +39,6 @@ rustc_apfloat = "0.2.0"
 serde_json = "1.0.115"
 sha2 = "0.10.8"
 tempfile = "3.10.1"
-tezos-smart-rollup-constants.path = "../kernel_sdk/constants"
-tezos-smart-rollup-encoding.path = "../kernel_sdk/encoding"
-tezos-smart-rollup-utils.path = "../kernel_sdk/utils"
 thiserror = "1.0.57"
 try-blocks = "0.1.4"
 vm-fdt = "0.3.0"
@@ -49,12 +46,21 @@ goldenfile = "1.7.1"
 arbitrary-int = "1.2.7"
 range-collections = "0.4.5"
 
+[workspace.dependencies.tezos-smart-rollup-constants]
+git = "https://gitlab.com/tezos/tezos.git"
+
+[workspace.dependencies.tezos-smart-rollup-encoding]
+git = "https://gitlab.com/tezos/tezos.git"
+
+[workspace.dependencies.tezos-smart-rollup-utils]
+git = "https://gitlab.com/tezos/tezos.git"
+
 [workspace.dependencies.tezos-smart-rollup]
-path = "../kernel_sdk/sdk"
+git = "https://gitlab.com/tezos/tezos.git"
 features = ["utils"]
 
 [workspace.dependencies.tezos_crypto_rs]
-path = "../../sdk/rust/crypto"
+git = "https://gitlab.com/tezos/tezos.git"
 default-features = false
 
 [workspace.dependencies.strum]
