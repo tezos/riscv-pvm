@@ -131,10 +131,10 @@ pub(crate) trait ICB {
     /// Construct an [`ICB::XValue`] from an `imm: i64`.
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue;
 
-    #[expect(unused)]
+    #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
-    #[expect(unused)]
+    #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
 
     /// Perform a read of the program counter.
@@ -156,7 +156,7 @@ pub(crate) trait ICB {
     fn extend_signed(&mut self, value: Self::XValue32) -> Self::XValue;
 
     /// Zero-extend an [`XValue32`] to an [`XValue`].
-    #[expect(dead_code)]
+    #[expect(dead_code, reason = "Will Be Used Soon™")]
     fn extend_unsigned(&mut self, value: Self::XValue32) -> Self::XValue;
 
     /// Multiply two [`XValue`] values and return the high 64 bits of the result, with

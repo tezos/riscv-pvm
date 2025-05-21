@@ -151,7 +151,7 @@ pub struct OutlineCompiler<MC: MemoryConfig, M: JitStateAccess> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
-    #[expect(unused)]
+    #[expect(unused, reason = "Needed to keep the JIT alive")]
     jit: Arc<Mutex<JIT<MC, M>>>,
     sender: Sender<CompilationRequest>,
 }

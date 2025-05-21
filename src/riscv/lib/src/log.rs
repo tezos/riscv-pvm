@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![allow(unused_imports, unused_macros, reason = "Not all events may be used")]
+#![expect(unused_imports, unused_macros, reason = "Not all events may be used")]
 
 #[cfg(feature = "log")]
 #[doc(hidden)]
