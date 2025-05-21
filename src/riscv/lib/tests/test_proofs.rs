@@ -13,10 +13,12 @@ use common::*;
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::TestCacheConfig;
+use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
+use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
@@ -29,13 +31,25 @@ use rand::Rng;
 #[test]
 #[ignore]
 fn test_jstz_proofs_one_step() {
-    test_jstz_proofs(false)
+    test_jstz_proofs(false, PvmStepper::verify_proof)
+}
+
+#[test]
+#[ignore]
+fn test_jstz_proofs_one_step_stream() {
+    test_jstz_proofs(false, PvmStepper::verify_proof_using_raw_bytes)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full() {
-    test_jstz_proofs(true)
+    test_jstz_proofs(true, PvmStepper::verify_proof)
+}
+
+#[test]
+#[ignore]
+fn test_jstz_proofs_full_stream() {
+    test_jstz_proofs(true, PvmStepper::verify_proof_using_raw_bytes)
 }
 
 #[test]
@@ -57,7 +71,10 @@ fn test_jstz_initial_proof_regression() {
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_jstz_proofs(full: bool) {
+fn test_jstz_proofs(
+    full: bool,
+    verify_fn: StepperVerifyFn<'static, M64M, DefaultCacheConfig, Owned>,
+) {
     let make_stepper = make_stepper_factory::<DefaultCacheConfig>();
 
     let mut base_stepper = make_stepper();
@@ -71,17 +88,21 @@ fn test_jstz_proofs(full: bool) {
         // For each step `s`, the stepper will initially step `s-1` steps, then
         // produce a proof of the `s` step. The minimum step size thus needs to be 1.
         let ladder = dissect_steps(steps, 1);
-        run_steps_ladder(&make_stepper, &ladder, Some(base_hash));
+        run_steps_ladder(&make_stepper, &ladder, Some(base_hash), verify_fn);
     } else {
         // Run a number of steps `s` and produce a proof
         let mut rng = rand::thread_rng();
         let step = [rng.gen_range(1..steps)];
-        run_steps_ladder(&make_stepper, &step, None)
+        run_steps_ladder(&make_stepper, &step, None, verify_fn)
     }
 }
 
-fn run_steps_ladder<F>(make_stepper: F, ladder: &[usize], expected_hash: Option<hash::Hash>)
-where
+fn run_steps_ladder<F>(
+    make_stepper: F,
+    ladder: &[usize],
+    expected_hash: Option<hash::Hash>,
+    verify_fn: StepperVerifyFn<'static, M64M, DefaultCacheConfig, Owned>,
+) where
     F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
@@ -116,10 +137,10 @@ where
             let final_state_hash = proof.final_state_hash();
 
             eprintln!("> Attempting to verify basic invalid proofs ...");
-            basic_invalid_proofs_are_rejected(&stepper, &proof, initial_state_hash);
+            basic_invalid_proofs_are_rejected(&stepper, &proof, initial_state_hash, verify_fn);
 
             eprintln!("> Verifying proof ...");
-            assert!(stepper.verify_proof(proof).is_ok());
+            assert!(verify_fn(&stepper, proof).is_ok());
 
             // Run one final step, which is the step proven by `proof`, and check that its
             // state hash matches the final state hash of `proof`.
@@ -146,10 +167,16 @@ where
     }
 }
 
+type StepperVerifyFn<'hooks, MC, BCC, M> = fn(
+    &PvmStepper<'hooks, MC, BCC, M, Interpreted<MC, M>>,
+    proof: Proof,
+) -> Result<(), ProofVerificationFailure>;
+
 fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
     stepper: &PvmStepper<'static, MC, BCC>,
     proof: &Proof,
     state_hash: hash::Hash,
+    verify_fn: StepperVerifyFn<'static, MC, BCC, Owned>,
 ) where
     AllocatedOf<BCC::Layout, Verifier>: 'static,
 {
@@ -158,28 +185,20 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
     // for this case.
     let fully_blinded_proof = proof_helpers::fully_blinded(state_hash);
     assert!(
-        stepper
-            .verify_proof(fully_blinded_proof)
+        verify_fn(stepper, fully_blinded_proof)
             .is_err_and(|e| matches!(e, ProofVerificationFailure::AbsentDataAccess(_)))
     );
 
     let empty_proof = proof_helpers::empty(state_hash);
     assert!(
-        stepper
-            .verify_proof(empty_proof)
+        verify_fn(stepper, empty_proof)
             .is_err_and(|e| matches!(e, ProofVerificationFailure::UnexpectedProofShape))
     );
 
     let invalid_final_hash_proof = proof_helpers::with_final_hash(proof, state_hash);
     assert!(
-        stepper
-            .verify_proof(invalid_final_hash_proof)
-            .is_err_and(
-                |e| matches!(e, ProofVerificationFailure::FinalHashMismatch {
-                    expected: _,
-                    computed: _
-                })
-            )
+        verify_fn(stepper, invalid_final_hash_proof)
+            .is_err_and(|e| matches!(e, ProofVerificationFailure::FinalHashMismatch { .. }))
     );
 }
 
