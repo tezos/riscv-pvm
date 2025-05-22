@@ -1,3 +1,0 @@
-code { DUP } ;
-input { } ;
-output (StaticError _);

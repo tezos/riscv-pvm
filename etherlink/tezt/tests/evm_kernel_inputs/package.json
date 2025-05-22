@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-      "ethers": "^5.7.0",
-      "@ethersproject/keccak256": "^5.7.0"
-  }
-}

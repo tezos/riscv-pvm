@@ -1,3 +1,0 @@
-code { PACK } ;
-input { Stack_elt unit Unit } ;
-output { Stack_elt bytes 0x05030b } ;

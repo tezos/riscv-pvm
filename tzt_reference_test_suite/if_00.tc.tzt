@@ -1,3 +1,0 @@
-code { IF { UNIT ; FAILWITH } { PUSH int 1 } } ;
-input { Stack_elt nat 1 } ;
-output (StaticError _)

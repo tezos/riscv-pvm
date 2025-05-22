@@ -1,8 +1,0 @@
-instructions:
-- move:
-    from: /kernel/boot.wasm
-    to: /another/kernel/boot.wasm
-
-- move:
-    from: /another/kernel/boot.wasm
-    to: /temporary/kernel/boot.wasm
