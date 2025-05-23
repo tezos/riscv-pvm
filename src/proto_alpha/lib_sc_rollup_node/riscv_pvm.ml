@@ -16,7 +16,7 @@ type repo = Context.repo
 type tree = Context.tree
 
 module State = Riscv_context.PVMState
-module Backend = Octez_riscv_pvm.Backend
+module Backend = Octez_riscv_pvm.Rollup_node_backend
 module Ctxt_wrapper = Context_wrapper.Riscv
 
 let to_pvm_input (input : Sc_rollup.input) : Backend.input =
