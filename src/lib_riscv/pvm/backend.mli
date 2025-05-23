@@ -6,71 +6,41 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-module Api = Octez_riscv_api
-
 type reveals
 
-type write_debug = string -> unit Lwt.t
+type write_debug = Common.write_debug
 
-type hash = Tezos_crypto.Hashed.Smart_rollup_state_hash.t
+type hash = Common.hash
 
-type state = Api.state
+type state = Common.state
 
-type status = Api.status
+type status = Common.status
 
 (* TODO RV-615: Improve the `input` type exposed in protocol environment *)
 (* Mirrors Api.input but requires manual conversion *)
-type input = Inbox_message of int32 * int64 * string | Reveal of string
+type input = Common.input =
+  | Inbox_message of int32 * int64 * string
+  | Reveal of string
 
 (* Mirrors Api.input_request but requires manual conversion *)
-type input_request =
+type input_request = Common.input_request =
   | No_input_required
   | Initial
   | First_after of int32 * int64
   | Needs_reveal of string
 
-type proof = Api.proof
+type proof = Octez_riscv_api.proof
 
-type output_proof = Api.output_proof
+type output_proof = Common.output_proof
 
-type output_info = {
+type output_info = Common.output_info = {
   message_index : Z.t;
   outbox_level : Bounded.Non_negative_int32.t;
 }
 
-type output = {info : output_info; encoded_message : string}
+type output = Common.output = {info : output_info; encoded_message : string}
 
-module Mutable_state : sig
-  type t = Api.mut_state
-
-  val from_imm : state -> t
-
-  val to_imm : t -> state
-
-  val compute_step_many :
-    ?reveal_builtins:reveals ->
-    ?write_debug:write_debug ->
-    ?stop_at_snapshot:bool ->
-    max_steps:int64 ->
-    t ->
-    int64 Lwt.t
-
-  val get_tick : t -> Z.t Lwt.t
-
-  val get_status : t -> status Lwt.t
-
-  val get_message_counter : t -> int64 Lwt.t
-
-  val get_current_level : t -> int32 option Lwt.t
-
-  val state_hash : t -> hash
-
-  val set_input : t -> input -> unit Lwt.t
-
-  val get_reveal_request : t -> string Lwt.t
-
-  val insert_failure : t -> unit Lwt.t
-end
+module Mutable_state : Common.Mutable_state
 
 val compute_step_many :
   ?reveal_builtins:reveals ->
