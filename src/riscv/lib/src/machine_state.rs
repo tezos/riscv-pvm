@@ -609,10 +609,7 @@ mod tests {
     use super::instruction::OpCode;
     use super::instruction::tagged_instruction::TaggedArgs;
     use super::instruction::tagged_instruction::TaggedInstruction;
-    use super::instruction::tagged_instruction::TaggedRegister;
-    use super::registers::XRegister;
     use crate::backend_test;
-    use crate::bits::u16;
     use crate::default::ConstDefault;
     use crate::machine_state::DefaultCacheLayouts;
     use crate::machine_state::TestCacheLayouts;
@@ -623,16 +620,13 @@ mod tests {
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::registers::a0;
-    use crate::machine_state::registers::a1;
     use crate::machine_state::registers::nz;
-    use crate::machine_state::registers::ra;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
     use crate::machine_state::registers::t2;
     use crate::parser::XRegisterParsed::*;
     use crate::parser::instruction::Instr;
     use crate::parser::instruction::InstrCacheable;
-    use crate::parser::instruction::InstrWidth;
     use crate::parser::instruction::SBTypeArgs;
     use crate::parser::instruction::SplitITypeArgs;
     use crate::parser::parse_block;
@@ -932,196 +926,209 @@ mod tests {
         );
     });
 
-    // The block cache & instruction cache have separate cache invalidation/overwriting.
-    // While running with an unbounded number of steps this is fine, there is a potential for
-    // divergence when the number of steps to be run is less than the block size of the next block.
+    // This test exercises the "partial block" feature of the block cache which is needed to ensure
+    // divergence of the state machine does not occur when the instructions in memory are changed
+    // but the state is rebound.
     //
-    // Namely:
-    // - we create a block at A, which jumps to address B
-    // - fetch instructions at B overwrites some of the _instruction cache_ entries of Block(A),
-    //   without affecting the block itself, and then jumps back to A
-    // - we don't have enough steps to execute Block(A) directly, so fall back to fetch/parse/run
-    // - A different set of instructions is executed than would be if there were enough steps
-    //   remaining to run Block(A).
-    backend_test!(test_block_cache_instruction_cache_determinism, F, {
-        // We make the wrap-around of the instruction cache much smaller than the wrap-around
-        // of the block-cache, allowing instruction cache entries to be overwritten without
-        // overwriting the related block-cache entries.
-        //
-        // Note that we are jumping 2 * CACHE_SIZE to achieve the wrap-around, as non u16-aligned
-        // addresses cannot be cached, so CACHE_SIZE corresponds to 2*CACHE_SIZE addresses.
-        let auipc_bytes: u32 = 0x517;
-        let cj_bytes: u16 = 0xa8b5;
+    // The scenario where problems could arise is when running a cached block, but we run fewer
+    // instructions than the block contains. In the absence of the partial block feature, we would
+    // run instructions from the memory and not from the block cache. This means depending on how
+    // many instructions we run, we run potentially different instructions.
+    backend_test!(test_block_cache_partial_determinism, F, {
+        const CODE1: [u32; 4] = [
+            0x00150513, // addi a0, a0, 1
+            0x00200293, // li t0, 2
+            0x02550533, // mul a0, a0, t0
+            0xff5ff06f, // j -12
+        ];
 
-        let block_a = [
-            // Store current instruction counter
-            Instruction::try_from(TaggedInstruction {
-                opcode: OpCode::AddImmediateToPC,
+        const CODE1_RESULT: u64 = 15358;
+
+        let code1_instrs: &[TaggedInstruction] = &[
+            TaggedInstruction {
+                opcode: OpCode::Addi,
                 args: TaggedArgs {
                     rd: nz::a0.into(),
-                    imm: 0,
-                    rs1: TaggedRegister::X(XRegister::x1),
-                    rs2: TaggedRegister::X(XRegister::x1),
+                    rs1: nz::a0.into(),
+                    imm: 1,
                     ..TaggedArgs::DEFAULT
                 },
-            })
-            .unwrap(),
-            // this represents a CJ instruction.
-            Instruction::try_from(TaggedInstruction {
-                opcode: OpCode::J,
-                args: TaggedArgs {
-                    imm: 128 - 4,
-                    width: InstrWidth::Compressed,
-                    rd: nz::ra.into(),
-                    rs1: nz::ra.into(),
-                    rs2: nz::ra.into(),
-                    ..TaggedArgs::DEFAULT
-                },
-            })
-            .unwrap(),
-        ];
-
-        // InstrCacheable::CJ(CJTypeArgs { imm: 1024 })
-        let overwrite_bytes = 0xa101;
-
-        let clui_bytes: u16 = 0x65a9;
-        let addiw_bytes: u32 = 0x1015859b;
-        let csw_bytes: u16 = 0xc10c;
-        let jalr_bytes: u32 = 0x50067;
-        let block_b = [
-            Instruction::try_from(TaggedInstruction {
+            },
+            TaggedInstruction {
                 opcode: OpCode::Li,
                 args: TaggedArgs {
-                    rd: nz::a1.into(),
-                    imm: (u16::bits_subset(overwrite_bytes, 15, 12) as i64) << 12,
-                    rs1: nz::ra.into(),
-                    rs2: nz::ra.into(),
-                    width: InstrWidth::Compressed,
+                    rd: nz::t0.into(),
+                    imm: 2,
                     ..TaggedArgs::DEFAULT
                 },
-            })
-            .unwrap(),
-            Instruction::try_from(TaggedInstruction {
-                opcode: OpCode::AddWordImmediate,
+            },
+            TaggedInstruction {
+                opcode: OpCode::Mul,
                 args: TaggedArgs {
-                    rd: nz::a1.into(),
-                    rs1: a1.into(),
-                    imm: u16::bits_subset(overwrite_bytes, 11, 0) as i64,
-                    rs2: TaggedRegister::X(XRegister::x1),
-                    ..TaggedArgs::DEFAULT
-                },
-            })
-            .unwrap(),
-            Instruction::try_from(TaggedInstruction {
-                opcode: OpCode::X32Store,
-                args: TaggedArgs {
-                    rd: ra.into(),
-                    rs1: a0.into(),
-                    rs2: a1.into(),
-                    imm: 0,
-                    width: InstrWidth::Compressed,
-                    ..TaggedArgs::DEFAULT
-                },
-            })
-            .unwrap(),
-            Instruction::try_from(TaggedInstruction {
-                opcode: OpCode::Jr,
-                args: TaggedArgs {
-                    rd: nz::ra.into(),
+                    rd: nz::a0.into(),
                     rs1: nz::a0.into(),
+                    rs2: nz::t0.into(),
                     ..TaggedArgs::DEFAULT
                 },
-            })
-            .unwrap(),
+            },
+            TaggedInstruction {
+                opcode: OpCode::J,
+                args: TaggedArgs {
+                    imm: -12,
+                    ..TaggedArgs::DEFAULT
+                },
+            },
         ];
 
-        let phys_addr = memory::FIRST_ADDRESS;
+        const CODE2: [u32; 4] = [
+            0x00150513, // addi a0, a0, 1
+            0x00300293, // li t0, 3
+            0x02550533, // mul a0, a0, t0
+            0xff5ff06f, // j -12
+        ];
 
-        let block_b_addr = phys_addr + 128;
+        const CODE2_RESULT: u64 = 856209;
 
-        let mut state = MachineState::<M8K, DefaultCacheLayouts, Interpreted<M8K, _>, _>::new(
+        let code2_instrs: &[TaggedInstruction] = &[
+            TaggedInstruction {
+                opcode: OpCode::Addi,
+                args: TaggedArgs {
+                    rd: nz::a0.into(),
+                    rs1: nz::a0.into(),
+                    imm: 1,
+                    ..TaggedArgs::DEFAULT
+                },
+            },
+            TaggedInstruction {
+                opcode: OpCode::Li,
+                args: TaggedArgs {
+                    rd: nz::t0.into(),
+                    imm: 3,
+                    ..TaggedArgs::DEFAULT
+                },
+            },
+            TaggedInstruction {
+                opcode: OpCode::Mul,
+                args: TaggedArgs {
+                    rd: nz::a0.into(),
+                    rs1: nz::a0.into(),
+                    rs2: nz::t0.into(),
+                    ..TaggedArgs::DEFAULT
+                },
+            },
+            TaggedInstruction {
+                opcode: OpCode::J,
+                args: TaggedArgs {
+                    imm: -12,
+                    ..TaggedArgs::DEFAULT
+                },
+            },
+        ];
+
+        let mut state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
 
-        state.core.main_memory.set_all_readable_writeable();
-
-        // Write the instructions to the beginning of the main memory and point the program
-        // counter at the first instruction.
-        state.core.hart.pc.write(phys_addr);
-
-        // block A
+        // Write instructions to a known part in memory.
         state
             .core
             .main_memory
-            .write_instruction_unchecked(phys_addr, auipc_bytes)
-            .unwrap();
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(phys_addr + 4, cj_bytes)
+            .write_instruction_unchecked(0x100, CODE1)
             .unwrap();
 
-        // block B
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(block_b_addr, clui_bytes)
-            .unwrap();
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(block_b_addr + 2, addiw_bytes)
-            .unwrap();
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(block_b_addr + 6, csw_bytes)
-            .unwrap();
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(block_b_addr + 8, jalr_bytes)
-            .unwrap();
+        // Run the block of instructions 10 times. Make sure it ran correctly. Validate that there
+        // is a block entry in the block cache.
+        {
+            state.core.hart.pc.write(0x100);
+            state.core.hart.xregisters.write(a0, 13);
 
-        // Overwritten jump dest
-        state
-            .core
-            .main_memory
-            .write_instruction_unchecked(phys_addr + 1024, overwrite_bytes)
-            .unwrap();
+            let steps = CODE1.len() * 10;
+            let result = state.step_max(Bound::Included(steps));
 
-        state.step_max(Bound::Included(block_a.len()));
-        assert_eq!(block_b_addr, state.core.hart.pc.read());
+            assert_eq!(result.steps, steps);
+            assert_eq!(result.error, None);
 
-        state.step_max(Bound::Included(block_b.len()));
-        assert_eq!(phys_addr, state.core.hart.pc.read());
+            let param0 = state.core.hart.xregisters.read(a0);
+            assert_eq!(param0, CODE1_RESULT);
 
-        assert!(state.block_cache.get_block(phys_addr).is_some());
-        assert_eq!(
-            block_a.as_slice(),
-            state.block_cache.get_block_instr(phys_addr).as_slice()
-        );
-
-        assert!(state.block_cache.get_block(block_b_addr).is_some());
-        assert_eq!(
-            block_b.as_slice(),
-            state.block_cache.get_block_instr(block_b_addr).as_slice()
-        );
-
-        let mut state_step = state.clone();
-
-        let result = state.step_max(Bound::Included(block_a.len()));
-        assert_eq!(result.steps, block_a.len());
-
-        for _ in 0..block_a.len() {
-            let result = state_step.step_max(Bound::Included(1));
-            assert_eq!(result.steps, 1);
+            assert!(state.block_cache.get_block(0x100).is_some());
+            assert_eq!(
+                state
+                    .block_cache
+                    .get_block_instr(0x100)
+                    .into_iter()
+                    .map(From::from)
+                    .collect::<Vec<TaggedInstruction>>(),
+                code1_instrs
+            );
         }
 
-        assert_eq_struct(
-            &state.struct_ref::<FnManagerIdent>(),
-            &state_step.struct_ref::<FnManagerIdent>(),
-        );
+        // Replace the instructions in memory with different ones.
+        state
+            .core
+            .main_memory
+            .write_instruction_unchecked(0x100, CODE2)
+            .unwrap();
+
+        // Run the block again 10 times but this time do it one step at a time to ensure the block
+        // doesn't get run in its entirety. This exercises the "partial block" feature of the cache
+        // which is needed to avoid divergence of the state machine.
+        // Despite rewriting the instructions in memory, the block should run as before because we
+        // haven't synchronised instruction and data memory yet.
+        {
+            state.core.hart.pc.write(0x100);
+            state.core.hart.xregisters.write(a0, 13);
+
+            for _ in 0..CODE2.len() * 10 {
+                let result = state.step_max(Bound::Included(1));
+                assert_eq!(result.steps, 1);
+                assert_eq!(result.error, None);
+            }
+
+            let param0 = state.core.hart.xregisters.read(a0);
+            assert_eq!(param0, CODE1_RESULT);
+
+            assert!(state.block_cache.get_block(0x100).is_some());
+            assert_eq!(
+                state
+                    .block_cache
+                    .get_block_instr(0x100)
+                    .into_iter()
+                    .map(From::from)
+                    .collect::<Vec<TaggedInstruction>>(),
+                code1_instrs
+            );
+        }
+
+        // Flush the block cache.
+        state.run_fencei();
+
+        // Run the block again 10 times, this time it should run the new instructions thanks to the
+        // previous flush.
+        {
+            state.core.hart.pc.write(0x100);
+            state.core.hart.xregisters.write(a0, 13);
+
+            for _ in 0..CODE2.len() * 10 {
+                let result = state.step_max(Bound::Included(1));
+                assert_eq!(result.steps, 1);
+                assert_eq!(result.error, None);
+            }
+
+            let param0 = state.core.hart.xregisters.read(a0);
+            assert_eq!(param0, CODE2_RESULT);
+
+            assert!(state.block_cache.get_block(0x100).is_some());
+            assert_eq!(
+                state
+                    .block_cache
+                    .get_block_instr(0x100)
+                    .into_iter()
+                    .map(From::from)
+                    .collect::<Vec<TaggedInstruction>>(),
+                code2_instrs
+            );
+        }
     });
 }
