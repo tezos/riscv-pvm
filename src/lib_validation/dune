@@ -1,0 +1,34 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_validation)
+ (public_name octez-shell-libs.validation)
+ (instrumentation (backend bisect_ppx))
+ (instrumentation (backend tezos-time-measurement))
+ (libraries
+  octez-libs.base
+  octez-shell-libs.client-base
+  octez-libs.crypto
+  octez-libs.rpc
+  octez-libs.clic
+  octez-shell-libs.context-ops
+  octez-shell-libs.shell-services
+  octez-shell-libs.protocol-updater
+  octez-libs.stdlib-unix
+  octez-libs.octez-profiler
+  octez-libs.octez-profiler.backends
+  octez-version.value)
+ (preprocess (pps octez-libs.ppx_profiler))
+ (preprocessor_deps (env_var TEZOS_PPX_PROFILER))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_client_base
+  -open Tezos_crypto
+  -open Tezos_context_ops
+  -open Tezos_shell_services
+  -open Tezos_protocol_updater
+  -open Tezos_stdlib_unix
+  -open Tezos_profiler
+  -open Tezos_profiler_backends))

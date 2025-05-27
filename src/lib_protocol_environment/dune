@@ -1,0 +1,36 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_protocol_environment)
+ (public_name octez-proto-libs.protocol-environment)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  zarith
+  bls12-381
+  octez-libs.plonk
+  octez-libs.crypto-dal
+  class_group_vdf
+  aches
+  aches-lwt
+  octez-libs.base
+  octez-libs.tezos-sapling
+  octez-proto-libs.protocol-environment.sigs
+  octez-proto-libs.protocol-environment.structs
+  octez-libs.micheline
+  octez-libs.tezos-context.memory
+  octez-libs.tezos-context-brassaia.memory
+  octez-libs.scoru-wasm
+  octez-riscv-pvm
+  octez-libs.event-logging
+  octez-libs.octez-profiler)
+ (preprocess (pps octez-libs.ppx_profiler))
+ (preprocessor_deps (env_var TEZOS_PPX_PROFILER))
+ (flags
+  (:standard)
+  -open Plonk
+  -open Tezos_base.TzPervasives
+  -open Tezos_micheline
+  -open Tezos_profiler))
+
+(documentation (package octez-proto-libs))

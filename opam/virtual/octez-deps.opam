@@ -1,0 +1,158 @@
+# This file was automatically generated, do not edit.
+# Edit file manifest/main.ml instead.
+opam-version: "2.0"
+maintainer: "contact@tezos.com"
+authors: ["Tezos devteam"]
+homepage: "https://www.tezos.com/"
+bug-reports: "https://gitlab.com/tezos/tezos/issues"
+dev-repo: "git+https://gitlab.com/tezos/tezos.git"
+license: "MIT"
+depends: [
+  "dune" { >= "3.11.1" }
+  "aches" { >= "1.1.0" }
+  "aches-lwt" { >= "1.1.0" }
+  "alcotest" { >= "1.5.0" }
+  "alcotest-lwt" { >= "1.5.0" }
+  "ambient-context-lwt" { = "0.1.0" }
+  "asetmap" { >= "0.8.1" }
+  "astring"
+  "bam-ppx" { >= "0.3" }
+  "base-unix"
+  "base64" { >= "3.3.0" }
+  "bheap" { >= "2.0.0" }
+  "bigarray-compat"
+  "bigstring"
+  "bigstringaf" { >= "0.5.0" }
+  "bisect_ppx" { >= "2.7.0" }
+  "camlp-streams" { >= "5.0.1" }
+  "camlzip" { >= "1.12" & < "1.13" }
+  "caqti"
+  "caqti-driver-postgresql" { >= "2.0.1" }
+  "caqti-driver-sqlite3" { >= "2.0.1" }
+  "caqti-dynload"
+  "caqti-lwt" { >= "2.0.1" }
+  "checkseum" { != "0.5.0" }
+  "clap" { >= "0.3.0" }
+  "class_group_vdf" { >= "0.0.4" }
+  "cmdliner" { >= "1.1.0" }
+  "cohttp" { >= "5.3.1" }
+  "conduit-lwt" { >= "7.1.0" }
+  "conduit-lwt-unix" { >= "7.1.0" }
+  "conf-libev"
+  "conf-rust"
+  "crowbar" { >= "0.2" }
+  "crunch" { >= "3.3.0" }
+  "ctypes" { >= "0.18.0" }
+  "ctypes-foreign" { >= "0.18.0" }
+  "digestif" { >= "0.9.0" }
+  "dmap"
+  "dream" { >= "1.0.0~alpha7" }
+  "dune-configurator"
+  "eio"
+  "eio_posix"
+  "eqaf"
+  "ezgzip"
+  "ezjsonm" { >= "1.3.0" }
+  "fmt" { >= "0.8.7" }
+  "fpath"
+  "hacl-star" { >= "0.7.1" & < "0.8" }
+  "hacl-star-raw"
+  "hashcons"
+  "hex" { >= "1.3.0" }
+  "index" { >= "1.6.0" & < "1.7.0" }
+  "integers"
+  "ipaddr" { >= "5.3.0" & < "6.0.0" }
+  "jingoo"
+  "jsonm"
+  "lambda-term" { >= "3.3.1" }
+  "ledgerwallet-tezos" { >= "0.4.1" }
+  "logs"
+  "lru" { >= "0.3.0" }
+  "lwt" { >= "5.7.0" & < "5.9.0" }
+  "lwt-canceler" { >= "0.3" & < "0.4" }
+  "lwt-exit"
+  "lwt-watcher" { = "0.2" }
+  "lwt_eio"
+  "lwt_log"
+  "lwt_ppx"
+  "magic-mime" { >= "1.3.1" }
+  "memtrace"
+  "mirage-crypto-rng" { >= "1.0.0" }
+  "mtime" { >= "2.0.0" }
+  "num"
+  "ocamlformat" { = "0.26.2" }
+  "ocamlgraph"
+  "ocp-ocamlres" { >= "0.4" }
+  "ocplib-endian"
+  "opam-file-format" { >= "2.1.6" }
+  "opentelemetry"
+  "optint"
+  "ppx_deriving"
+  "ppx_expect"
+  "ppx_hash"
+  "ppx_import"
+  "ppx_repr" { >= "0.6.0" }
+  "ppx_sexp_conv"
+  "ppxlib" { >= "0.34.0" }
+  "prbnmcn-linalg" { = "0.0.1" }
+  "prbnmcn-stats" { = "0.0.6" }
+  "pringo" { >= "1.3" & < "1.4" }
+  "progress" { >= "0.1.0" }
+  "ptime" { >= "1.1.0" }
+  "pure-splitmix" { = "0.3" }
+  "pyml" { >= "20220905" }
+  "qcheck-alcotest" { >= "0.20" }
+  "qcheck-core"
+  "re" { >= "1.10.0" }
+  "repr"
+  "ringo" { >= "1.1.0" }
+  "rope" { >= "0.6.2" }
+  "rusage"
+  "safepass"
+  "secp256k1-internal" { >= "0.4.0" }
+  "semaphore-compat" { >= "1.0.1" }
+  "seqes" { >= "0.2" }
+  "sexplib"
+  "stdint"
+  "tar"
+  "tar-unix" { >= "2.0.1" & < "3.0.0" }
+  "terminal"
+  "tezos-sapling-parameters" { >= "1.1.0" }
+  "tezt" { >= "4.1.0" & < "5.0.0" }
+  "tezt-bam" { >= "0.3" }
+  "tls-lwt" { >= "1.0.4" }
+  "uri" { >= "3.1.0" }
+  "uuidm" { >= "0.9.9" }
+  "uutf"
+  "vector"
+  "x509" { >= "1.0.0" }
+  "yaml" { >= "3.1.0" }
+  "zarith" { >= "1.13" & < "1.14" }
+]
+conflicts: [
+  "checkseum" { = "0.5.0" }
+  "cohttp-lwt"
+  "cohttp-lwt-unix"
+  "data-encoding"
+  "hacl_x25519"
+  "json_data_encoding"
+  "json_data_encoding_browser"
+  "json_data_encoding_bson"
+  "opentelemetry-client-cohttp-lwt"
+  "prometheus"
+  "prometheus-app"
+  "resto"
+  "resto-acl"
+  "resto-cohttp"
+  "resto-cohttp-client"
+  "resto-cohttp-self-serving-client"
+  "resto-cohttp-server"
+  "resto-directory"
+  "resto-json"
+  "result" { < "1.5" }
+  "websocket"
+]
+build: []
+available: os-family != "windows"
+synopsis: "Virtual package depending on Octez dependencies (profile: octez-deps)"
+description: "Install this package to install all dependencies needed to build the subset of Octez denoted by profile octez-deps."

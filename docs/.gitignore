@@ -1,0 +1,15 @@
+octez-*.html
+octez-*.txt
+octezdoc.txt
+/alpha/rpc.rst
+/shell/rpc.rst
+
+/api/errors.rst
+/shell/p2p_api.rst
+/user/default-acl.json
+/user/node-config.json
+/CHANGES-dev.rst
+/developer/metrics.csv
+
+/linkcheck
+/odoc.log

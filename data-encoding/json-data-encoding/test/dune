@@ -1,0 +1,45 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executables
+ (names
+  test_big_streaming
+  test_destruct
+  test_generated
+  test_list_map
+  test_mu
+  test_seq_is_lazy)
+ (libraries
+  octez-libs.json-data-encoding
+  crowbar
+  alcotest))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_big_streaming.exe})))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_destruct.exe})))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_generated.exe})))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_list_map.exe})))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_mu.exe})))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (action (run %{dep:./test_seq_is_lazy.exe})))

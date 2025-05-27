@@ -1,0 +1,65 @@
+# This file was automatically generated, do not edit.
+# Edit file ci/bin/main.ml instead.
+
+stages:
+- images
+- build
+- publish_release_gitlab
+
+oc.docker:jsonnet:amd64:
+  image: ${GCP_REGISTRY}/tezos/docker-images/ci-docker:v1.12.0
+  stage: images
+  tags:
+  - gcp
+  dependencies: []
+  timeout: 60 minutes
+  before_script:
+  - . ./scripts/ci/datadog_send_job_info.sh
+  - ./scripts/ci/docker_initialize.sh
+  script:
+  - ./scripts/ci/docker_jsonnet_build.sh
+  services:
+  - docker:${DOCKER_VERSION}-dind
+  variables:
+    DOCKER_VERSION: 24.0.7
+    CI_DOCKER_HUB: "false"
+  artifacts:
+    reports:
+      dotenv: jsonnet_image_tag.env
+
+build_grafazos_dashboards:
+  image: ${jsonnet_image_name}:${jsonnet_image_tag}
+  stage: build
+  tags:
+  - gcp
+  dependencies:
+  - oc.docker:jsonnet:amd64
+  timeout: 60 minutes
+  before_script:
+  - . ./scripts/ci/datadog_send_job_info.sh
+  - cd grafazos/
+  - jb install github.com/grafana/grafonnet/gen/grafonnet-v11.1.0@1ce5aec
+  script:
+  - make
+  artifacts:
+    name: grafazos-dashboards
+    expire_in: 1 day
+    paths:
+    - grafazos/output/**/*.json
+    when: on_success
+
+gitlab:release:
+  image: ${GCP_REGISTRY}/tezos/docker-images/ci-release:v1.6.0
+  stage: publish_release_gitlab
+  tags:
+  - gcp
+  needs:
+  - build_grafazos_dashboards
+  dependencies:
+  - build_grafazos_dashboards
+  timeout: 60 minutes
+  interruptible: false
+  before_script:
+  - . ./scripts/ci/datadog_send_job_info.sh
+  script:
+  - ./grafazos/scripts/releases/create_gitlab_release.sh

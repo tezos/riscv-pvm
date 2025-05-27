@@ -1,0 +1,29 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_store)
+ (public_name octez-shell-libs.store)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  octez-libs.crypto
+  octez-libs.rpc
+  lwt-watcher
+  octez-shell-libs.shell-services
+  octez-shell-libs.validation
+  octez-shell-libs.context-ops
+  octez-shell-libs.store.shared
+  octez-libs.octez-profiler)
+ (flags
+  (:standard)
+  -open Tezos_base
+  -open Tezos_base.TzPervasives
+  -open Tezos_crypto
+  -open Tezos_shell_services
+  -open Tezos_validation
+  -open Tezos_context_ops
+  -open Tezos_store_shared
+  -open Tezos_profiler)
+ (virtual_modules store)
+ (default_implementation octez-shell-libs.store.real))

@@ -1,0 +1,21 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  bls12-381.archive
+  octez-libs.webassembly-interpreter
+  octez-l2-libs.webassembly-interpreter-extra
+  lwt.unix
+  octez-libs.tree-encoding
+  octez-libs.lazy-containers)
+ (flags
+  (:standard)
+  -open Tezos_webassembly_interpreter
+  -open Tezos_webassembly_interpreter_extra
+  -open Tezos_tree_encoding
+  -open Tezos_lazy_containers))
+
+(include dune.inc)

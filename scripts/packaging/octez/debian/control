@@ -1,0 +1,123 @@
+Source: octez
+Section: devel
+Priority: optional
+Maintainer: Nomadic Labs <pkg@nomadic-labs.com>
+Homepage: https://gitlab.com/tezos/tezos
+Build-Depends: rsync,
+  git, m4,
+  build-essential,
+  patch, unzip, wget, opam, jq, bc,
+  autoconf, cmake, libev-dev,
+  libffi-dev, libgmp-dev,
+  libhidapi-dev, pkg-config,
+  zlib1g-dev, debhelper, debconf,
+  libprotobuf-dev, protobuf-compiler,
+  libsqlite3-dev
+
+Package: octez-node
+Architecture: amd64 arm64
+Depends: adduser,
+  logrotate,
+  octez-zcash-params ( = 1.0.0 ),
+  ${misc:Depends},
+  ${shlibs:Depends},
+  debconf (>= 0.5) | debconf-2.0,
+  curl,
+  systemd
+Pre-Depends: jq
+Recommends: octez-client (= ${source:Version}),
+Suggests: lz4
+Description: L1 Octez node for the Tezos network
+ This package serves as the core implementation for the Tezos blockchain node.
+ It contains the fundamental components required for protocol execution,
+ consensus, and network communication within the Tezos blockchain network
+ .
+ This package installs the Octez node.
+
+Package: octez-client
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends},
+Description: Client for interacting with the Tezos blockchain
+ This package serves as the client-side interface for interacting with the
+ Tezos blockchain. It includes command-line tools and functionalities for
+ querying blockchain data, broadcasting transactions, and interacting with
+ smart contracts on the Tezos network.
+ .
+ This package installs the Octez client. For key management it is
+ recommended to install a remote signer of a different host.
+
+Package: octez-baker
+Architecture: amd64 arm64
+Pre-Depends:
+ octez-client (= ${source:Version}),
+ debconf (>= 0.5) | debconf-2.0
+Depends:
+ ${misc:Depends}, ${shlibs:Depends},
+ octez-node (= ${source:Version}),
+ curl, systemd
+Recommends:
+ octez-signer (= ${source:Version}),
+ octez-dal-node (= ${source:Version})
+Description: Octez baking software for the Tezos blockchain.
+ The Octez baker includes the necessary tools and functionalities for
+ participating in the baking process, such as block creation, attestations, and
+ protocol-specific consensus mechanisms.
+ .
+ This package installs the baker, the accuser and the Octez node. By default,
+ installing this package causes the recommended packages octez-signer and
+ octez-dal-node to be installed as well. For key management it is recommended
+ to install a remote signer on a different host.
+
+Package: octez-signer
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends}, octez-client (= ${source:Version}),
+Recommends: systemd
+Suggests: wireguard, openssh-client
+Description: Signing client for the Tezos blockchain.
+ The Octez signer provides the essential tools and functionalities for securely
+ signing transactions, blocks, and other protocol-related data within the Tezos
+ network.
+ .
+ This package installs the Octez remote signer. It's recommended to run the
+ signer and the baker on different hosts and use a hardware ledger for key
+ management.
+
+Package: octez-experimental
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends},
+Description: Octez experimental binaries
+ This package is a collection of debug and experimental binaries from the
+ octez software suite.
+ .
+ This package installs:
+  * octez-snoop: is a tool for benchmarking and fitting statistical models
+    which predict the performance of any piece of code of interest.
+  * octez-smart-rollup-wasm-debugger: runs Smart Rollups in debug mode to
+    make it easier to test and observe them.
+  * octez-protocol-compiler: used by the node to compile new protocols on
+    the fly, and that can be used for developing new protocols.
+
+Package: octez-smart-rollup-node
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends},
+ octez-node (= ${source:Version}),
+ systemd
+Recommends: octez-client (= ${source:Version})
+Description: Smart Rollup node for the Tezos blockchain.
+ The Octez Smart Rollup node enables rollup deployment, managing progress
+ through commitment publication and refutation games. Similar to the Octez
+ node, it offers an HTTP-accessible RPC interface.
+ .
+ This package installs the Octez rollup node.
+
+Package: octez-dal-node
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends},
+ systemd
+Suggests: octez-baker (= ${source:Version})
+Description: Octez distribution Availability Layer (DAL) node
+ The DAL node is responsible for temporarily storing data and providing it to
+ bakers and Smart Rollups. Similar to the Octez node, it offers an
+ HTTP-accessible RPC interface.
+ .
+ This package installs the Octez DAL node.

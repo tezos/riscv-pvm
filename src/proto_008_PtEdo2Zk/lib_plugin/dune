@@ -1,0 +1,36 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_protocol_plugin_008_PtEdo2Zk)
+ (public_name octez-protocol-008-PtEdo2Zk-libs.plugin)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  tezos-protocol-008-PtEdo2Zk.protocol)
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_base.TzPervasives.Error_monad_legacy
+  -open Tezos_protocol_008_PtEdo2Zk)
+ (modules (:standard \ Plugin_registerer)))
+
+(documentation (package octez-protocol-008-PtEdo2Zk-libs))
+
+(library
+ (name tezos_protocol_plugin_008_PtEdo2Zk_registerer)
+ (public_name octez-protocol-008-PtEdo2Zk-libs.plugin-registerer)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  tezos-protocol-008-PtEdo2Zk.embedded-protocol
+  octez-protocol-008-PtEdo2Zk-libs.plugin
+  octez-shell-libs.validation)
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_base.TzPervasives.Error_monad_legacy
+  -open Tezos_embedded_protocol_008_PtEdo2Zk
+  -open Tezos_protocol_plugin_008_PtEdo2Zk
+  -open Tezos_validation)
+ (modules Plugin_registerer))

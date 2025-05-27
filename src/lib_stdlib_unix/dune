@@ -1,0 +1,34 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_stdlib_unix)
+ (public_name octez-libs.stdlib-unix)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  unix
+  octez-libs.error-monad
+  octez-libs.lwt-result-stdlib
+  octez-libs.event-logging
+  octez-libs.stdlib
+  octez-libs.data-encoding
+  aches-lwt
+  lwt.unix
+  lwt-exit
+  ipaddr.unix
+  re
+  ezjsonm
+  ptime
+  ptime.clock.os
+  mtime
+  mtime.clock.os
+  uri
+  progress
+  camlp-streams)
+ (flags
+  (:standard)
+  -open Tezos_error_monad
+  -open Tezos_error_monad.TzLwtreslib
+  -open Tezos_event_logging
+  -open Tezos_stdlib
+  -open Data_encoding))

@@ -1,0 +1,20 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_proxy)
+ (public_name octez-shell-libs.proxy)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  aches
+  aches-lwt
+  octez-libs.base
+  octez-libs.clic
+  octez-shell-libs.client-base
+  octez-proto-libs.protocol-environment
+  octez-libs.rpc
+  octez-shell-libs.shell-services
+  uri)
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives))

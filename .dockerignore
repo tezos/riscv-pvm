@@ -1,0 +1,147 @@
+
+## /!\ /!\ Update .gitignore accordingly /!\ /!\
+
+.DS_Store
+__pycache__
+**/*.pyc
+
+**/_build
+_build_rust
+_opam
+_docker_build
+_snoop
+docs/api/tezos-client.html
+docs/api/tezos-admin-client.html
+
+tezos-node
+tezos-tx-rollup-*
+tezos-protocol-compiler
+tezos-client
+tezos-admin-client
+tezos-baker-*
+tezos-endorser-*
+tezos-accuser-*
+tezos-signer
+tezos-smart-rollup-node-*
+tezos-smart-rollup-client-*
+octez-node
+octez-tx-rollup-*
+octez-protocol-compiler
+octez-client
+octez-admin-client
+octez-baker-*
+octez-endorser-*
+octez-accuser-*
+octez-signer
+octez-smart-rollup-node*
+octez-smart-rollup-client-*
+octez-injector-server
+octogram
+octez-teztale-archiver
+octez-teztale-server
+octez-accuser
+octez-baker
+
+scripts/opam-test-all.sh.DONE
+scripts/create_genesis/src
+
+docs/introduction/readme.rst
+docs/api/errors.rst
+docs/0*/rpc.rst
+docs/alpha/rpc.rst
+docs/shell/rpc.rst
+docs/shell/p2p_api.rst
+
+src/bin_client/test/LOG.*
+_coverage_output/*.coverage
+_coverage_report
+
+**/*.install
+**/.merlin
+
+**/*~
+**/\#*\#
+
+**/*.rej
+**/*.orig
+
+.idea
+.vscode
+# .venv directories are created by poetry if the option in-project is set to
+# true.
+**/.venv
+**/.mypy_cache/
+
+## Not in .gitignore
+
+.git
+.gitignore
+.gitlab-ci.yml
+
+# etherlink
+/etherlink/kernels-*
+etherlink-governance-observer
+floodgate
+
+# Rust
+**/target
+
+evm_kernel.wasm
+evm_installer.wasm
+evm_kernel_unstripped.wasm
+evm_kernel_debug.wasm
+evm-evaluation-assessor
+smart-rollup-installer
+_evm_installer_preimages/
+tx_kernel.wasm
+tx_kernel_dal.wasm
+tx-demo-collector
+dal_echo_kernel.wasm
+sequencer.wasm
+evm_benchmark_kernel.wasm
+evm_unstripped_installer.wasm
+_evm_unstripped_installer_preimages/
+
+# Terraform
+
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude all .tfvars files, which are likely to contain sensitive data, such as
+# password, private keys, and other secrets. These should not be part of version
+# control as they are data points which are potentially sensitive and subject
+# to change depending on the environment.
+*.tfvars
+*.tfvars.json
+
+# Ignore override files as they are usually used to override resources locally and so
+# are not checked in
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Include override files you do wish to add to version control using negated pattern
+# !example_override.tf
+
+# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
+# example: *tfplan*
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+# Terraform lock files
+*.lock.hcl
+
+# RISC-V
+/src/riscv/riscv-sandbox
+/src/riscv/riscv-dummy.elf

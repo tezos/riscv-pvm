@@ -1,0 +1,52 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name src_lib_lwt_result_stdlib_test_tezt_lib)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezt.core
+  octez-libs.lwt-result-stdlib
+  octez-libs.lwt-result-stdlib.examples.traces
+  lwt.unix
+  octez-alcotezt
+  qcheck-alcotest
+  octez-libs.test-helpers)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezt_core
+  -open Tezt_core.Base
+  -open Tezos_lwt_result_stdlib
+  -open Octez_alcotezt
+  -open Tezos_test_helpers)
+ (modules
+  support
+  traits_tiered
+  test_hashtbl
+  test_list_basic
+  test_list_basic_lwt
+  test_seq_basic
+  test_fuzzing_lib
+  test_fuzzing_list_against_stdlib
+  test_fuzzing_option_against_stdlib
+  test_fuzzing_set_against_stdlib
+  test_fuzzing_map_against_stdlib))
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx --bisect-sigterm))
+ (libraries
+  src_lib_lwt_result_stdlib_test_tezt_lib
+  tezt)
+ (modules main))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (enabled_if (and %{arch_sixtyfour} (<> false %{env:RUNTEZTALIAS=true})))
+ (action (run %{dep:./main.exe} /flaky /ci_disabled)))
+
+(rule
+ (targets main.ml)
+ (action (with-stdout-to %{targets} (echo "let () = Tezt.Test.run ()"))))

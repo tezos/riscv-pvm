@@ -1,0 +1,3611 @@
+[
+  {
+    "file": "src/proto_alpha/lib_protocol/test/unit/test_sc_rollup_game.ml",
+    "title": "alpha: sc rollup game (A single game move with a valid dissection)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "22483",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/unit/test_contract_repr.ml",
+    "title": "alpha: Contract_repr.ml (Contract_repr.originated_contract: must correctly create an originated contract)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "573",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Origination ; Sc_rollup_refute]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2979243",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Self-delegation ; Origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "3025274",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Update consensus key ; Sc_rollup_origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "3036848",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Increase paid storage ; Sc_rollup_add_messages]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28469",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Transfer_ticket ; Self-delegation]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27796",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: reveal in the middle: [Sc_rollup_cement ; Sc_rollup_cement]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33070",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch two sources: [Origination ; Set deposits limit]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29851",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch two sources: [Undelegation ; Sc_rollup_execute_outbox_message]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32876",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch two sources: [Sc_rollup_origination ; Register global constant]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33809",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch two sources: [Sc_rollup_timeout ; Undelegation]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29923",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch incons. counters: [Increase paid storage ; Transfer_ticket]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "36000",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch incons. counters: [Transfer_ticket ; Sc_rollup_origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34693",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch incons. counters: [Sc_rollup_refute ; Update consensus key]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32158",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch incons. counters: [Sc_rollup_execute_outbox_message ; Sc_rollup_cement]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34570",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: batch incons. counters: [Zk_rollup_publish ; Zk_rollup_publish]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33042",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance in middle of batch: [Increase paid storage ; Undelegation]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31163",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance in middle of batch: [Transfer_ticket ; Sc_rollup_timeout]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31107",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance in middle of batch: [Sc_rollup_refute ; Zk_rollup_publish]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33645",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance in middle of batch: [Sc_rollup_execute_outbox_message ; Sc_rollup_origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29309",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance in middle of batch: [Zk_rollup_update ; Origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "800487",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance at end of batch: [Transaction ; Sc_rollup_timeout]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34829",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance at end of batch: [Delegation ; Zk_rollup_publish]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "35737",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance at end of batch: [Sc_rollup_cement ; Sc_rollup_recover_bond]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31330",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance at end of batch: [Sc_rollup_refute ; Dal_publish_commitment]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31724",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: empty balance at end of batch: [Zk_rollup_publish ; Increase paid storage]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32000",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption: [Origination ; Origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32731",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption: [Transfer_ticket ; Update consensus key]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33116",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption: [Sc_rollup_timeout ; Sc_rollup_cement]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33924",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption: [Sc_rollup_execute_outbox_message ; Transaction]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33419",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption: [Zk_rollup_update ; Sc_rollup_origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "777652",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption (mempool): [Register global constant ; Sc_rollup_refute]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30090",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption (mempool): [Self-delegation ; Self-delegation]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31208",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption (mempool): [Update consensus key ; Origination]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29621",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Alpha: too much gas consumption (mempool): [Sc_rollup_publish ; Delegation]",
+    "tags": [
+      "alpha",
+      "batch",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27760",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_sanity.ml",
+    "title": "Alpha: manager operation coverage",
+    "tags": [
+      "alpha",
+      "operation",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "776360",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Alpha: too much gas consumption in block: Set deposits limit",
+    "tags": [
+      "alpha",
+      "manager_operation",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26684",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Alpha: fees are taken when valid: Sc_rollup_refute",
+    "tags": [
+      "alpha",
+      "manager_operation",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28378",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/operations/test_reveal.ml",
+    "title": "alpha: revelation (cannot batch a good reveal after an insolvent one)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "11165",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/michelson/test_typechecking.ml",
+    "title": "alpha: typechecking (forbidden SET_DELEGATE in view)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "9511",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/michelson/test_ticket_lazy_storage_diff.ml",
+    "title": "alpha: ticket lazy storage diff (update and remove same key multiple times on existing big-map)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "10539",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/michelson/test_script_typed_ir_size.ml",
+    "title": "alpha: script typed ir size (micheline sizes)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "334",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/michelson/test_sapling.ml",
+    "title": "alpha: sapling (use state from other contract and transact)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "1052252",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/gas/test_gas_levels.ml",
+    "title": "alpha: gas levels (Detect gas exhaustion in fresh context)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "6176",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/consensus/test_delegation.ml",
+    "title": "alpha: delegation (unregistered delegate key - credit 1μꜩ (origination, edge case fee))",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "11615",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/consensus/test_attestation.ml",
+    "title": "alpha: attestation (Not own slot)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "14328",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_stake.ml",
+    "title": "Alpha: Test stake unstake every cycle: AI activated, external stake",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "stake"
+    ],
+    "successful_runs": {
+      "total_time": "1323014",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_stake.ml",
+    "title": "Alpha: Test stake from unstake: unstake cycle (current-2), stake from unstake one container, one stake",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "stake"
+    ],
+    "successful_runs": {
+      "total_time": "628779",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Alpha: Test simple slashing: true, edge 1, with stakers, double preattesting, denounce next cycle, denouncer with maybe staker, another slash, double preattesting",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "615401",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Alpha: Test simple slashing: true, edge 1/3, with stakers, double preattesting, denounce next cycle, denouncer with maybe staker, another slash, double baking",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "547810",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Alpha: Test simple slashing: false, edge 1, with stakers, double preattesting, denounce next cycle, denouncer without staker, another slash, double attesting",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "564834",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Alpha: Test simple slashing: false, edge 1/3, with stakers, double preattesting, denounce next cycle, denouncer without staker",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "578685",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_slashing.ml",
+    "title": "Alpha: Test multiple misbehaviors: No AI, false, 1 misbehavior loops, multiple delegates, denounce reverse, all at once",
+    "tags": [
+      "alpha",
+      "protocol",
+      "scenario",
+      "slashing"
+    ],
+    "successful_runs": {
+      "total_time": "264808",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_scenario_deactivation.ml",
+    "title": "Alpha: Test simple deactivation scenario with ai",
+    "tags": [
+      "alpha",
+      "deactivation",
+      "protocol",
+      "scenario"
+    ],
+    "successful_runs": {
+      "total_time": "561857",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_liquidity_baking.ml",
+    "title": "Alpha: toggle vote with 80% of bakers voting Per_block_vote_off baking 100 blocks longer",
+    "tags": [
+      "alpha",
+      "liquidity_baking"
+    ],
+    "successful_runs": {
+      "total_time": "1645918",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_liquidity_baking.ml",
+    "title": "Alpha: toggle ema in block metadata is zero with no bakers voting Per_block_vote_off.",
+    "tags": [
+      "alpha",
+      "liquidity_baking"
+    ],
+    "successful_runs": {
+      "total_time": "131039",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_protocol/test/integration/test_constants.ml",
+    "title": "Alpha: constants consistency",
+    "tags": [
+      "alpha",
+      "constants"
+    ],
+    "successful_runs": {
+      "total_time": "243",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_client/test/test_michelson_v1_macros.ml",
+    "title": "alpha: micheline v1 macros (assert_some unexpansion)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "alpha"
+    ],
+    "successful_runs": {
+      "total_time": "331",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/unit/test_sc_rollup_storage.ml",
+    "title": "021-PsquebeC: sc rollup storage (deposit)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "12353",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/unit/test_global_constants_storage.ml",
+    "title": "021-PsquebeC: Global constants storage (bottom_up_fold_cps: does not stack overflow)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "394744",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/unit/test_gas_monad.ml",
+    "title": "021-PsquebeC: gas monad (syntax module)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "8563",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Undelegation ; Sc_rollup_recover_bond]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2081824",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Set deposits limit ; Sc_rollup_origination]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2029435",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Increase paid storage ; Update consensus key]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2661072",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Sc_rollup_recover_bond ; Self-delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28306",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Dal_publish_commitment ; Dal_publish_commitment]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26849",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: reveal in the middle: [Zk_rollup_update ; Dal_publish_commitment]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "1483052",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch two sources: [Set deposits limit ; Self-delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26772",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch two sources: [Sc_rollup_add_messages ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26015",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch two sources: [Sc_rollup_recover_bond ; Delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26834",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch two sources: [Dal_publish_commitment ; Update consensus key]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "25570",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch two sources: [Zk_rollup_origination ; Sc_rollup_cement]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34286",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch incons. counters: [Register global constant ; Dal_publish_commitment]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28349",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch incons. counters: [Undelegation ; Update consensus key]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26790",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch incons. counters: [Self-delegation ; Register global constant]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "689828",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: batch incons. counters: [Sc_rollup_origination ; Self-delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31425",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance in middle of batch: [Set deposits limit ; Transfer_ticket]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28275",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance in middle of batch: [Sc_rollup_add_messages ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27723",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance in middle of batch: [Sc_rollup_recover_bond ; Increase paid storage]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28872",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance in middle of batch: [Dal_publish_commitment ; Zk_rollup_publish]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33457",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance in middle of batch: [Zk_rollup_origination ; Sc_rollup_execute_outbox_message]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "36778",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance at end of batch: [Register global constant ; Register global constant]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33667",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance at end of batch: [Self-delegation ; Sc_rollup_publish]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31548",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance at end of batch: [Update consensus key ; Dal_publish_commitment]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32599",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: empty balance at end of batch: [Sc_rollup_origination ; Undelegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32011",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption: [Set deposits limit ; Sc_rollup_publish]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33715",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption: [Update consensus key ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "815066",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption: [Sc_rollup_publish ; Zk_rollup_origination]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "36863",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption: [Sc_rollup_add_messages ; Sc_rollup_cement]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29988",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption: [Dal_publish_commitment ; Set deposits limit]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27536",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption (mempool): [Transaction ; Self-delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28913",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption (mempool): [Delegation ; Zk_rollup_publish]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27078",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption (mempool): [Sc_rollup_cement ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30127",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption (mempool): [Sc_rollup_refute ; Delegation]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29483",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Quebeca: too much gas consumption (mempool): [Zk_rollup_publish ; Origination]",
+    "tags": [
+      "batch",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30140",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Quebeca: unallocated source: Zk_rollup_publish",
+    "tags": [
+      "manager_operation",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29119",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Quebeca: balance too low for fee payment: Sc_rollup_publish",
+    "tags": [
+      "manager_operation",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "28396",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Quebeca: empty undelegated source: Dal_publish_commitment",
+    "tags": [
+      "manager_operation",
+      "quebeca",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32467",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/operations/test_voting.ml",
+    "title": "021-PsquebeC: voting (voting proposal, without quorum)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "22123",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/operations/test_sc_rollup.ml",
+    "title": "021-PsquebeC: sc rollup (0-tick commitments are forbidden)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "13237",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/michelson/test_ticket_scanner.ml",
+    "title": "021-PsquebeC: ticket scanner (tickets in pair with zero amount)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "10236",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/michelson/test_ticket_accounting.ml",
+    "title": "021-PsquebeC: ticket accounting (Diffs for tickets in args)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "12179",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/consensus/test_double_attestation.ml",
+    "title": "021-PsquebeC: double attestation (valid double attestation evidence)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "41603",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/consensus/test_baking.ml",
+    "title": "021-PsquebeC: baking (a delegate with 8000 tez can bake)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "15924",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Quebeca: Test simple slashing: true, edge 1, double attesting, denounce same cycle, denouncer with maybe staker, another slash, double attesting",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "377980",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Quebeca: Test simple slashing: true, edge 1/3, double baking, denounce same cycle, denouncer with maybe staker",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "371982",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Quebeca: Test simple slashing: true, edge 1/3, double attesting, denounce same cycle, denouncer with maybe staker",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "369483",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Quebeca: Test simple slashing: false, edge 1, double attesting, denounce same cycle, denouncer with maybe staker, another slash, double attesting",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "384229",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Quebeca: Test simple slashing: false, edge 1/3, double attesting, denounce same cycle, denouncer with maybe staker, another slash, double baking",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "398081",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing.ml",
+    "title": "Quebeca: Test multiple misbehaviors: No AI, true, 1 misbehavior loops, double misbehaviors, denounce chronologically, one by one",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing"
+    ],
+    "successful_runs": {
+      "total_time": "279994",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_scenario_slashing.ml",
+    "title": "Quebeca: Test slash timing: false, unstake, with a first slash",
+    "tags": [
+      "protocol",
+      "quebeca",
+      "scenario",
+      "slashing"
+    ],
+    "successful_runs": {
+      "total_time": "159986",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_protocol/test/integration/test_liquidity_baking.ml",
+    "title": "Quebeca: cpmm is originated at the expected address",
+    "tags": [
+      "liquidity_baking",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "6782",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_client/test/test_michelson_v1_macros.ml",
+    "title": "021-PsquebeC: micheline v1 macros (set_cdar unexpansion)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "316",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/unit/test_slashing_percentage.ml",
+    "title": "020-PsParisC: slashing_percentage (Test exact slashing values)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "23871",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/unit/test_sc_rollup_management_protocol.ml",
+    "title": "020-PsParisC: sc rollup management protocol (Encode/decode internal inbox message transfer)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "11519",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/unit/test_destination_repr.ml",
+    "title": "020-PsParisC: Destination_repr.ml (Binary encoding compatibility Contract_repr to Destination_repr with dummy contracts)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "277",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/unit/test_adaptive_issuance_ema.ml",
+    "title": "020-PsParisC: adaptive issuance ema (EMA increases when vote is On)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "170",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Delegation ; Transaction]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2767848",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Undelegation ; Undelegation]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2097455",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Self-delegation ; Sc_rollup_timeout]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "2762771",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Set deposits limit ; Sc_rollup_recover_bond]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26161",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Sc_rollup_add_messages ; Set deposits limit]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "25521",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: reveal in the middle: [Sc_rollup_timeout ; Zk_rollup_origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29549",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch two sources: [Increase paid storage ; Origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27433",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch two sources: [Transfer_ticket ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29033",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch two sources: [Sc_rollup_refute ; Transfer_ticket]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27083",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch two sources: [Sc_rollup_execute_outbox_message ; Dal_publish_commitment]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "115967",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch two sources: [Zk_rollup_update ; Register global constant]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "1463274",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Undelegation ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "814177",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Set deposits limit ; Sc_rollup_origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33499",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Sc_rollup_publish ; Update consensus key]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34396",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Sc_rollup_add_messages ; Delegation]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34926",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Dal_publish_commitment ; Sc_rollup_publish]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "36887",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: batch incons. counters: [Zk_rollup_origination ; Increase paid storage]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "48413",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance in middle of batch: [Increase paid storage ; Sc_rollup_origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30191",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance in middle of batch: [Transfer_ticket ; Register global constant]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "31037",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance in middle of batch: [Sc_rollup_cement ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "789505",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance in middle of batch: [Sc_rollup_refute ; Sc_rollup_timeout]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "27679",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance in middle of batch: [Zk_rollup_publish ; Transfer_ticket]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26774",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance at end of batch: [Transaction ; Delegation]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "26798",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance at end of batch: [Delegation ; Sc_rollup_execute_outbox_message]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30105",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance at end of batch: [Sc_rollup_add_messages ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34875",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance at end of batch: [Sc_rollup_recover_bond ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29572",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: empty balance at end of batch: [Zk_rollup_origination ; Transaction]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "36824",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption: [Increase paid storage ; Undelegation]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32640",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption: [Transfer_ticket ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32793",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption: [Sc_rollup_refute ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "34722",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption: [Sc_rollup_execute_outbox_message ; Sc_rollup_origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32629",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption: [Zk_rollup_update ; Delegation]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33741",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption (mempool): [Origination ; Update consensus key]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "38175",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption (mempool): [Undelegation ; Sc_rollup_refute]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "29892",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption (mempool): [Sc_rollup_origination ; Sc_rollup_origination]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "32706",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_validation_batch.ml",
+    "title": "Parisc: too much gas consumption (mempool): [Sc_rollup_timeout ; Zk_rollup_update]",
+    "tags": [
+      "batch",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33833",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Parisc: storage limit too high: Sc_rollup_refute",
+    "tags": [
+      "manager_operation",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30743",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Parisc: too much gas consumption in block: Register global constant",
+    "tags": [
+      "manager_operation",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "30436",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/validate/test_manager_operation_validation.ml",
+    "title": "Parisc: fees are taken when valid: Sc_rollup_add_messages",
+    "tags": [
+      "manager_operation",
+      "parisc",
+      "validation"
+    ],
+    "successful_runs": {
+      "total_time": "33815",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/operations/test_voting.ml",
+    "title": "020-PsParisC: voting (Ballot source not in vote listings)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "23821",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/operations/test_reveal.ml",
+    "title": "020-PsParisC: revelation (simple reveal)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "12036",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/michelson/test_ticket_operations_diff.ml",
+    "title": "020-PsParisC: ticket operations diff (originate with different tickets)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "15065",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/gas/test_gas_levels.ml",
+    "title": "020-PsParisC: gas levels (Accepts a block that consumes all of its gas)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "11469",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/consensus/test_delegation.ml",
+    "title": "020-PsParisC: delegation (originated bootstrap contract can be undelegated)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "9169",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Parisc: Test simple slashing: true, edge 1, double preattesting, denounce next cycle, denouncer with maybe staker",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "416615",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Parisc: Test simple slashing: true, edge 1/3, double preattesting, denounce next cycle, denouncer with maybe staker, another slash, double attesting",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "397805",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Parisc: Test simple slashing: false, edge 1, double preattesting, denounce next cycle, denouncer with maybe staker, another slash, double baking",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "401373",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing_stakers.ml",
+    "title": "Parisc: Test simple slashing: false, edge 1/3, double preattesting, denounce next cycle, denouncer with maybe staker, another slash, double attesting",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing",
+      "stakers"
+    ],
+    "successful_runs": {
+      "total_time": "382029",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing.ml",
+    "title": "Parisc: Test multiple misbehaviors: Yes AI, false, 1 misbehavior loops, double misbehaviors, denounce chronologically, all at once",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing"
+    ],
+    "successful_runs": {
+      "total_time": "238062",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_protocol/test/integration/test_scenario_slashing.ml",
+    "title": "Parisc: Test slash timing: true, unstake, with a first slash, 3 cycles lag",
+    "tags": [
+      "parisc",
+      "protocol",
+      "scenario",
+      "slashing"
+    ],
+    "successful_runs": {
+      "total_time": "180541",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_client/test/test_michelson_v1_macros.ml",
+    "title": "020-PsParisC: micheline v1 macros (diip expansion)",
+    "tags": [
+      "alcotezt",
+      "quick",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "263",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_tree_encoding/test/test_encoding.ml",
+    "title": "test lib tree encoding: Encodings (Raw)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "195",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_store/unix/test/test_locator.ml",
+    "title": "tezos-store: locator (test pred)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "134653",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_store/unix/test/test.ml",
+    "title": "tezos-store: reconstruct (Reconstructing from snapshots on a Full mode node with 57 blocks.)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "1573091",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_stdlib/test/test_hash_queue.ml",
+    "title": "stdlib: hash_queue (take_replace_keep_order)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "170",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_shell/test/test_synchronisation_heuristic.ml",
+    "title": "tezos-shell: synchronisation heuristic  (test bp activate)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "178",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_wasm_pvm.ml",
+    "title": "test lib scoru wasm: WASM PVM (Test Stuck state is truncated on long messages (2.0.0))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "5850",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_wasm_pvm.ml",
+    "title": "test lib scoru wasm: WASM PVM (Test reboot (2.0.0-r3))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "23988",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_wasm_pvm.ml",
+    "title": "test lib scoru wasm: WASM PVM (Test write_debug kernel (2.0.0-r5))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "1791",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_init.ml",
+    "title": "test lib scoru wasm: Module Initialisation (imports only PVM host functions (2.0.0-r6))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "3476",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_durable_storage.ml",
+    "title": "test lib scoru wasm: Durable storage (store_delete removes subtree and value (2.0.0-r4))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "529",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_scoru_wasm/test/test_durable_storage.ml",
+    "title": "test lib scoru wasm: Durable storage (store_write (2.0.0-r6))",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "816",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_polynomial/test/test_with_finite_field.ml",
+    "title": "Polynomials with F379 and some random prime fields: Test evaluation, field order = 143223727 (evaluation at any point of a random constant polynomial)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "226",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_polynomial/test/test_with_finite_field.ml",
+    "title": "Polynomials with F379 and some random prime fields: Dense polynomial coefficients for prime field 143223727 (test vectors)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "154",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_polynomial/test/test_with_finite_field.ml",
+    "title": "Polynomials with F379 and some random prime fields: Tests on degrees, field order = 379 (degree of zero is infinity)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "113",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_vesta_jacobian.ml",
+    "title": "Vesta jacobian coordinates: Group properties (opposite_existential_property)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "12433",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_tweedledum_projective.ml",
+    "title": "Tweedledum projective coordinates: Group properties (opposite_existential_property)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "13206",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_tweedledum_affine.ml",
+    "title": "Tweedledum affine coordinates: Group properties (additive_associativity)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "41137",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_tweedledee_affine.ml",
+    "title": "Tweedledee affine coordinates: value generation (negate generates a valid point)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "13378",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_secp256r1_jacobian.ml",
+    "title": "secp256r1 jacobian coordinates: value generation (double_with_zero)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "100",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_secp256k1_projective.ml",
+    "title": "secp256k1 projective coordinates: Group properties (opposite_of_opposite_of_zero_is_zero)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "82",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_secp256k1_affine.ml",
+    "title": "secp256k1 affine coordinates: Group properties (check_bytes_random)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "3978",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_pedersen_hash.ml",
+    "title": "Pedersen Hash Zcash: Too long bitstrings (Too long bitstrings, not enough generators)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "17431",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_pallas_projective.ml",
+    "title": "Pallas projective coordinates: Group properties (check_bytes_random_multiplication)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "161823",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_jubjub_weierstrass.ml",
+    "title": "Jubjub - Weierstrass - Affine coordinates: value generation (double_with_zero)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "128",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_curve25519_montgomery.ml",
+    "title": "Curve25519: Group properties (opposite_of_zero_is_zero)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "105",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_bn254_jacobian.ml",
+    "title": "BN254 jacobian coordinates: Group properties (opposite_existential_property)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "3759",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_bls12_381_projective.ml",
+    "title": "BLS12-381 G1 projective form: Group properties (additive_commutativity)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "177928",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_bandersnatch_affine_weierstrass.ml",
+    "title": "Bandersnatch Weierstrass form, affine coordinates: value generation (negate_with_random)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "15242",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_bandersnatch_affine_edwards.ml",
+    "title": "Bandersnatch Edwards form, affine coordinates: equality (zero)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "136",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_mec/test/test_babyjubjub_reduced.ml",
+    "title": "BabyJubjub reduced twisted edwards form: Serialisation (of_bytes_opt and to_bytes are inverse functions)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "339",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_lwt_result_stdlib/test/test_list_basic_lwt.ml",
+    "title": "list-basic-lwt: init (init_es)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "148",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_hacl/test/test.ml",
+    "title": "hacl-test: tests (Testing NaCl.Secretbox)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "220",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_hacl/test/test_hacl.ml",
+    "title": "tezos-crypto: hash (keccak_256)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "261",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_gossipsub/test/test_unit.ml",
+    "title": "Gossipsub: Test prune removes peer from mesh",
+    "tags": [
+      "gossipsub",
+      "prune"
+    ],
+    "successful_runs": {
+      "total_time": "282",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381_signature/test/test_signature.ml",
+    "title": "BLS Signature: MinSig Auxiliary functions (pk_of_bytes_opt does check the input)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "190",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381_signature/test/test_aggregated_signature.ml",
+    "title": "BLS Aggregated Signature: minPk Properties for Proof of possession (Sign and verify correct signature with correct pks and some incorrect pops and correct msg)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "193321",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381/test/test_pairing.ml",
+    "title": "Pairing: Properties (test vectors pairing of one and one)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "254",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381/test/test_g2.ml",
+    "title": "G2: Curve properties (opposite_of_opposite_using_scalar)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "113113",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381/test/test_g1.ml",
+    "title": "G1: Bulk operations (to_affine_array)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "941292",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_bls12_381/test/test_fr.ml",
+    "title": "Fr: Equality for field of order 524358751751261904794477405081859658376905525005276378226036586999385811 (zero_same_objects)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "164",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/lib_base/test/test_sized.ml",
+    "title": "Sized: SizedSet (singleton)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "169",
+      "count": "1"
+    }
+  },
+  {
+    "file": "irmin/test/irmin/generic-key/test.ml",
+    "title": "irmin/generic-key: store_offset (with_tree strategies)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "586",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_sequencer.ml",
+    "title": "Alpha: Import sequencer snapshot in populated data dir (sequencer, latest, without dal)",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "evm",
+      "evm_kernel",
+      "evm_node",
+      "latest",
+      "node",
+      "sequencer",
+      "smart_rollup_installer",
+      "smart_rollup_node",
+      "snapshots"
+    ],
+    "successful_runs": {
+      "total_time": "29357272",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_sequencer.ml",
+    "title": "Alpha: Sequencer can run debug_traceTransaction and return a valid log (sequencer, ghostnet, without dal)",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "call",
+      "client",
+      "evm",
+      "evm_node",
+      "ghostnet",
+      "ghostnet_evm_kernel",
+      "node",
+      "rpc",
+      "smart_rollup_installer",
+      "smart_rollup_node",
+      "trace"
+    ],
+    "successful_runs": {
+      "total_time": "37156158",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_rollup.ml",
+    "title": "Alpha: Block size is greater than zero (sequencer, ghostnet, without dal)",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "block",
+      "client",
+      "evm",
+      "evm_node",
+      "ghostnet",
+      "ghostnet_evm_kernel",
+      "node",
+      "sequencer",
+      "size",
+      "smart_rollup_installer",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "32640888",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_rollup.ml",
+    "title": "Alpha: Check RPC web3_clientVersion (sequencer, ghostnet, without dal)",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "client_version",
+      "evm",
+      "evm_node",
+      "ghostnet",
+      "ghostnet_evm_kernel",
+      "node",
+      "rpc",
+      "sequencer",
+      "smart_rollup_installer",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "29512692",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_rollup.ml",
+    "title": "Alpha: RPC method eth_getTransactionByBlockNumberAndIndex (sequencer, mainnet, without dal)",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "block_number_and_index",
+      "client",
+      "evm",
+      "evm_node",
+      "get_transaction_by",
+      "mainnet",
+      "mainnet_evm_kernel",
+      "node",
+      "rpc",
+      "sequencer",
+      "smart_rollup_installer",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "46359555",
+      "count": "1"
+    }
+  },
+  {
+    "file": "etherlink/tezt/tests/evm_rollup.ml",
+    "title": "Alpha: migrate from proxy to sequencer using a sequencer admin contract with a future timestamp",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "evm",
+      "evm_kernel",
+      "evm_node",
+      "init",
+      "migration",
+      "node",
+      "rollup_node",
+      "sequencer",
+      "smart_rollup_installer",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "62884196",
+      "count": "1"
+    }
+  },
+  {
+    "file": "brassaia/test/brassaia/generic-key/test.ml",
+    "title": "brassaia/generic-key: inlined_contents (High-level store merges)",
+    "tags": [
+      "alcotezt",
+      "quick"
+    ],
+    "successful_runs": {
+      "total_time": "4060",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/cli_tezos.ml",
+    "title": "CLI under connections cap",
+    "tags": [
+      "cli",
+      "connections",
+      "node"
+    ],
+    "successful_runs": {
+      "total_time": "2191009",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/protocol_migration.ml",
+    "title": "protocol migration at level 13",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "migration",
+      "node",
+      "protocol",
+      "sandbox"
+    ],
+    "successful_runs": {
+      "total_time": "27346705",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/adaptive_issuance.ml",
+    "title": "Quebeca: Staking - test staking with delegate and staker in a simple scenario",
+    "tags": [
+      "accuser",
+      "accuser_psquebec",
+      "adaptive_issuance",
+      "admin_client",
+      "baking",
+      "client",
+      "double",
+      "node",
+      "quebeca",
+      "rewards",
+      "slashing",
+      "staking"
+    ],
+    "successful_runs": {
+      "total_time": "98939950",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/big_map_all.ml",
+    "title": "Alpha: RPC /chain/<chain_id>/blocks/<block_id>/context/big_maps/<big_map_id>?offset=[int]&length=[int]",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "big_map_all",
+      "client",
+      "node",
+      "rpc"
+    ],
+    "successful_runs": {
+      "total_time": "10778558",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/consensus_key.ml",
+    "title": "Alpha: Test set consensus key - baker is not delegate",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "consensus_key",
+      "layer1",
+      "node"
+    ],
+    "successful_runs": {
+      "total_time": "11094657",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Alpha: opcodes [list_map_block--storage907453363--input648737279]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "michelson"
+    ],
+    "successful_runs": {
+      "total_time": "481486",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Quebeca: opcodes [or_binary--storage921624073--input832403787]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "454241",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Alpha: opcodes [shifts--storage921624073--input115382786]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "michelson"
+    ],
+    "successful_runs": {
+      "total_time": "468128",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Parisc: opcodes [list_iter--storage680650890--input568817463]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "494372",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Parisc: opcodes [set_size--storage492856247--input403499055]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "451725",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Quebeca: opcodes [get_and_update_map--storage1026405794--input329240220]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "474097",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Alpha: opcodes [bls12_381_z_fr_nat--storage994282947--input680650890]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "michelson"
+    ],
+    "successful_runs": {
+      "total_time": "467966",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Parisc: opcodes [bls12_381_z_fr_nat--storage994282947--input453441034]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "454251",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_opcodes.ml",
+    "title": "Quebeca: opcodes [bls12_381_fr_to_int--storage680650890--input151303925]",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "michelson",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "467395",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_macros.ml",
+    "title": "Parisc: macros [set_caddaadr--storage395477859--input949481318]",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "macros",
+      "michelson",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "465157",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/contract_macros.ml",
+    "title": "Quebeca: macro failure [assert_lt--storage125992234--input1011138251]",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "macros",
+      "michelson",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "461194",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/double_consensus.ml",
+    "title": "Parisc: double preattestation using wrong branch",
+    "tags": [
+      "accuser",
+      "accuser_psparisc",
+      "admin_client",
+      "branch",
+      "client",
+      "double",
+      "layer1",
+      "node",
+      "parisc",
+      "preattestation"
+    ],
+    "successful_runs": {
+      "total_time": "11475137",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/encoding.ml",
+    "title": "Alpha: protocol encoding regression test: gas.cost",
+    "tags": [
+      "regression",
+      "alpha",
+      "codec",
+      "cost",
+      "encoding",
+      "gas",
+      "protocol"
+    ],
+    "successful_runs": {
+      "total_time": "1881268",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/http_cache_headers.ml",
+    "title": "Parisc: max-age header for local rpc",
+    "tags": [
+      "admin_client",
+      "client",
+      "http_cache_headers",
+      "middleware",
+      "node",
+      "parisc",
+      "rpc"
+    ],
+    "successful_runs": {
+      "total_time": "6168779",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/manager_operations.ml",
+    "title": "Quebeca: Test batch with wrong counters (+1, +2, +2)",
+    "tags": [
+      "admin_client",
+      "batch",
+      "client",
+      "counters",
+      "layer1",
+      "node",
+      "quebeca",
+      "transaction",
+      "transfer"
+    ],
+    "successful_runs": {
+      "total_time": "6939299",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/manager_operations.ml",
+    "title": "Parisc: Test batch with wrong counters (+1, +2, +4)",
+    "tags": [
+      "admin_client",
+      "batch",
+      "client",
+      "counters",
+      "layer1",
+      "node",
+      "parisc",
+      "transaction",
+      "transfer"
+    ],
+    "successful_runs": {
+      "total_time": "6976176",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/prevalidator.ml",
+    "title": "Alpha: Mempool disabled",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "disabled",
+      "injection",
+      "layer1",
+      "mempool",
+      "node"
+    ],
+    "successful_runs": {
+      "total_time": "15919416",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/proxy.ml",
+    "title": "Alpha: (Proxy) (/chains/main/blocks/head/votes/total_voting_power) No useless RPC call",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "get",
+      "layer1",
+      "node",
+      "proxy",
+      "rpc"
+    ],
+    "successful_runs": {
+      "total_time": "3935867",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/proxy.ml",
+    "title": "Quebeca: (Proxy) (/chains/main/blocks/head/helpers/levels_in_current_cycle) Cache at most once",
+    "tags": [
+      "admin_client",
+      "client",
+      "get",
+      "layer1",
+      "node",
+      "proxy",
+      "quebeca",
+      "rpc"
+    ],
+    "successful_runs": {
+      "total_time": "4019829",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/RPC_test.ml",
+    "title": "Parisc: (mode client) RPC regression tests: adaptive_issuance",
+    "tags": [
+      "regression",
+      "adaptive_issuance",
+      "admin_client",
+      "client",
+      "node",
+      "parisc",
+      "rpc"
+    ],
+    "successful_runs": {
+      "total_time": "10967480",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/rpc_versioning_attestation.ml",
+    "title": "Parisc: Preapply operation with consensus operations",
+    "tags": [
+      "admin_client",
+      "client",
+      "consensus",
+      "layer1",
+      "node",
+      "operations",
+      "parisc",
+      "preapply",
+      "rpc",
+      "versioning"
+    ],
+    "successful_runs": {
+      "total_time": "7366748",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/rpc_versioning_attestation.ml",
+    "title": "Parisc: Block double preconsensus evidence operations",
+    "tags": [
+      "admin_client",
+      "block",
+      "client",
+      "consensus",
+      "double",
+      "evidence",
+      "layer1",
+      "node",
+      "operations",
+      "parisc",
+      "pre",
+      "rpc",
+      "versioning"
+    ],
+    "successful_runs": {
+      "total_time": "12524428",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sapling.ml",
+    "title": "Quebeca: successful_roundtrip",
+    "tags": [
+      "admin_client",
+      "client",
+      "node",
+      "quebeca",
+      "sapling"
+    ],
+    "successful_runs": {
+      "total_time": "27287096",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sapling.ml",
+    "title": "Alpha: test sapling different memo size",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "memo_size",
+      "sapling",
+      "shield"
+    ],
+    "successful_runs": {
+      "total_time": "3764827",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/script_illtyped.ml",
+    "title": "Quebeca: Test Deprecated Typecheck Breaks - legacy/create_contract_flags",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "michelson",
+      "quebeca",
+      "script",
+      "typechecking"
+    ],
+    "successful_runs": {
+      "total_time": "1165743",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/script_illtyped.ml",
+    "title": "Parisc: Test Ill Typecheck - stack_bottom_undip2able",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "michelson",
+      "parisc",
+      "script",
+      "typechecking"
+    ],
+    "successful_runs": {
+      "total_time": "1492302",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/script_illtyped.ml",
+    "title": "Alpha: Test Ill Typecheck - big_drop",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "layer1",
+      "michelson",
+      "script",
+      "typechecking"
+    ],
+    "successful_runs": {
+      "total_time": "1259257",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/script_illtyped.ml",
+    "title": "Alpha: Test Ill Typecheck - comb1",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "layer1",
+      "michelson",
+      "script",
+      "typechecking"
+    ],
+    "successful_runs": {
+      "total_time": "973390",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/script_illtyped.ml",
+    "title": "Quebeca: Test Ill Typecheck - ticket_dup",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "michelson",
+      "quebeca",
+      "script",
+      "typechecking"
+    ],
+    "successful_runs": {
+      "total_time": "1075068",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sc_rollup.ml",
+    "title": "Parisc: wasm_2_0_0 - output exec (0, entrypoint: %default, eager: 0, intern, int)",
+    "tags": [
+      "admin_client",
+      "client",
+      "codec",
+      "default",
+      "etherlink",
+      "int",
+      "intern",
+      "node",
+      "outbox",
+      "parisc",
+      "sc_rollup",
+      "smart_rollup_node",
+      "wasm_2_0_0"
+    ],
+    "successful_runs": {
+      "total_time": "17610503",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sc_rollup.ml",
+    "title": "Parisc: wasm_2_0_0 - output exec (0, entrypoint: %default, eager: 5, intern, no_parameters_ty)",
+    "tags": [
+      "admin_client",
+      "client",
+      "codec",
+      "default",
+      "etherlink",
+      "intern",
+      "no_parameters_ty",
+      "node",
+      "outbox",
+      "parisc",
+      "sc_rollup",
+      "smart_rollup_node",
+      "wasm_2_0_0"
+    ],
+    "successful_runs": {
+      "total_time": "15159260",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sc_rollup.ml",
+    "title": "Parisc: arith - rollup node - correct handling of commitments (messages_reset)",
+    "tags": [
+      "admin_client",
+      "arith",
+      "client",
+      "commitment",
+      "etherlink",
+      "node",
+      "parisc",
+      "sc_rollup",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "24876050",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/sc_rollup.ml",
+    "title": "Parisc: arith - output exec (0, entrypoint: %default, eager: 0, extern, no_parameters_ty, auto_execute_outbox)",
+    "tags": [
+      "admin_client",
+      "arith",
+      "client",
+      "codec",
+      "default",
+      "etherlink",
+      "extern",
+      "no_parameters_ty",
+      "node",
+      "outbox",
+      "parisc",
+      "sc_rollup",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "16427452",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/tenderbake.ml",
+    "title": "Alpha: Tenderbake low level repropose",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "attest",
+      "client",
+      "layer1",
+      "low_level",
+      "node",
+      "preattest",
+      "propose",
+      "repropose",
+      "tenderbake"
+    ],
+    "successful_runs": {
+      "total_time": "11466062",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/views.ml",
+    "title": "Quebeca: sender after view - sender_after_view",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "michelson",
+      "quebeca"
+    ],
+    "successful_runs": {
+      "total_time": "2457357",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/views.ml",
+    "title": "Parisc: sender after view - sender_after_view",
+    "tags": [
+      "admin_client",
+      "client",
+      "layer1",
+      "michelson",
+      "parisc"
+    ],
+    "successful_runs": {
+      "total_time": "2745841",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/views.ml",
+    "title": "Alpha: Typecheck view - view_toplevel_dupable_type_output",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "client",
+      "layer1",
+      "michelson"
+    ],
+    "successful_runs": {
+      "total_time": "1424973",
+      "count": "1"
+    }
+  }
+]

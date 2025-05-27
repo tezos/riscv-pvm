@@ -1,0 +1,15 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_version)
+ (public_name octez-libs.version)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.data-encoding
+  octez-libs.error-monad
+  octez-libs.version.parser)
+ (flags
+  (:standard)
+  -open Tezos_error_monad
+  -open Tezos_error_monad.TzLwtreslib))

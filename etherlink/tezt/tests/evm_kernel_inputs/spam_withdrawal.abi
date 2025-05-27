@@ -1,0 +1,35 @@
+[
+	{
+		"type": "function",
+		"name": "batchTopUp",
+		"inputs": [
+			{
+				"name": "accounts",
+				"type": "address[]",
+				"internalType": "address[]"
+			}
+		],
+		"outputs": [],
+		"stateMutability": "nonpayable"
+	},
+	{
+		"type": "function",
+		"name": "doWithdrawals",
+		"inputs": [
+			{
+				"name": "n",
+				"type": "uint256",
+				"internalType": "uint256"
+			}
+		],
+		"outputs": [],
+		"stateMutability": "payable"
+	},
+	{
+		"type": "function",
+		"name": "giveFunds",
+		"inputs": [],
+		"outputs": [],
+		"stateMutability": "payable"
+	}
+]

@@ -1,0 +1,26 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executable
+ (name test_distribution)
+ (libraries
+  bls12-381.archive
+  octez-libs.distributed-plonk
+  octez-libs.plonk
+  octez-libs.plonk.aggregation
+  octez-libs.plonk.distribution
+  octez-libs.aplonk
+  octez-libs.plonk.plonk-test
+  octez-libs.test-helpers
+  tezt)
+ (flags
+  (:standard)
+  -open Tezos_test_helpers
+  -open Tezt
+  -open Tezt.Base))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (enabled_if (= false %{env:CI=false}))
+ (action (run %{dep:./test_distribution.exe})))

@@ -1,0 +1,14 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executable
+ (name tztop_main)
+ (public_name tztop)
+ (package internal-devtools)
+ (modes byte)
+ (libraries
+  bls12-381.archive
+  octez-protocol-compiler
+  octez-libs.base
+  compiler-libs.toplevel
+  (select tztop.ml from (utop -> tztop.utop.ml) (-> tztop.vanilla.ml))))

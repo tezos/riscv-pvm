@@ -1,0 +1,52 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name src_lib_signer_backends_test_tezt_lib)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezt.core
+  bls12-381.archive
+  octez-libs.base
+  octez-libs.base.unix
+  octez-libs.stdlib
+  octez-libs.error-monad
+  octez-libs.crypto
+  octez-shell-libs.client-base
+  octez-shell-libs.signer-backends
+  octez-alcotezt
+  uri)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezt_core
+  -open Tezt_core.Base
+  -open Tezos_stdlib
+  -open Tezos_error_monad
+  -open Tezos_error_monad.TzLwtreslib
+  -open Tezos_client_base
+  -open Tezos_signer_backends
+  -open Octez_alcotezt)
+ (modules test_encrypted))
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx --bisect-sigterm))
+ (libraries
+  octez-rustzcash-deps
+  src_lib_signer_backends_test_tezt_lib
+  tezt)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/macos-link-flags.sexp))
+ (modules main))
+
+(rule
+ (alias runtest)
+ (package octez-shell-libs)
+ (enabled_if (<> false %{env:RUNTEZTALIAS=true}))
+ (action (run %{dep:./main.exe} /flaky /ci_disabled)))
+
+(rule
+ (targets main.ml)
+ (action (with-stdout-to %{targets} (echo "let () = Tezt.Test.run ()"))))

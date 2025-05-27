@@ -1,0 +1,15 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_test_helpers)
+ (public_name octez-libs.test-helpers)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  uri
+  fmt
+  qcheck-alcotest
+  lwt
+  pure-splitmix
+  octez-libs.data-encoding)
+ (library_flags (:standard -linkall)))

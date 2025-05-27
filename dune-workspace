@@ -1,0 +1,11 @@
+(lang dune 3.7)
+
+(env
+ (dev (flags (:standard -w @1..72-4-40..42-44-45-48-60-67-69-70)))
+ (release (ocamlopt_flags (:standard -O3)))
+ (static (ocamlopt_flags (:standard -O3))))
+
+(context (default (paths (ORIGINAL_PATH :standard))))
+
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.

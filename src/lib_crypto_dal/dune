@@ -1,0 +1,27 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_crypto_dal)
+ (public_name octez-libs.crypto-dal)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.stdlib
+  octez-libs.stdlib-unix
+  octez-libs.error-monad
+  octez-libs.data-encoding
+  octez-libs.crypto-dal.dal-config
+  octez-libs.bls12-381-polynomial
+  octez-libs.cohttp-lwt-unix
+  octez-libs.lwt-result-stdlib
+  lwt.unix
+  octez-libs.kzg
+  octez-libs.event-logging
+  octez-libs.base)
+ (flags
+  (:standard)
+  -open Tezos_stdlib
+  -open Tezos_stdlib_unix
+  -open Tezos_error_monad
+  -open Data_encoding
+  -open Tezos_crypto_dal_octez_dal_config))

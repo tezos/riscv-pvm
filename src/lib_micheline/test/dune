@@ -1,0 +1,28 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name test_parser)
+ (package octez-libs)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.micheline)
+ (inline_tests (flags -verbose) (modes native))
+ (preprocess (pps ppx_expect))
+ (flags
+  (:standard)
+  -open Tezos_micheline)
+ (modules test_parser))
+
+(library
+ (name test_diff)
+ (package octez-libs)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.micheline)
+ (inline_tests (flags -verbose) (modes native))
+ (preprocess (pps ppx_expect))
+ (flags
+  (:standard)
+  -open Tezos_micheline)
+ (modules test_diff))

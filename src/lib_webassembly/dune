@@ -1,0 +1,19 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_webassembly_interpreter)
+ (public_name octez-libs.webassembly-interpreter)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.lwt-result-stdlib
+  octez-libs.stdlib
+  octez-libs.error-monad
+  zarith
+  octez-libs.lazy-containers)
+ (preprocess (pps ppx_deriving.show))
+ (flags
+  (:standard)
+  -open Tezos_lazy_containers))
+
+(include_subdirs unqualified)

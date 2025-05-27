@@ -1,0 +1,180 @@
+(*****************************************************************************)
+(*                                                                           *)
+(* Open Source License                                                       *)
+(* Copyright (c) Nomadic Labs, <contact@nomadic-labs.com>                    *)
+(* Copyright (c) Functori, <contact@functori.com>                            *)
+(*                                                                           *)
+(* Permission is hereby granted, free of charge, to any person obtaining a   *)
+(* copy of this software and associated documentation files (the "Software"),*)
+(* to deal in the Software without restriction, including without limitation *)
+(* the rights to use, copy, modify, merge, publish, distribute, sublicense,  *)
+(* and/or sell copies of the Software, and to permit persons to whom the     *)
+(* Software is furnished to do so, subject to the following conditions:      *)
+(*                                                                           *)
+(* The above copyright notice and this permission notice shall be included   *)
+(* in all copies or substantial portions of the Software.                    *)
+(*                                                                           *)
+(* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR*)
+(* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,  *)
+(* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL   *)
+(* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER*)
+(* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING   *)
+(* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER       *)
+(* DEALINGS IN THE SOFTWARE.                                                 *)
+(*                                                                           *)
+(*****************************************************************************)
+
+module Simple = struct
+  include Internal_event.Simple
+
+  let section = ["l1_crawler"]
+
+  let declare_0 ~name ~msg ?level () =
+    declare_1
+      ~section
+      ~prefix_name_with_section:true
+      ~name
+      ~msg:("[{name}] " ^ msg)
+      ?level
+      ("name", Data_encoding.string)
+      ~pp1:Format.pp_print_string
+
+  let declare_1 ~name ~msg ?level ?pp1 enc1 =
+    declare_2
+      ~section
+      ~prefix_name_with_section:true
+      ~name
+      ~msg:("[{name}] " ^ msg)
+      ?level
+      ("name", Data_encoding.string)
+      enc1
+      ~pp1:Format.pp_print_string
+      ?pp2:pp1
+
+  let declare_2 ~name ~msg ?level ?pp1 ?pp2 enc1 enc2 =
+    declare_3
+      ~section
+      ~prefix_name_with_section:true
+      ~name
+      ~msg:("[{name}] " ^ msg)
+      ?level
+      ("name", Data_encoding.string)
+      enc1
+      enc2
+      ~pp1:Format.pp_print_string
+      ?pp2:pp1
+      ?pp3:pp2
+
+  let starting =
+    declare_0 ~name:"starting" ~msg:"Starting layer 1 tracker" ~level:Notice ()
+
+  let stopping =
+    declare_0 ~name:"stopping" ~msg:"Stopping layer 1 tracker" ~level:Notice ()
+
+  let connection_lost =
+    declare_0
+      ~name:"connection_lost"
+      ~msg:"connection to the node has been lost"
+      ~level:Warning
+      ()
+
+  let connection_timeout =
+    declare_1
+      ~name:"connection_timeout"
+      ~msg:
+        "Connection to the node has timeout after {timeout}s waiting for a new \
+         head"
+      ~level:Warning
+      ("timeout", Data_encoding.float)
+
+  let cannot_connect =
+    declare_2
+      ~name:"cannot_connect"
+      ~msg:"cannot connect to Tezos node ({count}) {error}"
+      ~level:Warning
+      ("count", Data_encoding.int31)
+      ("error", trace_encoding)
+      ~pp2:pp_print_trace
+
+  let wait_reconnect =
+    declare_1
+      ~name:"wait_reconnect"
+      ~msg:"Retrying to connect in {delay}s"
+      ~level:Warning
+      ("delay", Data_encoding.float)
+
+  let switched_new_head =
+    declare_2
+      ~name:"new_head"
+      ~msg:"L1 node switched to head {hash} at level {level}"
+      ~level:Info
+      ("hash", Block_hash.encoding)
+      ("level", Data_encoding.int32)
+
+  let connected =
+    declare_0 ~name:"connected" ~msg:"Connected to L1 node" ~level:Debug ()
+
+  let stopping_old_connection =
+    declare_0
+      ~name:"stopping_old_connection"
+      ~msg:"Stopping previous L1 connection before reconnecting"
+      ~level:Debug
+      ()
+
+  let reconnect_connecting =
+    declare_0
+      ~name:"reconnect_connecting"
+      ~msg:"Reconnect, already pending reconnection, wait"
+      ~level:Debug
+      ()
+
+  let reconnect_notified =
+    declare_0
+      ~name:"reconnect_notified"
+      ~msg:"Notified of reconnection"
+      ~level:Debug
+      ()
+
+  let reconnect_disconnected =
+    declare_0
+      ~name:"reconnect_disconnected"
+      ~msg:"Reconnect on disconnected, connect"
+      ~level:Debug
+      ()
+
+  let reconnect_connected =
+    declare_0
+      ~name:"reconnect_connected"
+      ~msg:"Reconnect on connected, force reconnection"
+      ~level:Debug
+      ()
+end
+
+let starting ~name = Simple.(emit starting) name
+
+let stopping ~name = Simple.(emit stopping) name
+
+let connection_lost ~name = Simple.(emit connection_lost) name
+
+let connection_timeout ~name ~timeout =
+  Simple.(emit connection_timeout) (name, timeout)
+
+let cannot_connect ~name ~count error =
+  Simple.(emit cannot_connect) (name, count, error)
+
+let wait_reconnect ~name delay = Simple.(emit wait_reconnect) (name, delay)
+
+let switched_new_head ~name hash level =
+  Simple.(emit switched_new_head) (name, hash, level)
+
+let connected ~name = Simple.(emit connected) name
+
+let stopping_old_connection ~name = Simple.(emit stopping_old_connection) name
+
+let reconnect_connecting ~name = Simple.(emit reconnect_connecting) name
+
+let reconnect_notified ~name = Simple.(emit reconnect_notified) name
+
+let reconnect_disconnected ~name = Simple.(emit reconnect_disconnected) name
+
+let reconnect_connected ~name = Simple.(emit reconnect_connected) name

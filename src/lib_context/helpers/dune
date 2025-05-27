@@ -1,0 +1,19 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_context_helpers)
+ (public_name octez-libs.tezos-context.helpers)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  octez-libs.stdlib
+  octez-libs.tezos-context.encoding
+  octez-libs.context.sigs
+  octez-libs.tezos-context.merkle_proof_encoding
+  octez-internal-libs.irmin
+  octez-internal-libs.irmin_pack)
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_stdlib))

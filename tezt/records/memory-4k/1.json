@@ -1,0 +1,138 @@
+[
+  {
+    "file": "tezt/tests/sc_rollup.ml",
+    "title": "Alpha: riscv - node advances PVM state with messages (external)",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "etherlink",
+      "memory_4k",
+      "node",
+      "pvm",
+      "riscv",
+      "sc_rollup",
+      "smart_rollup_node"
+    ],
+    "successful_runs": {
+      "total_time": "85046911",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/synchronisation_heuristic.ml",
+    "title": "Quebeca: bootstrap: many nodes bootstrap",
+    "tags": [
+      "admin_client",
+      "baker_psquebec",
+      "bootstrap",
+      "client",
+      "layer1",
+      "memory_4k",
+      "node",
+      "quebeca",
+      "synchronisation_threshold",
+      "threshold"
+    ],
+    "successful_runs": {
+      "total_time": "54745134",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/dal.ml",
+    "title": "Parisc: Testing DAL L1 integration (Use all available slots)",
+    "tags": [
+      "regression",
+      "admin_client",
+      "client",
+      "dal",
+      "memory_4k",
+      "node",
+      "parisc",
+      "tezos2"
+    ],
+    "successful_runs": {
+      "total_time": "39899896",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/dal.ml",
+    "title": "Alpha: Testing DAL L1 integration (Use all available slots)",
+    "tags": [
+      "regression",
+      "admin_client",
+      "alpha",
+      "client",
+      "dal",
+      "memory_4k",
+      "node",
+      "tezos2"
+    ],
+    "successful_runs": {
+      "total_time": "38686781",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/dal.ml",
+    "title": "Quebeca: Testing DAL node (banned attesters receive their shards thanks to amplification)",
+    "tags": [
+      "admin_client",
+      "amplification",
+      "client",
+      "dal",
+      "dal_node",
+      "memory_4k",
+      "node",
+      "quebeca",
+      "tezos2"
+    ],
+    "successful_runs": {
+      "total_time": "43810706",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/dal.ml",
+    "title": "Parisc: Testing DAL node (observer triggers amplification (without lost shards))",
+    "tags": [
+      "admin_client",
+      "amplification",
+      "client",
+      "dal",
+      "dal_node",
+      "memory_4k",
+      "node",
+      "parisc",
+      "simple",
+      "tezos2"
+    ],
+    "successful_runs": {
+      "total_time": "45260672",
+      "count": "1"
+    }
+  },
+  {
+    "file": "tezt/tests/dal.ml",
+    "title": "Alpha: Testing DAL node (observer triggers amplification (without lost shards))",
+    "tags": [
+      "admin_client",
+      "alpha",
+      "amplification",
+      "client",
+      "dal",
+      "dal_node",
+      "memory_4k",
+      "node",
+      "simple",
+      "tezos2"
+    ],
+    "successful_runs": {
+      "total_time": "35640083",
+      "count": "1"
+    }
+  }
+]

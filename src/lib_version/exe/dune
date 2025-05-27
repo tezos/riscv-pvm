@@ -1,0 +1,46 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executable
+ (name get_git_info)
+ (libraries
+  bls12-381.archive
+  dune-configurator
+  octez-libs.version.parser)
+ (modules get_git_info))
+
+(executable
+ (name octez_print_version)
+ (public_name octez-version)
+ (package octez-version)
+ (libraries
+  octez-version.value
+  octez-version.print)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/static-link-flags.sexp))
+ (flags
+  (:standard)
+  -open Tezos_version_value
+  -open Octez_version_print)
+ (modules octez_print_version))
+
+(executable
+ (name octez_evm_node_print_version)
+ (public_name octez-evm-node-version)
+ (package octez-version)
+ (libraries
+  bls12-381.archive
+  octez-version.value
+  octez-libs.version
+  octez-libs.base.unix
+  octez-version.print)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/static-link-flags.sexp))
+ (flags
+  (:standard)
+  -open Tezos_version_value
+  -open Tezos_version
+  -open Octez_version_print)
+ (modules octez_evm_node_print_version))

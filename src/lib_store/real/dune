@@ -1,0 +1,13 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_store_real)
+ (public_name octez-shell-libs.store.real)
+ (implements octez-shell-libs.store)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-shell-libs.store.unix)
+ (flags
+  (:standard)
+  -open Tezos_store_unix))

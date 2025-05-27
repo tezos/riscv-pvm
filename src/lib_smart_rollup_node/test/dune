@@ -1,0 +1,58 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name src_lib_smart_rollup_node_test__tezt_lib)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezt.core
+  bls12-381.archive
+  octez-libs.base
+  octez-libs.stdlib-unix
+  octez-libs.test-helpers
+  octez-l2-libs.layer2_store
+  octez-l2-libs.irmin_context
+  octez-l2-libs.smart-rollup
+  octez-l2-libs.octez-smart-rollup-node-lib.store
+  octez-smart-rollup-node-lib
+  octez_smart_rollup_node_test_helpers
+  octez-alcotezt)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezt_core
+  -open Tezt_core.Base
+  -open Tezos_base.TzPervasives
+  -open Tezos_base.TzPervasives.Error_monad
+  -open Tezos_stdlib_unix
+  -open Tezos_test_helpers
+  -open Tezos_layer2_store
+  -open Tezos_layer2_irmin_context
+  -open Octez_smart_rollup
+  -open Octez_smart_rollup_node_store
+  -open Octez_smart_rollup_node
+  -open Octez_smart_rollup_node_test_helpers
+  -open Octez_alcotezt)
+ (modules canary test_context_gc test_store))
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx --bisect-sigterm))
+ (libraries
+  octez-rust-deps
+  src_lib_smart_rollup_node_test__tezt_lib
+  tezt)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/macos-link-flags.sexp))
+ (modules main))
+
+(rule
+ (alias runtest)
+ (package tezos-smart-rollup-node-lib-test)
+ (enabled_if (<> false %{env:RUNTEZTALIAS=true}))
+ (action (run %{dep:./main.exe} /flaky /ci_disabled)))
+
+(rule
+ (targets main.ml)
+ (action (with-stdout-to %{targets} (echo "let () = Tezt.Test.run ()"))))

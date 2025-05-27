@@ -1,0 +1,10 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_context)
+ (public_name octez-libs.tezos-context)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.tezos-context.disk
+  octez-libs.tezos-context.memory))

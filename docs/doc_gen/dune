@@ -1,0 +1,35 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executables
+ (names rpc_doc p2p_doc)
+ (libraries
+  octez-rust-deps
+  bls12-381.archive
+  octez-libs.base
+  octez-libs.rpc
+  octez-libs.stdlib-unix
+  octez-shell-libs.shell
+  octez-libs.rpc-http-server
+  octez-shell-libs.store
+  octez-shell-libs.protocol-updater
+  octez-node-config
+  octez-libs.data-encoding
+  re
+  tezos-protocol-genesis.embedded-protocol
+  tezos-protocol-022-PsRiotum.embedded-protocol
+  tezos-protocol-alpha.embedded-protocol
+  octez-protocol-022-PsRiotum-libs.plugin-registerer
+  octez-protocol-alpha-libs.plugin-registerer)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/macos-link-flags.sexp)
+  (-linkall))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_stdlib_unix
+  -open Tezos_shell
+  -open Tezos_store
+  -open Tezos_protocol_updater
+  -open Octez_node_config))

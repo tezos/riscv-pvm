@@ -1,0 +1,11 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name bare_sigs)
+ (public_name octez-libs.lwt-result-stdlib.bare.sigs)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  seqes
+  lwt
+  octez-libs.lwt-result-stdlib.bare.functor-outputs))

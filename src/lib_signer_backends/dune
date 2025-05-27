@@ -1,0 +1,25 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_signer_backends)
+ (public_name octez-shell-libs.signer-backends)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  octez-libs.stdlib
+  octez-shell-libs.client-base
+  octez-libs.rpc-http
+  octez-libs.rpc-http-client
+  octez-shell-libs.signer-services
+  octez-shell-libs.shell-services
+  uri)
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_stdlib
+  -open Tezos_client_base
+  -open Tezos_rpc_http
+  -open Tezos_rpc_http_client
+  -open Tezos_signer_services
+  -open Tezos_shell_services))

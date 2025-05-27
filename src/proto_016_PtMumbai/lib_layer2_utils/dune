@@ -1,0 +1,23 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_layer2_utils_016_PtMumbai)
+ (public_name octez-protocol-016-PtMumbai-libs.layer2-utils)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  tezos-protocol-016-PtMumbai.protocol
+  octez-protocol-016-PtMumbai-libs.client)
+ (inline_tests
+  (flags -verbose)
+  (modes native)
+  (executable (link_flags -linkall -cclib -lblst -cclib -loctez_rust_deps))
+  (libraries bls12-381.archive octez-rust-deps))
+ (preprocess (pps ppx_expect))
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_protocol_016_PtMumbai
+  -open Tezos_client_016_PtMumbai))

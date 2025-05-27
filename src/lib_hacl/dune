@@ -1,0 +1,10 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_hacl)
+ (public_name octez-libs.hacl)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  hacl-star
+  hacl-star-raw))

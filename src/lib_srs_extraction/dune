@@ -1,0 +1,28 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name octez_srs_extraction)
+ (public_name octez-libs.srs-extraction)
+ (libraries
+  bls12-381
+  octez-libs.bls12-381-polynomial)
+ (flags
+  (:standard)
+  -open Octez_bls12_381_polynomial)
+ (modules libsrs))
+
+(executable
+ (name srs_extraction_main)
+ (libraries
+  bls12-381.archive
+  octez-libs.srs-extraction
+  cmdliner
+  unix
+  bls12-381
+  octez-libs.bls12-381-polynomial)
+ (flags
+  (:standard)
+  -open Octez_srs_extraction
+  -open Octez_bls12_381_polynomial)
+ (modules srs_extraction_main))

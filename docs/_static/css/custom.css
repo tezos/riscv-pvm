@@ -1,0 +1,189 @@
+/* general
+ * -------
+ */
+
+a {
+    color: rgb(27, 85, 126);
+}
+
+a:hover {
+    color: rgb(0, 83, 173);
+}
+
+:root {
+    --feedback-modal-footer-link: #0D61FF;
+    --biel-bot-footer-link: rgb(27, 85, 126);
+}
+
+/* sidebar
+ * ------
+ */
+
+/* The original style uses data:
+ * which violates the CSP policy
+ */
+.wy-body-for-nav {
+    background-image: none !important;
+}
+
+.wy-side-scroll {
+    position: relative;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    height: 100%;
+}
+
+.wy-nav-top {
+    background: rgb(29, 91, 134);
+}
+
+.wy-nav-top i {
+    font-size: 17.3333px;
+    margin-top: 9px;
+    margin-left: 15px;
+}
+
+.wy-menu-vertical {
+    width: 290px;
+}
+
+.wy-menu-vertical header, .wy-menu-vertical p.caption {
+    font-size: inherit;
+}
+
+.wy-menu-vertical a {
+    font-size: inherit;
+}
+
+.wy-menu-vertical a:hover,
+.wy-menu-vertical a:focus {
+    color: #FFFFFF;
+}
+
+.wy-side-nav-search > a {
+  font-size: 120%;
+}
+
+.wy-side-nav-search > a:hover {
+    color: #FFFFFF;
+}
+
+/* content
+ * -------
+ */
+
+.card {
+    margin-bottom: .5rem;
+}
+
+.wy-nav-content {
+    min-height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.bd-content code, .bd-content .important {
+    all: unset;
+}
+
+.bd-content :not(pre) > code {
+    padding: 2px 4px;
+    font-size: 90%;
+    color: #c7254e;
+    background-color: #f9f2f4;
+    border-radius: 4px;
+}
+
+[data-theme='dark'] .bd-content :not(pre) > code {
+    color: var(--pst-color-text-base);
+    background-color: var(--pst-color-surface);
+}
+
+.bd-content tt.literal, .bd-content tt.literal, .bd-content code.literal {
+    color: rgb(151, 32, 18);
+}
+
+[data-theme='dark'] .bd-content tt.literal, .bd-content tt.literal, .bd-content code.literal {
+    color: var(--pst-color-text-base);
+}
+
+.bd-content a:visited {
+    color: rgb(13, 50, 200);
+    text-decoration:none;
+}
+
+.bd-content a:link {
+    color: rgb(13, 50, 255);
+    text-decoration:none;
+}
+
+[data-theme='dark'] .bd-content a:link,
+[data-theme='dark'] .bd-content .nav-link,
+[data-theme='dark'] .bd-content a:visited {
+    color: rgb(82, 143, 228);
+}
+
+.btn.btn-default {
+    color: #333;
+}
+
+.breadcrumb {
+    background-color: #e3f2fd;
+}
+
+.wy-side-nav-search {
+    color: initial;
+    background-color: rgb(29, 91, 134);
+}
+
+pre[class*="language-"] {
+    border: 0;
+    border-radius: 4px;
+}
+
+pre {
+    border: 0;
+}
+
+.btn:active {
+    padding: 6px 12px;
+}
+
+footer {
+    color: rgb(85, 85, 85);
+}
+
+.reference.external {
+  display:inline-block;
+  text-decoration:none;
+  padding-right:1em;
+}
+
+.reference.external:after {
+    content: '';
+    background:url('external-link.png');
+    background-size:cover;
+    position:absolute;
+    width:0.7em;
+    height:0.7em;
+    margin-left:0.2em;
+    margin-top:0.4em;
+}
+
+nav[class='contents'] {
+    background-color: #f9f9f9;
+}
+
+/* Fix for text in tabs showing up as white on white */
+[data-theme='dark'] button.tablinks {
+    color: rgb(0, 0, 0);
+}
+
+/* Fix for Mermaid diagrams in dark mode */
+[data-theme='dark'] .mermaid .messageText {
+    fill: white!important;
+}
+[data-theme='dark'] .mermaid line,
+[data-theme='dark'] .mermaid path {
+    stroke: white!important;
+}

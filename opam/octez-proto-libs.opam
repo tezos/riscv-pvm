@@ -1,0 +1,32 @@
+# This file was automatically generated, do not edit.
+# Edit file manifest/main.ml instead.
+opam-version: "2.0"
+maintainer: "contact@tezos.com"
+authors: ["Tezos devteam"]
+homepage: "https://www.tezos.com/"
+bug-reports: "https://gitlab.com/tezos/tezos/issues"
+dev-repo: "git+https://gitlab.com/tezos/tezos.git"
+license: "MIT"
+depends: [
+  "dune" { >= "3.11.1" }
+  "ocaml" { >= "4.14" }
+  "octez-libs" { = version }
+  "bls12-381" { = version }
+  "zarith" { >= "1.13" & < "1.14" }
+  "class_group_vdf" { >= "0.0.4" }
+  "aches" { >= "1.1.0" }
+  "aches-lwt" { >= "1.1.0" }
+  "octez-riscv-pvm" { = version }
+  "octez-rust-deps" { with-test & = version }
+  "tezt" { with-test & >= "4.1.0" & < "5.0.0" }
+  "octez-alcotezt" { with-test & = version }
+  "qcheck-alcotest" { with-test & >= "0.20" }
+  "lwt" { with-test & >= "5.7.0" & < "5.9.0" }
+]
+build: [
+  ["rm" "-r" "vendors" "contrib"]
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+available: os-family != "windows"
+synopsis: "Octez protocol libraries"

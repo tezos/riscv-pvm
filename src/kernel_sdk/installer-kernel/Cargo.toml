@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2023 TriliTech <contact@trili.tech>
+#
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "installer-kernel"
+version = "0.2.2"
+edition = "2021"
+authors = ["TriliTech <contact@trili.tech>"]
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["std"]
+std = []
+entrypoint = []
+
+[dependencies.tezos-smart-rollup]
+path = "../sdk"
+version = "0.2.2"
+default-features = false
+
+[build-dependencies.tezos-smart-rollup-build-utils]
+path = "../build-utils"
+
+[dependencies.tezos-smart-rollup-installer-config]
+path = "../installer-config"
+version = "0.2.2"
+default-features = false

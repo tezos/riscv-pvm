@@ -1,0 +1,63 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name src_lib_crypto_test_tezt_lib)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezt.core
+  bls12-381.archive
+  octez-libs.stdlib
+  octez-libs.crypto
+  octez-libs.error-monad
+  zarith
+  octez-libs.hacl
+  octez-libs.data-encoding
+  octez-alcotezt
+  qcheck-alcotest
+  octez-libs.test-helpers)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezt_core
+  -open Tezt_core.Base
+  -open Tezos_stdlib
+  -open Tezos_crypto
+  -open Tezos_error_monad.TzLwtreslib
+  -open Data_encoding
+  -open Octez_alcotezt
+  -open Tezos_test_helpers)
+ (modules
+  test_run
+  test_prop_signature
+  roundtrips
+  key_encoding_vectors
+  test_base58
+  test_blake2b
+  test_crypto_box
+  test_deterministic_nonce
+  test_merkle
+  test_signature
+  test_signature_encodings
+  test_timelock_legacy
+  test_timelock
+  test_context_hash
+  vectors_secp256k1_keccak256))
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx --bisect-sigterm))
+ (libraries
+  src_lib_crypto_test_tezt_lib
+  tezt)
+ (modules main))
+
+(rule
+ (alias runtest)
+ (package octez-libs)
+ (enabled_if (<> false %{env:RUNTEZTALIAS=true}))
+ (action (run %{dep:./main.exe} /flaky /ci_disabled)))
+
+(rule
+ (targets main.ml)
+ (action (with-stdout-to %{targets} (echo "let () = Tezt.Test.run ()"))))

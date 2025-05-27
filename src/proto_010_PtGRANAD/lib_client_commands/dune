@@ -1,0 +1,64 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_client_010_PtGRANAD_commands)
+ (public_name octez-protocol-010-PtGRANAD-libs.client.commands)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  octez-libs.clic
+  tezos-protocol-010-PtGRANAD.protocol
+  octez-libs.stdlib-unix
+  octez-proto-libs.protocol-environment
+  octez-shell-libs.shell-services
+  octez-shell-libs.client-base
+  octez-protocol-010-PtGRANAD-libs.client
+  octez-shell-libs.client-commands
+  octez-libs.rpc
+  octez-shell-libs.client-base-unix
+  octez-protocol-010-PtGRANAD-libs.plugin)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_base.TzPervasives.Error_monad_legacy
+  -open Tezos_protocol_010_PtGRANAD
+  -open Tezos_stdlib_unix
+  -open Tezos_shell_services
+  -open Tezos_client_base
+  -open Tezos_client_010_PtGRANAD
+  -open Tezos_client_commands
+  -open Tezos_client_base_unix
+  -open Tezos_protocol_plugin_010_PtGRANAD)
+ (modules (:standard \ alpha_commands_registration)))
+
+(library
+ (name tezos_client_010_PtGRANAD_commands_registration)
+ (public_name octez-protocol-010-PtGRANAD-libs.client.commands-registration)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.base
+  octez-libs.clic
+  tezos-protocol-010-PtGRANAD.protocol
+  octez-proto-libs.protocol-environment
+  octez-shell-libs.shell-services
+  octez-shell-libs.client-base
+  octez-protocol-010-PtGRANAD-libs.client
+  octez-shell-libs.client-commands
+  octez-protocol-010-PtGRANAD-libs.client.commands
+  octez-libs.rpc
+  octez-protocol-010-PtGRANAD-libs.plugin)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_base.TzPervasives.Error_monad_legacy
+  -open Tezos_protocol_010_PtGRANAD
+  -open Tezos_shell_services
+  -open Tezos_client_base
+  -open Tezos_client_010_PtGRANAD
+  -open Tezos_client_commands
+  -open Tezos_client_010_PtGRANAD_commands
+  -open Tezos_protocol_plugin_010_PtGRANAD)
+ (modules alpha_commands_registration))

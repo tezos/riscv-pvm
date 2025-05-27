@@ -1,0 +1,35 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(executable
+ (name main_snoop)
+ (public_name octez-snoop)
+ (package octez-snoop)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-rust-deps
+  bls12-381.archive
+  octez-libs.base
+  octez-libs.base.unix
+  octez-libs.stdlib-unix
+  octez-libs.clic
+  tezos-benchmark
+  tezos-benchmark-examples
+  octez-shell-libs.shell-benchmarks
+  tezos-benchmarks-proto-alpha
+  str
+  pyml
+  prbnmcn-stats
+  octez-version.value)
+ (link_flags
+  (:standard)
+  (:include %{workspace_root}/static-link-flags.sexp)
+  (:include %{workspace_root}/macos-link-flags.sexp)
+  (-linkall))
+ (flags
+  (:standard)
+  -open Tezos_base.TzPervasives
+  -open Tezos_stdlib_unix
+  -open Tezos_benchmark))
+
+(cram (deps main_snoop.exe) (package octez-snoop))

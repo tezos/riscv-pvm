@@ -1,0 +1,19 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_clic_unix)
+ (public_name octez-libs.clic.unix)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-libs.stdlib
+  octez-libs.clic
+  octez-libs.stdlib-unix
+  octez-libs.error-monad
+  octez-libs.lwt-result-stdlib)
+ (flags
+  (:standard)
+  -open Tezos_stdlib
+  -open Tezos_clic
+  -open Tezos_error_monad
+  -open Tezos_error_monad.TzLwtreslib))

@@ -1,0 +1,800 @@
+[
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: reaches level 5",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "9755589",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: cannot progress without new head",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3889896",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: reset delayed pqc",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1989624",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario t1",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2012382",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario t2",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1984872",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario t3",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5146142",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario t4",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "8988087",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario f1",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5415966",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario f2",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15540421",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m1",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15094759",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m2",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "12976700",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m3",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "27083103",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m4",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "738384",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m5",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3238718",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m6",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "14178771",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m7",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "10987121",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m8",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "22771188",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m9",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2960966",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_alpha/lib_delegate/test/test_scenario.ml",
+    "title": "alpha: scenario m10",
+    "tags": [
+      "alpha",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2982551",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: reaches level 5",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "10022809",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: cannot progress without new head",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3888592",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: reset delayed pqc",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1986954",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario t1",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2020617",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario t2",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1988177",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario t3",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5140332",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario t4",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "8986661",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario f1",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5401648",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario f2",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15529310",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m1",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15088765",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m2",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "12999830",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m3",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "27084519",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m4",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "713456",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m5",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3215497",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m6",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "14221240",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m7",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "11004625",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m8",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "22764638",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m9",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2959743",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_021_PsquebeC/lib_delegate/test/test_scenario.ml",
+    "title": "021-PsquebeC: scenario m10",
+    "tags": [
+      "021_psquebec",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2981588",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: reaches level 5",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "10020217",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: cannot progress without new head",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3904893",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: reset delayed pqc",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1972413",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario t1",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2032844",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario t2",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "1987463",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario t3",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5127038",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario t4",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "8969142",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario f1",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "5438360",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario f2",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15514634",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m1",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "15087915",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m2",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "13000991",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m3",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "27084523",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m4",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "713052",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m5",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3230503",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m6",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "14232177",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m7",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "11000129",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m8",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "22735948",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m9",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "2962646",
+      "count": "1"
+    }
+  },
+  {
+    "file": "src/proto_020_PsParisC/lib_delegate/test/test_scenario.ml",
+    "title": "020-PsParisC: scenario m10",
+    "tags": [
+      "020_psparisc",
+      "baker",
+      "mockup",
+      "time_sensitive"
+    ],
+    "successful_runs": {
+      "total_time": "3003401",
+      "count": "1"
+    }
+  }
+]

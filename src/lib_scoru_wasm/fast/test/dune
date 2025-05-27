@@ -1,0 +1,58 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name src_lib_scoru_wasm_fast_test_tezt_lib)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezt.core
+  bls12-381.archive
+  octez-libs.base
+  octez-libs.tree-encoding
+  octez-libs.base.unix
+  octez-libs.base-test-helpers
+  octez-l2-libs.scoru-wasm-helpers
+  octez-l2-libs.scoru_wasm_test_helpers
+  octez-libs.test-helpers
+  octez-libs.scoru-wasm
+  octez-l2-libs.scoru-wasm-fast
+  qcheck-alcotest
+  octez-alcotezt)
+ (preprocess (staged_pps ppx_import ppx_deriving.show))
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -open Tezt_core
+  -open Tezt_core.Base
+  -open Tezos_base.TzPervasives
+  -open Tezos_base_test_helpers
+  -open Tezos_scoru_wasm_helpers
+  -open Tezos_scoru_wasm_test_helpers
+  -open Tezos_test_helpers
+  -open Octez_alcotezt)
+ (modules
+  gen
+  partial_memory
+  qcheck_helpers
+  test_fast_cache
+  test_fast
+  test_memory_access))
+
+(executable
+ (name main)
+ (instrumentation (backend bisect_ppx --bisect-sigterm))
+ (libraries
+  octez-rust-deps
+  src_lib_scoru_wasm_fast_test_tezt_lib
+  tezt)
+ (modules main))
+
+(rule
+ (alias runtest)
+ (package octez-l2-libs)
+ (enabled_if (<> false %{env:RUNTEZTALIAS=true}))
+ (action (run %{dep:./main.exe} /flaky /ci_disabled)))
+
+(rule
+ (targets main.ml)
+ (action (with-stdout-to %{targets} (echo "let () = Tezt.Test.run ()"))))

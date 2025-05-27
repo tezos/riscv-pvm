@@ -1,0 +1,170 @@
+; This file was automatically generated, do not edit.
+; Edit file manifest/main.ml instead.
+
+(library
+ (name tezos_protocol_environment_demo_counter)
+ (public_name tezos-protocol-demo-counter.protocol.environment)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-proto-libs.protocol-environment)
+ (library_flags (:standard -linkall))
+ (modules Tezos_protocol_environment_demo_counter))
+
+(rule
+ (targets tezos_protocol_environment_demo_counter.ml)
+ (action
+  (write-file
+   %{targets}
+   "module Name = struct let name = \"demo-counter\" end\ninclude Tezos_protocol_environment.V15.Make(Name)()\n")))
+
+(library
+ (name tezos_raw_protocol_demo_counter)
+ (public_name tezos-protocol-demo-counter.protocol.raw)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezos-protocol-demo-counter.protocol.environment)
+ (library_flags (:standard -linkall))
+ (flags
+  (:standard)
+  -nostdlib
+  -nopervasives
+  -open Tezos_protocol_environment_demo_counter
+  -open Tezos_protocol_environment_demo_counter.Pervasives
+  -open Tezos_protocol_environment_demo_counter.Error_monad)
+ (modules
+  Error
+  Proto_params
+  Header
+  State
+  Proto_operation
+  Receipt
+  Apply
+  Services
+  Main))
+
+(library
+ (name tezos_protocol_demo_counter)
+ (public_name tezos-protocol-demo-counter.protocol)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-proto-libs.protocol-environment
+  octez-proto-libs.protocol-environment.sigs
+  tezos-protocol-demo-counter.protocol.raw)
+ (flags
+  (:standard)
+  -nopervasives)
+ (modules Protocol Tezos_protocol_demo_counter))
+
+(install
+ (package tezos-protocol-demo-counter)
+ (section lib)
+ (files (TEZOS_PROTOCOL as protocol/raw/TEZOS_PROTOCOL)))
+
+(rule
+ (targets protocol.ml)
+ (action
+  (write-file
+   %{targets}
+   "\nlet hash = Tezos_crypto.Hashed.Protocol_hash.of_b58check_exn \"ProtoDemoCounterDemoCounterDemoCounterDemoCou4LSpdT\"\nlet name = Tezos_protocol_environment_demo_counter.Name.name\ninclude Tezos_raw_protocol_demo_counter\ninclude Tezos_raw_protocol_demo_counter.Main\n")))
+
+(rule
+ (targets tezos_protocol_demo_counter.ml)
+ (action
+  (write-file
+   %{targets}
+   "\nmodule Environment = Tezos_protocol_environment_demo_counter\nmodule Protocol = Protocol\n")))
+
+(rule
+ (alias runtest_compile_protocol)
+ (deps
+  error.ml error.mli
+  proto_params.ml proto_params.mli
+  header.ml header.mli
+  state.ml state.mli
+  proto_operation.ml proto_operation.mli
+  receipt.ml receipt.mli
+  apply.ml apply.mli
+  services.ml services.mli
+  main.ml main.mli
+  (:src_dir TEZOS_PROTOCOL))
+ (action (run %{bin:octez-protocol-compiler} -no-hash-check -warn-error +a .)))
+
+(library
+ (name tezos_protocol_demo_counter_lifted)
+ (public_name tezos-protocol-demo-counter.protocol.lifted)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  octez-proto-libs.protocol-environment
+  octez-proto-libs.protocol-environment.sigs
+  tezos-protocol-demo-counter.protocol)
+ (flags
+  (:standard)
+  -nopervasives
+  -open Tezos_protocol_demo_counter)
+ (modules Lifted_protocol))
+
+(rule
+ (targets lifted_protocol.ml)
+ (action
+  (write-file
+   %{targets}
+   "\ninclude Environment.Lift (Protocol)\nlet hash = Protocol.hash\n")))
+
+(library
+ (name tezos_protocol_demo_counter_functor)
+ (libraries
+  octez-proto-libs.protocol-environment
+  octez-proto-libs.protocol-environment.sigs)
+ (flags
+  (:standard)
+  -nopervasives)
+ (modules Functor))
+
+(rule
+ (targets functor.ml)
+ (deps
+  error.ml error.mli
+  proto_params.ml proto_params.mli
+  header.ml header.mli
+  state.ml state.mli
+  proto_operation.ml proto_operation.mli
+  receipt.ml receipt.mli
+  apply.ml apply.mli
+  services.ml services.mli
+  main.ml main.mli (:src_dir TEZOS_PROTOCOL))
+ (action
+  (with-stdout-to
+   %{targets}
+   (chdir
+    %{workspace_root}
+    (run %{bin:octez-protocol-compiler.octez-protocol-packer} %{src_dir})))))
+
+(library
+ (name tezos_embedded_protocol_demo_counter)
+ (public_name tezos-protocol-demo-counter.embedded-protocol)
+ (instrumentation (backend bisect_ppx))
+ (libraries
+  tezos-protocol-demo-counter.protocol
+  octez-shell-libs.protocol-updater
+  octez-proto-libs.protocol-environment)
+ (library_flags (:standard -linkall))
+ (modules Registerer))
+
+(rule
+ (targets registerer.ml)
+ (deps
+  error.ml error.mli
+  proto_params.ml proto_params.mli
+  header.ml header.mli
+  state.ml state.mli
+  proto_operation.ml proto_operation.mli
+  receipt.ml receipt.mli
+  apply.ml apply.mli
+  services.ml services.mli
+  main.ml main.mli (:src_dir TEZOS_PROTOCOL))
+ (action
+  (with-stdout-to
+   %{targets}
+   (chdir
+    %{workspace_root}
+    (run %{bin:octez-embedded-protocol-packer} %{src_dir} demo_counter)))))

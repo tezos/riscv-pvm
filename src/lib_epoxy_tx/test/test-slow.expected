@@ -1,0 +1,364 @@
+RandomTx.make_rollup:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+RandomTx.make_rollup_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+RandomTx.make_rollup:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+RandomTx.make_rollup_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+RandomTx.make_rollup:
+Proof size: 3.56 KB
+Proof hash: 4810db70246bc69fc1d6f32a0ae55f52ceb59fd26d5afa8c8260bf724af81d6b
+Prover_pp hash: 41a1726b3dae7d47a1324e4ef2cac159530e012aa11e27aa8b43ed18ec8afae9
+Verifier_pp hash: ee4650ed9483ee0b8740b55cf330d90ee4b23685d632f4371596249909433d58
+
+insufficient balance: amount > bal:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+insufficient balance: amount > bal_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+insufficient balance: amount + fee > bal:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+insufficient balance: amount + fee > bal_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid dst:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid dst_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid src:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid src_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+replay:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+replay_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+balance out of bounds 1:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+balance out of bounds 1_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: bad msg:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: bad msg_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: bad sk:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: bad sk_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: not on curve:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: not on curve_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+insufficient balance: amount > bal:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+insufficient balance: amount > bal_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+insufficient balance: amount > bal:
+Proof size: 4.23 KB
+Proof hash: fd35e05a62f678397d097401c9ccc7e8fe88a8f9c4dcf2763900eaf2d829ebd9
+Prover_pp hash: 31b9e047b98690aa6b199b073fb8c6888c481dd8066fd1bab7dfb6e580177ac4
+Verifier_pp hash: d03716aa12ab0a9deebd473299672279ecde080803055dbf7f14383008d613b4
+
+insufficient balance: amount + fee > bal:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+insufficient balance: amount + fee > bal_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+insufficient balance: amount + fee > bal:
+Proof size: 4.52 KB
+Proof hash: 5dfe3ec449786144bad7d1a2a0391da5f95f4f57a62e3c78c378b3bc54beb431
+Prover_pp hash: 2613466ecb73c882486c2065d5856bd4a92a271ff5fca2781a52f07033c41331
+Verifier_pp hash: 6706b770c72fe62b17519ed23cf7610e33ef98630090c0e0562bf1bb2d0e9085
+
+invalid dst:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid dst_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid dst:
+Proof size: 3.13 KB
+Proof hash: a96737c42f2a780d0000912d9437f2bf14b93dbc1b0fa6589c3a52ecfd449860
+Prover_pp hash: a53f852c1ffd1be087050fc8ed47f554cd547aed9d98577831a2da1ff356307c
+Verifier_pp hash: ccc03f918a1a18afb51e8bb5b4b19c3896f4d6f4e4ce840597865077a650423f
+
+invalid src:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid src_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid src:
+Proof size: 3.13 KB
+Proof hash: 7ee19c5689358c1c108cc4347e3e4775dfd4a9122c5ca16e3d30914d9ed3b4a2
+Prover_pp hash: 45e667b6f6f05d2232048813a760760904dac73ec6cbebfff495ef15f16da0d2
+Verifier_pp hash: de055e066a969f7408d8b9460f50df231e99bc1c82b0d4841a98df0e1a99d540
+
+replay:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+replay_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+replay:
+Proof size: 2.89 KB
+Proof hash: 7524cdaf2fcfe4009c37f666e11026cb8b7cb3907636ffd400b67819cb8724e8
+Prover_pp hash: 7ae40d3c5778f1a25a1e5fc286960a48ab807d8645d26155046e749ac719aae5
+Verifier_pp hash: ce020a2ebdb772e8642bdb21995e9dfd2508d402c15a56e45b9f0ea653049e19
+
+balance out of bounds 1:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+balance out of bounds 1_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+balance out of bounds 1:
+Proof size: 3.71 KB
+Proof hash: 94e15b8abd3f4f0efe8ebe0dfe22fc957bcc5cdaadd606b3a799d28bc2f0702d
+Prover_pp hash: e3b6aa2a855e2dacd5a31957995a9cb05dca24beadebfd834e9c420b11511121
+Verifier_pp hash: 6323aac666678914630cd55794b2e844443c40a54b43f492994e5c60cbffe15d
+
+invalid signature: bad msg:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: bad msg_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: bad msg:
+Proof size: 3.85 KB
+Proof hash: e68400f9fa5a33548b1ae6fce5f679b418f0bb8b15d62de30a3cc493fd2571d2
+Prover_pp hash: bdd36bb7afaab5f491218321bec95659d2676e9bc69baa576b7d2d5b14315b68
+Verifier_pp hash: 1a5851ba657e19f82f356d1719f5b3f9b536d0886a754d829a12c3691c4b8614
+
+invalid signature: bad sk:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: bad sk_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: bad sk:
+Proof size: 3.80 KB
+Proof hash: 8ce2e1c028babbbfb9b9debd300dc9d960fa4d41208dacd1e5b1272c011b7b91
+Prover_pp hash: b714c77e7b8d17430b3553b07723fcfcb80d85c1ac2496da853eaff482b37810
+Verifier_pp hash: f845b3b9aa33cac715f3f2b8963bddec56062e8639e6eca24579c2dc73f8238c
+
+invalid signature: not on curve:
+Constraints       : 3758 [11.88]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 3758 [11.88]
+
+invalid signature: not on curve_optimized:
+Constraints       : 1400 [10.45]
+Range-Checks-Total: 0 [0.00]
+Range-Checks-Max  : 0 [0.00]
+Tables            : 0 [0.00]
+Circuit Size      : 1400 [10.45]
+
+invalid signature: not on curve:
+Proof size: 4.09 KB
+Proof hash: f972d97a112b44d322ff0e92f37bfc4d8e8d510d48f4787d31b63c72bd7c199a
+Prover_pp hash: c24962845b39917056a14818791bf3716a7041b25c27ad966e8a9f0372753d25
+Verifier_pp hash: b0533c02ad4332af1b969522fd79661b8bece1119923610ab93895bd3bd552c9
+
+benchmark:
+Proof size: 5.39 KB
+Proof hash: a4c1b2409b85daf9682515a2d898024871368c3827cb07e8ee399139222d644c
+Prover_pp hash: df295e8223c436c712287ced7c7f5d319bd6ead56e41a21512da26bb7e465a8b
+Verifier_pp hash: bf5413a3ff2e99faf6935b4ae29168566e954a232a246ed9f6d6a6fdea922776
+
+benchmark:
+Proof size: 5.39 KB
+Proof hash: ce5c5036c20b49a4c4c42b22b5bd5a1bb25c951b95eb2437e2f33d4badbf780e
+Prover_pp hash: df295e8223c436c712287ced7c7f5d319bd6ead56e41a21512da26bb7e465a8b
+Verifier_pp hash: bf5413a3ff2e99faf6935b4ae29168566e954a232a246ed9f6d6a6fdea922776
+
+benchmark_meta:
+Proof size: 11.18 KB
+Proof hash: 8205e15bc7c426f7f6978b63c38c823030429e44fcd646341c854b9c8efc17f8
+Prover_pp hash: b25b7b3de0daa2d0b65714d3a82f58ebb8289a7cc5ee186d1d66013d7939249f
+Verifier_pp hash: eda89ec76b6fc77be2ade147e0a7cbf5fac400c6179f7d71ca5732cf096d7d40
+
+benchmark_meta:
+Proof size: 11.18 KB
+Proof hash: cf40ce2eae5c31a21ea01d9d7374c87ade04eb29cc52704726dcd191f4aa192a
+Prover_pp hash: b25b7b3de0daa2d0b65714d3a82f58ebb8289a7cc5ee186d1d66013d7939249f
+Verifier_pp hash: eda89ec76b6fc77be2ade147e0a7cbf5fac400c6179f7d71ca5732cf096d7d40
+
