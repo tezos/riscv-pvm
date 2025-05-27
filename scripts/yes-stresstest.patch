@@ -1,6 +1,0 @@
---- a/src/proto_alpha/lib_client_commands/client_proto_stresstest_commands.ml
-+++ b/src/proto_alpha/lib_client_commands/client_proto_stresstest_commands.ml
-@@ -1951,2 +1951,1 @@ let fund_accounts_from_source : Protocol_client_context.full Tezos_clic.command
--let commands network () =
--  match network with Some `Mainnet -> [] | Some `Testnet | None -> commands
-+let commands _network () = commands

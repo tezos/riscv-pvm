@@ -1,7 +1,0 @@
-parameter unit;
-storage unit;
-code {
-       UNPAIR; DROP;
-       NIL operation ;
-       PAIR;
-      };

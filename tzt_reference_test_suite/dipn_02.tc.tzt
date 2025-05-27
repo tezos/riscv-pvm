@@ -1,3 +1,0 @@
-code { DIP 3 {} } ;
-input { Stack_elt unit Unit ; Stack_elt unit Unit } ;
-output (StaticError _);

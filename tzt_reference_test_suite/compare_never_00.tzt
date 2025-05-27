@@ -1,3 +1,0 @@
-code { LAMBDA never int { DUP; COMPARE }; DROP } ;
-input { } ;
-output { }

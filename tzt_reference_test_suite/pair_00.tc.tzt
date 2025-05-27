@@ -1,3 +1,0 @@
-code { PAIR } ;
-input { Stack_elt int 5 } ;
-output (StaticError _)

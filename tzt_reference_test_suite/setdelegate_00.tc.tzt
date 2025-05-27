@@ -1,3 +1,0 @@
-code { SET_DELEGATE } ;
-input { Stack_elt unit Unit } ;
-output (StaticError _) ;

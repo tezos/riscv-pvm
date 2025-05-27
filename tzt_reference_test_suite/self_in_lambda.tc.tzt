@@ -1,3 +1,0 @@
-code { LAMBDA unit unit { SELF; DROP } } ;
-input { } ;
-output (StaticError _) ;

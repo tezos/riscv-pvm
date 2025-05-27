@@ -1,3 +1,0 @@
-code { PACK } ;
-input { Stack_elt bool True } ;
-output { Stack_elt bytes 0x05030a } ;
