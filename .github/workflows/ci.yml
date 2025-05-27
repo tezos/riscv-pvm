@@ -27,6 +27,9 @@ env:
 
 jobs:
   run-make-target:
+    # Run for pushes to main or non-draft PRs
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+
     strategy:
       fail-fast: false
       matrix:
