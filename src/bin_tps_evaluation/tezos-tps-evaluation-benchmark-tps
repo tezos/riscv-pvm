@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-./tezos-tps-evaluation -i tezos_tps_benchmark "$@"

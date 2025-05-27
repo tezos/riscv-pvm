@@ -1,3 +1,0 @@
-code { SUB } ;
-input { Stack_elt nat 7 ; Stack_elt int 7 } ;
-output { Stack_elt int 0 }

@@ -1,3 +1,0 @@
-code { PACK } ;
-input { Stack_elt (list (list bool)) { {}; { True } } } ;
-output { Stack_elt bytes 0x05020000000c02000000000200000002030a } ;

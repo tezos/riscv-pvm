@@ -1,3 +1,0 @@
-code { OR } ;
-input { Stack_elt bytes 0x05 ; Stack_elt bytes 0x0106 } ;
-output { Stack_elt bytes 0x0107 }
