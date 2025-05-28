@@ -101,18 +101,43 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    pc_write => (JSA::pc_write::<MC>, AbiCall<2>::args),
-    xreg_read => (JSA::xregister_read::<MC>, AbiCall<2>::args),
-    xreg_write => (JSA::xregister_write::<MC>, AbiCall<3>::args),
+    pc_write => (pc_write::<MC, JSA>, AbiCall<2>::args),
+    xreg_read => (xregister_read::<MC, JSA>, AbiCall<2>::args),
+    xreg_write => (xregister_write::<MC, JSA>, AbiCall<3>::args),
     freg_read => (fregister_read::<MC, JSA>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC, JSA>, AbiCall<3>::args),
-    handle_exception => (JSA::handle_exception::<MC>, AbiCall<4>::args),
-    raise_illegal_instruction_exception => (JSA::raise_illegal_instruction_exception, AbiCall<1>::args),
-    raise_store_amo_access_fault_exception => (JSA::raise_store_amo_access_fault_exception, AbiCall<2>::args),
-    ecall_from_mode => (JSA::ecall::<MC>, AbiCall<2>::args),
-    memory_store => (JSA::memory_store::<MC>, AbiCall<5>::args),
-    memory_load => (JSA::memory_load::<MC>, AbiCall::<6>::args)
+    handle_exception => (handle_exception::<MC, JSA>, AbiCall<4>::args),
+    raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
+    raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
+    ecall_from_mode => (ecall::<MC, JSA>, AbiCall<2>::args),
+    memory_store => (memory_store::<MC, JSA>, AbiCall<5>::args),
+    memory_load => (memory_load::<MC, JSA>, AbiCall::<6>::args)
 );
+
+/// Update the instruction pc in the state.
+extern "C" fn pc_write<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    pc: u64,
+) {
+    core.hart.pc.write(pc)
+}
+
+/// Read the value of the given [`NonZeroXRegister`].
+extern "C" fn xregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    reg: NonZeroXRegister,
+) -> XValue {
+    core.hart.xregisters.read_nz(reg)
+}
+
+/// Write the given value to the given [`NonZeroXRegister`].
+extern "C" fn xregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    reg: NonZeroXRegister,
+    val: XValue,
+) {
+    core.hart.xregisters.write_nz(reg, val)
+}
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
@@ -131,168 +156,145 @@ extern "C" fn fregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
     core.hart.fregisters.write(reg, val)
 }
 
-/// State Access that a JIT-compiled block may use.
+/// Handle an [`Exception`].
 ///
-/// In future, this will come in two parts:
-/// - `extern "C"` functions that can be registered in the JIT module
-/// - a way of calling those functions from within JIT-compiled code
+/// If the exception is succesfully handled, the
+/// `current_pc` is updated to the new value, and returns true. The `current_pc`
+/// remains initialised to its previous value otherwise.
+///
+/// If the exception needs to be treated by the execution environment,
+/// `result` is updated with the `EnvironException` and `false` is
+/// returned.
+///
+/// # Panics
+///
+/// Panics if the exception does not have `Some(_)` value.
+///
+/// See [`MachineCoreState::address_on_exception`].
+extern "C" fn handle_exception<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    current_pc: &mut Address,
+    exception: &Exception,
+    result: &mut Result<(), EnvironException>,
+) -> bool {
+    let res = core.address_on_exception(*exception, *current_pc);
+
+    match res {
+        Err(e) => {
+            *result = Err(e);
+            false
+        }
+        Ok(address) => {
+            *current_pc = address;
+            true
+        }
+    }
+}
+
+/// Raise an [`Exception::IllegalInstruction`].
+///
+/// Writes the instruction to the given exception memory, after which it would be safe to
+/// assume it is initialised.
+extern "C" fn raise_illegal_instruction_exception(exception_out: &mut MaybeUninit<Exception>) {
+    exception_out.write(Exception::IllegalInstruction);
+}
+
+/// Raise an [`Exception::StoreAMOAccessFault`].
+///
+/// Writes the instruction to the given exception memory, after which it would be safe to
+/// assume it is initialised.
+extern "C" fn raise_store_amo_access_fault_exception(
+    exception_out: &mut MaybeUninit<Exception>,
+    address: u64,
+) {
+    exception_out.write(Exception::StoreAMOAccessFault(address));
+}
+
+/// Raise the appropriate environment-call exception given the current machine mode.
+///
+/// Writes the exception to the given exception memory, after which it would be safe to
+/// assume it is initialised.
+extern "C" fn ecall<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    exception_out: &mut MaybeUninit<Exception>,
+) {
+    exception_out.write(core.hart.run_ecall());
+}
+
+/// Store the lowest `width` bytes of the given value to memory, at the physical address.
+///
+/// If the store is successful, `false` is returned to indicate no exception handling is necessary.
+///
+/// If the store fails (due to out of bouds etc) then an exception will be written
+/// to `exception_out` and `true` returned to indicate exception handling will be necessary.
+///
+/// # Panics
+///
+/// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
+extern "C" fn memory_store<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    address: u64,
+    value: u64,
+    width: u8,
+    exception_out: &mut MaybeUninit<Exception>,
+) -> bool {
+    let Some(width) = LoadStoreWidth::new(width) else {
+        panic!("The given width {width} is not a supported LoadStoreWidth");
+    };
+
+    match <MachineCoreState<MC, M> as ICB>::main_memory_store(core, address, value, width) {
+        Ok(()) => false,
+        Err(exception) => {
+            exception_out.write(exception);
+            true
+        }
+    }
+}
+
+/// Load `width` bytes from memory, at the physical address, into lowest `width` bytes of an
+/// `XValue`, with (un)signed extension.
+///
+/// If the load is successful, `false` is returned to indicate no exception handling is
+/// necessary.
+///
+/// If the load fails (due to out of bouds etc) then an exception will be written
+/// to `exception_out` and `true` returned to indicate exception handling will be necessary.
+///
+/// # Panics
+///
+/// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
+extern "C" fn memory_load<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    address: u64,
+    width: u8,
+    signed: bool,
+    xval_out: &mut MaybeUninit<XValue>,
+    exception_out: &mut MaybeUninit<Exception>,
+) -> bool {
+    let Some(width) = LoadStoreWidth::new(width) else {
+        panic!("The given width {width} is not a supported LoadStoreWidth");
+    };
+
+    match <MachineCoreState<MC, M> as ICB>::main_memory_load(core, address, signed, width) {
+        Ok(value) => {
+            xval_out.write(value);
+            false
+        }
+        Err(exception) => {
+            exception_out.write(exception);
+            true
+        }
+    }
+}
+
+/// State Access that a JIT-compiled block may use
+///
+/// Methods in this trait are used to provide access to parts of the state. It can be specialised by
+/// state backend managers (e.g. [`Owned`]) to generate more efficient Cranelift IR.
+///
+/// Do not include `extern "C"` functions in this trait. Those functions are usually parametrically
+/// polymorphic. Hence they don't need to be included in this trait.
 pub trait JitStateAccess: ManagerReadWrite {
-    /// Update the instruction pc in the state.
-    extern "C" fn pc_write<MC: MemoryConfig>(core: &mut MachineCoreState<MC, Self>, pc: u64) {
-        core.hart.pc.write(pc)
-    }
-    /// Read the value of the given [`NonZeroXRegister`].
-    extern "C" fn xregister_read<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        reg: NonZeroXRegister,
-    ) -> XValue {
-        core.hart.xregisters.read_nz(reg)
-    }
-
-    /// Write the given value to the given [`NonZeroXRegister`].
-    extern "C" fn xregister_write<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        reg: NonZeroXRegister,
-        val: XValue,
-    ) {
-        core.hart.xregisters.write_nz(reg, val)
-    }
-
-    /// Handle an [`Exception`].
-    ///
-    /// If the exception is succesfully handled, the
-    /// `current_pc` is updated to the new value, and returns true. The `current_pc`
-    /// remains initialised to its previous value otherwise.
-    ///
-    /// If the exception needs to be treated by the execution environment,
-    /// `result` is updated with the `EnvironException` and `false` is
-    /// returned.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the exception does not have `Some(_)` value.
-    ///
-    /// See [`MachineCoreState::address_on_exception`].
-    extern "C" fn handle_exception<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        current_pc: &mut Address,
-        exception: &Exception,
-        result: &mut Result<(), EnvironException>,
-    ) -> bool {
-        let res = core.address_on_exception(*exception, *current_pc);
-
-        match res {
-            Err(e) => {
-                *result = Err(e);
-                false
-            }
-            Ok(address) => {
-                *current_pc = address;
-                true
-            }
-        }
-    }
-
-    /// Raise an [`Exception::IllegalInstruction`].
-    ///
-    /// Writes the instruction to the given exception memory, after which it would be safe to
-    /// assume it is initialised.
-    extern "C" fn raise_illegal_instruction_exception(exception_out: &mut MaybeUninit<Exception>) {
-        exception_out.write(Exception::IllegalInstruction);
-    }
-
-    /// Raise an [`Exception::StoreAMOAccessFault`].
-    ///
-    /// Writes the instruction to the given exception memory, after which it would be safe to
-    /// assume it is initialised.
-    extern "C" fn raise_store_amo_access_fault_exception(
-        exception_out: &mut MaybeUninit<Exception>,
-        address: u64,
-    ) {
-        exception_out.write(Exception::StoreAMOAccessFault(address));
-    }
-
-    /// Raise the appropriate environment-call exception given the current machine mode.
-    ///
-    /// Writes the exception to the given exception memory, after which it would be safe to
-    /// assume it is initialised.
-    extern "C" fn ecall<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        exception_out: &mut MaybeUninit<Exception>,
-    ) {
-        exception_out.write(core.hart.run_ecall());
-    }
-
-    /// Store the lowest `width` bytes of the given value to memory, at the physical address.
-    ///
-    /// If the store is successful, `false` is returned to indicate no exception handling is necessary.
-    ///
-    /// If the store fails (due to out of bouds etc) then an exception will be written
-    /// to `exception_out` and `true` returned to indicate exception handling will be necessary.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-    extern "C" fn memory_store<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        address: u64,
-        value: u64,
-        width: u8,
-        exception_out: &mut MaybeUninit<Exception>,
-    ) -> bool {
-        let Some(width) = LoadStoreWidth::new(width) else {
-            panic!("The given width {width} is not a supported LoadStoreWidth");
-        };
-
-        match <MachineCoreState<MC, Self> as ICB>::main_memory_store(core, address, value, width) {
-            Ok(()) => false,
-            Err(exception) => {
-                exception_out.write(exception);
-                true
-            }
-        }
-    }
-
-    /// Load `width` bytes from memory, at the physical address, into lowest `width` bytes of an
-    /// `XValue`, with (un)signed extension.
-    ///
-    /// If the load is successful, `false` is returned to indicate no exception handling is
-    /// necessary.
-    ///
-    /// If the load fails (due to out of bouds etc) then an exception will be written
-    /// to `exception_out` and `true` returned to indicate exception handling will be necessary.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-    extern "C" fn memory_load<MC: MemoryConfig>(
-        core: &mut MachineCoreState<MC, Self>,
-        address: u64,
-        width: u8,
-        signed: bool,
-        xval_out: &mut MaybeUninit<XValue>,
-        exception_out: &mut MaybeUninit<Exception>,
-    ) -> bool {
-        let Some(width) = LoadStoreWidth::new(width) else {
-            panic!("The given width {width} is not a supported LoadStoreWidth");
-        };
-
-        match <MachineCoreState<MC, Self> as ICB>::main_memory_load(core, address, signed, width) {
-            Ok(value) => {
-                xval_out.write(value);
-                false
-            }
-            Err(exception) => {
-                exception_out.write(exception);
-                true
-            }
-        }
-    }
-
-    // -------------
-    // IR Generation
-    // -------------
-
     /// Emit the required IR to read the value from the given xregister.
     fn ir_xreg_read<MC: MemoryConfig>(
         jsa_calls: &mut JsaCalls<'_, MC, Self>,
