@@ -42,6 +42,7 @@ use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
+use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::state_backend::verify_backend::Verifier;
 use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -120,7 +121,10 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, CL: CacheLayouts>
 impl<MC: MemoryConfig, CL: CacheLayouts> PvmStepper<'_, MC, CL, Owned> {
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
-    pub fn produce_proof(&mut self) -> Option<Proof> {
+    pub fn produce_proof(&mut self) -> Option<Proof>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
 
@@ -270,9 +274,12 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
     }
 
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
-    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
+    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
+    where
+        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = PvmLayout::<MC, CL>::from_proof(proof_tree)
+        let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
         let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);

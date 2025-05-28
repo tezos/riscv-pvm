@@ -31,6 +31,7 @@ tezos-smart-rollup-constants.workspace = true
 tezos-smart-rollup-utils.workspace = true
 thiserror.workspace = true
 try-blocks.workspace = true
+tuples.workspace = true
 vm-fdt.workspace = true
 itertools.workspace = true
 range-collections.workspace = true

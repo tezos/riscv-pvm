@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
+use super::deserialiser::FromProof;
 use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
@@ -232,4 +233,12 @@ impl<R> OwnedParserComb<'_, R> {
     pub fn into_result(self) -> R {
         self.result
     }
+}
+
+/// Deserialise into a type `T::Output` given a [`ProofTree`].
+///
+/// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
+pub fn deserialise<T: FromProof>(proof: ProofTree) -> Result<T::Output, DeserError> {
+    let comp_fn = T::from_proof::<ProofTreeDeserialiser>(proof.into())?;
+    Ok(comp_fn.into_result())
 }

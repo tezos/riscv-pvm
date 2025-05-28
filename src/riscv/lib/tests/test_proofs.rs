@@ -15,10 +15,12 @@ use octez_riscv::machine_state::DefaultCacheLayouts;
 use octez_riscv::machine_state::TestCacheLayouts;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
+use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
+use octez_riscv::state_backend::verify_backend::Verifier;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
@@ -148,7 +150,9 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, CL: CacheLayouts>(
     stepper: &PvmStepper<'static, MC, CL>,
     proof: &Proof,
     state_hash: hash::Hash,
-) {
+) where
+    AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+{
     // A fully blinded proof could only be valid if every single leaf
     // in the state is written to and proof compression were to optimise
     // for this case.
