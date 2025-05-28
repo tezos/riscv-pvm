@@ -18,6 +18,8 @@ use cranelift_module::Linkage;
 use cranelift_module::Module;
 use cranelift_module::ModuleResult;
 
+use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 
 /// This struct is used to produce and declare function signatures for external function calls.
@@ -159,6 +161,14 @@ impl<T> ToCraneliftRepr for &T {
 
 impl<T> ToCraneliftRepr for &mut T {
     const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Ptr;
+}
+
+impl ToCraneliftRepr for FRegister {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for FValue {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
 }
 
 /// A valid return type for an external function call.
