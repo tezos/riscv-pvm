@@ -37,6 +37,7 @@ use crate::instruction_context::comparable::Comparable;
 use crate::jit::builder::block_state::PCUpdate;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::parser::instruction::InstrWidth;
 
@@ -47,6 +48,10 @@ pub struct X64(pub Value);
 /// A newtype for wrapping [`Value`], representing a 32-bit value in the JIT context.
 #[derive(Copy, Clone, Debug)]
 pub struct X32(pub Value);
+
+/// A newtype for wrapping [`Value`], representing a 64-bit floating-point value in the JIT context.
+#[derive(Copy, Clone, Debug)]
+pub struct F64(pub Value);
 
 /// Builder context used when lowering individual instructions within a block.
 pub(crate) struct Builder<'a, MC: MemoryConfig, JSA: JitStateAccess> {
@@ -268,6 +273,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
 
 impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     type XValue = X64;
+    type FValue = F64;
     type IResult<Value> = Option<Value>;
 
     /// An `I8` width value.
@@ -333,6 +339,25 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
             self.core_ptr_val,
             reg,
             value,
+        )
+    }
+
+    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
+        JSA::ir_freg_write(
+            &mut self.jsa_call,
+            &mut self.builder,
+            self.core_ptr_val,
+            reg,
+            value,
+        )
+    }
+
+    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
+        JSA::ir_freg_read(
+            &mut self.jsa_call,
+            &mut self.builder,
+            self.core_ptr_val,
+            reg,
         )
     }
 
