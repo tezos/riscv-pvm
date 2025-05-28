@@ -68,6 +68,7 @@ jobs:
           restore-prefixes-first-match: |
             nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
             nix-${{ runner.os }}-${{ runner.arch }}-
+          save: ${{ github.ref_name == 'main' }}
 
       - name: Rustup and Cargo cache
         id: rust-cache
@@ -83,6 +84,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
+          lookup-only: ${{ github.ref_name != 'main' }}
 
       - name: Rust compilation cache 
         uses: Mozilla-Actions/sccache-action@v0.0.9
@@ -93,7 +95,7 @@ jobs:
       # All downloads should be cached. If there is a cache miss, we should ensure that the cache
       # contains all downloads.
       - name: Prefetch Cargo downloads
-        if: steps.rust-cache.outputs.cache-hit != 'true' 
+        if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main' 
         run: nix develop --command find src/riscv -iname Cargo.lock -execdir cargo fetch \;
 
       - name: Build dependencies
@@ -107,5 +109,5 @@ jobs:
       # Only when the primary-key cache was not found do we actually produce a cache. In that case
       # we need to clean up the Nix store a little to save space.
       - name: Clean up Nix store
-        if: steps.nix-cache.outputs.hit-primary-key != 'true' 
+        if: steps.nix-cache.outputs.hit-primary-key != 'true' && github.ref_name == 'main'
         run: nix store gc
