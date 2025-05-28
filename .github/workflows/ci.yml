@@ -4,6 +4,9 @@ on:
   # Trigger this workflow on PRs
   pull_request:
 
+  # Trigger this workflow for Merge Queue items
+  merge_group:
+
   # Trigger this workflow on pushes to these branches
   push:
     branches: [main]
