@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::read_to_string;
+use std::ops::Div;
 use std::path::Path;
 use std::time::Duration;
 
@@ -70,8 +71,20 @@ pub fn handle_results(
             println!("Run {} / {len} => {metrics}", num + 1);
         }
 
-        let agg_metrics = TransferMetrics::aggregate(&all_metrics);
-        println!("\nAggregate => {agg_metrics}");
+        println!();
+
+        let average_metrics = TransferMetrics::mean(&all_metrics);
+        println!("Average => {average_metrics}");
+
+        let worst_metrics = TransferMetrics::worst(&all_metrics);
+        println!("Worst   => {worst_metrics}");
+
+        let best_metrics = TransferMetrics::best(&all_metrics);
+        println!("Best    => {best_metrics}");
+
+        let stddev_metrics = TransferMetrics::standard_deviation(&all_metrics);
+        println!("StdDev  => {:?}", stddev_metrics.duration);
+        println!("        => {:.3} TPS", stddev_metrics.tps);
     } else if let Some(metrics) = all_metrics.first() {
         println!("{metrics}");
     }
@@ -99,7 +112,7 @@ struct TransferMetrics {
 }
 
 impl TransferMetrics {
-    fn aggregate(metrics: &[TransferMetrics]) -> TransferMetrics {
+    fn mean(metrics: &[TransferMetrics]) -> TransferMetrics {
         let summed = metrics.iter().fold(Self::default(), |acc, m| Self {
             transfers: acc.transfers + m.transfers,
             duration: acc.duration + m.duration,
@@ -107,8 +120,57 @@ impl TransferMetrics {
         });
 
         Self {
+            transfers: summed.transfers / metrics.len(),
+            duration: summed.duration.div_f64(metrics.len() as f64),
             tps: summed.tps / metrics.len() as f64,
-            ..summed
+        }
+    }
+
+    fn worst(metrics: &[TransferMetrics]) -> TransferMetrics {
+        metrics
+            .iter()
+            .min_by(|lhs, rhs| lhs.tps.total_cmp(&rhs.tps))
+            .cloned()
+            .unwrap_or(TransferMetrics::default())
+    }
+
+    fn best(metrics: &[TransferMetrics]) -> TransferMetrics {
+        metrics
+            .iter()
+            .max_by(|lhs, rhs| lhs.tps.total_cmp(&rhs.tps))
+            .cloned()
+            .unwrap_or(TransferMetrics::default())
+    }
+
+    fn standard_deviation(metrics: &[TransferMetrics]) -> TransferMetrics {
+        let mean = Self::mean(metrics);
+
+        let transfers_stddev = metrics
+            .iter()
+            .map(|metric| (metric.transfers as f64 - mean.transfers as f64).powi(2))
+            .sum::<f64>()
+            .div(metrics.len() as f64)
+            .sqrt() as usize;
+
+        let duration_stddev = metrics
+            .iter()
+            .map(|metric| (metric.duration.as_secs_f64() - mean.duration.as_secs_f64()).powi(2))
+            .sum::<f64>()
+            .div(metrics.len() as f64)
+            .sqrt();
+        let duration_stddev = Duration::from_secs_f64(duration_stddev);
+
+        let tps_stddev = metrics
+            .iter()
+            .map(|metric| (metric.tps - mean.tps).powi(2))
+            .sum::<f64>()
+            .div(metrics.len() as f64)
+            .sqrt();
+
+        TransferMetrics {
+            transfers: transfers_stddev,
+            duration: duration_stddev,
+            tps: tps_stddev,
         }
     }
 }
