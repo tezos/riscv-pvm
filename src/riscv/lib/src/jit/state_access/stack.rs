@@ -38,7 +38,7 @@
 //! are a good example of this. For now, we choose to pass pointers from values created in rust
 //! code, for safety.
 //!
-//! [`handle_exception`]: super::JitStateAccess::handle_exception
+//! [`handle_exception`]: super::handle_exception
 
 use std::marker::PhantomData;
 
