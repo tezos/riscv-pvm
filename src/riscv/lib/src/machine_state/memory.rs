@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
+use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
@@ -59,69 +60,118 @@ pub const FIRST_ADDRESS: Address = 0;
 
 /// Memory access permissions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Permissions {
-    None,
-    Read,
-    Write,
-    ReadWrite,
-    ReadExec,
-    #[cfg(test)]
-    ReadWriteExec,
+pub struct Permissions {
+    /// Readable?
+    pub(crate) read: bool,
+
+    /// Writable?
+    pub(crate) write: bool,
+
+    /// Executable?
+    pub(crate) exec: bool,
 }
 
 impl Permissions {
+    /// Allow nothing
+    pub(crate) const NONE: Self = Self {
+        read: false,
+        write: false,
+        exec: false,
+    };
+
+    /// Allow write
+    pub(crate) const WRITE: Self = Self {
+        read: false,
+        write: true,
+        exec: false,
+    };
+
+    /// Allow read and write
+    pub(crate) const READ_WRITE: Self = Self {
+        read: true,
+        write: true,
+        exec: false,
+    };
+
+    /// Allow everything
+    #[cfg(test)]
+    pub(crate) const READ_WRITE_EXEC: Self = Self {
+        read: true,
+        write: true,
+        exec: true,
+    };
+
     /// Do the permissions allow reading?
     pub const fn can_read(&self) -> bool {
-        match self {
-            Self::None | Self::Write => false,
-            Self::Read | Self::ReadWrite | Self::ReadExec => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
-        }
+        self.read
     }
 
     /// Do the permissions allow writing?
     pub const fn can_write(&self) -> bool {
-        match self {
-            Self::None | Self::Read | Self::ReadExec => false,
-            Self::ReadWrite | Self::Write => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
-        }
+        self.write
     }
 
     /// Do the permissions allow execution?
     pub const fn can_exec(&self) -> bool {
-        match self {
-            Self::None | Self::Read | Self::ReadWrite | Self::Write => false,
-            Self::ReadExec => true,
-            #[cfg(test)]
-            Self::ReadWriteExec => true,
-        }
+        self.exec
     }
 }
 
 impl TryFrom<XValue> for Permissions {
-    type Error = crate::pvm::linux::error::Error;
+    type Error = linux::error::Error;
 
     fn try_from(value: XValue) -> Result<Self, Self::Error> {
-        const READ: u64 = 0b1;
-        const WRITE: u64 = 0b10;
-        const EXEC: u64 = 0b100;
-        const READ_WRITE: u64 = READ | WRITE;
-        const READ_EXEC: u64 = READ | EXEC;
-        const NONE: u64 = 0;
-
-        match value {
-            READ_WRITE => Ok(Self::ReadWrite),
-            READ_EXEC => Ok(Self::ReadExec),
-            READ => Ok(Self::Read),
-            WRITE => Ok(Self::Write),
-            NONE => Ok(Self::None),
-
-            // Unknown protections value
-            _ => Err(crate::pvm::linux::error::Error::InvalidArgument),
+        // Validate that no bits beyond the low three are set
+        if value & !0b111 != 0 {
+            return Err(linux::error::Error::InvalidArgument);
         }
+
+        let read = value & 0b001 != 0;
+        let write = value & 0b010 != 0;
+        let exec = value & 0b100 != 0;
+
+        Ok(Self { read, write, exec })
+    }
+}
+
+/// Represents data fetched from instruction memory.
+///
+/// This struct encapsulates the raw instruction data and its associated metadata,
+/// such as whether the instruction memory is writable. It is used to manage and
+/// process instructions in the RISC-V machine state.
+pub struct InstructionData<E> {
+    /// The raw instruction data.
+    ///
+    /// This field contains the actual instruction or part of an instruction
+    /// fetched from memory. The type `E` allows flexibility in representing
+    /// the data, such as a half-word (`u16`) or a full word (`u32`).
+    pub data: E,
+
+    /// Indicates whether the instruction memory is writable.
+    ///
+    /// If `true`, the instruction memory can be modified by the program.
+    /// Writable instructions are generally not ideal for caching, as any
+    /// changes to the memory would require invalidating or updating the cache.
+    pub writable: bool,
+}
+
+impl InstructionData<u16> {
+    /// Combines two half-word pieces of instruction data into a full word.
+    ///
+    /// This method takes the lower and upper half-word parts of an instruction
+    /// and combines them into a single 32-bit word. The `writable` flag of the
+    /// resulting instruction is set to `true` if either of the input parts is
+    /// writable.
+    #[inline]
+    pub fn combine_with_upper(self, upper: Self) -> InstructionData<u32> {
+        let data = (self.data as u32) | ((upper.data as u32) << 16);
+
+        // If either part of the instruction is writable, then we consider the whole instruction
+        // writable as it may be changed by the program at any time. Writable instructions are not
+        // ideal for caching as we would need to track every write to ensure correctness.
+        let writable = self.writable || upper.writable;
+
+        InstructionData { data, writable }
     }
 }
 
@@ -150,7 +200,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerRead;
 
     /// Read an element in the region that will be used in execution. `address` is in bytes.
-    fn read_exec<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
+    fn read_exec<E>(&self, address: Address) -> Result<InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
         M: ManagerRead;
@@ -233,7 +283,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerReadWrite,
     {
         self.deallocate_pages(address, length)?;
-        self.protect_pages(address, length, Permissions::None)
+        self.protect_pages(address, length, Permissions::NONE)
     }
 }
 

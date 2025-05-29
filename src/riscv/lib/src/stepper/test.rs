@@ -135,7 +135,7 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheLayouts, B>
             .machine_state
             .core
             .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::ReadWriteExec)
+            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC)
             .unwrap();
 
         stepper.machine_state.setup_boot(&elf_program, initrd)?;

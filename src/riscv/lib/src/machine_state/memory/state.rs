@@ -57,7 +57,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         B: Buddy<M>,
         M: ManagerReadWrite,
     {
-        self.protect_pages(0, TOTAL_BYTES, Permissions::ReadWrite)
+        self.protect_pages(0, TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
     }
 
@@ -107,25 +107,29 @@ where
     }
 
     #[inline]
-    fn read_exec<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
+    fn read_exec<E>(&self, address: Address) -> Result<super::InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        let length = mem::size_of::<E>();
+
+        Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
             // Checking for executable access is sufficient as that implies read access
-            if !self
-                .executable_pages
-                .can_access(address, mem::size_of::<E>())
-            {
+            if !self.executable_pages.can_access(address, length) {
                 return Err(BadMemoryAccess);
             }
         }
 
-        Ok(self.data.read(address as usize))
+        let data = self.data.read(address as usize);
+
+        // SAFETY: The bounds check above ensures the access check below is safe
+        let writable = unsafe { self.writable_pages.can_access(address, length) };
+
+        Ok(super::InstructionData { data, writable })
     }
 
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
@@ -386,7 +390,7 @@ pub mod tests {
         // Request size that's not a multiple of page size
         let requested_size = (PAGE_SIZE.get() as usize) - 100;
         let address = memory
-            .allocate_and_protect_pages(None, requested_size, Permissions::ReadWrite, false)
+            .allocate_and_protect_pages(None, requested_size, Permissions::READ_WRITE, false)
             .expect("Memory allocation should succeed");
 
         // Verify that memory is zeroed for the entire page, not just the requested length
