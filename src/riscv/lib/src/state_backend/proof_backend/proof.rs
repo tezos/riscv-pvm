@@ -24,6 +24,7 @@ use crate::storage::DIGEST_SIZE;
 use crate::storage::HashError;
 
 pub mod deserialise_owned;
+pub mod deserialise_stream;
 pub mod deserialiser;
 
 /// Structure of a proof transitioning from state A to state B.
@@ -148,6 +149,8 @@ pub enum LeafTag {
     Read,
 }
 
+const TAG_OFFSETS_IN_BYTE: [usize; 4] = [6, 4, 2, 0];
+
 impl From<&MerkleProof> for Tag {
     fn from(value: &MerkleProof) -> Self {
         match value {
@@ -189,17 +192,30 @@ impl From<LeafTag> for Tag {
     }
 }
 
+impl Tag {
+    /// Obtain the parsed tags from the most significant bits to the lower ones.
+    pub fn ordered_tags_from_u8(
+        byte: u8,
+    ) -> [Result<Tag, DeserialiseError>; TAG_OFFSETS_IN_BYTE.len()] {
+        TAG_OFFSETS_IN_BYTE
+            .map(|offset| (byte >> offset) & TAG_MASK)
+            .map(Tag::try_from)
+    }
+}
+
 fn serialise_raw_tags(raw_tags: impl Iterator<Item = Tag>) -> Vec<u8> {
     // Tag serialisation to bytes depends on the number of bits required to hold a raw tag
     // Here, a raw tag is 2 bits wide, hence we use 8 / 2 = 4 chunks
     raw_tags
-        .chunks(4)
+        .chunks(TAG_OFFSETS_IN_BYTE.len())
         .into_iter()
         .map(|chunk| {
-            chunk.zip([6, 4, 2, 0]).fold(0, |acc: u8, (tag, offset)| {
-                let bits = u8::from(tag) << offset;
-                acc | bits
-            })
+            chunk
+                .zip(TAG_OFFSETS_IN_BYTE)
+                .fold(0, |acc: u8, (tag, offset)| {
+                    let bits = u8::from(tag) << offset;
+                    acc | bits
+                })
         })
         .collect()
 }
@@ -235,11 +251,15 @@ pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
         .chain(nodes_encoding)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum DeserialiseError {
-    ExpectedLeaf,
+    #[error("Expected a leaf tag, but got a node tag")]
+    UnexpectedNode,
+    #[error("Invalid tag")]
     InvalidTag,
+    #[error("Not enough bytes")]
     NotEnoughBytes,
+    #[error("Too many bytes")]
     TooManyBytes,
 }
 
@@ -304,7 +324,7 @@ fn deserialise_merkle_proof_tags(
             },
             Tag::Node => match subtree {
                 Tree::Node(children) => Ok(ModifyResult::NodeContinue((), children)),
-                Tree::Leaf(_) => Err(DeserialiseError::ExpectedLeaf),
+                Tree::Leaf(_) => Err(DeserialiseError::UnexpectedNode),
             },
         }
     })
@@ -802,14 +822,14 @@ mod tests {
         let raw_bytes = [fh.as_ref(), &tag_bytes, &val_bytes].concat();
         check_deserialisation(&raw_bytes, root.clone(), Proof::new(merkle_proof, fh));
 
-        // ExpectedLeaf tag error
+        // UnexpectedNode tag error
         let tag_bytes_bad = [
             (TAG_NODE << 6) | (TAG_NODE << 4) | (TAG_NODE << 2) | (TAG_READ << 0),
             (TAG_BLIND << 6) | (TAG_NODE << 4) | (TAG_READ << 2) | (TAG_NODE << 0),
             (TAG_READ << 6) | (TAG_BLIND << 4),
         ];
         let raw_bytes = [fh.as_ref(), &tag_bytes_bad, &val_bytes].concat();
-        check_bad_deserialisation(&raw_bytes, root.clone(), DeserialiseError::ExpectedLeaf);
+        check_bad_deserialisation(&raw_bytes, root.clone(), DeserialiseError::UnexpectedNode);
     }
 
     #[test]

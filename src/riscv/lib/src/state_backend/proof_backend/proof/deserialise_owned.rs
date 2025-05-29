@@ -23,10 +23,10 @@ use crate::storage::binary;
 /// Deserialiser for [`Deserialiser`] which owns the data.
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
 
-impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
-    type Suspended<R> = OwnedParserComb<'t, R>;
+impl<'f, 't> Deserialiser<'f> for ProofTreeDeserialiser<'t> {
+    type Suspended<R: 'f> = OwnedParserComb<'t, R>;
 
-    type DeserialiserNode<R> = OwnedBranchComb<'t, R, Self>;
+    type DeserialiserNode<R: 'f> = OwnedBranchComb<'t, R, Self>;
 
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         self.deserialise_as_leaf()?
@@ -43,7 +43,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_leaf<T: DeserializeOwned + 'static>(self) -> Result<Self::Suspended<Partial<T>>> {
+    fn into_leaf<T: DeserializeOwned + 'f>(self) -> Result<Self::Suspended<Partial<T>>> {
         self.deserialise_as_leaf()?
             .map_present_fallible(|data| Ok(binary::deserialise::<T>(data.as_ref())?))
             .map(OwnedParserComb::new)
@@ -138,7 +138,7 @@ impl<B> OwnedBranchComb<'_, Partial<()>, B> {
     }
 }
 
-impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser<'t>> {
+impl<'f, 't, R: 'f> DeserialiserNode<'f, R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser<'t>> {
     type Parent = ProofTreeDeserialiser<'t>;
 
     fn next_branch<T>(
@@ -146,11 +146,11 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         branch_deserialiser: impl FnOnce(
             Self::Parent,
         )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
+            -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<T>>,
+    ) -> Result<<Self::Parent as Deserialiser<'f>>::DeserialiserNode<(R, T)>>
     where
-        R: 'static,
-        T: 'static,
+        T: 'f,
+        R: 'f,
     {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
@@ -174,11 +174,11 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
 
     fn map<T>(
         self,
-        f: impl FnOnce(R) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
+        f: impl FnOnce(R) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::DeserialiserNode<T>
     where
-        T: 'static,
-        R: 'static,
+        T: 'f,
+        R: 'f,
     {
         OwnedBranchComb {
             f: self.f.map(f),
@@ -186,7 +186,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         }
     }
 
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
+    fn done(self) -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<R>> {
         if let Partial::Present(branches) = self.node_data {
             if !branches.is_empty() {
                 let length = branches.len();
@@ -201,28 +201,29 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
     }
 }
 
-impl<'t, R> Suspended for OwnedParserComb<'t, R> {
+impl<'f, 't, R> Suspended<'f> for OwnedParserComb<'t, R> {
     type Output = R;
 
     type Parent = ProofTreeDeserialiser<'t>;
 
     fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
+        f: impl FnOnce(Self::Output) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<T>
     where
-        Self::Output: 'static,
+        T: 'f,
+        Self::Output: 'f,
     {
         OwnedParserComb::new(f(self.result))
     }
 
     fn zip<T>(
         self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
+        other: <Self::Parent as Deserialiser<'f>>::Suspended<T>,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<(Self::Output, T)>
     where
-        Self::Output: 'static,
-        T: 'static,
+        Self::Output: 'f,
+        T: 'f,
     {
         OwnedParserComb::new((self.result, other.result))
     }

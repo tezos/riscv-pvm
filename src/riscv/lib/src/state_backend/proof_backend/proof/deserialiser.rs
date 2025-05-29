@@ -66,18 +66,18 @@ impl<T> Partial<T> {
 /// 1. [`Deserialiser::into_leaf_raw`] The proof is a leaf and raw bytes are obtained.
 /// 2. [`Deserialiser::into_leaf<T>`] The proof is a leaf and the type `T` is parsed.
 /// 3. [`Deserialiser::into_node`] The proof is a node in the tree.
-pub trait Deserialiser {
+pub trait Deserialiser<'f> {
     /// After deserialising a proof, a [`Suspended<R>`] computation is obtained.
-    type Suspended<R>: Suspended<Output = R, Parent = Self>;
+    type Suspended<R: 'f>: Suspended<'f, Output = R, Parent = Self>;
 
     /// In case the proof is a node, [`Deserialiser::DeserialiserNode`] is the deserialiser for the branch case.
-    type DeserialiserNode<R>: DeserialiserNode<R, Parent = Self>;
+    type DeserialiserNode<R: 'f>: DeserialiserNode<'f, R, Parent = Self>;
 
     /// It is expected for the proof to be a leaf. Obtain the raw bytes from that leaf.
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    fn into_leaf<T: DeserializeOwned + 'static>(self) -> Result<Self::Suspended<Partial<T>>>;
+    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<T>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
@@ -86,8 +86,8 @@ pub trait Deserialiser {
 /// The trait used for deserialising a proof's node.
 /// Having an object of this trait is equivalent to knowing the current proof is a node.
 /// Deserialisers for each of its branches are expected to be provided to continue the deserialisation.
-pub trait DeserialiserNode<R> {
-    type Parent: Deserialiser;
+pub trait DeserialiserNode<'f, R> {
+    type Parent: Deserialiser<'f>;
 
     /// The next branch of the current node is deserialised using the provided deserialiser `br_deser`.
     fn next_branch<T>(
@@ -95,59 +95,64 @@ pub trait DeserialiserNode<R> {
         branch_deserialiser: impl FnOnce(
             Self::Parent,
         )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
+            -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<T>>
+        + 'static,
+    ) -> Result<<Self::Parent as Deserialiser<'f>>::DeserialiserNode<(R, T)>>
     where
-        R: 'static,
-        T: 'static;
+        T: 'f,
+        R: 'f;
 
     /// Helper for mapping the current result into a new type.
     fn map<T>(
         self,
-        f: impl FnOnce(R) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
+        f: impl FnOnce(R) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::DeserialiserNode<T>
     where
-        T: 'static,
-        R: 'static;
+        T: 'f,
+        R: 'f;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>>;
+    fn done(self) -> Result<<Self::Parent as Deserialiser<'f>>::Suspended<R>>;
 }
 
 /// The trait represents a computation function obtained after deserialising a proof.
-pub trait Suspended {
+pub trait Suspended<'f> {
     /// End result of the computation.
     type Output;
 
-    type Parent: Deserialiser;
+    type Parent: Deserialiser<'f>;
 
     /// Helper to map the current result into a new type.
     fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
+        f: impl FnOnce(Self::Output) -> T + 'f,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<T>
     where
-        Self::Output: 'static;
+        Self::Output: 'f;
 
     /// Helper to zip the current result with another result.
     fn zip<T>(
         self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
+        other: <Self::Parent as Deserialiser<'f>>::Suspended<T>,
+    ) -> <Self::Parent as Deserialiser<'f>>::Suspended<(Self::Output, T)>
     where
-        Self::Output: 'static,
-        T: 'static;
+        Self::Output: 'f,
+        T: 'f;
 }
+
 /// Helper trait for transforming `Self`` to a suspended computation from a given serialiser.
 pub trait FromProof {
     type Output: Sized;
 
-    fn from_proof<D: Deserialiser>(de: D) -> Result<D::Suspended<Self::Output>>;
+    fn from_proof<'f, D: Deserialiser<'f>>(de: D) -> Result<D::Suspended<Self::Output>>;
 }
 
 #[cfg(test)]
 mod tests {
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use super::Deserialiser;
     use super::DeserialiserNode;
@@ -155,15 +160,23 @@ mod tests {
     use super::Result;
     use super::Suspended;
     use crate::state_backend::ProofTree;
+    use crate::state_backend::proof_backend::proof::DeserialiseError;
     use crate::state_backend::proof_backend::proof::MerkleProof;
     use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
+    use crate::state_backend::proof_backend::proof::TAG_BLIND;
+    use crate::state_backend::proof_backend::proof::TAG_NODE;
+    use crate::state_backend::proof_backend::proof::TAG_READ;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
+    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
+    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamParserComb;
+    use crate::state_backend::proof_backend::proof::deserialise_stream::TagIter;
     use crate::state_backend::proof_backend::proof::deserialiser::DeserError;
+    use crate::storage::DIGEST_SIZE;
     use crate::storage::Hash;
 
-    fn create_computation<D: Deserialiser>(
+    fn computation<'f, D: Deserialiser<'f>>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser<'f>>::Suspended<i32>> {
         // The tree structure:
         // Node (root)
         // ├── Leaf (type: Hash)
@@ -193,9 +206,9 @@ mod tests {
         }))
     }
 
-    fn create_computation_2<D: Deserialiser>(
+    fn computation_2<'f, D: Deserialiser<'f>>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser<'f>>::Suspended<i32>> {
         // The tree structure
         // Node (root)
         // ├── Leaf 1 (type: i32)
@@ -229,11 +242,21 @@ mod tests {
         }))
     }
 
+    /// Nested results are used to distinguish between deserialisation and parsing leaves stages
+    fn run_stream_deserialiser<'f, 'ret>(
+        deser: impl FnOnce(StreamDeserialiser<'f, 'ret>) -> Result<StreamParserComb<'f, 'ret, i32>>,
+        bytes: &'ret [u8],
+    ) -> Result<Result<i32>> {
+        let tags = Rc::new(RefCell::new(TagIter::new(bytes)));
+        let comp_fn = deser(StreamDeserialiser::new_present(tags.clone()));
+        comp_fn.map(|f| f.into_result(&mut tags.borrow().remaining_to_stream_input()))
+    }
+
     #[test]
     fn test_absent_computation() {
         // Root is absent already
         let proof: ProofTreeDeserialiser = ProofTree::Absent.into();
-        let comp_fn = create_computation(proof).unwrap();
+        let comp_fn = computation(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0);
 
         // We expect to get the Absent case since the father of the nested node is blinded
@@ -250,8 +273,29 @@ mod tests {
             )),
         ]);
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
-        let comp_fn = create_computation(proof).unwrap();
+        let comp_fn = computation(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0);
+    }
+
+    #[test]
+    fn test_absent_computation_stream() {
+        // Root is absent already
+        let proof: StreamDeserialiser = StreamDeserialiser::Absent;
+        let comp_fn = computation(proof).unwrap();
+        assert_eq!(
+            comp_fn
+                .into_result(&mut TagIter::new(&[]).remaining_to_stream_input())
+                .unwrap(),
+            0
+        );
+
+        // Expect absent case in the computed result
+        let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_BLIND << 2];
+        let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
+        let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap().into();
+        let proof_bytes = [tag_bytes.as_ref(), leaf_read.as_ref(), leaf_blind.as_ref()].concat();
+        let res = run_stream_deserialiser(computation, &proof_bytes);
+        assert_eq!(res.unwrap().unwrap(), 0);
     }
 
     #[test]
@@ -266,7 +310,7 @@ mod tests {
             ))]),
         ]);
         let comp_fn =
-            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&absent_shape).into());
+            computation::<ProofTreeDeserialiser>(ProofTree::Present(&absent_shape).into());
 
         let res = comp_fn.unwrap().into_result();
 
@@ -278,7 +322,37 @@ mod tests {
             Hash::blake2b_hash_bytes(&[6, 7, 8]).unwrap(),
         ));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
-        let comp_fn = create_computation_2(proof).unwrap();
+        let comp_fn = computation_2(proof).unwrap();
+        assert_eq!(comp_fn.into_result(), -1);
+    }
+
+    #[test]
+    fn test_blind_computation_stream() {
+        // The nested leaf is blinded
+        let raw_bytes_tags = [TAG_NODE << 6 | TAG_BLIND << 4 | TAG_NODE << 2 | TAG_BLIND];
+        let b1: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let b2: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let raw_bytes_content = [raw_bytes_tags.as_ref(), b1.as_ref(), b2.as_ref()].concat();
+
+        let rc = Rc::new(RefCell::new(TagIter::new(&raw_bytes_content)));
+
+        let comp_fn =
+            computation::<StreamDeserialiser>(StreamDeserialiser::new_present(rc.clone()));
+
+        let res = comp_fn
+            .unwrap()
+            .into_result(&mut rc.borrow_mut().remaining_to_stream_input())
+            .unwrap();
+
+        assert_eq!(res, -1);
+
+        // For computation_2, the provided merkle proof will resolve as blinded
+        // since root is blinded
+        let merkle_proof = MerkleProof::Leaf(MerkleProofLeaf::Blind(
+            Hash::blake2b_hash_bytes(&[6, 7, 8]).unwrap(),
+        ));
+        let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
+        let comp_fn = computation_2(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
     }
 
@@ -302,30 +376,79 @@ mod tests {
                 Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap(),
             )),
         ]);
+        let bad_shape_4 = MerkleProof::Node(vec![
+            MerkleProof::Leaf(MerkleProofLeaf::Read([42_u8; 32].to_vec())),
+            MerkleProof::Leaf(MerkleProofLeaf::Read(100_i32.to_le_bytes().to_vec())),
+        ]);
+
         // Tree is missing branches
-        let comp_fn =
-            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_1).into());
+        let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_1).into());
         assert!(comp_fn.is_err_and(|e| matches!(e, DeserError::BadNumberOfBranches { .. })));
-        let comp_fn =
-            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
+
         // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
         // Ideally, we would like to have expected: 2, got: 5, but the implemenetation for `ProofTreeDeserialiser`
         // does not track this information (the original number of chilren)
+        let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
         assert!(comp_fn.is_err_and(|e| {
-            println!("{e:?}");
             matches!(e, DeserError::BadNumberOfBranches {
                 expected: 0,
                 got: 3
             })
         }));
-        let comp_fn =
-            create_computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
+
         // The first child is a node, but is expected to be a leaf
+        let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
         assert!(comp_fn.is_err_and(|e| matches!(e, DeserError::UnexpectedNode)));
+        // The second child is a leaf, but is expected to be a node
+        let comp_fn = computation::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_4).into());
+        assert!(comp_fn.is_err_and(|e| { matches!(e, DeserError::UnexpectedLeaf) }));
     }
 
     #[test]
-    fn test_absent_node_parsing() {}
+    fn test_bad_structure_stream() {
+        let hash: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let tag_shape_1 = [TAG_NODE << 6 | 0b01 << 4];
+        let tag_shape_2 = [
+            TAG_NODE << 6 | TAG_BLIND << 4 | TAG_BLIND << 2 | TAG_NODE,
+            TAG_NODE << 6 | TAG_NODE << 4,
+        ];
+        let tag_shape_3 = [TAG_NODE << 6 | TAG_NODE << 4 | TAG_BLIND << 2];
+        let tag_shape_4 = [TAG_NODE << 6 | TAG_READ << 4 | TAG_READ << 2];
+
+        let data_shape_1 = [];
+        let data_shape_2 = [hash.as_ref(), hash.as_ref()].concat();
+        let data_shape_3 = &hash;
+        let data_shape_4 = [hash.as_ref(), hash.as_ref()].concat();
+
+        // Bad tag introduced after the first node
+        let res = run_stream_deserialiser(
+            computation,
+            &[tag_shape_1.as_ref(), data_shape_1.as_ref()].concat(),
+        );
+        assert!(matches!(
+            res,
+            Err(DeserError::TagDeserialise(DeserialiseError::InvalidTag))
+        ));
+
+        // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
+        let bytes = &[tag_shape_2.as_ref(), data_shape_2.as_ref()].concat();
+        let res = run_stream_deserialiser(computation, bytes);
+        assert!(matches!(res, Ok(Err(DeserError::RemainingBytes))));
+
+        // The first child is a node, but is expected to be a leaf
+        let res = run_stream_deserialiser(
+            computation,
+            &[tag_shape_3.as_ref(), data_shape_3.as_ref()].concat(),
+        );
+        assert!(matches!(res, Err(DeserError::UnexpectedNode)));
+
+        // The second child is a read leaf, but is expected to be a node
+        let res = run_stream_deserialiser(
+            computation,
+            &[tag_shape_4.as_ref(), data_shape_4.as_ref()].concat(),
+        );
+        assert!(matches!(res, Err(DeserError::UnexpectedLeaf)));
+    }
 
     #[test]
     fn test_valid_computation() {
@@ -343,7 +466,33 @@ mod tests {
         ]);
 
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
-        let comp_fn = create_computation_2(proof).unwrap();
+        let comp_fn = computation_2(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0x140A_0000 + 0xC0005);
+    }
+
+    #[test]
+    fn test_valid_computation_stream() {
+        let h1 = 0x140A_0000_i32.to_le_bytes();
+        let h2: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap().into();
+        let h3 = 0xC0005_i32.to_le_bytes();
+        let h4: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[9, 10, 11]).unwrap().into();
+
+        let tags = [
+            TAG_NODE << 6 | TAG_READ << 4 | TAG_BLIND << 2 | TAG_READ,
+            TAG_BLIND << 6,
+        ];
+
+        let res = run_stream_deserialiser(
+            computation_2,
+            &[
+                tags.as_ref(),
+                h1.as_ref(),
+                h2.as_ref(),
+                h3.as_ref(),
+                h4.as_ref(),
+            ]
+            .concat(),
+        );
+        assert_eq!(res.unwrap().unwrap(), 0x140A_0000 + 0xC0005);
     }
 }
