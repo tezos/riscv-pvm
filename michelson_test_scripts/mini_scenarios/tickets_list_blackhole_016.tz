@@ -1,6 +1,0 @@
-# This contract drops any inbound ticket list
-parameter (list (ticket string)) ;
-storage unit;
-code { CDR ;
-       NIL operation ;
-       PAIR }

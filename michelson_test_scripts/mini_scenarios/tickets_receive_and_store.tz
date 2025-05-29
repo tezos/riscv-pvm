@@ -1,4 +1,0 @@
-# Contract that takes a string ticket as parameter and stores it in storage
-{ parameter (ticket string) ;
-  storage (option (ticket string)) ;
-  code { CAR ; SOME ; NIL operation ; PAIR } }

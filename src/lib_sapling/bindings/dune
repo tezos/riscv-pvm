@@ -1,9 +1,0 @@
-; This file was automatically generated, do not edit.
-; Edit file manifest/main.ml instead.
-
-(executable
- (name rustzcash_ctypes_gen)
- (libraries
-  ctypes.stubs
-  ctypes)
- (modules rustzcash_ctypes_gen rustzcash_ctypes_bindings))

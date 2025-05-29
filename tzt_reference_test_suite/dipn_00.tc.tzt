@@ -1,3 +1,0 @@
-code { DIP 1 { PUSH bool True } } ;
-input { } ;
-output (StaticError _);

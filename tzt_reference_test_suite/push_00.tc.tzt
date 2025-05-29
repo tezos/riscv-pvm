@@ -1,3 +1,0 @@
-code { PUSH int "42" } ;
-input { } ;
-output (StaticError _);

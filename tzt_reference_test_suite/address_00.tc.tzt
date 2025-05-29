@@ -1,3 +1,0 @@
-code { ADDRESS } ;
-input { Stack_elt unit Unit } ;
-output (StaticError _) ;

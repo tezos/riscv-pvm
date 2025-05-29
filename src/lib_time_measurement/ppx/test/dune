@@ -1,4 +1,0 @@
-
-(library
- (name tezos_time_measurement_ppx_test)
- (modules utils))

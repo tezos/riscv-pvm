@@ -1,3 +1,0 @@
-code { PACK } ;
-input { Stack_elt (lambda unit unit) { CDR 0 } } ;
-output { Stack_elt bytes 0x050200000009020000000405290000 } ;

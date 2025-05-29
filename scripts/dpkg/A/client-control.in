@@ -1,6 +1,0 @@
-Package: @PKG@
-Version: @VERSION@
-Architecture: @ARCH@
-Maintainer: @MAINT@
-Description: The Octez client
-Depends: @DEPENDS@

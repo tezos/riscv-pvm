@@ -1,3 +1,0 @@
-# Vendored libraries
-
-None

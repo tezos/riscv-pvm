@@ -1,4 +1,0 @@
-{ "observer": { "evm_node_endpoint": "https://relay.mainnet.etherlink.com" },
-  "kernel_execution":
-    { "preimages_endpoint":
-        "https://snapshots.tzinit.org/etherlink-mainnet/wasm_2_0_0" } }
