@@ -24,6 +24,8 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
@@ -111,6 +113,11 @@ pub(crate) trait ICB {
     /// [`XRegisters`]: crate::machine_state::registers::XRegisters
     type XValue: Arithmetic<Self> + Comparable<Self>;
 
+    /// A 64-bit floating-point value stored in [`FRegisters`].
+    ///
+    /// [`FRegisters`]: crate::machine_state::registers::FRegisters
+    type FValue;
+
     /// Perform a read to a [`NonZeroXRegister`], with the given value.
     /// This is a specialized version of `xregister_read` that is only used for
     /// registers that are guaranteed not to be x0.
@@ -123,6 +130,12 @@ pub(crate) trait ICB {
 
     /// Construct an [`ICB::XValue`] from an `imm: i64`.
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue;
+
+    #[expect(unused)]
+    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
+
+    #[expect(unused)]
+    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
 
     /// Perform a read of the program counter.
     fn pc_read(&mut self) -> Self::XValue;
@@ -270,6 +283,8 @@ pub(crate) trait ICB {
 impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     type XValue = XValue;
 
+    type FValue = FValue;
+
     #[inline(always)]
     fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
         self.hart.xregisters.read_nz(reg)
@@ -293,6 +308,16 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     #[inline(always)]
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         imm as u64
+    }
+
+    #[inline(always)]
+    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
+        self.hart.fregisters.read(reg)
+    }
+
+    #[inline(always)]
+    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
+        self.hart.fregisters.write(reg, value)
     }
 
     #[inline(always)]

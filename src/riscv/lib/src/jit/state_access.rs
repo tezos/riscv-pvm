@@ -41,6 +41,7 @@ use cranelift_module::FuncId;
 use cranelift_module::Module;
 use cranelift_module::ModuleResult;
 
+use super::builder::F64;
 use super::builder::X64;
 use super::builder::errno::Errno;
 use super::builder::errno::ErrnoImpl;
@@ -49,6 +50,8 @@ use crate::instruction_context::LoadStoreWidth;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
@@ -101,6 +104,8 @@ register_jsa_functions!(
     pc_write => (JSA::pc_write::<MC>, AbiCall<2>::args),
     xreg_read => (JSA::xregister_read::<MC>, AbiCall<2>::args),
     xreg_write => (JSA::xregister_write::<MC>, AbiCall<3>::args),
+    freg_read => (fregister_read::<MC, JSA>, AbiCall<2>::args),
+    freg_write => (fregister_write::<MC, JSA>, AbiCall<3>::args),
     handle_exception => (JSA::handle_exception::<MC>, AbiCall<4>::args),
     raise_illegal_instruction_exception => (JSA::raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (JSA::raise_store_amo_access_fault_exception, AbiCall<2>::args),
@@ -108,6 +113,23 @@ register_jsa_functions!(
     memory_store => (JSA::memory_store::<MC>, AbiCall<5>::args),
     memory_load => (JSA::memory_load::<MC>, AbiCall::<6>::args)
 );
+
+/// Read the value of the given [`FRegister`].
+extern "C" fn fregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    reg: FRegister,
+) -> FValue {
+    core.hart.fregisters.read(reg)
+}
+
+/// Write the given value to the given [`FRegister`].
+extern "C" fn fregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    reg: FRegister,
+    val: FValue,
+) {
+    core.hart.fregisters.write(reg, val)
+}
 
 /// State Access that a JIT-compiled block may use.
 ///
@@ -304,6 +326,40 @@ pub trait JitStateAccess: ManagerReadWrite {
         let reg = builder.ins().iconst(I8, reg as i64);
         builder.ins().call(*xreg_write, &[core_ptr, reg, value.0]);
     }
+
+    /// Emit the required IR to read the value from the given fregister.
+    fn ir_freg_read<MC: MemoryConfig>(
+        jsa_calls: &mut JsaCalls<'_, MC, Self>,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        reg: FRegister,
+    ) -> F64 {
+        let freg_read = jsa_calls.freg_read.get_or_insert_with(|| {
+            jsa_calls
+                .module
+                .declare_func_in_func(jsa_calls.imports.freg_read, builder.func)
+        });
+        let reg = builder.ins().iconst(I8, reg as i64);
+        let call = builder.ins().call(*freg_read, &[core_ptr, reg]);
+        F64(builder.inst_results(call)[0])
+    }
+
+    /// Emit the required IR to write the value to the given fregister.
+    fn ir_freg_write<MC: MemoryConfig>(
+        jsa_calls: &mut JsaCalls<'_, MC, Self>,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        reg: FRegister,
+        value: F64,
+    ) {
+        let freg_write = jsa_calls.freg_write.get_or_insert_with(|| {
+            jsa_calls
+                .module
+                .declare_func_in_func(jsa_calls.imports.freg_write, builder.func)
+        });
+        let reg = builder.ins().iconst(I8, reg as i64);
+        builder.ins().call(*freg_write, &[core_ptr, reg, value.0]);
+    }
 }
 
 impl JitStateAccess for Owned {
@@ -354,6 +410,8 @@ pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     pc_write: Option<FuncRef>,
     xreg_read: Option<FuncRef>,
     xreg_write: Option<FuncRef>,
+    freg_read: Option<FuncRef>,
+    freg_write: Option<FuncRef>,
     handle_exception: Option<FuncRef>,
     raise_illegal_instruction_exception: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
@@ -377,6 +435,8 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
             pc_write: None,
             xreg_read: None,
             xreg_write: None,
+            freg_read: None,
+            freg_write: None,
             handle_exception: None,
             raise_illegal_instruction_exception: None,
             raise_store_amo_access_fault_exception: None,
