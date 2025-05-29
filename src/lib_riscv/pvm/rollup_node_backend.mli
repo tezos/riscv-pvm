@@ -18,27 +18,19 @@ type status = Common.status
 
 (* TODO RV-615: Improve the `input` type exposed in protocol environment *)
 (* Mirrors Api.input but requires manual conversion *)
-type input = Common.input =
-  | Inbox_message of int32 * int64 * string
-  | Reveal of string
+type input = Common.input
 
 (* Mirrors Api.input_request but requires manual conversion *)
-type input_request = Common.input_request =
-  | No_input_required
-  | Initial
-  | First_after of int32 * int64
-  | Needs_reveal of string
+type input_request = Common.input_request
 
-type proof = Octez_riscv_api.proof
+(* TODO NOW *)
+type proof = int32
 
 type output_proof = Common.output_proof
 
-type output_info = Common.output_info = {
-  message_index : Z.t;
-  outbox_level : Bounded.Non_negative_int32.t;
-}
+type output_info = Common.output_info
 
-type output = Common.output = {info : output_info; encoded_message : string}
+type output = Common.output
 
 module Mutable_state : Common.Mutable_state
 
