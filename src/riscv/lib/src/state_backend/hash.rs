@@ -44,7 +44,13 @@ pub struct Hash {
 impl Hash {
     /// Hash a slice of bytes
     pub fn blake2b_hash_bytes(bytes: &[u8]) -> Result<Self, HashError> {
-        tezos_crypto_rs::blake2b::digest_256(bytes).try_into()
+        let hash = xxhash_rust::xxh3::xxh3_64(bytes);
+
+        let mut digest = [0u8; DIGEST_SIZE];
+        // Directly write u64 as bytes without intermediate conversion
+        digest[0..8].copy_from_slice(&hash.to_le_bytes());
+
+        Ok(Hash { digest })
     }
 
     /// Get the hash of a value that can be serialised by hashing its serialisation
