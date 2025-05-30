@@ -767,14 +767,6 @@ pub enum InstrUncacheable {
 
     // Zifencei instructions
     FenceI,
-
-    // Privileged instructions
-    // Trap-Return
-    Mret,
-    Sret,
-    Mnret,
-    // Supervisor Memory-Management
-    SFenceVma { asid: XRegister, vaddr: XRegister },
 }
 
 /// RISC-V parsed instructions.
@@ -1014,9 +1006,7 @@ impl InstrUncacheable {
     pub const fn width(&self) -> InstrWidth {
         use InstrUncacheable::*;
         match self {
-            FenceI | Fence(_) | FenceTso(_) | Ebreak | Mret | Sret | Mnret | SFenceVma { .. } => {
-                InstrWidth::Uncompressed
-            }
+            FenceI | Fence(_) | FenceTso(_) | Ebreak => InstrWidth::Uncompressed,
 
             CEbreak => InstrWidth::Compressed,
         }
@@ -1472,14 +1462,6 @@ impl fmt::Display for InstrUncacheable {
             FenceTso(args) => fence_instr!(f, "fence.tso", args),
 
             Ebreak => write!(f, "ebreak"),
-
-            // Privileged instructions
-            // Trap-Return
-            Mret => write!(f, "mret"),
-            Sret => write!(f, "sret"),
-            Mnret => write!(f, "mnret"),
-            // Supervisor Memory-Management
-            SFenceVma { asid, vaddr } => write!(f, "sfence.vma {vaddr},{asid}"),
 
             // Zifencei instructions
             FenceI => write!(f, "fence.i"),
