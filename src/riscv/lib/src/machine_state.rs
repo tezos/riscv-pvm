@@ -359,18 +359,6 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
             InstrUncacheable::FenceTso(_args) => Err(Exception::IllegalInstruction),
             InstrUncacheable::Ebreak => run_syscall_instr!(core, run_ebreak),
 
-            // Privileged instructions
-            // Trap-Return
-            InstrUncacheable::Mret => Err(Exception::IllegalInstruction),
-            InstrUncacheable::Sret => Err(Exception::IllegalInstruction),
-            // Currently not implemented instruction (part of Smrnmi extension)
-            InstrUncacheable::Mnret => Err(Exception::IllegalInstruction),
-            // Supervisor Memory-Management
-            InstrUncacheable::SFenceVma { asid, vaddr } => {
-                self.core.run_sfence_vma(*asid, *vaddr)?;
-                Ok(ProgramCounterUpdate::Next(instr.width()))
-            }
-
             // RV32C compressed instructions
             InstrUncacheable::CEbreak => run_syscall_instr!(core, run_cebreak),
 
