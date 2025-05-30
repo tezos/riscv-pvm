@@ -477,11 +477,8 @@ const F5_30: u32 = 0b1_1110;
 
 const F7_0: u32 = 0b0;
 const F7_1: u32 = 0b1;
-const F7_9: u32 = 0b1001;
 const F7_8: u32 = 0b000_1000;
 const F7_20: u32 = 0b10_0000;
-const F7_24: u32 = 0b001_1000;
-const F7_56: u32 = 0b011_1000;
 
 const FMT_S: u32 = 0b0;
 const FMT_D: u32 = 0b01;
@@ -501,7 +498,6 @@ const RM_MAX: u32 = RM_1;
 const RS1_0: u32 = 0b0;
 const RS2_0: u32 = 0b0;
 const RS2_1: u32 = 0b1;
-const RS2_2: u32 = 0b10;
 const RS2_5: u32 = 0b101;
 
 const RS2_0_U5: u5 = u5::new(0b0);
@@ -711,23 +707,8 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
                     (RS1_0, RS2_1) => return Instr::Uncacheable(Ebreak),
                     _ => Unknown { instr },
                 },
-                F7_9 => {
-                    return Instr::Uncacheable(SFenceVma {
-                        vaddr: rs1(instr),
-                        asid: rs2(instr),
-                    });
-                }
                 F7_8 => match (rs1_bits(instr), rs2_bits(instr)) {
-                    (RS1_0, RS2_2) => return Instr::Uncacheable(Sret),
                     (RS1_0, RS2_5) => return Instr::Cacheable(Wfi),
-                    _ => Unknown { instr },
-                },
-                F7_24 => match (rs1_bits(instr), rs2_bits(instr)) {
-                    (RS1_0, RS2_2) => return Instr::Uncacheable(Mret),
-                    _ => Unknown { instr },
-                },
-                F7_56 => match (rs1_bits(instr), rs2_bits(instr)) {
-                    (RS1_0, RS2_2) => return Instr::Uncacheable(Mnret),
                     _ => Unknown { instr },
                 },
                 _ => Unknown { instr },
@@ -1450,7 +1431,6 @@ mod tests {
     use crate::parser::SplitITypeArgs;
     use crate::parser::instruction::CIBNZTypeArgs;
     use crate::parser::instruction::CIBTypeArgs;
-    use crate::parser::instruction::InstrUncacheable;
     use crate::parser::parse_compressed_instruction;
     use crate::parser::parse_compressed_instruction_inner;
 
@@ -1578,15 +1558,6 @@ mod tests {
                 instr: u32::from_le_bytes([0x13, 0x15, 0xf5, 0x21]),
             }),
         ];
-        let instructions = parse_block(&bytes);
-        assert_eq!(instructions, expected)
-    }
-
-    // Instructions not covered in integration tests
-    #[test]
-    fn test_6() {
-        let bytes: [u8; 4] = [0x73, 0x00, 0x20, 0x70];
-        let expected = [Instr::Uncacheable(InstrUncacheable::Mnret)];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected)
     }
