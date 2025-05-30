@@ -342,6 +342,10 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         X64(self.builder.ins().iconst(I64, imm))
     }
 
+    fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32 {
+        X32(self.builder.ins().iconst(I32, imm as i64))
+    }
+
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue {
         // unsigned extension works as boolean can never be negative (only 0 or 1)
         X64(self.builder.ins().uextend(I64, value))

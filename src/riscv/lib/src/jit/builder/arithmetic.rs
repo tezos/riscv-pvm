@@ -63,6 +63,10 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
     }
 
     fn modulus(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
+        X64(icb.builder.ins().urem(self.0, other.0))
+    }
+
+    fn modulus_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         X64(icb.builder.ins().srem(self.0, other.0))
     }
 }
@@ -116,6 +120,10 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
     }
 
     fn modulus(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
+        X32(icb.builder.ins().urem(self.0, other.0))
+    }
+
+    fn modulus_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         X32(icb.builder.ins().srem(self.0, other.0))
     }
 }

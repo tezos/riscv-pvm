@@ -14,12 +14,7 @@ impl<M> XRegisters<M>
 where
     M: backend::ManagerReadWrite,
 {
-    /// `REMW` R-type instruction
-    ///
-    /// Compute the remainder of val(rs1) divided by val(rs2), but only consider
-    /// the lower 32 bits of each value. Store result in `rd`. In case the lower
-    /// 32 bits of val(rs2) is zero, the result is val(rs1). In case of overflow
-    /// the result is zero. All values used in the operation are _signed integers_.
+    #[cfg(test)]
     pub fn run_remw(&mut self, rs1: XRegister, rs2: XRegister, rd: XRegister) {
         let rval1 = self.read(rs1) as i32;
         let rval2 = self.read(rs2) as i32;
@@ -35,11 +30,7 @@ where
         self.write(rd, result as u64);
     }
 
-    /// `REMUW` R-type instruction
-    ///
-    /// Compute the remainder of val(rs1) divided by val(rs2) and store the result
-    /// in register `rd`. In case val(rs2) is zero, the result is val(rs1). All
-    /// values are _unsigned integers_.
+    #[cfg(test)]
     pub fn run_remuw(&mut self, rs1: XRegister, rs2: XRegister, rd: XRegister) {
         let rval1 = self.read(rs1) as u32;
         let rval2 = self.read(rs2) as u32;

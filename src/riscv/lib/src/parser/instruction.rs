@@ -484,9 +484,31 @@ pub enum InstrCacheable {
     Amomaxud(AmoArgs),
 
     // RV64M division instructions
+    /// `REM` R-type instruction
+    ///
+    /// Compute the remainder of val(rs1) divided by val(rs2). Store result in `rd`.
+    /// In case val(rs2) is zero, result is val(rs1). In case of overflow, when
+    /// val(rs2) is -1 and val(rs1) is the minimum of signed 32 bit integer, result is
+    /// zero. All values are _signed integers_.
     Rem(RTypeArgs),
+    /// `REMU` R-type instruction
+    ///
+    /// Compute the remainder of val(rs1) divided by val(rs2) and store the result
+    /// in register `rd`. In case val(rs2) is zero, the result is val(rs1). All
+    /// values are _unsigned integers_.
     Remu(RTypeArgs),
+    /// `REMW` R-type instruction
+    ///
+    /// Compute the remainder of val(rs1) divided by val(rs2), but only consider
+    /// the lower 32 bits of each value. Store result in `rd`. In case the lower
+    /// 32 bits of val(rs2) is zero, the result is val(rs1). In case of overflow
+    /// the result is zero. All values used in the operation are _signed integers_.
     Remw(RTypeArgs),
+    /// `REMUW` R-type instruction
+    ///
+    /// Compute the remainder of val(rs1) divided by val(rs2) and store the result
+    /// in register `rd`. In case val(rs2) is zero, the result is val(rs1). All
+    /// values are _unsigned integers_.
     Remuw(RTypeArgs),
     /// `DIV` - signed integer division `⌊ val(rs1) / val(rs2) ⌋`, storing the result in `rd`.
     ///

@@ -71,6 +71,9 @@ pub(crate) trait ICB {
     /// Construct an [`ICB::XValue`] from an `imm: i64`.
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue;
 
+    /// Construct an [`ICB::XValue32`] from an `imm: i32`.
+    fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32;
+
     #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
@@ -253,6 +256,10 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     #[inline(always)]
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         imm as u64
+    }
+
+    fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32 {
+        imm as u32
     }
 
     #[inline(always)]

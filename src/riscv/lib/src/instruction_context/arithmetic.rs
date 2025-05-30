@@ -49,6 +49,9 @@ pub trait Arithmetic<I: ICB + ?Sized>: Copy {
     /// Find the signed remainder of the division of **self** by **other**.
     /// Panics if **other** is zero.
     fn modulus(self, other: Self, icb: &mut I) -> Self;
+
+    /// Find the signed remainder of the division of **self**(signed) by **other**(signed).
+    fn modulus_signed(self, other: Self, icb: &mut I) -> Self;
 }
 
 impl<I: ICB> Arithmetic<I> for XValue {
@@ -95,6 +98,10 @@ impl<I: ICB> Arithmetic<I> for XValue {
     fn modulus(self, other: Self, _: &mut I) -> Self {
         self % other
     }
+
+    fn modulus_signed(self, other: Self, _: &mut I) -> Self {
+        ((self as i64).wrapping_rem(other as i64)) as Self
+    }
 }
 
 impl<I: ICB> Arithmetic<I> for XValue32 {
@@ -140,5 +147,9 @@ impl<I: ICB> Arithmetic<I> for XValue32 {
 
     fn modulus(self, other: Self, _: &mut I) -> Self {
         self % other
+    }
+
+    fn modulus_signed(self, other: Self, _: &mut I) -> Self {
+        ((self as i32).wrapping_rem(other as i32)) as Self
     }
 }

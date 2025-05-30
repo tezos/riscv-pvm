@@ -6,6 +6,7 @@
 
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::types::I64;
+use cranelift::prelude::types::I32;
 
 use super::LoadStoreWidth;
 use crate::instruction_context::ICB;
@@ -14,6 +15,7 @@ use crate::jit::state_access::JitStateAccess;
 use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XValue;
+use crate::machine_state::registers::XValue32;
 use crate::state_backend::Elem;
 
 /// Types which can be loaded and stored using the [`super::ICB`]
@@ -135,6 +137,25 @@ impl PhiValue for XValue {
     }
 
     const IR_TYPES: &'static [ir::Type] = &[I64];
+}
+
+impl PhiValue for XValue32 {
+    type IcbValue<I: ICB + ?Sized> = I::XValue32;
+
+    fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
+        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+    ) -> impl IntoIterator<Item = ir::Value> {
+        [icb_repr.0 as ir::Value]
+    }
+
+    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+        params: &[ir::Value],
+        _: &mut jit::builder::Builder<'_, MC, JSA>,
+    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        jit::builder::X32(params[0])
+    }
+
+    const IR_TYPES: &'static [ir::Type] = &[I32];
 }
 
 impl<E> PhiValue for Result<(), E> {
