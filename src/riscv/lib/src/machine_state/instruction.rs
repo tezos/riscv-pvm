@@ -504,10 +504,10 @@ impl OpCode {
             Self::Amomaxd => Args::run_amomaxd,
             Self::Amominud => Args::run_amominud,
             Self::Amomaxud => Args::run_amomaxud,
-            Self::Rem => Args::run_rem,
-            Self::Remu => Args::run_remu,
-            Self::Remw => Args::run_remw,
-            Self::Remuw => Args::run_remuw,
+            Self::Rem => Args::run_x64_rem_signed,
+            Self::Remu => Args::run_x64_rem_unsigned,
+            Self::Remw => Args::run_x32_rem_signed,
+            Self::Remuw => Args::run_x32_rem_unsigned,
             Self::X64DivSigned => Args::run_x64_div_signed,
             Self::Divu => Args::run_divu,
             Self::Divw => Args::run_divw,
@@ -637,6 +637,10 @@ impl OpCode {
             Self::X64MulHighSignedUnsigned => Some(Args::run_x64_mul_high_signed_unsigned),
             Self::X64MulHighUnsigned => Some(Args::run_x64_mul_high_unsigned),
             Self::X64DivSigned => Some(Args::run_x64_div_signed),
+            Self::Rem => Some(Args::run_x64_rem_signed),
+            Self::Remu => Some(Args::run_x64_rem_unsigned),
+            Self::Remw => Some(Args::run_x32_rem_signed),
+            Self::Remuw => Some(Args::run_x32_rem_unsigned),
             Self::Li => Some(Args::run_li),
             Self::AddImmediateToPC => Some(Args::run_add_immediate_to_pc),
             Self::J => Some(Args::run_j),
@@ -1493,10 +1497,18 @@ impl Args {
     impl_amo_type!(run_amomaxud);
 
     // RV64M multiplication and division instructions
-    impl_r_type!(run_rem);
-    impl_r_type!(run_remu);
-    impl_r_type!(run_remw);
-    impl_r_type!(run_remuw);
+    impl_r_type!(integer::run_x64_rem_signed, run_x64_rem_signed, non_zero_rd);
+    impl_r_type!(
+        integer::run_x64_rem_unsigned,
+        run_x64_rem_unsigned,
+        non_zero_rd
+    );
+    impl_r_type!(integer::run_x32_rem_signed, run_x32_rem_signed, non_zero_rd);
+    impl_r_type!(
+        integer::run_x32_rem_unsigned,
+        run_x32_rem_unsigned,
+        non_zero_rd
+    );
     impl_r_type!(integer::run_x64_div_signed, run_x64_div_signed, non_zero_rd);
     impl_r_type!(run_divu);
     impl_r_type!(run_divw);
@@ -1924,22 +1936,10 @@ impl From<&InstrCacheable> for Instruction {
             },
 
             // RV64M multiplication and division instructions
-            InstrCacheable::Rem(args) => Instruction {
-                opcode: OpCode::Rem,
-                args: args.into(),
-            },
-            InstrCacheable::Remu(args) => Instruction {
-                opcode: OpCode::Remu,
-                args: args.into(),
-            },
-            InstrCacheable::Remw(args) => Instruction {
-                opcode: OpCode::Remw,
-                args: args.into(),
-            },
-            InstrCacheable::Remuw(args) => Instruction {
-                opcode: OpCode::Remuw,
-                args: args.into(),
-            },
+            InstrCacheable::Rem(args) => Instruction::from_ic_rem(args),
+            InstrCacheable::Remu(args) => Instruction::from_ic_remu(args),
+            InstrCacheable::Remw(args) => Instruction::from_ic_remw(args),
+            InstrCacheable::Remuw(args) => Instruction::from_ic_remuw(args),
             InstrCacheable::Div(args) => Instruction::from_ic_div(args),
             InstrCacheable::Divu(args) => Instruction {
                 opcode: OpCode::Divu,

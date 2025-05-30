@@ -13,6 +13,7 @@ use crate::instruction_context::comparable::Comparable;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
+use crate::machine_state::registers::XValue32;
 use crate::parser::SHIFT_BITMASK;
 
 /// Moves the two's complement of `val(rs1)` into `rd`.
@@ -507,6 +508,136 @@ pub fn run_x32_shift_immediate(
 
     let result = icb.extend_signed(result);
 
+    icb.xregister_write_nz(rd, result);
+}
+
+/// Signed integer remainder `val(rs1) % val(rs2)`, storing the result in `rd`.
+///
+/// If `val(rs2) == 0`, the result is `val(rs1)`.
+/// If `val(rs2) == -1` and `val(rs1) == i64::MIN`, the result is `0`.
+///
+/// All values are signed integers.
+pub fn run_x64_rem_signed(
+    icb: &mut impl ICB,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: NonZeroXRegister,
+) {
+    let rval1 = icb.xregister_read(rs1);
+    let rval2 = icb.xregister_read(rs2);
+    let zero = icb.xvalue_of_imm(0);
+    let cond = rval2.compare(zero, Predicate::Equal, icb);
+
+    let result = icb.branch_merge::<XValue, _, _>(
+        cond,
+        |_icb| rval1,
+        |icb| {
+            let minimum = icb.xvalue_of_imm(i64::MIN);
+            let minus_one = icb.xvalue_of_imm(-1);
+
+            let cond1 = rval2.compare(minus_one, Predicate::Equal, icb);
+            let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
+            let cond = icb.bool_and(cond1, cond2);
+
+            icb.branch_merge::<XValue, _, _>(
+                cond,
+                |_icb| zero,
+                |icb| rval1.modulus_signed(rval2, icb),
+            )
+        },
+    );
+
+    icb.xregister_write_nz(rd, result);
+}
+
+/// Unsigned integer remainder `val(rs1) % val(rs2)`, storing the result in `rd`.
+///
+/// If `val(rs2) == 0`, the result is `val(rs1)`.
+///
+/// All values are unsigned integers.
+pub fn run_x64_rem_unsigned(
+    icb: &mut impl ICB,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: NonZeroXRegister,
+) {
+    let rval1 = icb.xregister_read(rs1);
+    let rval2 = icb.xregister_read(rs2);
+    let zero = icb.xvalue_of_imm(0);
+    let cond = rval2.compare(zero, Predicate::Equal, icb);
+
+    let result =
+        icb.branch_merge::<XValue, _, _>(cond, |_icb| rval1, |icb| rval1.modulus(rval2, icb));
+
+    icb.xregister_write_nz(rd, result);
+}
+
+/// Signed integer remainder `val(rs1) % val(rs2)`, storing the lower 32 bits of the result in `rd`.
+///
+/// All values are signed integers.
+pub fn run_x32_rem_signed(
+    icb: &mut impl ICB,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: NonZeroXRegister,
+) {
+    let rval1 = icb.xregister_read(rs1);
+    let rval2 = icb.xregister_read(rs2);
+
+    // Narrow to 32 bits
+    let rval1 = icb.narrow(rval1);
+    let rval2 = icb.narrow(rval2);
+
+    let zero = icb.xvalue32_of_imm(0);
+    let cond = rval2.compare(zero, Predicate::Equal, icb);
+
+    let result = icb.branch_merge::<XValue32, _, _>(
+        cond,
+        |_icb| rval1,
+        |icb| {
+            let minimum = icb.xvalue32_of_imm(i32::MIN);
+            let minus_one = icb.xvalue32_of_imm(-1);
+
+            let cond1 = rval2.compare(minus_one, Predicate::Equal, icb);
+            let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
+            let cond = icb.bool_and(cond1, cond2);
+
+            icb.branch_merge::<XValue32, _, _>(
+                cond,
+                |_icb| zero,
+                |icb| rval1.modulus_signed(rval2, icb),
+            )
+        },
+    );
+
+    // Sign extend back to 64 bits
+    let result = icb.extend_signed(result);
+    icb.xregister_write_nz(rd, result);
+}
+
+/// Unsigned integer remainder `val(rs1) % val(rs2)`, storing the lower 32 bits of the result in `rd`.
+///
+/// All values are unsigned integers.
+pub fn run_x32_rem_unsigned(
+    icb: &mut impl ICB,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: NonZeroXRegister,
+) {
+    let rval1 = icb.xregister_read(rs1);
+    let rval2 = icb.xregister_read(rs2);
+
+    let rval1 = icb.narrow(rval1);
+    let rval2 = icb.narrow(rval2);
+
+    let zero = icb.xvalue32_of_imm(0);
+    let cond = rval2.compare(zero, Predicate::Equal, icb);
+
+    let result =
+        icb.branch_merge::<XValue32, _, _>(cond, |_icb| rval1, |icb| rval1.modulus(rval2, icb));
+
+    // Sign extend back to 64 bits
+    let result = icb.extend_signed(result);
     icb.xregister_write_nz(rd, result);
 }
 
@@ -1056,7 +1187,7 @@ mod tests {
             state.hart.xregisters.write(a0, r1_val);
             state.hart.xregisters.write(a1, r2_val);
             run_x64_div_signed(&mut state, a0, a1, nz::a2);
-            state.hart.xregisters.run_rem(a0, a1, a3);
+            run_x64_rem_signed(&mut state, a0, a1, nz::a3);
 
             prop_assert_eq!(
                 state.hart.xregisters.read(a0),

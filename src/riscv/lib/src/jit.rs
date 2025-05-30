@@ -2611,4 +2611,104 @@ mod tests {
             scenario.run(&mut jit, &mut interpreted_bb);
         }
     });
+
+    backend_test!(test_rem, F, {
+        use crate::machine_state::registers::NonZeroXRegister::x2;
+        use crate::machine_state::registers::XRegister::x1;
+        use crate::machine_state::registers::XRegister::x3;
+
+        let test_rem =
+            |constructor: fn(NonZeroXRegister, XRegister, XRegister, InstrWidth) -> I,
+             lhs_val: u64,
+             rhs_val: u64,
+             expected: u64|
+             -> Scenario<F> {
+                ScenarioBuilder::default()
+                    .set_setup_hook(setup_hook!(core, F, {
+                        core.hart.xregisters.write(x1, lhs_val);
+                        core.hart.xregisters.write(x3, rhs_val);
+                    }))
+                    .set_instructions(&[constructor(x2, x1, x3, Compressed)])
+                    .set_assert_hook(assert_hook!(core, F, {
+                        assert_eq!(core.hart.xregisters.read_nz(x2), expected);
+                    }))
+                    .build()
+            };
+
+        let scenarios: &[Scenario<F>] = &[
+            // REM (Signed 64-bit) tests
+            test_rem(I::new_x64_rem_signed, 20, 6, 2),
+            test_rem(
+                I::new_x64_rem_signed,
+                (-20i64) as u64,
+                (-6i64) as u64,
+                (-2i64) as u64,
+            ),
+            test_rem(I::new_x64_rem_signed, 20, (-6i64) as u64, 2),
+            test_rem(I::new_x64_rem_signed, (-20i64) as u64, 6, (-2i64) as u64),
+            // Special cases for signed remainder
+            test_rem(I::new_x64_rem_signed, i64::MIN as u64, (-1i64) as u64, 0),
+            test_rem(I::new_x64_rem_signed, 5, 0, 5),
+            // REMU (Unsigned 64-bit) tests
+            test_rem(I::new_x64_rem_unsigned, 20, 6, 2),
+            test_rem(I::new_x64_rem_unsigned, 7, 3, 1),
+            test_rem(I::new_x64_rem_unsigned, u64::MAX, 2, 1),
+            test_rem(I::new_x64_rem_unsigned, 5, 0, 5),
+            // REM (Signed 32-bit) tests
+            test_rem(I::new_x32_rem_signed, 20, 6, 2),
+            test_rem(
+                I::new_x32_rem_signed,
+                (-20i32) as u32 as u64,
+                (-6i32) as u32 as u64,
+                (-2i32) as u64,
+            ),
+            test_rem(I::new_x32_rem_signed, 20, (-6i32) as u32 as u64, 2),
+            test_rem(
+                I::new_x32_rem_signed,
+                (-20i32) as u32 as u64,
+                6,
+                (-2i32) as u64,
+            ),
+            // Special cases for 32-bit signed remainder
+            test_rem(
+                I::new_x32_rem_signed,
+                i32::MIN as u32 as u64,
+                (-1i32) as u32 as u64,
+                0,
+            ),
+            test_rem(I::new_x32_rem_signed, 5, 0, 5),
+            // Test truncation and sign extension
+            test_rem(
+                I::new_x32_rem_signed,
+                0xFFFFFFFF_00000005, // Should be truncated to 5
+                3,
+                2,
+            ),
+            test_rem(
+                I::new_x32_rem_signed,
+                (-5i32) as u32 as u64,
+                3,
+                (-2i32) as u64,
+            ),
+            // REMU (Unsigned 32-bit) tests
+            test_rem(I::new_x32_rem_unsigned, 20, 6, 2),
+            test_rem(I::new_x32_rem_unsigned, 7, 3, 1),
+            test_rem(I::new_x32_rem_unsigned, u32::MAX as u64, 2, 1),
+            test_rem(I::new_x32_rem_unsigned, 5, 0, 5),
+            // Test truncation
+            test_rem(
+                I::new_x32_rem_unsigned,
+                0xFFFFFFFF_00000005, // Should be truncated to 5
+                3,
+                2,
+            ),
+        ];
+
+        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut interpreted_bb = InterpretedBlockBuilder;
+
+        for scenario in scenarios {
+            scenario.run(&mut jit, &mut interpreted_bb);
+        }
+    });
 }

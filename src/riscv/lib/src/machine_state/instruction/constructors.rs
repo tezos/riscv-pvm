@@ -1389,6 +1389,78 @@ impl Instruction {
             },
         }
     }
+
+    pub(crate) fn new_x64_rem_signed(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Rem,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x64_rem_unsigned(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Remu,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_rem_signed(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Remw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_rem_unsigned(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Remuw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
 }
 
 impl Instruction {
@@ -2136,6 +2208,58 @@ impl Instruction {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
             (X::NonZero(rd), _, _) => {
                 Instruction::new_x64_div_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    /// Convert [`InstrCacheable::Rem`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Rem`]: crate::parser::instruction::InstrCacheable::Rem
+    pub(super) fn from_ic_rem(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
+            (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
+            (X::NonZero(rd), _, _) => {
+                Instruction::new_x64_rem_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    /// Convert [`InstrCacheable::Remu`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Remu`]: crate::parser::instruction::InstrCacheable::Remu
+    pub(super) fn from_ic_remu(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
+            (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
+            (X::NonZero(rd), _, _) => {
+                Instruction::new_x64_rem_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    /// Convert [`InstrCacheable::Remw`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Remw`]: crate::parser::instruction::InstrCacheable::Remw
+    pub(super) fn from_ic_remw(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
+            (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
+            (X::NonZero(rd), _, _) => {
+                Instruction::new_x32_rem_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    /// Convert [`InstrCacheable::Remuw`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Remuw`]: crate::parser::instruction::InstrCacheable::Remuw
+    pub(super) fn from_ic_remuw(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
+            (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
+            (X::NonZero(rd), _, _) => {
+                Instruction::new_x32_rem_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
             }
         }
     }
