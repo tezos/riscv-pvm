@@ -70,9 +70,9 @@ jobs:
             nix-${{ runner.os }}-${{ runner.arch }}-
           save: ${{ github.ref_name == 'main' }}
 
-      - name: Rustup and Cargo cache
+      - name: Restore Rustup and Cargo cache
         id: rust-cache
-        uses: actions/cache@v4.2.3
+        uses: actions/cache/restore@v4.2.3
         with:
           key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/rust-toolchain*') }}-v1
           restore-keys: |
@@ -84,7 +84,6 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          lookup-only: ${{ github.ref_name != 'main' }}
 
       - name: Rust compilation cache 
         uses: Mozilla-Actions/sccache-action@v0.0.9
@@ -105,6 +104,18 @@ jobs:
       - name: Run 'make ${{ matrix.make-target }}'
         run: nix develop --command make ${{ matrix.make-target }}
         working-directory: src/riscv
+
+      - name: Save Rustup and Cargo cache
+        if: github.ref_name == 'main'
+        uses: actions/cache/save@v4.2.3
+        with:
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+          path: |
+            ~/.rustup
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
       
       # Only when the primary-key cache was not found do we actually produce a cache. In that case
       # we need to clean up the Nix store a little to save space.
