@@ -419,10 +419,10 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | SetLessThanImmediateSigned
         | SetLessThanImmediateUnsigned
         | AddImmediateToPC
-        | Rem
-        | Remu
-        | Remw
-        | Remuw
+        | X64RemSigned
+        | X64RemUnsigned
+        | X32RemSigned
+        | X32RemUnsigned
         | X64DivSigned => ArgsShape::XSrcNZXDest,
     }
 }

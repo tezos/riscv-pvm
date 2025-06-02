@@ -349,7 +349,7 @@ fn reservation_set_align_address<V: StoreLoadInt, I: ICB>(
 ) -> I::XValue {
     let zero = icb.xvalue_of_imm(0);
     let size = icb.xvalue_of_imm(V::SIZE as i64);
-    let offset = address.modulus(size, icb);
+    let offset = address.modulus_unsigned(size, icb);
     let cond = offset.compare(zero, Predicate::Equal, icb);
 
     icb.branch_merge::<XValue, _, _>(

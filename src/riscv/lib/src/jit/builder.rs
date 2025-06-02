@@ -440,7 +440,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         with_reset_reservation: bool,
     ) -> Self::IResult<()> {
         let width = self.xvalue_of_imm(V::WIDTH as i64);
-        let remainder = address.modulus(width, self);
+        let remainder = address.modulus_unsigned(width, self);
 
         // The steps of taking the comparison are technically not needed, as cranelift will
         // treat any non-zero value as a take-branch (i.e. raise exception) value, so we could
