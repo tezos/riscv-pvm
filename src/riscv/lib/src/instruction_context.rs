@@ -364,7 +364,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         with_reset_reservation: bool,
     ) -> Self::IResult<()> {
         let width = self.xvalue_of_imm(V::WIDTH as i64);
-        let remainder = address.modulus(width, self);
+        let remainder = address.modulus_unsigned(width, self);
         let zero = self.xvalue_of_imm(0);
 
         if remainder.compare(zero, Predicate::NotEqual, self) {

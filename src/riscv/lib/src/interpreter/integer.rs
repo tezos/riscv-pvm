@@ -566,8 +566,11 @@ pub fn run_x64_rem_unsigned(
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result =
-        icb.branch_merge::<XValue, _, _>(cond, |_icb| rval1, |icb| rval1.modulus(rval2, icb));
+    let result = icb.branch_merge::<XValue, _, _>(
+        cond,
+        |_icb| rval1,
+        |icb| rval1.modulus_unsigned(rval2, icb),
+    );
 
     icb.xregister_write_nz(rd, result);
 }
@@ -633,8 +636,11 @@ pub fn run_x32_rem_unsigned(
     let zero = icb.xvalue32_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result =
-        icb.branch_merge::<XValue32, _, _>(cond, |_icb| rval1, |icb| rval1.modulus(rval2, icb));
+    let result = icb.branch_merge::<XValue32, _, _>(
+        cond,
+        |_icb| rval1,
+        |icb| rval1.modulus_unsigned(rval2, icb),
+    );
 
     // Sign extend back to 64 bits
     let result = icb.extend_signed(result);

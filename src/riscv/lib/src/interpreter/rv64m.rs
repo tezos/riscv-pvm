@@ -14,32 +14,6 @@ impl<M> XRegisters<M>
 where
     M: backend::ManagerReadWrite,
 {
-    #[cfg(test)]
-    pub fn run_remw(&mut self, rs1: XRegister, rs2: XRegister, rd: XRegister) {
-        let rval1 = self.read(rs1) as i32;
-        let rval2 = self.read(rs2) as i32;
-
-        let result = if rval2 == 0 {
-            rval1
-        } else if rval2 == -1 && rval1 == i32::MIN {
-            0
-        } else {
-            rval1 % rval2
-        };
-
-        self.write(rd, result as u64);
-    }
-
-    #[cfg(test)]
-    pub fn run_remuw(&mut self, rs1: XRegister, rs2: XRegister, rd: XRegister) {
-        let rval1 = self.read(rs1) as u32;
-        let rval2 = self.read(rs2) as u32;
-
-        let result = if rval2 == 0 { rval1 } else { rval1 % rval2 };
-
-        self.write(rd, result as i32 as u64);
-    }
-
     /// `DIVW` R-type instruction
     ///
     /// Divide the lower 32 bits of val(rs1) by the lower 32 bits of val(rs2).
@@ -83,11 +57,15 @@ mod test {
     use proptest::proptest;
 
     use crate::backend_test;
-    use crate::machine_state::registers::XRegisters;
+    use crate::interpreter::integer::run_x32_rem_signed;
+    use crate::interpreter::integer::run_x32_rem_unsigned;
+    use crate::machine_state::MachineCoreState;
+    use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
     use crate::machine_state::registers::a3;
+    use crate::machine_state::registers::nz;
     use crate::state::NewState;
 
     backend_test!(test_div_rem_invariant, F, {
@@ -95,18 +73,18 @@ mod test {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = XRegisters::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
 
-            state.write(a0, r1_val);
-            state.write(a1, r2_val);
-            state.run_divw(a0, a1, a2);
-            state.run_remw(a0, a1, a3);
+            state.hart.xregisters.write(a0, r1_val);
+            state.hart.xregisters.write(a1, r2_val);
+            state.hart.xregisters.run_divw(a0, a1, a2);
+            run_x32_rem_signed(&mut state, a0, a1, nz::a3);
 
             prop_assert_eq!(
-                state.read(a0) as i32,
-                (state.read(a1) as i32)
-                    .wrapping_mul(state.read(a2) as i32)
-                    .wrapping_add(state.read(a3) as i32));
+                state.hart.xregisters.read(a0) as i32,
+                (state.hart.xregisters.read(a1) as i32)
+                    .wrapping_mul(state.hart.xregisters.read(a2) as i32)
+                    .wrapping_add(state.hart.xregisters.read(a3) as i32));
         })
     });
 
@@ -115,18 +93,18 @@ mod test {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = XRegisters::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
 
-            state.write(a0, r1_val);
-            state.write(a1, r2_val);
-            state.run_divuw(a0, a1, a2);
-            state.run_remuw(a0, a1, a3);
+            state.hart.xregisters.write(a0, r1_val);
+            state.hart.xregisters.write(a1, r2_val);
+            state.hart.xregisters.run_divuw(a0, a1, a2);
+            run_x32_rem_unsigned(&mut state, a0, a1, nz::a3);
 
             prop_assert_eq!(
-                state.read(a0) as u32,
-                (state.read(a1) as u32)
-                    .wrapping_mul(state.read(a2) as u32)
-                    .wrapping_add(state.read(a3) as u32));
+                state.hart.xregisters.read(a0) as u32,
+                (state.hart.xregisters.read(a1) as u32)
+                    .wrapping_mul(state.hart.xregisters.read(a2) as u32)
+                    .wrapping_add(state.hart.xregisters.read(a3) as u32));
         })
     });
 }
