@@ -191,6 +191,14 @@ pub(crate) trait ICB {
         phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue>;
 
+    /// Write the start address of the reservation set.
+    ///
+    /// The address must be aligned to the size of the reservation set.
+    fn reservation_set_write(&mut self, address: Self::XValue);
+
+    /// Read the reservation set start address.
+    fn reservation_set_read(&mut self) -> Self::XValue;
+
     // ----------------
     // Provided Methods
     // ----------------
@@ -409,6 +417,16 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
             .map(V::to_xvalue)
             .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
     }
+
+    #[inline(always)]
+    fn reservation_set_write(&mut self, address: Self::XValue) {
+        self.hart.reservation_set.start_addr.write(address);
+    }
+
+    #[inline(always)]
+    fn reservation_set_read(&mut self) -> Self::XValue {
+        self.hart.reservation_set.start_addr.read()
+    }
 }
 
 /// Operators for producing a boolean from two values.
@@ -451,7 +469,7 @@ pub enum MulHighType {
 /// constants for each - so that we know very precisely what values are expected.
 ///
 /// [state_access]: crate::jit::state_access
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum LoadStoreWidth {
     Byte = Self::BYTE_WIDTH,

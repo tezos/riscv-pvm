@@ -45,6 +45,7 @@ use super::builder::F64;
 use super::builder::X64;
 use super::builder::errno::Errno;
 use super::builder::errno::ErrnoImpl;
+use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::StoreLoadInt;
 use crate::machine_state::MachineCoreState;
@@ -125,6 +126,8 @@ register_jsa_functions!(
     memory_load_u32 => (memory_load::<u32, MC, JSA>, AbiCall<4>::args),
     memory_load_i64 => (memory_load::<i64, MC, JSA>, AbiCall<4>::args),
     memory_load_u64 => (memory_load::<u64, MC, JSA>, AbiCall<4>::args),
+    reservation_set_write => (reservation_set_write::<MC, JSA>, AbiCall<2>::args),
+    reservation_set_read => (reservation_set_read::<MC, JSA>, AbiCall<1>::args),
 );
 
 /// Update the instruction pc in the state.
@@ -289,6 +292,21 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
     }
 }
 
+/// Set the reservation set to the given starting address.
+extern "C" fn reservation_set_write<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    address: u64,
+) {
+    <MachineCoreState<MC, M> as ICB>::reservation_set_write(core, address);
+}
+
+/// Read the reservation set starting address.
+extern "C" fn reservation_set_read<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+) -> u64 {
+    <MachineCoreState<MC, M> as ICB>::reservation_set_read(core)
+}
+
 /// State Access that a JIT-compiled block may use
 ///
 /// Methods in this trait are used to provide access to parts of the state. It can be specialised by
@@ -432,6 +450,8 @@ pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     memory_load_u32: Option<FuncRef>,
     memory_load_i64: Option<FuncRef>,
     memory_load_u64: Option<FuncRef>,
+    reservation_set_write: Option<FuncRef>,
+    reservation_set_read: Option<FuncRef>,
     _pd: PhantomData<(MC, JSA)>,
 }
 
@@ -467,6 +487,8 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
             memory_load_u32: None,
             memory_load_i64: None,
             memory_load_u64: None,
+            reservation_set_write: None,
+            reservation_set_read: None,
             _pd: PhantomData,
         }
     }
@@ -723,6 +745,42 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
 
             X64(xval)
         })
+    }
+
+    /// Emit the required IR to call `set_reservation_set`.
+    ///
+    /// Sets the reservation set to the given address.
+    pub(super) fn reservation_set_write(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        address: X64,
+    ) {
+        let reservation_set_write = self.reservation_set_write.get_or_insert_with(|| {
+            self.module
+                .declare_func_in_func(self.imports.reservation_set_write, builder.func)
+        });
+
+        builder
+            .ins()
+            .call(*reservation_set_write, &[core_ptr, address.0]);
+    }
+
+    /// Emit the required IR to call `reservation_set_read`.
+    ///
+    /// Reads the reservation set starting address.
+    pub(super) fn reservation_set_read(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+    ) -> X64 {
+        let reservation_set_read = self.reservation_set_read.get_or_insert_with(|| {
+            self.module
+                .declare_func_in_func(self.imports.reservation_set_read, builder.func)
+        });
+
+        let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
+        X64(builder.inst_results(call)[0])
     }
 }
 
