@@ -22,7 +22,7 @@ use crate::machine_state::backend::Cell;
 use crate::state::NewState;
 
 pub struct ReservationSet<M: backend::ManagerBase> {
-    start_addr: Cell<u64, M>,
+    pub(crate) start_addr: Cell<u64, M>,
 }
 
 /// Layout for [ReservationSet]
@@ -38,7 +38,7 @@ pub type ReservationSetLayout = backend::Atom<u64>;
 /// aligned, and no greater than the virtual memory page size."
 const SIZE: u64 = 8;
 
-const UNSET_VALUE: u64 = u64::MAX;
+pub(crate) const UNSET_VALUE: u64 = u64::MAX;
 
 const fn align_address(address: u64, align: u64) -> u64 {
     let offset = address.rem_euclid(align);

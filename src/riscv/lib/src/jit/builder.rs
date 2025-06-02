@@ -503,6 +503,16 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
 
         Some(res)
     }
+
+    fn reservation_set_write(&mut self, address: Self::XValue) {
+        self.jsa_call
+            .reservation_set_write(&mut self.builder, self.core_ptr_val, address);
+    }
+
+    fn reservation_set_read(&mut self) -> Self::XValue {
+        self.jsa_call
+            .reservation_set_read(&mut self.builder, self.core_ptr_val)
+    }
 }
 
 impl From<Predicate> for IntCC {
