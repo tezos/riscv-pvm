@@ -213,9 +213,9 @@ mod test {
     use crate::backend_test;
     use crate::interpreter::atomics::SC_FAILURE;
     use crate::interpreter::atomics::SC_SUCCESS;
-    use crate::interpreter::atomics::run_lrw;
-    use crate::interpreter::atomics::run_scw;
-    use crate::interpreter::atomics::test::test_lrsc;
+    use crate::interpreter::atomics::run_x32_atomic_load;
+    use crate::interpreter::atomics::run_x32_atomic_store;
+    use crate::interpreter::atomics::test::test_atomic_loadstore;
     use crate::interpreter::integer::run_addi;
     use crate::interpreter::rv32a::test::test_amo;
     use crate::machine_state::MachineCoreState;
@@ -223,7 +223,7 @@ mod test {
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
 
-    test_lrsc!(
+    test_atomic_loadstore!(
         test_lrd_scd,
         MachineCoreState::run_lrd,
         MachineCoreState::run_scd,
@@ -231,8 +231,20 @@ mod test {
         u64
     );
 
-    test_lrsc!(test_lrd_scw, MachineCoreState::run_lrd, run_scw, 8, u32);
-    test_lrsc!(test_lrw_scd, run_lrw, MachineCoreState::run_scd, 8, u32);
+    test_atomic_loadstore!(
+        test_lrd_scw,
+        MachineCoreState::run_lrd,
+        run_x32_atomic_store,
+        8,
+        u32
+    );
+    test_atomic_loadstore!(
+        test_lrw_scd,
+        run_x32_atomic_load,
+        MachineCoreState::run_scd,
+        8,
+        u32
+    );
 
     test_amo!(run_amoswapd, |_, r2_val| r2_val, 8, u64);
 

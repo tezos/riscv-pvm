@@ -2483,8 +2483,8 @@ mod tests {
                     // normal load-reserve followed by store-conditional.
                     I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
                     I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
-                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
-                    I::new_scw(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_store(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(core, F, {
                     let value: u64 = core.hart.xregisters.read(x3);
@@ -2507,7 +2507,7 @@ mod tests {
                         (ADDRESS_BASE_ATOMICS + 2) as i64,
                         InstrWidth::Compressed,
                     ),
-                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(2)
@@ -2530,8 +2530,8 @@ mod tests {
                         InstrWidth::Uncompressed,
                     ),
                     I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
-                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
-                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(5)
@@ -2555,8 +2555,8 @@ mod tests {
                         InstrWidth::Uncompressed,
                     ),
                     I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
-                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
-                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(6)
@@ -2585,9 +2585,9 @@ mod tests {
                         InstrWidth::Uncompressed,
                     ),
                     I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
-                    I::new_lrw(x3, x4, false, false, InstrWidth::Uncompressed),
-                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
-                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x4, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(7)

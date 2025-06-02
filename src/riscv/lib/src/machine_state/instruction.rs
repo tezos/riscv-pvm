@@ -263,8 +263,8 @@ pub enum OpCode {
     JalrImm,
 
     // RV64A R-type atomic instructions
-    Lrw,
-    Scw,
+    X32AtomicLoad,
+    X32AtomicStore,
     Amoswapw,
     Amoaddw,
     Amoxorw,
@@ -482,8 +482,8 @@ impl OpCode {
             Self::JalrImm => Args::run_jalr_imm,
             Self::JrImm => Args::run_jr_imm,
             Self::JalrAbsolute => Args::run_jalr_absolute,
-            Self::Lrw => Args::run_lrw,
-            Self::Scw => Args::run_scw,
+            Self::X32AtomicLoad => Args::run_x32_atomic_load,
+            Self::X32AtomicStore => Args::run_x32_atomic_store,
             Self::Amoswapw => Args::run_amoswapw,
             Self::Amoaddw => Args::run_amoaddw,
             Self::Amoxorw => Args::run_amoxorw,
@@ -702,8 +702,8 @@ impl OpCode {
             Self::X8LoadUnsigned => Some(Args::run_x8_load_unsigned),
 
             // Atomic instructions
-            Self::Lrw => Some(Args::run_lrw),
-            Self::Scw => Some(Args::run_scw),
+            Self::X32AtomicLoad => Some(Args::run_x32_atomic_load),
+            Self::X32AtomicStore => Some(Args::run_x32_atomic_store),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
 
             // Errors
@@ -1469,8 +1469,8 @@ impl Args {
     }
 
     // RV64A atomic instructions
-    impl_amo_type!(atomics::run_lrw, run_lrw);
-    impl_amo_type!(atomics::run_scw, run_scw);
+    impl_amo_type!(atomics::run_x32_atomic_load, run_x32_atomic_load);
+    impl_amo_type!(atomics::run_x32_atomic_store, run_x32_atomic_store);
     impl_amo_type!(run_amoswapw);
     impl_amo_type!(run_amoaddw);
     impl_amo_type!(run_amoxorw);
@@ -1823,14 +1823,14 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Jalr(args) => Instruction::from_ic_jalr(args),
 
             // RV64A atomic instructions
-            InstrCacheable::Lrw(args) => Instruction::new_lrw(
+            InstrCacheable::Lrw(args) => Instruction::new_x32_atomic_load(
                 args.rd,
                 args.rs1,
                 args.aq,
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Scw(args) => Instruction::new_scw(
+            InstrCacheable::Scw(args) => Instruction::new_x32_atomic_store(
                 args.rd,
                 args.rs1,
                 args.rs2,

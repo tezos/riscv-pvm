@@ -218,7 +218,7 @@ pub fn run_x64_atomic_add<I: ICB>(
 /// sign-extended value in `rd`, and registers a reservation set for
 /// that address.
 /// See also [crate::machine_state::reservation_set].
-pub(super) fn run_lr<I: ICB, V: StoreLoadInt>(
+pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     icb: &mut I,
     rs1: XRegister,
     rd: XRegister,
@@ -254,7 +254,7 @@ pub(super) fn run_lr<I: ICB, V: StoreLoadInt>(
 /// See also [crate::machine_state::reservation_set].
 /// The `aq` and `rl` bits specify additional memory constraints in
 /// multi-hart environments so they are currently ignored.
-pub(super) fn run_sc<I: ICB, V: StoreLoadInt>(
+pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     icb: &mut I,
     rs1: XRegister,
     rs2: XRegister,
@@ -304,7 +304,7 @@ pub(super) fn run_sc<I: ICB, V: StoreLoadInt>(
 /// The value in `rs2` is always 0 so is ignored.
 /// The `aq` and `rl` bits specify additional memory constraints
 /// in multi-hart environments so they are currently ignored.
-pub fn run_lrw<I: ICB>(
+pub fn run_x32_atomic_load<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     _rs2: XRegister,
@@ -312,7 +312,7 @@ pub fn run_lrw<I: ICB>(
     _rl: bool,
     _aq: bool,
 ) -> I::IResult<()> {
-    run_lr::<I, i32>(icb, rs1, rd)
+    run_atomic_load::<I, i32>(icb, rs1, rd)
 }
 
 /// Conditionally writes a word in `rs2` to the address in `rs1`.
@@ -323,7 +323,7 @@ pub fn run_lrw<I: ICB>(
 ///
 /// The `aq` and `rl` bits specify additional memory constraints
 /// in multi-hart environments so they are currently ignored.
-pub fn run_scw<I: ICB>(
+pub fn run_x32_atomic_store<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     rs2: XRegister,
@@ -331,7 +331,7 @@ pub fn run_scw<I: ICB>(
     _rl: bool,
     _aq: bool,
 ) -> I::IResult<()> {
-    run_sc::<I, i32>(icb, rs1, rs2, rd)
+    run_atomic_store::<I, i32>(icb, rs1, rs2, rd)
 }
 
 // Reservation Set Helper Functionss
@@ -393,7 +393,7 @@ pub(crate) mod test {
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
 
-    macro_rules! test_lrsc {
+    macro_rules! test_atomic_loadstore {
         ($name:ident, $lr: expr, $sc: expr, $align: expr, $t: ident) => {
             backend_test!($name, F, {
                 use $crate::machine_state::registers::nz;
@@ -438,7 +438,7 @@ pub(crate) mod test {
             });
         }
     }
-    pub(crate) use test_lrsc;
+    pub(crate) use test_atomic_loadstore;
 
     macro_rules! test_atomic {
         ($(#[$m:meta])* $name: ident, $instr: path, $f: expr, $align: expr, $t: ty) => {
@@ -479,7 +479,13 @@ pub(crate) mod test {
         }
     }
 
-    test_lrsc!(test_lrw_scw, run_lrw, run_scw, 4, u32);
+    test_atomic_loadstore!(
+        test_x32_atomic_loadstore,
+        run_x32_atomic_load,
+        run_x32_atomic_store,
+        4,
+        u32
+    );
 
     test_atomic!(
         test_run_x64_atomic_add,

@@ -340,11 +340,12 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
     use OpCode::*;
     match opcode {
         X8LoadSigned | X16LoadSigned | X32LoadSigned | X8LoadUnsigned | X16LoadUnsigned
-        | X32LoadUnsigned | X64LoadSigned | X8Store | X16Store | X32Store | X64Store | Lrw
-        | Scw | Amoswapw | Amoaddw | Amoxorw | Amoandw | Amoorw | Amominw | Amomaxw | Amominuw
-        | Amomaxuw | Lrd | Scd | Amoswapd | X64AtomicAdd | Amoxord | Amoandd | Amoord | Amomind
-        | Amomaxd | Amominud | Amomaxud | Rem | Remu | Remw | Remuw | Divu | Divw | Divuw
-        | X32Mul | Csrrw | Csrrs | Csrrc | Csrrwi | Csrrsi | Csrrci => ArgsShape::XSrcXDest,
+        | X32LoadUnsigned | X64LoadSigned | X8Store | X16Store | X32Store | X64Store
+        | X32AtomicLoad | X32AtomicStore | Amoswapw | Amoaddw | Amoxorw | Amoandw | Amoorw
+        | Amominw | Amomaxw | Amominuw | Amomaxuw | Lrd | Scd | Amoswapd | X64AtomicAdd
+        | Amoxord | Amoandd | Amoord | Amomind | Amomaxd | Amominud | Amomaxud | Rem | Remu
+        | Remw | Remuw | Divu | Divw | Divuw | X32Mul | Csrrw | Csrrs | Csrrc | Csrrwi | Csrrsi
+        | Csrrci => ArgsShape::XSrcXDest,
 
         Fadds | Fsubs | Fmuls | Fdivs | Fsqrts | Fmins | Fmaxs | Fsgnjs | Fsgnjns | Fsgnjxs
         | Fmadds | Fmsubs | Fnmsubs | Fnmadds | Faddd | Fsubd | Fmuld | Fdivd | Fsqrtd | Fmind
