@@ -64,7 +64,7 @@ git = "https://gitlab.com/tezos/tezos.git"
 default-features = false
 
 [workspace.dependencies.strum]
-version = "0.26.1"
+version = "0.26.3"
 features = ["derive"]
 
 [workspace.dependencies.clap]
