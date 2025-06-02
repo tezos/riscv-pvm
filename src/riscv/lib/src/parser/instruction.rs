@@ -448,7 +448,14 @@ pub enum InstrCacheable {
     Jalr(ITypeArgs),
 
     // RV64A R-type atomic instructions
+    /// `LR.W` - Loads in `rd` a word-length value from the address in `rs1`
+    ///  and registers a reservation set on that address.
     Lrw(AmoArgs),
+    /// `SC.W` - Conditionally writes a word in `rs2` to the address in `rs1`.
+    /// SC.W succeeds only if the reservation is still valid and
+    /// the reservation set contains the bytes being written.
+    /// In case of success, write 0 in `rd`, otherwise write 1.
+    /// See also [crate::machine_state::reservation_set].
     Scw(AmoArgs),
     Amoswapw(AmoArgs),
     Amoaddw(AmoArgs),

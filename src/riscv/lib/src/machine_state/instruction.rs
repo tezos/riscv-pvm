@@ -702,6 +702,8 @@ impl OpCode {
             Self::X8LoadUnsigned => Some(Args::run_x8_load_unsigned),
 
             // Atomic instructions
+            Self::Lrw => Some(Args::run_lrw),
+            Self::Scw => Some(Args::run_scw),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
 
             // Errors
@@ -1467,8 +1469,8 @@ impl Args {
     }
 
     // RV64A atomic instructions
-    impl_amo_type!(run_lrw);
-    impl_amo_type!(run_scw);
+    impl_amo_type!(atomics::run_lrw, run_lrw);
+    impl_amo_type!(atomics::run_scw, run_scw);
     impl_amo_type!(run_amoswapw);
     impl_amo_type!(run_amoaddw);
     impl_amo_type!(run_amoxorw);
@@ -1821,14 +1823,21 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Jalr(args) => Instruction::from_ic_jalr(args),
 
             // RV64A atomic instructions
-            InstrCacheable::Lrw(args) => Instruction {
-                opcode: OpCode::Lrw,
-                args: args.into(),
-            },
-            InstrCacheable::Scw(args) => Instruction {
-                opcode: OpCode::Scw,
-                args: args.into(),
-            },
+            InstrCacheable::Lrw(args) => Instruction::new_lrw(
+                args.rd,
+                args.rs1,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Scw(args) => Instruction::new_scw(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoswapw(args) => Instruction {
                 opcode: OpCode::Amoswapw,
                 args: args.into(),

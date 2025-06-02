@@ -15,6 +15,7 @@ use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::frontend::FunctionBuilder;
 
+use crate::interpreter::atomics::reset_reservation_set;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::memory::MemoryConfig;
 
@@ -103,19 +104,24 @@ where
 }
 
 /// Helper type for producing the required IR for the address alignment check at the beginning
-/// of an atomic operation.
+/// of an atomic operation. In the case of a store_conditional, this will also reset the reservation.
 ///
 /// The only way to access the values that will be returned on success, is via the
 /// [`Errno::handle`] method.
 pub(crate) struct AtomicAccessGuard {
     errno: ir::Value,
     address: ir::Value,
+    with_reset_reservation: bool,
 }
 
 impl AtomicAccessGuard {
     /// Construct a new `Errno` that must be handled.
-    pub(crate) fn new(errno: ir::Value, address: ir::Value) -> Self {
-        Self { errno, address }
+    pub(crate) fn new(errno: ir::Value, address: ir::Value, with_reset_reservation: bool) -> Self {
+        Self {
+            errno,
+            address,
+            with_reset_reservation,
+        }
     }
 }
 
@@ -139,6 +145,11 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Errno<(), MC, JSA> for AtomicAccessG
         let exception_ptr = builder
             .jsa_call
             .raise_store_amo_access_fault_exception(&mut builder.builder, self.address);
+        if self.with_reset_reservation {
+            // If the atomic operation was a store_conditional, we reset the reservation.
+            reset_reservation_set(builder);
+        }
+
         builder.handle_exception(exception_ptr);
 
         builder.builder.seal_block(error_branch);

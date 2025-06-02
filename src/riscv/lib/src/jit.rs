@@ -150,6 +150,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
 
         let mut builder = self.start();
 
+        // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
         for i in instr {
             let Some(lower) = i.opcode.to_lowering() else {
                 builder.fail();
@@ -164,6 +165,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
                 (lower)(i.args(), &mut builder)
             };
 
+            // `pc_update == None` indicates an exception was raised.
             let Some(pc_update) = pc_update else {
                 builder.end_unconditional_exception();
 
@@ -2454,6 +2456,152 @@ mod tests {
                 (((i64::MIN as u64 as u128) * (2u128)) >> 64) as u64,
             ),
             test_mul_high(I::new_x64_mul_high_unsigned, x1, 0u64, x3, u64::MAX, 0u64),
+        ];
+
+        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut interpreted_bb = InterpretedBlockBuilder;
+
+        for scenario in scenarios {
+            scenario.run(&mut jit, &mut interpreted_bb);
+        }
+    });
+
+    backend_test!(test_lrsc, F, {
+        use Instruction as I;
+
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
+        use crate::machine_state::registers::*;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
+
+        let scenarios: &[Scenario<F>] = &[
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory.write(ADDRESS_BASE_ATOMICS, 100).unwrap();
+                }))
+                .set_instructions(&[
+                    // normal load-reserve followed by store-conditional.
+                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
+                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
+                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_scw(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                ])
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 0);
+
+                    let res: u64 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
+                    assert_eq!(res, 200, "Found {res}, expected 200");
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory
+                        .write(ADDRESS_BASE_ATOMICS + 4, 100)
+                        .unwrap();
+                }))
+                .set_instructions(&[
+                    // load-reserve with an address that is not aligned.
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS + 2) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(2)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 0);
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    // store-conditional with an address not aligned.
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_li(
+                        NZ::x4,
+                        (ADDRESS_BASE_ATOMICS + 2) as i64,
+                        InstrWidth::Uncompressed,
+                    ),
+                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
+                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(5)
+                .set_assert_hook(assert_hook!(core, F, {
+                    // Failure due to unaligned address should not modify the value in `rd`.
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 0);
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    // store-conditional with an address outside the reservation set.
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_li(
+                        NZ::x4,
+                        (ADDRESS_BASE_ATOMICS + 100) as i64,
+                        InstrWidth::Uncompressed,
+                    ),
+                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
+                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(6)
+                .set_assert_hook(assert_hook!(core, F, {
+                    // Failure due to address outside the reservation set
+                    // should set the value in `rd` to 1.
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 1);
+
+                    // The value in memory should not be modified.
+                    let res: u64 = core.main_memory.read(ADDRESS_BASE_ATOMICS + 100).unwrap();
+                    assert_ne!(res, 200, "Found {res}, expected value not to be modified");
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    // store-conditional with an address inside an expired reservation set.
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_li(
+                        NZ::x4,
+                        (ADDRESS_BASE_ATOMICS + 100) as i64,
+                        InstrWidth::Uncompressed,
+                    ),
+                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
+                    I::new_lrw(x3, x4, false, false, InstrWidth::Uncompressed),
+                    I::new_lrw(x3, x1, false, false, InstrWidth::Uncompressed),
+                    I::new_scw(x3, x4, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(7)
+                .set_assert_hook(assert_hook!(core, F, {
+                    // Failure due to address outside the current reservation set
+                    // should set the value in `rd` to 1.
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 1);
+
+                    // The value in memory should not be modified.
+                    let res: u64 = core.main_memory.read(ADDRESS_BASE_ATOMICS + 100).unwrap();
+                    assert_ne!(res, 200, "Found {res}, expected value not to be modified");
+                }))
+                .build(),
         ];
 
         let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
