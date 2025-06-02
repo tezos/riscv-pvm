@@ -5,18 +5,18 @@
 # SPDX-License-Identifier: MIT
 
 # Build & run jstz on two different commits,
-# where the first commit is the "base / master" commit hash
+# where the first commit is the "base / main" commit hash
 # and the second commit is the current change / MR tested
 
 set -e
 
 # Iterations for RISCV and for native are different because usually for native you would want way more runs
-USAGE="Usage: -t <num_transfers> -i <num_iterations_riscv> -n <num_iterations_riscv> -c <change_commit_hash> [ -b <base_commit_hash>: default master ]"
+USAGE="Usage: -t <num_transfers> -i <num_iterations_riscv> -n <num_iterations_riscv> -c <change_commit_hash> [ -b <base_commit_hash>: default main ]"
 
 RISCV_IT=""
 NATIVE_IT=""
 TX=""
-BASE_COMM="master"
+BASE_COMM="main"
 CHANGE_COMM=""
 NATIVE=""
 

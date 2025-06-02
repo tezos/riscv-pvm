@@ -36,7 +36,7 @@ make -C src/riscv all
     sentence stating so. 
 -->
 
-|  | `master` | This MR | Improvement |
+|  | `main` | This MR | Improvement |
 |--|----------|---------|-------------|
 | $MyMachine | X.XXX TPS | X.XXX TPS | XX.XX% |
 | Benchmark Machine | Y.YYY TPS | Y.YYY TPS | YY.YY% |
