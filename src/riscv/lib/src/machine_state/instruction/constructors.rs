@@ -1344,8 +1344,8 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Lrw`].
-    pub(crate) fn new_lrw(
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicLoad`].
+    pub(crate) fn new_x32_atomic_load(
         rd: XRegister,
         rs1: XRegister,
         aq: bool,
@@ -1353,11 +1353,11 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Lrw,
+            opcode: OpCode::X32AtomicLoad,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
-                // Although not used, rs2 is `x0` in the instruction encoding for `Lr.w` opcode.
+                // Although not used, rs2 is explicitly `x0` in the instruction encoding for `Lr.w` opcode.
                 rs2: XRegister::x0.into(),
                 aq,
                 rl,
@@ -1367,8 +1367,8 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Scw`].
-    pub(crate) fn new_scw(
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicStore`].
+    pub(crate) fn new_x32_atomic_store(
         rd: XRegister,
         rs1: XRegister,
         rs2: XRegister,
@@ -1377,7 +1377,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Scw,
+            opcode: OpCode::X32AtomicStore,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
