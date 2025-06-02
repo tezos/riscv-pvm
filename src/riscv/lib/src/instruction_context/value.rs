@@ -93,6 +93,7 @@ pub(crate) trait PhiValue {
     /// Convert [`ir::Value`]s back to itself.
     fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
         params: &[ir::Value],
+        icb: &mut jit::builder::Builder<'_, MC, JSA>,
     ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>>;
 
     /// The cranelift primitive types of the IR values representing this value in JIT.
@@ -110,6 +111,7 @@ impl PhiValue for () {
 
     fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
         _: &[ir::Value],
+        _: &mut jit::builder::Builder<'_, MC, JSA>,
     ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
     }
 
@@ -127,9 +129,32 @@ impl PhiValue for XValue {
 
     fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
         params: &[ir::Value],
+        _: &mut jit::builder::Builder<'_, MC, JSA>,
     ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
         jit::builder::X64(params[0])
     }
 
     const IR_TYPES: &'static [ir::Type] = &[I64];
+}
+
+impl<E> PhiValue for Result<(), E> {
+    type IcbValue<I: ICB + ?Sized> = I::IResult<()>;
+
+    /// For handling an `IResult` output from a branch merge, we are only catering
+    /// for the `Ok` case. `Err` is handled within the block, whilst we are continuing
+    /// building IR for the `Ok` case.
+    fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
+        _: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+    ) -> impl IntoIterator<Item = ir::Value> {
+        []
+    }
+
+    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+        _: &[ir::Value],
+        icb: &mut jit::builder::Builder<'_, MC, JSA>,
+    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        icb.ok(())
+    }
+
+    const IR_TYPES: &'static [ir::Type] = &[];
 }

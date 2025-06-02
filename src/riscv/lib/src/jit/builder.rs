@@ -413,12 +413,13 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         self.builder.switch_to_block(post_block);
         let params = self.builder.block_params(post_block);
 
-        Phi::from_ir_vals(params)
+        Phi::from_ir_vals(params.to_vec().as_slice(), self)
     }
 
     fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
+        with_reset_reservation: bool,
     ) -> Self::IResult<()> {
         let width = self.xvalue_of_imm(V::WIDTH as i64);
         let remainder = address.modulus(width, self);
@@ -429,7 +430,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         // comparison here.
         let zero = self.xvalue_of_imm(0);
         let not_aligned = remainder.compare(zero, Predicate::NotEqual, self);
-        let errno = AtomicAccessGuard::new(not_aligned, address.0);
+        let errno = AtomicAccessGuard::new(not_aligned, address.0, with_reset_reservation);
         errno.handle(self);
 
         Some(())

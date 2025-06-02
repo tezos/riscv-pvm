@@ -1343,6 +1343,52 @@ impl Instruction {
             },
         }
     }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Lrw`].
+    pub(crate) fn new_lrw(
+        rd: XRegister,
+        rs1: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Lrw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                // Although not used, rs2 is `x0` in the instruction encoding for `Lr.w` opcode.
+                rs2: XRegister::x0.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Scw`].
+    pub(crate) fn new_scw(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Scw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
 }
 
 impl Instruction {

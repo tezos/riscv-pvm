@@ -213,19 +213,26 @@ mod test {
     use crate::backend_test;
     use crate::interpreter::atomics::SC_FAILURE;
     use crate::interpreter::atomics::SC_SUCCESS;
+    use crate::interpreter::atomics::run_lrw;
+    use crate::interpreter::atomics::run_scw;
+    use crate::interpreter::atomics::test::test_lrsc;
     use crate::interpreter::integer::run_addi;
     use crate::interpreter::rv32a::test::test_amo;
-    use crate::interpreter::rv32a::test::test_lrsc;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
 
-    test_lrsc!(test_lrd_scd, run_lrd, run_scd, 8, u64);
+    test_lrsc!(
+        test_lrd_scd,
+        MachineCoreState::run_lrd,
+        MachineCoreState::run_scd,
+        8,
+        u64
+    );
 
-    test_lrsc!(test_lrd_scw, run_lrd, run_scw, 8, u32);
-
-    test_lrsc!(test_lrw_scd, run_lrw, run_scd, 8, u32);
+    test_lrsc!(test_lrd_scw, MachineCoreState::run_lrd, run_scw, 8, u32);
+    test_lrsc!(test_lrw_scd, run_lrw, MachineCoreState::run_scd, 8, u32);
 
     test_amo!(run_amoswapd, |_, r2_val| r2_val, 8, u64);
 
