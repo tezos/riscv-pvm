@@ -13,12 +13,9 @@ pub(crate) mod value;
 
 use arithmetic::Arithmetic;
 use comparable::Comparable;
-use cranelift::codegen::ir;
-use cranelift::codegen::ir::types::I64;
 
 pub use self::value::StoreLoadInt;
-use crate::jit::state_access::JitStateAccess;
-use crate::jit::{self};
+use crate::instruction_context::value::PhiValue;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::instruction::Args;
@@ -45,66 +42,6 @@ pub type IcbLoweringFn<I> = unsafe fn(&Args, &mut I) -> IcbFnResult<I>;
 
 /// Result of lowering an instruction.
 pub type IcbFnResult<I> = <I as ICB>::IResult<ProgramCounterUpdate<<I as ICB>::XValue>>;
-
-/// PhiValue allows the conversion of values to and from cranelift primitive
-/// [`ir::Value`] when in the context of [`JIT`] compilation. It represents a chosen
-/// correct value from multiple control flows possible in `ICB::branch_merge`.
-///
-/// These methods have no relevance in the context of interpreted mode.
-///
-/// [`JIT`]: crate::jit::JIT
-pub(super) trait PhiValue {
-    /// Represents the generic representation of the value in the ICB.
-    type IcbValue<I: ICB + ?Sized>: Sized;
-
-    /// In JIT, convert the value to an iterator of [`ir::Value`]s.
-    fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
-    ) -> impl IntoIterator<Item = ir::Value>;
-
-    /// Convert [`ir::Value`]s back to itself.
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
-        params: &[ir::Value],
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>>;
-
-    /// The cranelift primitive types of the IR values representing this value in JIT.
-    const IR_TYPES: &'static [ir::Type];
-}
-
-impl PhiValue for () {
-    type IcbValue<I: ICB + ?Sized> = ();
-
-    fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        _: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
-    ) -> impl IntoIterator<Item = ir::Value> {
-        []
-    }
-
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
-        _: &[ir::Value],
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
-    }
-
-    const IR_TYPES: &'static [ir::Type] = &[];
-}
-
-impl PhiValue for XValue {
-    type IcbValue<I: ICB + ?Sized> = I::XValue;
-
-    fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
-    ) -> impl IntoIterator<Item = ir::Value> {
-        [icb_repr.0]
-    }
-
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
-        params: &[ir::Value],
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
-        jit::builder::X64(params[0])
-    }
-
-    const IR_TYPES: &'static [ir::Type] = &[I64];
-}
 
 /// Instruction Context Builder contains operations required to
 /// execute RISC-V instructions.
