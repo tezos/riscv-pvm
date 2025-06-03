@@ -1,0 +1,116 @@
+diff a/src/riscv/lib/src/machine_state/block_cache/block.rs b/src/riscv/lib/src/machine_state/block_cache/block.rs	(rejected hunks)
+@@ -336,11 +393,54 @@
+         result: &mut Result<(), EnvironException>,
+         block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
+     ) {
+-        *result = unsafe {
+-            // Safety: this function is always safe to call
+-            self.fallback
+-                .run_block(core, instr_pc, steps, &mut block_builder.1)
+-        };
++        let instrs = self.fallback.instr()[..self.num_instr()]
++            .iter()
++            .map(|i| i.read_stored().opcode)
++            .collect::<Vec<_>>()
++            .into_boxed_slice();
++        dispatch_metrics::measure(instrs, || {
++            *result = unsafe {
++                // Safety: this function is always safe to call
++                self.fallback
++                    .run_block(core, instr_pc, steps, &mut block_builder.1)
++            };
++        })
++    }
++
++    extern "C" fn run_block_compiling(
++        &mut self,
++        core: &mut MachineCoreState<MC, M>,
++        instr_pc: Address,
++        steps: &mut usize,
++        result: &mut Result<(), EnvironException>,
++        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
++    ) {
++        let instrs = self.fallback.instr()[..self.num_instr()]
++            .iter()
++            .map(|i| i.read_stored().opcode)
++            .collect::<Vec<_>>()
++            .into_boxed_slice();
++        dispatch_metrics::measure(instrs, || unsafe {
++            self.run_block_not_compiled(core, instr_pc, steps, result, block_builder)
++        })
++    }
++
++    extern "C" fn run_block_compiling_failed(
++        &mut self,
++        core: &mut MachineCoreState<MC, M>,
++        instr_pc: Address,
++        steps: &mut usize,
++        result: &mut Result<(), EnvironException>,
++        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
++    ) {
++        let instrs = self.fallback.instr()[..self.num_instr()]
++            .iter()
++            .map(|i| i.read_stored().opcode)
++            .collect::<Vec<_>>()
++            .into_boxed_slice();
++        dispatch_metrics::measure(instrs, || unsafe {
++            self.run_block_not_compiled(core, instr_pc, steps, result, block_builder)
++        })
+     }
+ }
+ 
+@@ -467,27 +567,34 @@
+     instr_pc: &mut Address,
+     steps: &mut usize,
+ ) -> Result<(), Exception> {
+-    for instr in instr.iter() {
+-        match run_instr(instr, core) {
+-            Ok(ProgramCounterUpdate::Next(width)) => {
+-                *instr_pc += width as u64;
+-                core.hart.pc.write(*instr_pc);
+-                *steps += 1;
+-            }
+-            Ok(ProgramCounterUpdate::Set(instr_pc)) => {
+-                // Setting the instr_pc implies execution continuing
+-                // elsewhere - and no longer within the current block.
+-                core.hart.pc.write(instr_pc);
+-                *steps += 1;
+-                break;
+-            }
+-            Err(e) => {
+-                // Exceptions lead to a new address being set to handle it,
+-                // with no guarantee of it being the next instruction.
+-                return Err(e);
++    let instrs = instr
++        .iter()
++        .map(|cell| cell.read_stored().opcode)
++        .collect::<Vec<_>>()
++        .into_boxed_slice();
++    dispatch_metrics::measure(instrs, || {
++        for instr in instr.iter() {
++            match run_instr(instr, core) {
++                Ok(ProgramCounterUpdate::Next(width)) => {
++                    *instr_pc += width as u64;
++                    core.hart.pc.write(*instr_pc);
++                    *steps += 1;
++                }
++                Ok(ProgramCounterUpdate::Set(instr_pc)) => {
++                    // Setting the instr_pc implies execution continuing
++                    // elsewhere - and no longer within the current block.
++                    core.hart.pc.write(instr_pc);
++                    *steps += 1;
++                    break;
++                }
++                Err(e) => {
++                    // Exceptions lead to a new address being set to handle it,
++                    // with no guarantee of it being the next instruction.
++                    return Err(e);
++                }
+             }
+         }
+-    }
+ 
+-    Ok(())
++        Ok(())
++    })
+ }

@@ -38,6 +38,63 @@ use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
+pub(crate) mod dispatch_metrics {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use crate::machine_state::instruction::OpCode;
+
+    struct Counters {
+        measurements: RefCell<HashMap<Box<[OpCode]>, std::time::Duration>>,
+    }
+
+    impl Counters {
+        fn new() -> Self {
+            Self {
+                measurements: RefCell::new(HashMap::new()),
+            }
+        }
+
+        fn add(&self, instr_pc: Box<[OpCode]>, took: Duration) {
+            self.measurements
+                .borrow_mut()
+                .entry(instr_pc)
+                .and_modify(|so_far| *so_far += took)
+                .or_insert_with(|| took);
+        }
+    }
+
+    impl Drop for Counters {
+        fn drop(&mut self) {
+            let measurements = self.measurements.borrow();
+            let mut pairs = measurements.iter().collect::<Vec<_>>();
+            pairs.sort_by(|a, b| b.1.cmp(a.1));
+
+            let total = pairs.iter().map(|(_, v)| *v).sum::<Duration>();
+
+            eprintln!("Interpretation stats stats ({total:?}):");
+            for (instr_pc, took) in pairs {
+                eprintln!("  {instr_pc:?} => {took:?}");
+            }
+        }
+    }
+
+    thread_local! {
+        static COUNTERS: Counters = Counters::new();
+    }
+
+    pub fn measure<R>(instr_pc: Box<[OpCode]>, f: impl FnOnce() -> R) -> R {
+        let start = quanta::Instant::now();
+        let result = f();
+        let took = start.elapsed();
+
+        COUNTERS.with(|counters| counters.add(instr_pc, took));
+
+        result
+    }
+}
+
 /// State Layout for Blocks
 pub type BlockLayout = (Atom<u8>, [Atom<Instruction>; CACHE_INSTR]);
 
@@ -342,18 +399,48 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
-        let block_result = unsafe {
-            // Safety: this function is always safe to call
-            self.fallback
-                .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
-        };
+        let instrs = self
+            .fallback
+            .instr
+            .iter()
+            .take(<Self as Block<MC, M>>::num_instr(self))
+            .map(|i| i.read_stored().opcode)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        dispatch_metrics::measure(instrs, || {
+            let block_result = unsafe {
+                // Safety: this function is always safe to call
+                self.fallback
+                    .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
+            };
 
-        *result = match block_result.error {
-            Some(exc) => Err(exc),
-            None => Ok(()),
-        };
+            *result = match block_result.error {
+                Some(exc) => Err(exc),
+                None => Ok(()),
+            };
 
-        block_result.steps
+            block_result.steps
+        })
+    }
+
+    unsafe extern "C" fn run_block_compiling_failed(
+        &mut self,
+        core: &mut MachineCoreState<MC, M>,
+        instr_pc: Address,
+        result: &mut Result<(), EnvironException>,
+        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
+    ) -> usize {
+        let instrs = self
+            .fallback
+            .instr
+            .iter()
+            .take(<Self as Block<MC, M>>::num_instr(self))
+            .map(|i| i.read_stored().opcode)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        dispatch_metrics::measure(instrs, || unsafe {
+            Self::run_block_not_compiled(self, core, instr_pc, result, block_builder)
+        })
     }
 }
 
