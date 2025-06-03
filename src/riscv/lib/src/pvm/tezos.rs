@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+//! Tezos-specific host functions for the PVM
+
 use std::cmp::min;
 
 use ed25519_dalek::Signature;
