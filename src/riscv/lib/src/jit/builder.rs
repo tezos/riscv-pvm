@@ -12,6 +12,7 @@ pub(super) mod comparable;
 pub(super) mod errno;
 
 use cranelift::codegen::ir;
+use cranelift::codegen::ir::BlockArg;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::condcodes::IntCC;
@@ -183,7 +184,10 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
             .end_block
             .unwrap_or_else(|| self.builder.create_block());
 
-        self.builder.ins().jump(end_block, &[pc_val.0, steps_val]);
+        self.builder.ins().jump(end_block, &[
+            BlockArg::Value(pc_val.0),
+            BlockArg::Value(steps_val),
+        ]);
         self.finalise_end_block(end_block)
     }
 
@@ -395,18 +399,28 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         self.builder.switch_to_block(true_block);
 
         let res_val = Phi::to_ir_vals(true_branch(self));
-        self.builder
-            .ins()
-            .jump(post_block, &res_val.into_iter().collect::<Vec<_>>());
+        self.builder.ins().jump(
+            post_block,
+            res_val
+                .into_iter()
+                .map(BlockArg::Value)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
         self.builder.seal_block(true_block);
 
         self.dynamic = snapshot;
         self.builder.switch_to_block(false_block);
 
         let res_val = Phi::to_ir_vals(false_branch(self));
-        self.builder
-            .ins()
-            .jump(post_block, &res_val.into_iter().collect::<Vec<_>>());
+        self.builder.ins().jump(
+            post_block,
+            res_val
+                .into_iter()
+                .map(BlockArg::Value)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
         self.builder.seal_block(false_block);
 
         // The post-block is the common exit point for both branches.
