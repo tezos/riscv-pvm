@@ -145,30 +145,58 @@ impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for JIT<MC, M>
     }
 }
 
+/// Unsafe Rust escape hatches
+mod internal_corro {
+    /// A wrapper to make a value `Send`
+    #[derive(Default)]
+    pub(super) struct SendWrapper<T> {
+        /// Do not use directly! Use [`Self::as_mut`] instead.
+        _no_please_no: T,
+    }
+
+    impl<T> SendWrapper<T> {
+        /// Obtain a mutable reference to the inner value.
+        ///
+        /// # Safety
+        ///
+        /// Ensure that this is only called from the thread that owns the [`SendWrapper`]. There must
+        /// not be any other thread that uses its reference to a [`SendWrapper`].
+        pub(super) unsafe fn as_mut(&mut self) -> &mut T {
+            &mut self._no_please_no
+        }
+    }
+
+    // We know that the main thread does not actually use the JIT compilation state. The only thing it
+    // may do is drop it when it is the only owner left.
+    unsafe impl<T> Send for SendWrapper<T> {}
+}
+
 /// JIT compiler for blocks that performs compilation in a
 /// background thread.
 pub struct OutlineCompiler<MC: MemoryConfig, M: JitStateAccess> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
-    #[expect(unused, reason = "Needed to keep the JIT alive")]
-    jit: Arc<Mutex<JIT<MC, M>>>,
+    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC, M>>>>,
     sender: Sender<CompilationRequest>,
 }
 
 impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompiler<MC, M> {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
-        let jit: Arc<Mutex<JIT<MC, M>>> = Default::default();
+        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT<MC, M>>>> = Default::default();
 
         let compiler = Self {
-            jit: jit.clone(),
+            _do_not_use_this_is_for_drop_only: jit.clone(),
             sender,
         };
 
         std::thread::spawn(move || {
             {
-                let mut jit = jit.lock().expect("Only this thread locks the JIT");
+                let mut jit_guard = jit.lock().expect("Only this thread locks the JIT");
+
+                // SAFETY: We are the only thread that may access the JIT compilation state.
+                let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
                     if let Some(jitfn) = jit.compile(&msg.instr) {
