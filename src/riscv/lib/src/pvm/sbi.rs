@@ -2,11 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![expect(
-    dead_code,
-    reason = "Most functions are not used with the supervising PVM"
-)]
-
 use std::cmp::min;
 
 use ed25519_dalek::Signature;
@@ -16,13 +11,6 @@ use ed25519_dalek::VerifyingKey;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
 use tezos_smart_rollup_constants::riscv::REVEAL_DATA_MAX_SIZE;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
-use tezos_smart_rollup_constants::riscv::SBI_CONSOLE_PUTCHAR;
-use tezos_smart_rollup_constants::riscv::SBI_DBCN;
-use tezos_smart_rollup_constants::riscv::SBI_DBCN_CONSOLE_WRITE_BYTE;
-use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
-use tezos_smart_rollup_constants::riscv::SBI_SHUTDOWN;
-use tezos_smart_rollup_constants::riscv::SBI_SRST;
-use tezos_smart_rollup_constants::riscv::SBI_SRST_SYSTEM_RESET;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_BLAKE2B_HASH256;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_ED25519_SIGN;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_ED25519_VERIFY;
@@ -30,7 +18,6 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
-use super::PvmHooks;
 use super::PvmStatus;
 use super::reveals::RevealRequest;
 use crate::machine_state::MachineCoreState;
@@ -43,8 +30,6 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
-use crate::machine_state::registers::a7;
-use crate::parser::instruction::InstrCacheable;
 use crate::state_backend::CellRead;
 use crate::state_backend::CellReadWrite;
 use crate::state_backend::CellWrite;
@@ -67,17 +52,6 @@ fn sbi_return1<M: ManagerWrite>(xregisters: &mut XRegisters<M>, value: XValue) {
     }
 
     xregisters.write(a0, value);
-}
-
-/// Write an `sbiret` return struct.
-#[inline]
-fn sbi_return_sbiret<M: ManagerWrite>(
-    xregisters: &mut XRegisters<M>,
-    error: Option<SbiError>,
-    value: XValue,
-) {
-    xregisters.write(a0, error.map(|err| err as i64 as XValue).unwrap_or(0));
-    xregisters.write(a1, value);
 }
 
 /// Run the given closure `inner` and write the corresponding SBI results to `machine`.
@@ -307,51 +281,6 @@ fn handle_tezos_reveal<S, MC, M>(
     status.write(PvmStatus::WaitingForReveal);
 }
 
-/// Handle a [SBI_SHUTDOWN] call.
-#[inline(always)]
-fn handle_legacy_shutdown<M>(xregisters: &mut XRegisters<M>)
-where
-    M: ManagerWrite,
-{
-    // This call always fails.
-    handle_not_supported(xregisters);
-}
-
-/// Handle a [SBI_CONSOLE_PUTCHAR] call.
-#[inline(always)]
-fn handle_legacy_console_putchar<M>(xregisters: &mut XRegisters<M>, hooks: &mut PvmHooks)
-where
-    M: ManagerReadWrite,
-{
-    let char = xregisters.read(a0) as u8;
-    (hooks.putchar_hook)(char);
-
-    // This call always succeeds.
-    sbi_return1(xregisters, 0);
-}
-
-/// Handle a [SBI_DBCN_CONSOLE_WRITE_BYTE] call.
-#[inline(always)]
-fn handle_debug_console_write_byte<M>(xregisters: &mut XRegisters<M>, hooks: &mut PvmHooks)
-where
-    M: ManagerReadWrite,
-{
-    let char = xregisters.read(a0) as u8;
-    (hooks.putchar_hook)(char);
-
-    // This call always succeeds.
-    sbi_return_sbiret(xregisters, None, 0);
-}
-
-/// Handle a [SBI_SRST_SYSTEM_RESET] call.
-#[inline(always)]
-fn handle_system_reset<M>(xregisters: &mut XRegisters<M>)
-where
-    M: ManagerWrite,
-{
-    sbi_return_sbiret(xregisters, Some(SbiError::NotSupported), 0);
-}
-
 /// Handle unsupported SBI calls.
 #[inline(always)]
 fn handle_not_supported<M>(xregisters: &mut XRegisters<M>)
@@ -361,55 +290,6 @@ where
     // SBI requires us to indicate that we don't support this function by returning
     // `ERR_NOT_SUPPORTED`.
     sbi_return_error(xregisters, SbiError::NotSupported);
-}
-
-/// Handle a PVM SBI call. Returns `true` if it makes sense to continue evaluation.
-#[inline]
-pub fn handle_call<S, MC, M>(
-    status: &mut S,
-    reveal_request: &mut RevealRequest<M>,
-    machine: &mut MachineCoreState<MC, M>,
-    hooks: &mut PvmHooks,
-) -> bool
-where
-    S: CellReadWrite<Value = PvmStatus>,
-    MC: MemoryConfig,
-    M: ManagerReadWrite,
-{
-    // No matter the outcome, we need to bump the
-    // program counter because ECALL's don't update it
-    // to the following instructions.
-    let pc = machine.hart.pc.read() + InstrCacheable::Ecall.width() as u64;
-    machine.hart.pc.write(pc);
-
-    // SBI extension is contained in a7.
-    let sbi_extension = machine.hart.xregisters.read(a7);
-    match sbi_extension {
-        SBI_CONSOLE_PUTCHAR => handle_legacy_console_putchar(&mut machine.hart.xregisters, hooks),
-        SBI_SHUTDOWN => handle_legacy_shutdown(&mut machine.hart.xregisters),
-        SBI_DBCN => {
-            let sbi_function = machine.hart.xregisters.read(a6);
-            match sbi_function {
-                SBI_DBCN_CONSOLE_WRITE_BYTE => {
-                    handle_debug_console_write_byte(&mut machine.hart.xregisters, hooks)
-                }
-                _ => handle_not_supported(&mut machine.hart.xregisters),
-            }
-        }
-        SBI_SRST => {
-            let sbi_function = machine.hart.xregisters.read(a6);
-            match sbi_function {
-                SBI_SRST_SYSTEM_RESET => handle_system_reset(&mut machine.hart.xregisters),
-                _ => handle_not_supported(&mut machine.hart.xregisters),
-            }
-        }
-        SBI_FIRMWARE_TEZOS => {
-            handle_tezos(machine, status, reveal_request);
-        }
-        _ => handle_not_supported(&mut machine.hart.xregisters),
-    }
-
-    status.read() == PvmStatus::Evaluating
 }
 
 /// Handle a Tezos SBI call.
