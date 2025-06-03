@@ -181,7 +181,7 @@ where
                 // information on ABI compatability.
                 unsafe { std::mem::transmute::<JitFn<MC, M>, DispatchFn<Self, MC, M>>(jitfn) }
             }
-            None => Jitted::run_block_not_compiled,
+            None => Jitted::run_block_compiling_failed,
         };
 
         target.set(fun);
@@ -262,7 +262,12 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompile
                         // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
                         // information on ABI compatability.
                         msg.fun.store(jitfn as usize, Ordering::Release);
-                    };
+                    } else {
+                        msg.fun.store(
+                            Jitted::<Self, MC, M>::run_block_compiling_failed as usize,
+                            Ordering::Release,
+                        );
+                    }
                 }
             }
             // because we used blocking recv with an asynchronous channel, this only fails when the

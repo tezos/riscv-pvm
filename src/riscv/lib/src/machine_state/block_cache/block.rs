@@ -38,6 +38,63 @@ use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
+pub(crate) mod dispatch_metrics {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use crate::machine_state::instruction::OpCode;
+
+    struct Counters {
+        measurements: RefCell<HashMap<Box<[OpCode]>, std::time::Duration>>,
+    }
+
+    impl Counters {
+        fn new() -> Self {
+            Self {
+                measurements: RefCell::new(HashMap::new()),
+            }
+        }
+
+        fn add(&self, instr_pc: Box<[OpCode]>, took: Duration) {
+            self.measurements
+                .borrow_mut()
+                .entry(instr_pc)
+                .and_modify(|so_far| *so_far += took)
+                .or_insert_with(|| took);
+        }
+    }
+
+    impl Drop for Counters {
+        fn drop(&mut self) {
+            let measurements = self.measurements.borrow();
+            let mut pairs = measurements.iter().collect::<Vec<_>>();
+            pairs.sort_by(|a, b| b.1.cmp(a.1));
+
+            let total = pairs.iter().map(|(_, v)| *v).sum::<Duration>();
+
+            eprintln!("Block stats ({total:?}):");
+            for (instr_pc, took) in pairs {
+                eprintln!("  {instr_pc:?} => {took:?}");
+            }
+        }
+    }
+
+    thread_local! {
+        static COUNTERS: Counters = Counters::new();
+    }
+
+    pub fn measure<R>(instr_pc: Box<[OpCode]>, f: impl FnOnce() -> R) -> R {
+        let start = quanta::Instant::now();
+        let result = f();
+        let took = start.elapsed();
+
+        COUNTERS.with(|counters| counters.add(instr_pc, took));
+
+        result
+    }
+}
+
 /// State Layout for Blocks
 pub type BlockLayout = (Atom<u8>, [Atom<Instruction>; CACHE_INSTR]);
 
