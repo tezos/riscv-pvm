@@ -1315,6 +1315,7 @@ dependencies = [
  "num_enum",
  "paste",
  "proptest",
+ "quanta",
  "rand 0.8.5",
  "range-collections",
  "rustc_apfloat",
