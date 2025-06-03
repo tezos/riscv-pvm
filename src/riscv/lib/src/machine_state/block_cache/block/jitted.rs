@@ -6,8 +6,6 @@
 //! JIT-compiled blocks of instructions
 
 use super::ICallPlaced;
-use crate::jit::state_access::JitStateAccess;
-use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::BlockLayout;
@@ -17,6 +15,7 @@ use crate::machine_state::block_cache::block::interpreted;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::{MachineCoreState, block_cache::block::InterpretedBlockBuilder};
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::EnrichedCell;
@@ -29,6 +28,9 @@ use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
 use crate::traps::EnvironException;
+use crate::{
+    jit::state_access::JitStateAccess, machine_state::block_cache::block::dispatch_metrics,
+};
 
 /// Blocks that are compiled to native code for execution, when possible.
 ///
@@ -95,18 +97,48 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
-        let block_result = unsafe {
-            // Safety: this function is always safe to call
-            self.fallback
-                .run_block(core, instr_pc, &mut interpreted::InterpretedBlockBuilder)
-        };
+        let instrs = self
+            .fallback
+            .instr
+            .iter()
+            .take(<Self as Block<MC, M>>::num_instr(self))
+            .map(|i| i.read_stored().opcode)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        dispatch_metrics::measure(instrs, || {
+            let block_result = unsafe {
+                // Safety: this function is always safe to call
+                self.fallback
+                    .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
+            };
 
-        *result = match block_result.error {
-            Some(exc) => Err(exc),
-            None => Ok(()),
-        };
+            *result = match block_result.error {
+                Some(exc) => Err(exc),
+                None => Ok(()),
+            };
 
-        block_result.steps
+            block_result.steps
+        })
+    }
+
+    pub(super) unsafe extern "C" fn run_block_compiling_failed(
+        &mut self,
+        core: &mut MachineCoreState<MC, M>,
+        instr_pc: Address,
+        result: &mut Result<(), EnvironException>,
+        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
+    ) -> usize {
+        let instrs = self
+            .fallback
+            .instr
+            .iter()
+            .take(<Self as Block<MC, M>>::num_instr(self))
+            .map(|i| i.read_stored().opcode)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        dispatch_metrics::measure(instrs, || unsafe {
+            Self::run_block_not_compiled(self, core, instr_pc, result, block_builder)
+        })
     }
 }
 
