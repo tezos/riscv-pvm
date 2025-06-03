@@ -219,10 +219,9 @@ pub(crate) trait ICB {
 
     /// Raise an [`Exception::StoreAMOAccessFault`] error if `address` is not
     /// aligned to the given [`LoadStoreWidth`].
-    fn atomic_access_fault_guard(
+    fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()>;
 
     /// Map the fallible-value into a fallible-value of a different type.
@@ -405,12 +404,11 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     }
 
     #[inline(always)]
-    fn atomic_access_fault_guard(
+    fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Address,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()> {
-        let width = self.xvalue_of_imm(width as i64);
+        let width = self.xvalue_of_imm(V::WIDTH as i64);
         let remainder = address.modulus(width, self);
         let zero = self.xvalue_of_imm(0);
 

@@ -26,7 +26,6 @@ use self::errno::Errno;
 use super::state_access::JitStateAccess;
 use super::state_access::JsaCalls;
 use crate::instruction_context::ICB;
-use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::MulHighType;
 use crate::instruction_context::PhiValue;
 use crate::instruction_context::Predicate;
@@ -417,12 +416,11 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         Phi::from_ir_vals(params)
     }
 
-    fn atomic_access_fault_guard(
+    fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        width: LoadStoreWidth,
     ) -> Self::IResult<()> {
-        let width = self.xvalue_of_imm(width as i64);
+        let width = self.xvalue_of_imm(V::WIDTH as i64);
         let remainder = address.modulus(width, self);
 
         // The steps of taking the comparison are technically not needed, as cranelift will
