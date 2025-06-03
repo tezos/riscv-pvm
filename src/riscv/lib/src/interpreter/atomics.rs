@@ -7,7 +7,6 @@
 use std::mem;
 
 use crate::instruction_context::ICB;
-use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
@@ -173,7 +172,7 @@ fn run_x64_atomic<I: ICB>(
     let address_rs1 = icb.xregister_read(rs1);
 
     // Handle the case where the address is not aligned.
-    let result = icb.atomic_access_fault_guard(address_rs1, LoadStoreWidth::Double);
+    let result = icb.atomic_access_fault_guard::<u64>(address_rs1);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
