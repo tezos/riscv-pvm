@@ -6,6 +6,6 @@ mod common;
 pub(crate) mod linux;
 pub mod node_pvm;
 mod reveals;
-mod sbi;
+mod tezos;
 
 pub use common::*;

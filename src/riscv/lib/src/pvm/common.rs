@@ -23,7 +23,7 @@ use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::a0;
-use crate::pvm::sbi;
+use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
@@ -370,7 +370,7 @@ impl<
     where
         M: state_backend::ManagerReadWrite,
     {
-        if !sbi::provide_input(
+        if !tezos::provide_input(
             &mut self.status,
             &mut self.machine_state.core,
             level,
@@ -392,7 +392,7 @@ impl<
     where
         M: state_backend::ManagerReadWrite,
     {
-        if !sbi::provide_reveal_response(
+        if !tezos::provide_reveal_response(
             &mut self.status,
             &mut self.machine_state.core,
             reveal_data,
@@ -502,7 +502,7 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(core, hooks, |core| {
-        sbi::handle_tezos(core, status, reveal_request);
+        tezos::handle_tezos(core, status, reveal_request);
         status.read() == PvmStatus::Evaluating
     })
 }
