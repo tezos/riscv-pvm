@@ -399,28 +399,28 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
-        let instrs = self
-            .fallback
-            .instr
-            .iter()
-            .take(<Self as Block<MC, M>>::num_instr(self))
-            .map(|i| i.read_stored().opcode)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        dispatch_metrics::measure(instrs, || {
-            let block_result = unsafe {
-                // Safety: this function is always safe to call
-                self.fallback
-                    .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
-            };
+        // let instrs = self
+        //     .fallback
+        //     .instr
+        //     .iter()
+        //     .take(<Self as Block<MC, M>>::num_instr(self))
+        //     .map(|i| i.read_stored().opcode)
+        //     .collect::<Vec<_>>()
+        //     .into_boxed_slice();
+        // dispatch_metrics::measure(instrs, || {
+        let block_result = unsafe {
+            // Safety: this function is always safe to call
+            self.fallback
+                .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
+        };
 
-            *result = match block_result.error {
-                Some(exc) => Err(exc),
-                None => Ok(()),
-            };
+        *result = match block_result.error {
+            Some(exc) => Err(exc),
+            None => Ok(()),
+        };
 
-            block_result.steps
-        })
+        block_result.steps
+        // })
     }
 
     unsafe extern "C" fn run_block_compiling_failed(
@@ -430,17 +430,17 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         result: &mut Result<(), EnvironException>,
         block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
     ) -> usize {
-        let instrs = self
-            .fallback
-            .instr
-            .iter()
-            .take(<Self as Block<MC, M>>::num_instr(self))
-            .map(|i| i.read_stored().opcode)
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        dispatch_metrics::measure(instrs, || unsafe {
-            Self::run_block_not_compiled(self, core, instr_pc, result, block_builder)
-        })
+        // let instrs = self
+        //     .fallback
+        //     .instr
+        //     .iter()
+        //     .take(<Self as Block<MC, M>>::num_instr(self))
+        //     .map(|i| i.read_stored().opcode)
+        //     .collect::<Vec<_>>()
+        //     .into_boxed_slice();
+        // dispatch_metrics::measure(instrs, || unsafe {
+        Self::run_block_not_compiled(self, core, instr_pc, result, block_builder)
+        // })
     }
 }
 
@@ -534,14 +534,24 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
 
         let fun = self.dispatch.get();
 
-        // Safety: the block builder is always the same instance, guarantee-ing that any
-        // jit-compiled function is still alive.
-        let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
+        let instrs = self
+            .fallback
+            .instr
+            .iter()
+            .take(<Self as Block<MC, M>>::num_instr(self))
+            .map(|i| i.read_stored().opcode)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        dispatch_metrics::measure(instrs, || {
+            // Safety: the block builder is always the same instance, guarantee-ing that any
+            // jit-compiled function is still alive.
+            let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
 
-        StepManyResult {
-            steps,
-            error: result.err(),
-        }
+            StepManyResult {
+                steps,
+                error: result.err(),
+            }
+        })
     }
 
     fn num_instr(&self) -> usize
