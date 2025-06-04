@@ -75,6 +75,45 @@ impl TryFrom<u64> for MainThreadId {
     }
 }
 
+/// Known to be a valid process ID. As we currently only support one hart, this will be that hart,
+/// or zero to represent no hart.
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessId;
+
+impl TryFrom<u64> for ProcessId {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        // We only support the single hart or a null value
+        match value {
+            0 | 1 => Ok(ProcessId),
+            _ => Err(Error::Search),
+        }
+    }
+}
+
+/// A valid size for the cpu set struct.
+///
+/// see <https://man7.org/linux/man-pages/man3/CPU_SET.3.html>
+#[derive(Debug, Clone, Copy)]
+pub struct CpuSetSize(pub NonZeroU64);
+
+impl TryFrom<u64> for CpuSetSize {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        /// See: <https://man7.org/linux/man-pages/man2/sched_getaffinity.2.html>
+        const MAX_CPU_SET_SIZE: u64 = 1024 / u8::BITS as u64;
+        if value > MAX_CPU_SET_SIZE {
+            return Err(Error::InvalidArgument);
+        }
+
+        Ok(CpuSetSize(
+            NonZeroU64::new(value).ok_or(Error::InvalidArgument)?,
+        ))
+    }
+}
+
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
 pub struct Signal(u7);

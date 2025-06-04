@@ -119,6 +119,9 @@ const GETRANDOM: u64 = 278;
 /// System call number for `clock_gettime` on RISC-V
 const CLOCK_GETTIME: u64 = 113;
 
+/// System call number for `sched_getaffinity` on RISC-V
+const SCHED_GETAFFINITY: u64 = 123;
+
 /// System call number for `gettimeofday` on RISC-V
 const GETTIMEOFDAY: u64 = 169;
 
@@ -732,6 +735,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             MADVISE => dispatch0!(madvise),
             GETRANDOM => dispatch2!(getrandom, core),
             CLOCK_GETTIME => dispatch2!(clock_gettime, core),
+            SCHED_GETAFFINITY => dispatch3!(sched_getaffinity, core),
             GETTIMEOFDAY => dispatch2!(gettimeofday, core),
             SBI_FIRMWARE_TEZOS => return on_tezos(core),
             _ => Err(Error::NoSystemCall),
@@ -916,6 +920,37 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         // Return 0 as an indicator of success
         Ok(0)
+    }
+
+    /// Handle `sched_getaffinity` system call. We only support one hart.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/sched_getaffinity.2.html>
+    fn handle_sched_getaffinity(
+        &self,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+        _pid: parameters::ProcessId,
+        cpusetsize: parameters::CpuSetSize,
+        mask: VirtAddr,
+    ) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        const SINGLE_PROCESS_PID_AFFINITY: u8 = 0b1_u8;
+
+        let other_bytes_size = cpusetsize.0.get() - 1;
+
+        for i in 0..other_bytes_size {
+            let address = mask + i;
+            core.main_memory.write(address.to_machine_address(), 0u8)?;
+        }
+
+        core.main_memory.write(
+            (mask + other_bytes_size).to_machine_address(),
+            SINGLE_PROCESS_PID_AFFINITY,
+        )?;
+
+        // Return bytes written
+        Ok(cpusetsize.0.get())
     }
 
     /// Handle `gettimeofday` system call. Fills the timeval and timezone structures with zeros.
@@ -1157,6 +1192,182 @@ mod tests {
             default_on_tezos_handler,
         );
         assert!(result);
+    });
+
+    // Check that the `sched_getaffinity` system call can accept different cpu set sizes.
+    backend_test!(sched_getaffinity_set_sizes, F, {
+        type MemLayout = M4K;
+
+        let mut manager = F::manager();
+        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new(&mut manager);
+
+        // Make sure everything is readable and writable. Otherwise, we'd get access faults.
+        machine_state
+            .main_memory
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .unwrap();
+
+        // Mask pointer (must be non-zero)
+        let mask_address = VirtAddr::new(0x100);
+
+        for i in 1..=64_u64 {
+            // Fill the memory with non-zero values to verify they are written to later
+            machine_state
+                .main_memory
+                .write_all(mask_address.to_machine_address(), &vec![
+                    0xFF_u8;
+                    i as usize
+                ])
+                .unwrap();
+
+            // System call number
+            machine_state
+                .hart
+                .xregisters
+                .write(registers::a7, SCHED_GETAFFINITY);
+
+            // Zero or one `pid` can both mean the main hart
+            machine_state.hart.xregisters.write(registers::a0, i % 2);
+
+            // Set cpu set size
+            machine_state.hart.xregisters.write(registers::a1, i);
+
+            // Set mask address
+            machine_state
+                .hart
+                .xregisters
+                .write(registers::a2, mask_address.to_machine_address());
+
+            // Perform the system call
+            let result = supervisor_state.handle_system_call(
+                &mut machine_state,
+                &mut PvmHooks::default(),
+                default_on_tezos_handler,
+            );
+
+            assert!(result);
+
+            // Verify that a single bit is set in the mask
+            for j in 1..i {
+                let leading_mask = machine_state
+                    .main_memory
+                    .read::<u8>((mask_address + j - 1).to_machine_address())
+                    .unwrap();
+
+                assert_eq!(leading_mask, 0u8);
+            }
+
+            let end_mask = machine_state
+                .main_memory
+                .read::<u8>((mask_address + i - 1).to_machine_address())
+                .unwrap();
+
+            assert_eq!(end_mask, 1u8);
+        }
+    });
+
+    // Check that the `sched_getaffinity` system call fails for a zero cpusetsize
+    backend_test!(sched_getaffinity_zero_set_size, F, {
+        type MemLayout = M4K;
+
+        let mut manager = F::manager();
+        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new(&mut manager);
+
+        // Mask pointer (must be non-zero)
+        let mask_address = VirtAddr::new(0x100);
+
+        // System call number
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a7, SCHED_GETAFFINITY);
+
+        // One `pid`
+        machine_state.hart.xregisters.write(registers::a0, 1u64);
+
+        // Set a zero cpu set size
+        machine_state.hart.xregisters.write(registers::a1, 0);
+
+        // Set mask address
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a2, mask_address.to_machine_address());
+
+        // Perform the system call
+        let result = supervisor_state.handle_system_call(
+            &mut machine_state,
+            &mut PvmHooks::default(),
+            default_on_tezos_handler,
+        );
+
+        assert!(result);
+
+        let result = machine_state.hart.xregisters.read(registers::a0);
+
+        // Verify we get an error
+        assert!(result != 0);
+    });
+
+    // Check that the `sched_getaffinity` system call fails for an unreasonably large cpusetsize
+    backend_test!(sched_getaffinity_unreasonable_set_size, F, {
+        type MemLayout = M4K;
+
+        let mut manager = F::manager();
+        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new(&mut manager);
+
+        // Mask pointer (must be non-zero)
+        let mask_address = VirtAddr::new(0x100);
+
+        // System call number
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a7, SCHED_GETAFFINITY);
+
+        // One `pid`
+        machine_state.hart.xregisters.write(registers::a0, 1u64);
+
+        // Set an unreasonably large cpu set size
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a1, 1_000_000);
+
+        // Set mask address
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a2, mask_address.to_machine_address());
+
+        // Set mask address
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a2, mask_address.to_machine_address());
+
+        // Set mask address
+        machine_state
+            .hart
+            .xregisters
+            .write(registers::a2, mask_address.to_machine_address());
+
+        // Perform the system call
+        let result = supervisor_state.handle_system_call(
+            &mut machine_state,
+            &mut PvmHooks::default(),
+            default_on_tezos_handler,
+        );
+
+        assert!(result);
+
+        let result: u64 = machine_state.hart.xregisters.read(registers::a0);
+
+        // Verify we get an error
+        assert!(result != 0);
     });
 
     // Check that the `rt_sigaction system call can accept 0 for the `old` parameter.
