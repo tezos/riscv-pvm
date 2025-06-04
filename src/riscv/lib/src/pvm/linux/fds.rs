@@ -34,8 +34,6 @@ impl<M: ManagerBase> SupervisorState<M> {
         // Limit how much data we can write to prevent proof-size explosion
         let length = length.min(PAGE_SIZE.get());
 
-        // TODO: RV-487: Memory mappings are not yet protected. We assume the kernel knows what
-        // it's doing for now.
         let mut data = vec![0u8; length as usize];
         core.main_memory
             .read_all(addr.to_machine_address(), &mut data)?;
@@ -119,14 +117,10 @@ impl<M: ManagerBase> SupervisorState<M> {
                 let struct_addr_base = struct_addr + OFFSET_BASE;
                 let struct_addr_len = struct_addr + OFFSET_LEN;
 
-                // TODO: RV-487: Memory mappings are not yet protected. We assume the kernel knows
-                // what it's doing for now.
                 let addr = core
                     .main_memory
                     .read(struct_addr_base.to_machine_address())?;
 
-                // TODO: RV-487: Memory mappings are not yet protected. We assume the kernel knows
-                // what it's doing for now.
                 let length = core
                     .main_memory
                     .read(struct_addr_len.to_machine_address())?;

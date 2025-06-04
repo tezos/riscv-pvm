@@ -165,8 +165,6 @@ impl<M: ManagerBase> SupervisorState<M> {
             .deallocate_and_protect_pages(addr, length as usize)
             .map_err(|_| Error::InvalidArgument)?;
 
-        // TODO: RV-534: Mapped memory is never freed up to be re-allocated
-
         Ok(0)
     }
 }

@@ -83,8 +83,6 @@ impl<M: ManagerBase> SupervisorState<M> {
             return Err(Error::Range);
         }
 
-        // TODO: RV-487: Memory mappings are not yet protected. We assume the kernel knows what
-        // it's doing for now.
         core.main_memory.write_all(buffer, CWD)?;
 
         // Return the buffer address as an indicator of success

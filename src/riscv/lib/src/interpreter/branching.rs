@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 //! Implementation of branching and jumping instructions for RISC-V over the ICB.
-// TODO: RV-520: Update remaining 'jump' handlers in the file to work over the ICB.
 
 use crate::instruction_context::ICB;
 use crate::instruction_context::Predicate;
