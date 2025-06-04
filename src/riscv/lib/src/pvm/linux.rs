@@ -89,6 +89,9 @@ const RT_SIGACTION: u64 = 134;
 /// System call number for `rt_sigprocmask` on RISC-V
 const RT_SIGPROCMASK: u64 = 135;
 
+/// System call number for `getpid` on RISC-V
+const GETPID: u64 = 172;
+
 /// System call number for `brk` on RISC-V
 const BRK: u64 = 214;
 
@@ -709,6 +712,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             READLINKAT => dispatch0!(readlinkat),
             EXIT | EXITGROUP => dispatch1!(exit),
             SET_TID_ADDRESS => dispatch1!(set_tid_address, core),
+            GETPID => dispatch0!(getpid),
             TKILL => dispatch2!(tkill),
             SIGALTSTACK => dispatch2!(sigaltstack, core),
             RT_SIGACTION => dispatch4!(rt_sigaction, core),
@@ -870,6 +874,14 @@ impl<M: ManagerBase> SupervisorState<M> {
             result: 0,
             control_flow: false,
         })
+    }
+
+    /// Handle `getpid` system call.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/getpid.2.html>
+    pub(super) fn handle_getpid(&self) -> Result<u64, Infallible> {
+        // We only have one process
+        Ok(1)
     }
 
     /// Handle `clock_gettime` system call. Fills the timespec structure with zeros.
