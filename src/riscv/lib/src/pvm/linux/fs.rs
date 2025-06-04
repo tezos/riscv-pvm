@@ -23,6 +23,33 @@ impl<M: ManagerBase> SupervisorState<M> {
         Err(Error::Access)
     }
 
+    /// Handle `close` system call. All access to the file system is denied.
+    ///
+    /// See <https://man7.org/linux/man-pages/man2/close.2.html>
+    pub(super) fn handle_close(&self) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        // None of the file descriptors we allow (stdout/stderr) can sensibly be closed.
+        Err(Error::Access)
+    }
+
+    /// Handle `read` system call. All access to the file system is denied.
+    ///
+    /// See <https://man7.org/linux/man-pages/man2/read.2.html>
+    pub(super) fn handle_read(&self, length: u64) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        if length == 0 {
+            // If the length is zero then POSIX allows returning zero without reading or checking
+            // for errors.
+            return Ok(0);
+        }
+
+        Err(Error::Access)
+    }
+
     /// Handle the `readlinkat` system call. All access to the file system is denied.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/readlink.2.html>
