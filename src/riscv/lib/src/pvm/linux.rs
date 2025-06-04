@@ -56,6 +56,12 @@ const GETCWD: u64 = 17;
 /// System call number for `openat` on RISC-V
 const OPENAT: u64 = 56;
 
+/// System call number for `close` on RISC-V
+const CLOSE: u64 = 57;
+
+/// System call number for `read` on RISC-V
+const READ: u64 = 63;
+
 /// System call number for `write` on RISC-V
 pub(crate) const WRITE: u64 = 64;
 
@@ -706,6 +712,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         let result = match system_call_no {
             GETCWD => dispatch2!(getcwd, core),
             OPENAT => dispatch0!(openat),
+            CLOSE => dispatch0!(close),
+            READ => dispatch1!(read),
             WRITE => dispatch3!(write, core, hooks),
             WRITEV => dispatch3!(writev, core, hooks),
             PPOLL => dispatch2!(ppoll, core),
