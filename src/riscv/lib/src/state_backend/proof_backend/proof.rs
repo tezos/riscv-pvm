@@ -22,6 +22,7 @@ use super::tree::impl_modify_map_collect;
 use crate::bits::ones;
 use crate::state_backend::FromProofError;
 use crate::state_backend::Layout;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::verify_backend::Verifier;
