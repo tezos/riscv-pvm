@@ -22,7 +22,7 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
-use crate::state_backend::VerifierAlloc;
+use crate::state_backend::VerifierAllocResult;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::storage::Hash;
@@ -55,10 +55,10 @@ where
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
 
-    fn to_verifier_alloc<D: deserialiser::Deserialiser>(
+    fn into_verifier_alloc<D: deserialiser::Deserialiser>(
         proof: D,
-    ) -> deserialiser::Result<D::Suspended<VerifierAlloc<Self>>> {
-        <PickLayout<PAGES> as ProofLayout>::to_verifier_alloc(proof)
+    ) -> VerifierAllocResult<D, Self> {
+        <PickLayout<PAGES> as ProofLayout>::into_verifier_alloc(proof)
     }
 
     fn partial_state_hash(

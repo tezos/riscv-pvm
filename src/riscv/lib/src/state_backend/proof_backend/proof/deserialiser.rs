@@ -16,7 +16,9 @@
 use serde::de::DeserializeOwned;
 
 use crate::state_backend::FromProofError;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::hash::Hash;
+use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Error used when deserialising using [`Deserialiser`] methods
 pub type DeserError = FromProofError;
@@ -26,6 +28,7 @@ pub type Result<R, E = DeserError> = std::result::Result<R, E>;
 
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
 /// where the leaf is assumed to have type `T`.
+#[derive(Clone)]
 pub enum Partial<T> {
     /// The leaf / node is altogether absent from the proof.
     Absent,
@@ -58,6 +61,31 @@ impl<T> Partial<T> {
     }
 }
 
+impl Partial<Vec<u8>> {
+    /// Convert a [`Partial<Vec<u8>>`] into an owned proof part.
+    pub fn into_leaf_proof_tree(self) -> OwnedProofPart {
+        OwnedProofPart::leaf_from_partial(self, |data| data)
+    }
+}
+
+impl Partial<Box<[u8; MERKLE_LEAF_SIZE.get()]>> {
+    /// Convert a [`Partial<Box<[u8; MERKLE_LEAF_SIZE]>>`] into an owned proof part.
+    pub fn into_leaf_proof_tree(self) -> OwnedProofPart {
+        OwnedProofPart::leaf_from_partial(self, |data| data.to_vec())
+    }
+}
+
+impl<A, B> Partial<(A, B)> {
+    /// Split a [`Partial<(A, B)>`] into [`Partial<A>`] and [`Partial<B>`].
+    pub fn split(self) -> (Partial<A>, Partial<B>) {
+        match self {
+            Partial::Absent => (Partial::Absent, Partial::Absent),
+            Partial::Blinded(hash) => (Partial::Blinded(hash), Partial::Blinded(hash)),
+            Partial::Present((a, b)) => (Partial::Present(a), Partial::Present(b)),
+        }
+    }
+}
+
 /// The main trait used for deserialising a proof.
 ///
 /// Having an object of this trait is equivalent to having a proof and being able to deserialise it.
@@ -77,7 +105,13 @@ pub trait Deserialiser {
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    fn into_leaf<T: DeserializeOwned + 'static>(self) -> Result<Self::Suspended<Partial<T>>>;
+    #[expect(
+        clippy::type_complexity,
+        reason = "Adding an alias for Partial<(T, Vec<u8>)> would only decrease readability"
+    )]
+    fn into_leaf<T: DeserializeOwned + 'static>(
+        self,
+    ) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
@@ -186,7 +220,7 @@ mod tests {
             Partial::Absent => 0,
             // This blinded hash can be of the nested leaf or the root
             Partial::Blinded(_hash) => -1,
-            Partial::Present(nr) => nr,
+            Partial::Present((nr, _)) => nr,
         }))
     }
 
@@ -209,7 +243,7 @@ mod tests {
                 .next_branch(|br_proof| br_proof.into_leaf::<i32>())?
                 .map(|(acc, val)| {
                     acc.map_present(|mut acc| {
-                        if let Partial::Present(val) = val {
+                        if let Partial::Present((val, _)) = val {
                             acc.push(val);
                         }
                         acc
