@@ -32,9 +32,7 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
-use crate::state_backend::CellRead;
-use crate::state_backend::CellReadWrite;
-use crate::state_backend::CellWrite;
+use crate::state_backend::Cell;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 
@@ -72,15 +70,14 @@ where
 
 /// Provide input information to the machine. Returns `false` in case the
 /// machine wasn't expecting any input, otherwise returns `true`.
-pub fn provide_input<S, MC, M>(
-    status: &mut S,
+pub fn provide_input<MC, M>(
+    status: &mut Cell<PvmStatus, M>,
     machine: &mut MachineCoreState<MC, M>,
     level: u32,
     counter: u32,
     payload: &[u8],
 ) -> bool
 where
-    S: CellReadWrite<Value = PvmStatus>,
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -124,13 +121,12 @@ where
 
 /// Provide reveal data in response to a reveal request. Returns `false`
 /// if the machine is not expecting reveal.
-pub fn provide_reveal_response<S, MC, M>(
-    status: &mut S,
+pub fn provide_reveal_response<MC, M>(
+    status: &mut Cell<PvmStatus, M>,
     machine: &mut MachineCoreState<MC, M>,
     reveal_data: &[u8],
 ) -> bool
 where
-    S: CellReadWrite<Value = PvmStatus>,
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -164,9 +160,9 @@ where
 
 /// Handle a [SBI_TEZOS_INBOX_NEXT] call.
 #[inline]
-fn handle_tezos_inbox_next<S>(status: &mut S)
+fn handle_tezos_inbox_next<M>(status: &mut Cell<PvmStatus, M>)
 where
-    S: CellWrite<Value = PvmStatus>,
+    M: ManagerWrite,
 {
     // Prepare the EE state for an input tick.
     status.write(PvmStatus::WaitingForInput);
@@ -255,12 +251,11 @@ where
 
 /// Handle a [SBI_TEZOS_REVEAL] call.
 #[inline]
-fn handle_tezos_reveal<S, MC, M>(
+fn handle_tezos_reveal<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     reveal_request: &mut RevealRequest<M>,
-    status: &mut S,
+    status: &mut Cell<PvmStatus, M>,
 ) where
-    S: CellReadWrite<Value = PvmStatus>,
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -295,12 +290,11 @@ where
 }
 
 /// Handle a Tezos SBI call.
-pub(super) fn handle_tezos<S, MC, M>(
+pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
-    status: &mut S,
+    status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
 ) where
-    S: CellReadWrite<Value = PvmStatus>,
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
