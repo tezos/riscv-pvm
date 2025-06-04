@@ -29,8 +29,6 @@ impl<M: ManagerBase> SupervisorState<M> {
         let actual_length = length.min(RANDOM.len() as u64);
         let data = &RANDOM[..actual_length as usize];
 
-        // TODO: RV-487: Memory mappings are not yet protected. We assume the kernel knows what
-        // it's doing for now.
         core.main_memory.write_all(buffer, data)?;
 
         Ok(actual_length)

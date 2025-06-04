@@ -264,7 +264,6 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
             // output. Instead we use hooks that don't do anything.
             hooks: PvmHooks::none(),
 
-            // TODO: RV-462 Pvm stepper uses response map less expensive to clone
             reveal_request_response_map: self.reveal_request_response_map.clone(),
         }
     }
@@ -289,7 +288,6 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
             // output. Instead we use hooks that don't do anything.
             hooks: PvmHooks::none(),
 
-            // TODO: RV-462 Pvm stepper uses response map less expensive to clone
             reveal_request_response_map: self.reveal_request_response_map.clone(),
         };
 
