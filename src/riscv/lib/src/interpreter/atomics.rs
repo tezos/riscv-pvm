@@ -244,7 +244,7 @@ pub fn run_x32_atomic_load<I: ICB>(
 /// The value in `rs2` is always 0 so is ignored.
 /// The `aq` and `rl` bits specify additional memory constraints
 /// in multi-hart environments so they are currently ignored.
-pub fn run_lrd<I: ICB>(
+pub fn run_x64_atomic_load<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     _rs2: XRegister,
@@ -282,7 +282,7 @@ pub fn run_x32_atomic_store<I: ICB>(
 ///
 /// The `aq` and `rl` bits specify additional memory constraints
 /// in multi-hart environments so they are currently ignored.
-pub fn run_scd<I: ICB>(
+pub fn run_x64_atomic_store<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     rs2: XRegister,
@@ -450,10 +450,28 @@ pub(crate) mod test {
         u64
     );
 
-    test_atomic_loadstore!(test_lrd_scd, run_lrd, run_scd, 8, u64);
+    test_atomic_loadstore!(
+        test_x64_atomic_loadstore,
+        run_x64_atomic_load,
+        run_x64_atomic_store,
+        8,
+        u64
+    );
 
-    test_atomic_loadstore!(test_lrd_scw, run_lrd, run_x32_atomic_store, 8, u32);
-    test_atomic_loadstore!(test_lrw_scd, run_x32_atomic_load, run_scd, 8, u32);
+    test_atomic_loadstore!(
+        test_atomic_loadstore_x64_x32,
+        run_x64_atomic_load,
+        run_x32_atomic_store,
+        8,
+        u32
+    );
+    test_atomic_loadstore!(
+        test_atomic_loadstore_x32_x64,
+        run_x32_atomic_load,
+        run_x64_atomic_store,
+        8,
+        u32
+    );
 
     backend_test!(test_alignment, F, {
         let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
@@ -462,7 +480,7 @@ pub(crate) mod test {
         state.hart.xregisters.write(a1, 84); // SC.W starting address.
         state.hart.xregisters.write(a2, 200); // Value to store.
 
-        run_lrd(&mut state, a0, a7, a3, false, false).unwrap();
+        run_x64_atomic_load(&mut state, a0, a7, a3, false, false).unwrap();
         run_x32_atomic_store(&mut state, a1, a2, a3, false, false).unwrap();
 
         // Check that the value was stored correctly.
