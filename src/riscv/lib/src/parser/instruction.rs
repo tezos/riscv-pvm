@@ -466,7 +466,14 @@ pub enum InstrCacheable {
     Amomaxw(AmoArgs),
     Amominuw(AmoArgs),
     Amomaxuw(AmoArgs),
+    /// `LR.D` - Loads in `rd` a double-length value from the address in `rs1`
+    ///  and registers a reservation set on that address.
     Lrd(AmoArgs),
+    /// `SC.D` - Conditionally writes a double-word in `rs2` to the address in `rs1`.
+    /// SC.D succeeds only if the reservation is still valid and
+    /// the reservation set contains the bytes being written.
+    /// In case of success, write 0 in `rd`, otherwise write 1.
+    /// See also [crate::machine_state::reservation_set].
     Scd(AmoArgs),
     Amoswapd(AmoArgs),
     ///`AMOADD.D` - Loads in rd the value from the address in rs1 and stores the result of

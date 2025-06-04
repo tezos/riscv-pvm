@@ -707,7 +707,9 @@ impl OpCode {
 
             // Atomic instructions
             Self::X32AtomicLoad => Some(Args::run_x32_atomic_load),
+            Self::Lrd => Some(Args::run_lrd),
             Self::X32AtomicStore => Some(Args::run_x32_atomic_store),
+            Self::Scd => Some(Args::run_scd),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
 
             // Errors
@@ -1484,8 +1486,8 @@ impl Args {
     impl_amo_type!(run_amomaxw);
     impl_amo_type!(run_amominuw);
     impl_amo_type!(run_amomaxuw);
-    impl_amo_type!(run_lrd);
-    impl_amo_type!(run_scd);
+    impl_amo_type!(atomics::run_lrd, run_lrd);
+    impl_amo_type!(atomics::run_scd, run_scd);
     impl_amo_type!(run_amoswapd);
     impl_amo_type!(atomics::run_x64_atomic_add, run_x64_atomic_add);
     impl_amo_type!(run_amoxord);
@@ -1886,14 +1888,21 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Amomaxuw,
                 args: args.into(),
             },
-            InstrCacheable::Lrd(args) => Instruction {
-                opcode: OpCode::Lrd,
-                args: args.into(),
-            },
-            InstrCacheable::Scd(args) => Instruction {
-                opcode: OpCode::Scd,
-                args: args.into(),
-            },
+            InstrCacheable::Lrd(args) => Instruction::new_lrd(
+                args.rd,
+                args.rs1,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Scd(args) => Instruction::new_scd(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoswapd(args) => Instruction {
                 opcode: OpCode::Amoswapd,
                 args: args.into(),

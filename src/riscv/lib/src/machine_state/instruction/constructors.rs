@@ -1390,6 +1390,52 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Lrd`].
+    pub(crate) fn new_lrd(
+        rd: XRegister,
+        rs1: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Lrd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                // Although not used, rs2 is explicitly `x0` in the instruction encoding for `Lr.d` opcode.
+                rs2: XRegister::x0.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Scd`].
+    pub(crate) fn new_scd(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Scd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     pub(crate) fn new_x64_rem_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
