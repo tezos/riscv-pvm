@@ -1390,8 +1390,8 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Lrd`].
-    pub(crate) fn new_lrd(
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicLoad`].
+    pub(crate) fn new_x64_atomic_load(
         rd: XRegister,
         rs1: XRegister,
         aq: bool,
@@ -1399,7 +1399,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Lrd,
+            opcode: OpCode::X64AtomicLoad,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1413,8 +1413,8 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Scd`].
-    pub(crate) fn new_scd(
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicStore`].
+    pub(crate) fn new_x64_atomic_store(
         rd: XRegister,
         rs1: XRegister,
         rs2: XRegister,
@@ -1423,7 +1423,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Scd,
+            opcode: OpCode::X64AtomicStore,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
