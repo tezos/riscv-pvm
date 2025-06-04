@@ -15,6 +15,7 @@ use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::program::Program;
+use crate::pvm::InputRequest;
 use crate::pvm::common::PvmHooks;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
@@ -189,6 +190,8 @@ impl NodePvm {
             }
         }
 
+        let _ = proof_state.input_request();
+
         let proof = proof_state.to_proof().ok()?;
         Some(proof)
     }
@@ -201,7 +204,7 @@ impl NodePvm<Verifier> {
         proof: &Proof,
         input: Option<PvmInput>,
         pvm_hooks: &mut PvmHooks,
-    ) -> Option<()> {
+    ) -> Option<InputRequest> {
         let proof_tree = proof.tree();
         let mut pvm = Pvm::from_proof(proof_tree, InterpretedBlockBuilder).map(|state| Self {
             state: Box::new(state),
@@ -224,8 +227,7 @@ impl NodePvm<Verifier> {
                 return None;
             }
 
-            // TODO: RV-556: Construct and return input request upon successful verification
-            todo!()
+            Some(pvm.input_request())
         })
     }
 }
