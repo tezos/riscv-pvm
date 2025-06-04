@@ -13,9 +13,6 @@ pub(crate) mod mode;
 pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
-#[cfg(test)]
-extern crate proptest;
-
 use std::ops::Bound;
 
 use block_cache::BlockCache;
