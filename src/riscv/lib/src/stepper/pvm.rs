@@ -35,6 +35,7 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
@@ -278,8 +279,18 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
         AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
     {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
-            .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+        let (space, deserialised_proof_tree) =
+            deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
+                .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+
+        let deserialised_proof_tree = match deserialised_proof_tree {
+            OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofPart::Absent => ProofTree::Absent,
+        };
+        debug_assert_eq!(
+            proof_tree, deserialised_proof_tree,
+            "The merkle proof tree obtained through deserialisation should match the original proof tree"
+        );
 
         let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
         let stepper = PvmStepper {

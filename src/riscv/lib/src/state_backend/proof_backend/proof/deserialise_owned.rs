@@ -15,6 +15,7 @@ use super::deserialiser::Result;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::FromProofError;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
@@ -46,9 +47,9 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<T>>> {
+    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         self.deserialise_as_leaf()?
-            .map_present_fallible(|data| Ok(binary::deserialise::<T>(data.as_ref())?))
+            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
             .map(OwnedParserComb::new)
     }
 
@@ -229,7 +230,7 @@ impl<R> OwnedParserComb<'_, R> {
 /// Given a [`ProofTree`] deserialise it into an allocated [`Verifier`] backend.
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
-) -> Result<AllocatedOf<L, Verifier>, DeserError> {
+) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart), DeserError> {
     let comp_fn = L::to_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?;
     Ok(comp_fn.into_result())
 }
