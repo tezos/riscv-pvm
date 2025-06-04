@@ -14,7 +14,7 @@ use crate::instruction_context::comparable::Comparable;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
 use crate::machine_state::registers::XRegister;
-use crate::machine_state::registers::XValue;
+use crate::machine_state::reservation_set::RES_SET_BITMASK;
 use crate::machine_state::reservation_set::UNSET_VALUE;
 use crate::state_backend as backend;
 use crate::traps::Exception;
@@ -347,16 +347,8 @@ fn reservation_set_align_address<V: StoreLoadInt, I: ICB>(
     icb: &mut I,
     address: I::XValue,
 ) -> I::XValue {
-    let zero = icb.xvalue_of_imm(0);
-    let size = icb.xvalue_of_imm(V::SIZE as i64);
-    let offset = address.modulus_unsigned(size, icb);
-    let cond = offset.compare(zero, Predicate::Equal, icb);
-
-    icb.branch_merge::<XValue, _, _>(
-        cond,
-        |_| address,
-        |icb| address.add(size, icb).sub(offset, icb),
-    )
+    let bitmask = icb.xvalue_of_imm(RES_SET_BITMASK as i64);
+    address.and(bitmask, icb)
 }
 
 /// Check whether the given 'address' is within the reservation set and reset the reservation set.
@@ -389,9 +381,13 @@ pub(crate) mod test {
     use crate::backend_test;
     use crate::interpreter::integer::run_addi;
     use crate::machine_state::MachineCoreState;
+    use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
+    use crate::machine_state::registers::a3;
+    use crate::machine_state::registers::a7;
+    use crate::state::NewState;
 
     macro_rules! test_atomic_loadstore {
         ($name:ident, $lr: expr, $sc: expr, $align: expr, $t: ident) => {
@@ -494,4 +490,23 @@ pub(crate) mod test {
         8,
         u64
     );
+
+    backend_test!(test_alignment, F, {
+        let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        state.main_memory.set_all_readable_writeable();
+        state.hart.xregisters.write(a0, 80); // LR.D starting address.
+        state.hart.xregisters.write(a1, 84); // SC.W starting address.
+        state.hart.xregisters.write(a2, 200); // Value to store.
+
+        state.run_lrd(a0, a7, a3, false, false).unwrap();
+        run_x32_atomic_store(&mut state, a1, a2, a3, false, false).unwrap();
+
+        // Check that the value was stored correctly.
+        let stored_value: u32 = state.read_from_address(84).unwrap();
+        assert_eq!(stored_value, 200);
+
+        // check rd stores the success value 0.
+        let rd_value = state.hart.xregisters.read(a3);
+        assert_eq!(rd_value, SC_SUCCESS);
+    });
 }

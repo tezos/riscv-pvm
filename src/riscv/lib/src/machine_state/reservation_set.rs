@@ -7,6 +7,8 @@
 //!
 //! Section 8.2 - Unprivileged spec
 
+use std::ops::BitAnd;
+
 use crate::machine_state::backend;
 /// Executing a LR.x instructions registers a reservation set on the address
 /// from which data was loaded. The success of a SC.x instruction is conditional
@@ -36,17 +38,12 @@ pub type ReservationSetLayout = backend::Atom<u64>;
 /// data word or doubleword. [...] The Unix platform is expected to require of
 /// main memory that the reservation set be of fixed size, contiguous, naturally
 /// aligned, and no greater than the virtual memory page size."
-const SIZE: u64 = 8;
+///
+/// With an 8-byte reservation set, we can align addresses by bitwise ANDing with
+/// the bitmask.
+pub(crate) const RES_SET_BITMASK: u64 = !0b111;
 
 pub(crate) const UNSET_VALUE: u64 = u64::MAX;
-
-const fn align_address(address: u64, align: u64) -> u64 {
-    let offset = address.rem_euclid(align);
-    if offset > 0 {
-        return address + align - offset;
-    }
-    address
-}
 
 impl<M: backend::ManagerBase> ReservationSet<M> {
     /// Bind the reservation set cell to the given allocated space
@@ -92,7 +89,7 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
     where
         M: backend::ManagerWrite,
     {
-        self.write(align_address(addr, SIZE))
+        self.write(addr.bitand(RES_SET_BITMASK));
     }
 
     /// Check wether the `addr` is within the reservation set
@@ -104,7 +101,7 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
         // Regardless of success or failure, executing an SC.x instruction
         // invalidates any reservation held by this hart.
         self.reset();
-        start_addr != UNSET_VALUE && start_addr == align_address(addr, SIZE)
+        start_addr != UNSET_VALUE && start_addr == addr.bitand(RES_SET_BITMASK)
     }
 }
 
