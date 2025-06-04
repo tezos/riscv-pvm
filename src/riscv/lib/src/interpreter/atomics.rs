@@ -27,83 +27,6 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    // TODO: RV-663 - Remove this method once LR.D is lowered.
-    /// Loads a word or a double from the address in `rs1`, places the
-    /// sign-extended value in `rd`, and registers a reservation set for
-    /// that address.
-    /// See also [crate::machine_state::reservation_set].
-    pub(super) fn run_lr<T: backend::Elem>(
-        &mut self,
-        rs1: XRegister,
-        rd: XRegister,
-        from: fn(T) -> u64,
-    ) -> Result<(), Exception> {
-        let address_rs1 = self.hart.xregisters.read(rs1);
-
-        // "The A extension requires that the address held in rs1 be naturally
-        // aligned to the size of the operand (i.e., eight-byte aligned for
-        // 64-bit words and four-byte aligned for 32-bit words). If the address
-        // is not naturally aligned, an address-misaligned exception or
-        // an access-fault exception will be generated."
-        if address_rs1 % mem::size_of::<T>() as u64 != 0 {
-            return Err(Exception::LoadAccessFault(address_rs1));
-        }
-
-        // Load the value from address in rs1
-        let value_rs1: T = self.read_from_address(address_rs1)?;
-
-        // Register a reservation set for the address in rs1 and write
-        // the value at that address to rd
-        self.hart.reservation_set.set(address_rs1);
-        self.hart.xregisters.write(rd, from(value_rs1));
-
-        Ok(())
-    }
-
-    // TODO: RV-663 - Remove this method once SC.D is lowered.
-    /// `SC.W` R-type instruction
-    ///
-    /// Conditionally writes a word in `rs2` to the address in `rs1`.
-    /// SC.W succeeds only if the reservation is still valid and
-    /// the reservation set contains the bytes being written.
-    /// In case of success, write 0 in `rd`, otherwise write 1.
-    /// See also [crate::machine_state::reservation_set].
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub(super) fn run_sc<T: backend::Elem>(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        to: fn(u64) -> T,
-    ) -> Result<(), Exception> {
-        let address_rs1 = self.hart.xregisters.read(rs1);
-
-        // "The A extension requires that the address held in rs1 be naturally
-        // aligned to the size of the operand (i.e., eight-byte aligned for
-        // 64-bit words and four-byte aligned for 32-bit words). If the address
-        // is not naturally aligned, an address-misaligned exception or
-        // an access-fault exception will be generated."
-        if address_rs1 % mem::size_of::<T>() as u64 != 0 {
-            self.hart.reservation_set.reset();
-            return Err(Exception::StoreAMOAccessFault(address_rs1));
-        }
-
-        if self.hart.reservation_set.test_and_unset(address_rs1) {
-            // If the address in rs1 belongs to a valid reservation, write
-            // the value in rs2 to this address and return success.
-            let value_rs2 = to(self.hart.xregisters.read(rs2));
-            self.hart.xregisters.write(rd, SC_SUCCESS);
-            self.write_to_address(address_rs1, value_rs2)
-        } else {
-            // If the address in rs1 does not belong to a valid reservation or
-            // there is no valid reservation set on the hart, do not write to
-            // memory and return failure.
-            self.hart.xregisters.write(rd, SC_FAILURE);
-            Ok(())
-        }
-    }
-
     /// Generic implementation of any atomic memory operation, implementing
     /// read-modify-write operations for multi-processor synchronisation
     /// (Section 8.4)
@@ -315,6 +238,23 @@ pub fn run_x32_atomic_load<I: ICB>(
     run_atomic_load::<I, i32>(icb, rs1, rd)
 }
 
+/// Loads a doubleword from the address in `rs1`, places the value in `rd`,
+/// and registers a reservation set for that address.
+///
+/// The value in `rs2` is always 0 so is ignored.
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_lrd<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    _rs2: XRegister,
+    rd: XRegister,
+    _rl: bool,
+    _aq: bool,
+) -> I::IResult<()> {
+    run_atomic_load::<I, i64>(icb, rs1, rd)
+}
+
 /// Conditionally writes a word in `rs2` to the address in `rs1`.
 /// This succeeds if the reservation is still valid and
 /// the reservation set contains the bytes being written.
@@ -332,6 +272,25 @@ pub fn run_x32_atomic_store<I: ICB>(
     _aq: bool,
 ) -> I::IResult<()> {
     run_atomic_store::<I, i32>(icb, rs1, rs2, rd)
+}
+
+/// Conditionally writes a doubleword in `rs2` to the address in `rs1`.
+/// This succeeds if the reservation is still valid and
+/// the reservation set contains the bytes being written.
+/// In case of success, write 0 in `rd`, otherwise write 1.
+/// See also [crate::machine_state::reservation_set].
+///
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_scd<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _rl: bool,
+    _aq: bool,
+) -> I::IResult<()> {
+    run_atomic_store::<I, i64>(icb, rs1, rs2, rd)
 }
 
 // Reservation Set Helper Functionss
@@ -491,6 +450,11 @@ pub(crate) mod test {
         u64
     );
 
+    test_atomic_loadstore!(test_lrd_scd, run_lrd, run_scd, 8, u64);
+
+    test_atomic_loadstore!(test_lrd_scw, run_lrd, run_x32_atomic_store, 8, u32);
+    test_atomic_loadstore!(test_lrw_scd, run_x32_atomic_load, run_scd, 8, u32);
+
     backend_test!(test_alignment, F, {
         let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
         state.main_memory.set_all_readable_writeable();
@@ -498,7 +462,7 @@ pub(crate) mod test {
         state.hart.xregisters.write(a1, 84); // SC.W starting address.
         state.hart.xregisters.write(a2, 200); // Value to store.
 
-        state.run_lrd(a0, a7, a3, false, false).unwrap();
+        run_lrd(&mut state, a0, a7, a3, false, false).unwrap();
         run_x32_atomic_store(&mut state, a1, a2, a3, false, false).unwrap();
 
         // Check that the value was stored correctly.

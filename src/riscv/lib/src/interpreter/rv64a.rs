@@ -22,43 +22,6 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    /// `LR.D` R-type instruction
-    ///
-    /// See [Self::run_lr].
-    /// The value in `rs2` is always 0 so it is ignored.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_lrd(
-        &mut self,
-        rs1: XRegister,
-        _rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_lr::<u64>(rs1, rd, |x| x)
-    }
-
-    /// `SC.D` R-type instruction
-    ///
-    /// Conditionally writes a double in `rs2` to the address in `rs1`.
-    /// SC.D succeeds only if the reservation is still valid and
-    /// the reservation set contains the bytes being written.
-    /// In case of success, write 0 in `rd`, otherwise write 1.
-    /// See also [crate::machine_state::reservation_set].
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_scd(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_sc::<u64>(rs1, rs2, rd, |x| x)
-    }
-
     /// `AMOSWAP.D` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and writes val(rs2)
@@ -211,40 +174,11 @@ mod test {
     use proptest::prelude::*;
 
     use crate::backend_test;
-    use crate::interpreter::atomics::SC_FAILURE;
-    use crate::interpreter::atomics::SC_SUCCESS;
-    use crate::interpreter::atomics::run_x32_atomic_load;
-    use crate::interpreter::atomics::run_x32_atomic_store;
-    use crate::interpreter::atomics::test::test_atomic_loadstore;
-    use crate::interpreter::integer::run_addi;
     use crate::interpreter::rv32a::test::test_amo;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
-
-    test_atomic_loadstore!(
-        test_lrd_scd,
-        MachineCoreState::run_lrd,
-        MachineCoreState::run_scd,
-        8,
-        u64
-    );
-
-    test_atomic_loadstore!(
-        test_lrd_scw,
-        MachineCoreState::run_lrd,
-        run_x32_atomic_store,
-        8,
-        u32
-    );
-    test_atomic_loadstore!(
-        test_lrw_scd,
-        run_x32_atomic_load,
-        MachineCoreState::run_scd,
-        8,
-        u32
-    );
 
     test_amo!(run_amoswapd, |_, r2_val| r2_val, 8, u64);
 
