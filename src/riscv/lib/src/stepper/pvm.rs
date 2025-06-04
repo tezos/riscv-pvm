@@ -131,6 +131,8 @@ impl<MC: MemoryConfig, CL: CacheLayouts> PvmStepper<'_, MC, CL, Owned> {
 
         proof_stepper.try_step().then_some(())?;
 
+        let _ = proof_stepper.pvm.input_request();
+
         let proof = proof_stepper.pvm.to_proof().ok()?;
         Some(proof)
     }

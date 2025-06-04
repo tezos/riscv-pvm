@@ -235,6 +235,7 @@ impl<'a> ProofTree<'a> {
     }
 }
 
+#[derive(Clone)]
 pub enum OwnedProofPart {
     /// This part of the tree is absent.
     Absent,

@@ -432,6 +432,23 @@ impl<
     {
         self.status.read()
     }
+
+    pub fn input_request(&self) -> InputRequest
+    where
+        M: state_backend::ManagerRead,
+    {
+        if self.status.read() == PvmStatus::WaitingForInput {
+            if !self.level_is_set.read() {
+                InputRequest::Initial
+            } else {
+                InputRequest::FirstAfter(self.level.read(), self.message_counter.read())
+            }
+        } else if self.status.read() == PvmStatus::WaitingForReveal {
+            InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
+        } else {
+            InputRequest::NoInputRequired
+        }
+    }
 }
 
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Owned>> Pvm<MC, CL, B, Owned> {
@@ -462,6 +479,13 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
 
         Ok(proof)
     }
+}
+
+pub enum InputRequest {
+    NoInputRequired,
+    Initial,
+    FirstAfter(u32, u64),
+    NeedsReveal(Box<[u8]>),
 }
 
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, Verifier> {
