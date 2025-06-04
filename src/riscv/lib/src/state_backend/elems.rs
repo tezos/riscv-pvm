@@ -2,6 +2,39 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroUsize;
+
+use crate::machine_state::memory::PAGE_SIZE;
+
+/// Types that have a non-zero size
+pub trait NonZeroSized: Sized {
+    /// Size of the type
+    const NON_ZERO_SIZE: NonZeroUsize = {
+        let size = NonZeroUsize::new(std::mem::size_of::<Self>());
+        if let Some(size) = size {
+            size
+        } else {
+            panic!("Type has zero size");
+        }
+    };
+}
+
+impl<T: Sized> NonZeroSized for T {}
+
+/// Types that are less than one page wide
+pub trait NarrowlySized: NonZeroSized {
+    /// Size of the type
+    const NARROW_SIZE: NonZeroUsize = {
+        if Self::NON_ZERO_SIZE.get() >= PAGE_SIZE.get() as usize {
+            panic!("Type is too wide");
+        }
+
+        Self::NON_ZERO_SIZE
+    };
+}
+
+impl<T: NonZeroSized> NarrowlySized for T {}
+
 /// Types that can be copied and contain no non-static references
 pub trait StaticCopy: Copy + 'static {}
 

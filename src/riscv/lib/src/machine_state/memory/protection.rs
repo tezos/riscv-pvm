@@ -17,6 +17,7 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Many;
+use crate::state_backend::NarrowlySized;
 use crate::state_backend::Ref;
 
 /// State layout for page permissions
@@ -77,6 +78,32 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
         }
 
         true
+    }
+
+    /// Same as [`Self::can_access`], but slightly faster. Requires additional invariants to be upheld.
+    /// The generic parameter `E` is used to specify the type of the element being accessed. It
+    /// also determines the length of the access.
+    ///
+    /// # Safety
+    ///
+    /// The length must be non-zero and less than the page size. Otherwise, same as
+    /// [`Self::can_access`].
+    #[inline]
+    pub unsafe fn can_access_narrow<E>(&self, address: Address) -> bool
+    where
+        E: NarrowlySized,
+        M: ManagerRead,
+    {
+        let address = address as usize;
+
+        let start_page = address >> super::OFFSET_BITS;
+        if unsafe { !self.pages.get_unchecked(start_page).read() } {
+            return false;
+        }
+
+        let end_page =
+            address.wrapping_add(E::NARROW_SIZE.get()).wrapping_sub(1) >> super::OFFSET_BITS;
+        unsafe { self.pages.get_unchecked(end_page).read() }
     }
 
     /// Change the access permissions for the given range.

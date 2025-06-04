@@ -98,7 +98,7 @@ where
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self.readable_pages.can_access(address, mem::size_of::<E>()) {
+            if !self.readable_pages.can_access_narrow::<E>(address) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -119,7 +119,7 @@ where
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
             // Checking for executable access is sufficient as that implies read access
-            if !self.executable_pages.can_access(address, length) {
+            if !self.executable_pages.can_access_narrow::<E>(address) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -127,7 +127,7 @@ where
         let data = self.data.read(address as usize);
 
         // SAFETY: The bounds check above ensures the access check below is safe
-        let writable = unsafe { self.writable_pages.can_access(address, length) };
+        let writable = unsafe { self.writable_pages.can_access_narrow::<E>(address) };
 
         Ok(super::InstructionData { data, writable })
     }
@@ -163,7 +163,7 @@ where
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self.writable_pages.can_access(address, mem::size_of::<E>()) {
+            if !self.writable_pages.can_access_narrow::<E>(address) {
                 return Err(BadMemoryAccess);
             }
         }
