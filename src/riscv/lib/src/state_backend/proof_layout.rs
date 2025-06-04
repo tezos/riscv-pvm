@@ -236,6 +236,7 @@ impl<'a> ProofTree<'a> {
 }
 
 /// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`].
+#[derive(Clone)]
 pub enum OwnedProofPart {
     /// This part of the tree is absent.
     Absent,
