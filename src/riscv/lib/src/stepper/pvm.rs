@@ -130,7 +130,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<'_, MC, BCC, Owned> {
 
         proof_stepper.try_step().then_some(())?;
 
-        let proof = proof_stepper.pvm.to_proof().ok()?;
+        let proof = proof_stepper.pvm.produce_proof().ok()?;
         Some(proof)
     }
 }
