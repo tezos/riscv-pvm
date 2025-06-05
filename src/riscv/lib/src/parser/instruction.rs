@@ -485,6 +485,10 @@ pub enum InstrCacheable {
     Amoxord(AmoArgs),
     Amoandd(AmoArgs),
     Amoord(AmoArgs),
+    /// `AMOMIN.D` Loads in `rd` the value from the address in `rs1` and stores the minimum
+    /// between it and `val(rs2)` back to the address in `rs1`.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amomind(AmoArgs),
     Amomaxd(AmoArgs),
     Amominud(AmoArgs),
