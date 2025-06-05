@@ -1357,8 +1357,6 @@ impl Instruction {
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
-                // Although not used, rs2 is explicitly `x0` in the instruction encoding for `Lr.w` opcode.
-                rs2: XRegister::x0.into(),
                 aq,
                 rl,
                 width,
@@ -1403,8 +1401,6 @@ impl Instruction {
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
-                // Although not used, rs2 is explicitly `x0` in the instruction encoding for `Lr.d` opcode.
-                rs2: XRegister::x0.into(),
                 aq,
                 rl,
                 width,
