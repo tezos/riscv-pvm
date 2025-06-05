@@ -142,7 +142,7 @@ pub fn run_x64_atomic_add<I: ICB>(
 ///
 /// The `aq` and `rl` bits specify additional memory constraints in
 /// multi-hart environments so they are currently ignored.
-pub fn run_amomind<I: ICB>(
+pub fn run_x64_atomic_min_signed<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     rs2: XRegister,
@@ -467,8 +467,8 @@ pub(crate) mod test {
     );
 
     test_atomic!(
-        test_run_amomind,
-        super::run_amomind,
+        test_run_x64_atomic_min_signed,
+        super::run_x64_atomic_min_signed,
         |r1_val, r2_val| i64::min(r1_val as i64, r2_val as i64) as u64,
         8,
         u64

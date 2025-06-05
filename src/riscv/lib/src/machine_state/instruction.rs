@@ -281,7 +281,7 @@ pub enum OpCode {
     Amoxord,
     Amoandd,
     Amoord,
-    Amomind,
+    X64AtomicMinSigned,
     Amomaxd,
     Amominud,
     Amomaxud,
@@ -500,7 +500,7 @@ impl OpCode {
             Self::Amoxord => Args::run_amoxord,
             Self::Amoandd => Args::run_amoandd,
             Self::Amoord => Args::run_amoord,
-            Self::Amomind => Args::run_amomind,
+            Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
             Self::Amomaxd => Args::run_amomaxd,
             Self::Amominud => Args::run_amominud,
             Self::Amomaxud => Args::run_amomaxud,
@@ -711,7 +711,7 @@ impl OpCode {
             Self::X32AtomicStore => Some(Args::run_x32_atomic_store),
             Self::X64AtomicStore => Some(Args::run_x64_atomic_store),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
-            Self::Amomind => Some(Args::run_amomind),
+            Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1494,7 +1494,10 @@ impl Args {
     impl_amo_type!(run_amoxord);
     impl_amo_type!(run_amoandd);
     impl_amo_type!(run_amoord);
-    impl_amo_type!(atomics::run_amomind, run_amomind);
+    impl_amo_type!(
+        atomics::run_x64_atomic_min_signed,
+        run_x64_atomic_min_signed
+    );
     impl_amo_type!(run_amomaxd);
     impl_amo_type!(run_amominud);
     impl_amo_type!(run_amomaxud);
@@ -1928,7 +1931,7 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Amoord,
                 args: args.into(),
             },
-            InstrCacheable::Amomind(args) => Instruction::new_amomind(
+            InstrCacheable::Amomind(args) => Instruction::new_x64_atomic_min_signed(
                 args.rd,
                 args.rs1,
                 args.rs2,

@@ -1344,8 +1344,8 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Amomind`].
-    pub(crate) fn new_amomind(
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinSigned`].
+    pub(crate) fn new_x64_atomic_min_signed(
         rd: XRegister,
         rs1: XRegister,
         rs2: XRegister,
@@ -1354,7 +1354,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amomind,
+            opcode: OpCode::X64AtomicMinSigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
