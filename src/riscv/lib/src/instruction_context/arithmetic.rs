@@ -52,6 +52,9 @@ pub trait Arithmetic<I: ICB + ?Sized>: Copy {
 
     /// Find the signed remainder of the division of **self**(signed) by **other**(signed).
     fn modulus_signed(self, other: Self, icb: &mut I) -> Self;
+
+    /// Return the signed minimum of two **XValues**.
+    fn min_signed(self, other: Self, icb: &mut I) -> Self;
 }
 
 impl<I: ICB> Arithmetic<I> for XValue {
@@ -102,6 +105,10 @@ impl<I: ICB> Arithmetic<I> for XValue {
     fn modulus_signed(self, other: Self, _: &mut I) -> Self {
         ((self as i64).wrapping_rem(other as i64)) as Self
     }
+
+    fn min_signed(self, other: Self, _: &mut I) -> Self {
+        (self as i64).min(other as i64) as Self
+    }
 }
 
 impl<I: ICB> Arithmetic<I> for XValue32 {
@@ -151,5 +158,9 @@ impl<I: ICB> Arithmetic<I> for XValue32 {
 
     fn modulus_signed(self, other: Self, _: &mut I) -> Self {
         ((self as i32).wrapping_rem(other as i32)) as Self
+    }
+
+    fn min_signed(self, other: Self, _: &mut I) -> Self {
+        (self as i32).min(other as i32) as Self
     }
 }
