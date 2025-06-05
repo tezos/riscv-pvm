@@ -516,8 +516,17 @@ pub enum InstrCacheable {
     ///
     /// All values are _signed integers_.    
     Div(RTypeArgs),
+    /// `DIVU` - Divide val(rs1) by val(rs2). The result is stored in `rd`. In case val(rs2)
+    /// is zero, the result is `u64::MAX`. All values are _unsigned integers_.
     Divu(RTypeArgs),
+    /// `DIVW` - Divide the lower 32 bits of val(rs1) by the lower 32 bits of val(rs2).
+    /// The result is stored in `rd`. In case the divisor is zero, the result is
+    /// `-1`. In case the dividend is `i32::MIN`, and the divisor is `-1`, then
+    /// the result is `i32::MIN` as well. All values are _signed integers_.
     Divw(RTypeArgs),
+    /// `DIVUW` - Divide lower 32 bits of val(rs1) by the lower 32 bits of val(rs2).
+    /// The result is stored in `rd`. In case the divisor is zero, the result is
+    /// u32::MAX. All values are _unsigned integers_.
     Divuw(RTypeArgs),
     /// `MUL` - Perform bitwise-multiplication of `val(rs1)` with `val(rs2)`.
     Mul(RTypeArgs),

@@ -1289,6 +1289,60 @@ impl Instruction {
         }
     }
 
+    pub(crate) fn new_x64_div_unsigned(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Divu,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_div_signed(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Divw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_div_unsigned(
+        rd: NonZeroXRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Divuw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ECall`].
     pub(crate) fn new_ecall() -> Self {
         Self {
@@ -2253,6 +2307,36 @@ impl Instruction {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
             (X::NonZero(rd), _, _) => {
                 Instruction::new_x64_div_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    pub(super) fn from_ic_divu(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match split_x0(args.rd) {
+            X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
+                Instruction::new_x64_div_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    pub(super) fn from_ic_divw(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match split_x0(args.rd) {
+            X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
+                Instruction::new_x32_div_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    pub(super) fn from_ic_divuw(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match split_x0(args.rd) {
+            X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
+                Instruction::new_x32_div_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
             }
         }
     }
