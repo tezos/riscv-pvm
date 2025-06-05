@@ -1289,6 +1289,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64DivUnsigned`].
     pub(crate) fn new_x64_div_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1296,7 +1297,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Divu,
+            opcode: OpCode::X64DivUnsigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1307,6 +1308,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32DivSigned`].
     pub(crate) fn new_x32_div_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1314,7 +1316,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Divw,
+            opcode: OpCode::X32DivSigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1325,6 +1327,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32DivUnsigned`].
     pub(crate) fn new_x32_div_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1332,7 +1335,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Divuw,
+            opcode: OpCode::X32DivUnsigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2302,18 +2305,22 @@ impl Instruction {
     /// [`InstrCacheable::Div`]: crate::parser::instruction::InstrCacheable::Div
     pub(super) fn from_ic_div(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
-        match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
+        match split_x0(args.rd) {
             // This holds as `div` is non-trapping in the case of division by zero.
-            (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
-            (X::NonZero(rd), _, _) => {
+            X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
                 Instruction::new_x64_div_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
             }
         }
     }
 
+    /// Convert [`InstrCacheable::Divu`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Divu`]: crate::parser::instruction::InstrCacheable::Divu
     pub(super) fn from_ic_divu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `div` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x64_div_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2321,9 +2328,13 @@ impl Instruction {
         }
     }
 
+    /// Convert [`InstrCacheable::Divw`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Divw`]: crate::parser::instruction::InstrCacheable::Divw
     pub(super) fn from_ic_divw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `div` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x32_div_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2331,9 +2342,13 @@ impl Instruction {
         }
     }
 
+    /// Convert [`InstrCacheable::Divuw`] according to whether registers are non-zero.
+    ///
+    /// [`InstrCacheable::Divuw`]: crate::parser::instruction::InstrCacheable::Divuw
     pub(super) fn from_ic_divuw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `div` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x32_div_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2347,6 +2362,7 @@ impl Instruction {
     pub(super) fn from_ic_rem(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `rem` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x64_rem_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2360,6 +2376,7 @@ impl Instruction {
     pub(super) fn from_ic_remu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `rem` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x64_rem_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2373,6 +2390,7 @@ impl Instruction {
     pub(super) fn from_ic_remw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `rem` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x32_rem_signed(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
@@ -2386,6 +2404,7 @@ impl Instruction {
     pub(super) fn from_ic_remuw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
+            // This holds as `rem` is non-trapping in the case of division by zero.
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
             X::NonZero(rd) => {
                 Instruction::new_x32_rem_unsigned(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)

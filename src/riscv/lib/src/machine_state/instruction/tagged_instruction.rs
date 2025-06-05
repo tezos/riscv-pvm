@@ -424,9 +424,9 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | X32RemSigned
         | X32RemUnsigned
         | X64DivSigned
-        | Divu
-        | Divw
-        | Divuw => ArgsShape::XSrcNZXDest,
+        | X64DivUnsigned
+        | X32DivSigned
+        | X32DivUnsigned => ArgsShape::XSrcNZXDest,
     }
 }
 

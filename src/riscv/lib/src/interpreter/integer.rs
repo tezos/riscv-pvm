@@ -433,7 +433,7 @@ pub fn run_x64_div_unsigned(
 
     let result = icb.branch_merge::<XValue, _, _>(
         cond,
-        |icb| icb.xvalue_of_imm(u64::MAX as i64),
+        |icb| icb.xvalue_of_imm(!0),
         |icb| rval1.div_unsigned(rval2, icb),
     );
     icb.xregister_write_nz(rd, result);
@@ -508,7 +508,7 @@ pub fn run_x32_div_unsigned(
 
     let result = icb.branch_merge::<XValue32, _, _>(
         cond,
-        |icb| icb.xvalue32_of_imm(u32::MAX as i32),
+        |icb| icb.xvalue32_of_imm(!0),
         |icb| rval1.div_unsigned(rval2, icb),
     );
 
