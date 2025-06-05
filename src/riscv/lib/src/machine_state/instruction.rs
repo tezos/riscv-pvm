@@ -716,6 +716,7 @@ impl OpCode {
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
+            Self::Amomind => Some(Args::run_amomind),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1498,7 +1499,7 @@ impl Args {
     impl_amo_type!(run_amoxord);
     impl_amo_type!(run_amoandd);
     impl_amo_type!(run_amoord);
-    impl_amo_type!(run_amomind);
+    impl_amo_type!(atomics::run_amomind, run_amomind);
     impl_amo_type!(run_amomaxd);
     impl_amo_type!(run_amominud);
     impl_amo_type!(run_amomaxud);
@@ -1948,10 +1949,14 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Amoord,
                 args: args.into(),
             },
-            InstrCacheable::Amomind(args) => Instruction {
-                opcode: OpCode::Amomind,
-                args: args.into(),
-            },
+            InstrCacheable::Amomind(args) => Instruction::new_amomind(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amomaxd(args) => Instruction {
                 opcode: OpCode::Amomaxd,
                 args: args.into(),
