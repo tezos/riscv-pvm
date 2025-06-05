@@ -206,21 +206,6 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
             Ok(map_f(r))
         })
     }
-
-    fn zip<T>(
-        self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
-    where
-        Self::Output: 'static,
-        T: 'static,
-    {
-        StreamParserComb::new(|input| {
-            let r = (self.f)(input)?;
-            let t = (other.f)(input)?;
-            Ok((r, t))
-        })
-    }
 }
 
 impl<R> StreamParserComb<'_, R> {
