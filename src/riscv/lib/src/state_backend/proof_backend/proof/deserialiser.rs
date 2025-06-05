@@ -129,16 +129,8 @@ pub trait Suspended {
     ) -> <Self::Parent as Deserialiser>::Suspended<T>
     where
         Self::Output: 'static;
-
-    /// Helper to zip the current result with another result.
-    fn zip<T>(
-        self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
-    where
-        Self::Output: 'static,
-        T: 'static;
 }
+
 /// Helper trait for transforming `Self`` to a suspended computation from a given serialiser.
 pub trait FromProof {
     type Output: Sized;

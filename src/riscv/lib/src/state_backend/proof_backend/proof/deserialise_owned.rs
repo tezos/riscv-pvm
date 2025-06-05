@@ -167,7 +167,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         let br_comb = branch_deserialiser(next_branch)?;
 
         Ok(OwnedBranchComb {
-            f: self.f.zip(br_comb),
+            f: OwnedParserComb::new((self.f.result, br_comb.result)),
             node_data: self.node_data,
         })
     }
@@ -214,17 +214,6 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
         Self::Output: 'static,
     {
         OwnedParserComb::new(f(self.result))
-    }
-
-    fn zip<T>(
-        self,
-        other: <Self::Parent as Deserialiser>::Suspended<T>,
-    ) -> <Self::Parent as Deserialiser>::Suspended<(Self::Output, T)>
-    where
-        Self::Output: 'static,
-        T: 'static,
-    {
-        OwnedParserComb::new((self.result, other.result))
     }
 }
 
