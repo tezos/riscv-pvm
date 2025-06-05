@@ -90,25 +90,6 @@ where
         self.run_amo_d(rs1, rs2, rd, u64::bitor)
     }
 
-    /// `AMOMIN.D` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the minimum
-    /// between it and val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amomind(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_d(rs1, rs2, rd, |value_rs1, value_rs2| {
-            (value_rs1 as i64).min(value_rs2 as i64) as u64
-        })
-    }
-
     /// `AMOMAX.D` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and stores the maximum
@@ -187,13 +168,6 @@ mod test {
     test_amo!(run_amoandd, u64::bitand, 8, u64);
 
     test_amo!(run_amoord, u64::bitor, 8, u64);
-
-    test_amo!(
-        run_amomind,
-        |r1_val, r2_val| i64::min(r1_val as i64, r2_val as i64) as u64,
-        8,
-        u64
-    );
 
     test_amo!(
         run_amomaxd,

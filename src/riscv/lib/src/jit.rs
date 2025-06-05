@@ -2287,10 +2287,40 @@ mod tests {
 
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
-        let valid_x64_atomic = |constructor: ConstructAtomicFn,
-                                val1: u64,
-                                val2: u64,
-                                fun: fn(u64, u64) -> u64|
+        let valid_x64_atomic_signed = |constructor: ConstructAtomicFn,
+                                       val1: i64,
+                                       val2: i64,
+                                       fun: fn(i64, i64) -> i64|
+         -> Scenario<F> {
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory.write(ADDRESS_BASE_ATOMICS, val1).unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
+                    I::new_li(NZ::x2, val2, InstrWidth::Compressed),
+                    constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(4)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value as i64, val1);
+
+                    let res: u64 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
+                    let expected = fun(val1, val2);
+                    assert_eq!(
+                        res as i64, expected,
+                        "Found {value:x}, expected {expected:x}"
+                    );
+                }))
+                .build()
+        };
+
+        let valid_x64_atomic_unsigned = |constructor: ConstructAtomicFn,
+                                         val1: u64,
+                                         val2: u64,
+                                         fun: fn(u64, u64) -> u64|
          -> Scenario<F> {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(core, F, {
@@ -2314,10 +2344,43 @@ mod tests {
                 .build()
         };
 
-        let invalid_x64_atomic = |constructor: ConstructAtomicFn,
-                                  val1: u64,
-                                  val2: u64,
-                                  fun: fn(u64, u64) -> u64|
+        let invalid_x64_atomic_signed = |constructor: ConstructAtomicFn,
+                                         val1: i64,
+                                         val2: i64,
+                                         fun: fn(i64, i64) -> i64|
+         -> Scenario<F> {
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory
+                        .write(ADDRESS_BASE_ATOMICS + 4, val1)
+                        .unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS + 4) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_li(NZ::x2, val2, InstrWidth::Compressed),
+                    constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value: u64 = core.hart.xregisters.read(x3);
+                    assert_eq!(value as i64, 0);
+
+                    let res: u64 = core.main_memory.read(ADDRESS_BASE_ATOMICS + 4).unwrap();
+                    let expected = fun(val1, val2);
+                    assert_eq!(res as i64, val1, "Found {value:x}, expected {expected:x}");
+                }))
+                .build()
+        };
+
+        let invalid_x64_atomic_unsigned = |constructor: ConstructAtomicFn,
+                                           val1: u64,
+                                           val2: u64,
+                                           fun: fn(u64, u64) -> u64|
          -> Scenario<F> {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(core, F, {
@@ -2348,8 +2411,10 @@ mod tests {
         };
 
         let scenarios: &[Scenario<F>] = &[
-            valid_x64_atomic(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
-            invalid_x64_atomic(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
+            valid_x64_atomic_unsigned(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
+            invalid_x64_atomic_unsigned(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
+            valid_x64_atomic_signed(I::new_amomind, -10, 30, i64::min),
+            invalid_x64_atomic_signed(I::new_amomind, 10, -30, i64::min),
         ];
 
         let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
