@@ -509,9 +509,9 @@ impl OpCode {
             Self::X32RemSigned => Args::run_x32_rem_signed,
             Self::X32RemUnsigned => Args::run_x32_rem_unsigned,
             Self::X64DivSigned => Args::run_x64_div_signed,
-            Self::Divu => Args::run_divu,
-            Self::Divw => Args::run_divw,
-            Self::Divuw => Args::run_divuw,
+            Self::Divu => Args::run_x64_div_unsigned,
+            Self::Divw => Args::run_x32_div_signed,
+            Self::Divuw => Args::run_x32_div_unsigned,
             Self::Mul => Args::run_mul,
             Self::X64MulHighSigned => Args::run_x64_mul_high_signed,
             Self::X64MulHighSignedUnsigned => Args::run_x64_mul_high_signed_unsigned,
@@ -637,6 +637,9 @@ impl OpCode {
             Self::X64MulHighSignedUnsigned => Some(Args::run_x64_mul_high_signed_unsigned),
             Self::X64MulHighUnsigned => Some(Args::run_x64_mul_high_unsigned),
             Self::X64DivSigned => Some(Args::run_x64_div_signed),
+            Self::Divu => Some(Args::run_x64_div_unsigned),
+            Self::Divw => Some(Args::run_x32_div_signed),
+            Self::Divuw => Some(Args::run_x32_div_unsigned),
             Self::X64RemSigned => Some(Args::run_x64_rem_signed),
             Self::X64RemUnsigned => Some(Args::run_x64_rem_unsigned),
             Self::X32RemSigned => Some(Args::run_x32_rem_signed),
@@ -1512,9 +1515,17 @@ impl Args {
         non_zero_rd
     );
     impl_r_type!(integer::run_x64_div_signed, run_x64_div_signed, non_zero_rd);
-    impl_r_type!(run_divu);
-    impl_r_type!(run_divw);
-    impl_r_type!(run_divuw);
+    impl_r_type!(
+        integer::run_x64_div_unsigned,
+        run_x64_div_unsigned,
+        non_zero_rd
+    );
+    impl_r_type!(integer::run_x32_div_signed, run_x32_div_signed, non_zero_rd);
+    impl_r_type!(
+        integer::run_x32_div_unsigned,
+        run_x32_div_unsigned,
+        non_zero_rd
+    );
     impl_r_type!(integer::run_mul, run_mul, non_zero);
     impl_x64_mul_high_type!(run_x64_mul_high_signed, Signed);
     impl_x64_mul_high_type!(run_x64_mul_high_signed_unsigned, SignedUnsigned);
@@ -1950,18 +1961,9 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Remw(args) => Instruction::from_ic_remw(args),
             InstrCacheable::Remuw(args) => Instruction::from_ic_remuw(args),
             InstrCacheable::Div(args) => Instruction::from_ic_div(args),
-            InstrCacheable::Divu(args) => Instruction {
-                opcode: OpCode::Divu,
-                args: args.into(),
-            },
-            InstrCacheable::Divw(args) => Instruction {
-                opcode: OpCode::Divw,
-                args: args.into(),
-            },
-            InstrCacheable::Divuw(args) => Instruction {
-                opcode: OpCode::Divuw,
-                args: args.into(),
-            },
+            InstrCacheable::Divu(args) => Instruction::from_ic_divu(args),
+            InstrCacheable::Divw(args) => Instruction::from_ic_divw(args),
+            InstrCacheable::Divuw(args) => Instruction::from_ic_divuw(args),
             InstrCacheable::Mul(args) => Instruction::from_ic_mul(args),
             InstrCacheable::Mulh(args) => Instruction::from_ic_mulh(args),
             InstrCacheable::Mulhsu(args) => Instruction::from_ic_mulhsu(args),

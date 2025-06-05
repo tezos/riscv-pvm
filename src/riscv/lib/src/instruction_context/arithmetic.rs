@@ -35,6 +35,11 @@ pub trait Arithmetic<I: ICB + ?Sized>: Copy {
     /// This behaves identically for both signed & unsigned values.
     fn mul(self, other: Self, icb: &mut I) -> Self;
 
+    /// Perform the unsigned integer division of **self** by **other**, returning the new value.
+    ///
+    /// This panics if **other** is zero.
+    fn div_unsigned(self, other: Self, icb: &mut I) -> Self;
+
     /// Perform the signed integer division of **self** by **other**, returning the new value.
     ///
     /// This panics if **other** is zero.
@@ -77,6 +82,10 @@ impl<I: ICB> Arithmetic<I> for XValue {
 
     fn mul(self, other: Self, _: &mut I) -> Self {
         self.wrapping_mul(other)
+    }
+
+    fn div_unsigned(self, other: Self, _: &mut I) -> Self {
+        self / other
     }
 
     fn div_signed(self, other: Self, _: &mut I) -> Self {
@@ -127,6 +136,10 @@ impl<I: ICB> Arithmetic<I> for XValue32 {
 
     fn mul(self, other: Self, _: &mut I) -> Self {
         self.wrapping_mul(other)
+    }
+
+    fn div_unsigned(self, other: Self, _: &mut I) -> Self {
+        self / other
     }
 
     fn div_signed(self, other: Self, _: &mut I) -> Self {
