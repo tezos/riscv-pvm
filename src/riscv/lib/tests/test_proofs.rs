@@ -45,6 +45,8 @@ fn test_jstz_initial_proof_regression() {
     let make_stepper = make_stepper_factory::<TestCacheLayouts>();
     let mut stepper = make_stepper();
 
+    eprintln!("> Initial state hash: {:?}", stepper.hash());
+
     eprintln!("> Producing proof ...");
     let proof = stepper.produce_proof().unwrap();
     let proof_serialisation: Vec<u8> = serialise_proof(&proof).collect();
