@@ -59,11 +59,20 @@ fn test_jstz_initial_proof_regression() {
     let make_stepper = make_stepper_factory::<TestCacheConfig>();
     let mut stepper = make_stepper();
 
-    eprintln!("> Initial state hash: {:?}", stepper.hash());
+    let initial_hash = stepper.hash();
+    eprintln!("> Initial state hash: {:?}\n", initial_hash);
+    // eprintln!("> Initial state hash: {:#?}\n", initial_hash.as_ref());
+    initial_hash
+        .as_ref()
+        .iter()
+        .for_each(|byte| eprint!("{:02x} ", byte));
+    eprintln!();
 
     eprintln!("> Producing proof ...");
     let proof = stepper.produce_proof().unwrap();
     let proof_serialisation: Vec<u8> = serialise_proof(&proof).collect();
+
+    eprintln!("> Final state hash: {:?}", proof.final_state_hash());
 
     // This file is also used in the tests for the OCaml `lib_riscv` library
     let mut mint = goldenfile::Mint::new("tests/expected/jstz");
