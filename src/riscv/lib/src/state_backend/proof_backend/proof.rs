@@ -336,6 +336,7 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
 
     Ok((Proof::new(merkle_tree, final_state_hash), pvm))
 }
+
 #[cfg(test)]
 mod tests {
     use proptest::proptest;
