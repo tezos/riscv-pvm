@@ -30,7 +30,6 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
-use crate::state_backend::VerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 use crate::storage::Hash;
@@ -58,11 +57,9 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         D: crate::state_backend::proof_backend::proof::deserialiser::Deserialiser,
     >(
         proof: D,
-    ) -> crate::state_backend::proof_backend::proof::deserialiser::Result<
-        D::Suspended<VerifierAlloc<Self>>,
-    > {
+    ) -> crate::state_backend::ToVerifierAllocResult<D, Self> {
         let parser = Atom::to_verifier_alloc(proof)?;
-        Ok(parser.map(|cell| Self::Allocated { set: cell }))
+        Ok(parser.map(|(cell, merkle)| (Self::Allocated { set: cell }, merkle)))
     }
 
     fn partial_state_hash(

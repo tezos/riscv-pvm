@@ -10,13 +10,12 @@ use crate::default::ConstDefault;
 use crate::machine_state::memory::Address;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
-use crate::state_backend::FromProofError;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::Many;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::VerifierAlloc;
+use crate::state_backend::ToVerifierAllocResult;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
@@ -113,9 +112,7 @@ where
         Many::<CachedLayout, SIZE>::to_merkle_tree(state)
     }
 
-    fn to_verifier_alloc<D: Deserialiser>(
-        proof: D,
-    ) -> Result<D::Suspended<VerifierAlloc<Self>>, FromProofError> {
+    fn to_verifier_alloc<D: Deserialiser>(proof: D) -> ToVerifierAllocResult<D, Self> {
         Many::<CachedLayout, SIZE>::to_verifier_alloc(proof)
     }
 

@@ -178,23 +178,21 @@ macro_rules! struct_layout {
                 #[inline]
                 fn to_verifier_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
                     proof: D,
-                ) -> Result<
-                    D::Suspended<$crate::state_backend::VerifierAlloc<Self>>,
-                    $crate::state_backend::FromProofError
-                > {
+                ) -> $crate::state_backend::ToVerifierAllocResult<D, Self> {
 
                     use $crate::state_backend::proof_layout::tuple_branches_proof_layout;
                     use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
 
                     let ctx = tuple_branches_proof_layout!(@no_done; proof $(, [<$field_name:camel>])+);
 
-                    let ctx = ctx.map(|res| {
+                    let ctx = ctx.map(|(res, merkle)| {
                         let ( $($field_name,)+ ) = res;
-                        Self::Allocated {
-                        $(
-                            $field_name
-                        ),+
-                        }
+                        let allocated = Self::Allocated {
+                            $(
+                                $field_name
+                            ),+
+                        };
+                        (allocated, merkle)
                     });
 
                     ctx.done()
@@ -415,7 +413,9 @@ mod tests {
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
                 let mut verify_foo =
-                    deserialise_owned::deserialise::<Foo>(ProofPart::Present(&proof)).unwrap();
+                    deserialise_owned::deserialise::<Foo>(ProofPart::Present(&proof))
+                        .unwrap()
+                        .0;
                 assert_eq!(bar, verify_foo.bar.read());
                 assert_eq!(qux, verify_foo.qux.read_all().as_slice());
 

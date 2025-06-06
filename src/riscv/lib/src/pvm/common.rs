@@ -432,6 +432,23 @@ impl<
     {
         self.status.read()
     }
+
+    pub fn input_request(&self) -> InputRequest
+    where
+        M: state_backend::ManagerRead,
+    {
+        if self.status.read() == PvmStatus::WaitingForInput {
+            if !self.level_is_set.read() {
+                InputRequest::Initial
+            } else {
+                InputRequest::FirstAfter(self.level.read(), self.message_counter.read())
+            }
+        } else if self.status.read() == PvmStatus::WaitingForReveal {
+            InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
+        } else {
+            InputRequest::NoInputRequired
+        }
+    }
 }
 
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Owned>> Pvm<MC, CL, B, Owned> {
@@ -464,14 +481,22 @@ impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned
     }
 }
 
+pub enum InputRequest {
+    NoInputRequired,
+    Initial,
+    FirstAfter(u32, u64),
+    NeedsReveal(Box<[u8]>),
+}
+
 impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, Verifier> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
     where
         AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
     {
-        let space =
-            deserialise_owned::deserialise::<PvmLayout<MC, CL>>(ProofTree::Present(proof)).ok()?;
+        let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(ProofTree::Present(proof))
+            .ok()?
+            .0;
         Some(Self::bind(space, block_builder))
     }
 }
