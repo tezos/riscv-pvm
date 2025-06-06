@@ -230,6 +230,13 @@ impl NodePvm<Verifier> {
             Some(pvm.input_request())
         })
     }
+
+    pub fn partial_state_hash(&self, proof_tree: ProofTree) -> Result<Hash, PvmError> {
+        let refs = self.state.struct_ref::<FnManagerIdent>();
+        NodePvmLayout::partial_state_hash(refs, proof_tree).map_err(|e| {
+            PvmError::SerializationError(format!("Failed to compute partial state hash: {}", e))
+        })
+    }
 }
 
 impl<M: state_backend::ManagerSerialise> fmt::Debug for NodePvm<M> {
