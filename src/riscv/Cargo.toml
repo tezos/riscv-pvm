@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["lib", "sandbox"]
-exclude = ["jstz", "dummy_kernel"]
+exclude = ["jstz", "dummy_kernel", "etherlink"]
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
@@ -63,6 +63,10 @@ features = ["utils"]
 [workspace.dependencies.tezos_crypto_rs]
 git = "https://gitlab.com/tezos/tezos.git"
 default-features = false
+
+[workspace.dependencies.evm_kernel]
+git = "https://gitlab.com/tezos/tezos.git"
+features = ["debug"]
 
 [workspace.dependencies.strum]
 version = "0.26.3"
