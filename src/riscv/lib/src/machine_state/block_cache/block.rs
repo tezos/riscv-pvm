@@ -274,7 +274,7 @@ pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
     &mut MachineCoreState<MC, M>,
     Address,
     &mut Result<(), EnvironException>,
-    &mut <Jitted<D, MC, M> as Block<MC, M>>::BlockBuilder,
+    &mut D,
 ) -> usize;
 
 /// Blocks that are compiled to native code for execution, when possible.
@@ -305,9 +305,9 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
         result: &mut Result<(), EnvironException>,
-        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
+        block_builder: &mut D,
     ) -> usize {
-        if !block_builder.0.should_compile(&mut self.dispatch) {
+        if !block_builder.should_compile(&mut self.dispatch) {
             return unsafe { self.run_block_not_compiled(core, instr_pc, result, block_builder) };
         }
 
@@ -320,7 +320,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
             .map(|i| i.read_stored())
             .collect::<Vec<_>>();
 
-        let fun = block_builder.0.compile(&mut self.dispatch, instr);
+        let fun = block_builder.compile(&mut self.dispatch, instr);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
@@ -340,12 +340,12 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
         result: &mut Result<(), EnvironException>,
-        block_builder: &mut <Self as Block<MC, M>>::BlockBuilder,
+        _block_builder: &mut D,
     ) -> usize {
         let block_result = unsafe {
             // Safety: this function is always safe to call
             self.fallback
-                .run_block(core, instr_pc, &mut block_builder.1)
+                .run_block(core, instr_pc, &mut InterpretedBlockBuilder)
         };
 
         *result = match block_result.error {
@@ -374,7 +374,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M
 impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, M>
     for Jitted<D, MC, M>
 {
-    type BlockBuilder = (D, InterpretedBlockBuilder);
+    type BlockBuilder = D;
 
     fn start_block(&mut self)
     where
