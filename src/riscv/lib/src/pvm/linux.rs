@@ -86,6 +86,9 @@ const EXITGROUP: u64 = 94;
 /// System call number for `set_tid_address` on RISC-V
 const SET_TID_ADDRESS: u64 = 96;
 
+/// System call number for `set_robust_list` on RISC-V
+const SET_ROBUST_LIST: u64 = 99;
+
 /// System call number for `tkill` on RISC-V
 const TKILL: u64 = 130;
 
@@ -728,6 +731,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             EXIT | EXITGROUP => dispatch1!(exit),
             SET_TID_ADDRESS => dispatch1!(set_tid_address, core),
             GETPID => dispatch0!(getpid),
+            SET_ROBUST_LIST => dispatch2!(set_robust_list),
             TKILL => dispatch2!(tkill),
             SIGALTSTACK => dispatch2!(sigaltstack, core),
             RT_SIGACTION => dispatch4!(rt_sigaction, core),
@@ -781,6 +785,25 @@ impl<M: ManagerBase> SupervisorState<M> {
         self.tid_address.write(tid_address);
         // The caller expects the Thread ID to be returned
         Ok(MAIN_THREAD_ID)
+    }
+
+    /// Handle `set_robust_list` system call.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man2/set_robust_list.2.html>
+    fn handle_set_robust_list(&self, _head: VirtAddr, size: usize) -> Result<u64, Error> {
+        // NOTE: `set_robust_list` is mostly important for when a thread terminates. As we don't
+        // really support threading yet, we do nothing. In the future, when we add threading, this
+        // system call needs to be implemented to support informing other (waiting) threads of the
+        // head of the robust futex list in case of this thread dying without cleaning up futexes.
+
+        // VirtAddr is repr(transparent)
+        const ROBUST_LIST_HEAD_SIZE: usize = size_of::<VirtAddr>();
+        if size != ROBUST_LIST_HEAD_SIZE {
+            return Err(Error::InvalidArgument);
+        }
+
+        // Return 0 as an indicator of success
+        Ok(0)
     }
 
     fn handle_exit(
