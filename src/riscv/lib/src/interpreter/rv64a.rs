@@ -22,23 +22,6 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    /// `AMOSWAP.D` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and writes val(rs2)
-    /// back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoswapd(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_d(rs1, rs2, rd, |_, value_rs2| value_rs2)
-    }
-
     /// `AMOXOR.D` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and stores the result of
@@ -179,8 +162,6 @@ mod test {
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
-
-    test_amo!(run_amoswapd, |_, r2_val| r2_val, 8, u64);
 
     test_amo!(run_amoxord, u64::bitxor, 8, u64);
 
