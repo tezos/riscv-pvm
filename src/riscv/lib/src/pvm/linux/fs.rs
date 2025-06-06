@@ -13,6 +13,13 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
+    /// Handle the `faccessat` system call. All access to the file system is denied.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man3/faccessat.3p.html>
+    pub(super) fn handle_faccessat(&self) -> Result<u64, Error> {
+        Err(Error::Access)
+    }
+
     /// Handle the `openat` system call. All access to the file system is denied.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man3/openat.3p.html>
