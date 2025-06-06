@@ -32,6 +32,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::block_cache::metrics::block_metrics;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_backend::ManagerBase;
 use crate::state_backend::hash::Hash;
 use crate::traps::EnvironException;
 
@@ -52,10 +53,10 @@ use crate::traps::EnvironException;
     improper_ctypes_definitions,
     reason = "The receiving functions know the layout of the referenced types"
 )]
-pub type JitFn<MC, JSA> = unsafe extern "C" fn(
+pub type JitFn<MC, M> = unsafe extern "C" fn(
     // ignored
     *const c_void,
-    &mut MachineCoreState<MC, JSA>,
+    &mut MachineCoreState<MC, M>,
     u64,
     &mut Result<(), EnvironException>,
     // ignored
@@ -81,7 +82,7 @@ pub enum JitError {
 
 /// The JIT is responsible for compiling blocks of instructions to machine code,
 /// returning a function that can be run over the [`MachineCoreState`].
-pub struct JIT<MC: MemoryConfig, JSA: JitStateAccess> {
+pub struct JIT<MC: MemoryConfig, M: ManagerBase> {
     /// The function builder context, which is reused across multiple
     /// [`FunctionBuilder`] instances.
     builder_context: FunctionBuilderContext,
@@ -96,13 +97,13 @@ pub struct JIT<MC: MemoryConfig, JSA: JitStateAccess> {
     module: JITModule,
 
     /// Imported [JitStateAccess] functions.
-    jsa_imports: JsaImports<MC, JSA>,
+    jsa_imports: JsaImports<MC, M>,
 
     /// Cache of compilation results.
-    cache: HashMap<Hash, Option<JitFn<MC, JSA>>>,
+    cache: HashMap<Hash, Option<JitFn<MC, M>>>,
 }
 
-impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
+impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
     /// Create a new instance of the JIT, which will be able to
     /// produce functions that can be run over the current
     /// memory configuration and manager.
@@ -121,7 +122,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
         let isa = isa_builder.finish(settings::Flags::new(flag_builder))?;
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        register_jsa_symbols::<MC, JSA>(&mut builder);
+        register_jsa_symbols::<MC, M>(&mut builder);
 
         let mut module = JITModule::new(builder);
         let jsa_imports = JsaImports::declare_in_module(&mut module)?;
@@ -139,7 +140,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
     ///
     /// Not all instructions are currently supported. For blocks containing
     /// unsupported instructions, `None` will be returned.
-    pub fn compile(&mut self, instr: &[Instruction]) -> Option<JitFn<MC, JSA>> {
+    pub fn compile(&mut self, instr: &[Instruction]) -> Option<JitFn<MC, M>> {
         let Ok(hash) = Hash::blake2b_hash(instr) else {
             return None;
         };
@@ -196,7 +197,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
     /// # Return
     ///
     /// | `steps: usize`                | `int`                           |
-    fn start(&mut self) -> Builder<'_, MC, JSA> {
+    fn start(&mut self) -> Builder<'_, MC, M> {
         let ptr = self.module.target_config().pointer_type();
 
         // first param ignored
@@ -214,11 +215,11 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
         let builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
         let jsa_call = JsaCalls::func_calls(&mut self.module, &self.jsa_imports, ptr);
 
-        Builder::<'_, MC, JSA>::new(builder, jsa_call)
+        Builder::<'_, MC, M>::new(builder, jsa_call)
     }
 
     /// Finalise and cache the function under construction.
-    fn produce_function(&mut self, hash: &Hash) -> JitFn<MC, JSA> {
+    fn produce_function(&mut self, hash: &Hash) -> JitFn<MC, M> {
         let name = hex::encode(hash);
 
         let fun = self.finalise(&name);
@@ -230,7 +231,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> JIT<MC, JSA> {
     }
 
     /// Finalise the function currently under construction.
-    fn finalise(&mut self, name: &str) -> JitFn<MC, JSA> {
+    fn finalise(&mut self, name: &str) -> JitFn<MC, M> {
         let id = self
             .module
             .declare_function(name.as_ref(), Linkage::Export, &self.ctx.func.signature)

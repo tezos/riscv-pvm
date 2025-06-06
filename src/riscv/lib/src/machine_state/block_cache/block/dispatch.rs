@@ -23,11 +23,12 @@ use crate::jit::JitFn;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_backend::ManagerBase;
 
 /// Dispatch target that wraps a [`DispatchFn`].
 ///
 /// This is the target used for compilation - see [`DispatchCompiler::compile`].
-pub struct DispatchTarget<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> {
+pub struct DispatchTarget<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     /// Function pointer stored as an atomic usize.
     ///
     /// This will allow the `fun` to be updated from a background thread.
@@ -92,9 +93,11 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Default
 
 /// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
 /// said block in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig, M: JitStateAccess>: Default + Sized {
+pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
     /// Whether compilation should be attempted for the block.
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool;
+    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool
+    where
+        M: JitStateAccess;
 
     /// Compile a block, hot-swapping the `run_block` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
@@ -107,7 +110,9 @@ pub trait DispatchCompiler<MC: MemoryConfig, M: JitStateAccess>: Default + Sized
         &mut self,
         target: &mut DispatchTarget<Self, MC, M>,
         instr: Vec<Instruction>,
-    ) -> DispatchFn<Self, MC, M>;
+    ) -> DispatchFn<Self, MC, M>
+    where
+        M: JitStateAccess;
 }
 
 impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for JIT<MC, M> {
@@ -173,7 +178,7 @@ mod internal_corro {
 
 /// JIT compiler for blocks that performs compilation in a
 /// background thread.
-pub struct OutlineCompiler<MC: MemoryConfig, M: JitStateAccess> {
+pub struct OutlineCompiler<MC: MemoryConfig, M: ManagerBase> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.

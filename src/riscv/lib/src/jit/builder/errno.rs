@@ -18,6 +18,7 @@ use cranelift::frontend::FunctionBuilder;
 use crate::interpreter::atomics::reset_reservation_set;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_backend::ManagerBase;
 
 /// Wrapper for `Errno`-type returns.
 ///
@@ -29,13 +30,13 @@ use crate::machine_state::memory::MemoryConfig;
 /// *NB* a trait is used, rather than a structure, to allow us to naturally use
 /// _unboxed closures_ for the function that returns the output values, without needing
 /// to thread extra generics.
-pub(crate) trait Errno<T, MC: MemoryConfig, JSA: JitStateAccess> {
+pub(crate) trait Errno<T, MC: MemoryConfig, M: ManagerBase> {
     /// Insert exception handling branch that will be triggered at runtime
     /// when `errno` indicates failure.
     ///
     /// The caller of this function is put back into the context of the happy path -
     /// ie, where `errno` indicates success and no exception occurred.
-    fn handle(self, builder: &mut super::Builder<'_, MC, JSA>) -> T;
+    fn handle(self, builder: &mut super::Builder<'_, MC, M>) -> T;
 }
 
 /// Helper type for ensuring fallible operations are handled correctly.

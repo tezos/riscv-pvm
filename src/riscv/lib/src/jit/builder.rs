@@ -39,6 +39,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::parser::instruction::InstrWidth;
+use crate::state_backend::ManagerBase;
 
 /// A newtype for wrapping [`Value`], representing a 64-bit value in the JIT context.
 #[derive(Copy, Clone, Debug)]
@@ -53,12 +54,12 @@ pub struct X32(pub Value);
 pub struct F64(pub Value);
 
 /// Builder context used when lowering individual instructions within a block.
-pub(crate) struct Builder<'a, MC: MemoryConfig, JSA: JitStateAccess> {
+pub(crate) struct Builder<'a, MC: MemoryConfig, M: ManagerBase> {
     /// Cranelift function builder
     builder: FunctionBuilder<'a>,
 
     /// Helpers for calling locally imported [JitStateAccess] methods.
-    jsa_call: JsaCalls<'a, MC, JSA>,
+    jsa_call: JsaCalls<'a, MC, M>,
 
     /// Value representing a pointer to [`MachineCoreState<MC, JSA>`]
     ///
