@@ -95,9 +95,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Default
 /// said block in the given dispatch target.
 pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
     /// Whether compilation should be attempted for the block.
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool
-    where
-        M: JitStateAccess;
+    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool;
 
     /// Compile a block, hot-swapping the `run_block` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
@@ -117,10 +115,13 @@ pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
 
 /// JIT compiler for blocks that performs compilation inline, in the same thread as execution.
 pub struct InlineCompiler<MC: MemoryConfig, M: ManagerBase> {
-    jit: JIT<MC, M>,
+    jit: JIT<MC, M::ManagerRoot>,
 }
 
-impl<MC: MemoryConfig, M: JitStateAccess> Default for InlineCompiler<MC, M> {
+impl<MC: MemoryConfig, M: ManagerBase> Default for InlineCompiler<MC, M>
+where
+    M::ManagerRoot: JitStateAccess,
+{
     fn default() -> Self {
         Self {
             jit: JIT::default(),
@@ -128,7 +129,10 @@ impl<MC: MemoryConfig, M: JitStateAccess> Default for InlineCompiler<MC, M> {
     }
 }
 
-impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for InlineCompiler<MC, M> {
+impl<MC: MemoryConfig, M: ManagerBase> DispatchCompiler<MC, M> for InlineCompiler<MC, M>
+where
+    M::ManagerRoot: JitStateAccess,
+{
     #[inline]
     fn should_compile(&self, _target: &mut DispatchTarget<Self, MC, M>) -> bool {
         // every block must be compiled immediately for inline jit, as it's used for testing
@@ -140,7 +144,10 @@ impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for InlineComp
         &mut self,
         target: &mut DispatchTarget<Self, MC, M>,
         instr: Vec<Instruction>,
-    ) -> DispatchFn<Self, MC, M> {
+    ) -> DispatchFn<Self, MC, M>
+    where
+        M: JitStateAccess,
+    {
         let fun = match self.jit.compile(&instr) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
