@@ -790,17 +790,15 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `set_robust_list` system call.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/set_robust_list.2.html>
-    fn handle_set_robust_list(&self, _head: VirtAddr, size: usize) -> Result<u64, Error> {
+    fn handle_set_robust_list(
+        &self,
+        _head: VirtAddr,
+        _size: parameters::RobustListHeadSize,
+    ) -> Result<u64, Error> {
         // NOTE: `set_robust_list` is mostly important for when a thread terminates. As we don't
         // really support threading yet, we do nothing. In the future, when we add threading, this
         // system call needs to be implemented to support informing other (waiting) threads of the
         // head of the robust futex list in case of this thread dying without cleaning up futexes.
-
-        // VirtAddr is repr(transparent)
-        const ROBUST_LIST_HEAD_SIZE: usize = size_of::<VirtAddr>();
-        if size != ROBUST_LIST_HEAD_SIZE {
-            return Err(Error::InvalidArgument);
-        }
 
         // Return 0 as an indicator of success
         Ok(0)

@@ -114,6 +114,25 @@ impl TryFrom<u64> for CpuSetSize {
     }
 }
 
+/// A size parameter passed to `set_robust_list(2)`
+#[derive(Debug, Clone, Copy)]
+pub struct RobustListHeadSize;
+
+impl TryFrom<u64> for RobustListHeadSize {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value: usize = value.try_into()?;
+
+        const ROBUST_LIST_HEAD_SIZE: usize = size_of::<u64>();
+        if value != ROBUST_LIST_HEAD_SIZE {
+            return Err(Error::InvalidArgument);
+        }
+
+        Ok(RobustListHeadSize)
+    }
+}
+
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
 pub struct Signal(u7);
