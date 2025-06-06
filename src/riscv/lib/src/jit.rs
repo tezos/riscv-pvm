@@ -2880,4 +2880,84 @@ mod tests {
             scenario.run(&mut jit, &mut interpreted_bb);
         }
     });
+
+    backend_test!(test_atomic_swap, F, {
+        use crate::machine_state::instruction::Instruction as I;
+        use crate::machine_state::registers::XRegister::x1;
+        use crate::machine_state::registers::XRegister::x2;
+        use crate::machine_state::registers::XRegister::x3;
+
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
+
+        let test_atomic_swap =
+            |constructor: fn(XRegister, XRegister, XRegister, bool, bool, InstrWidth) -> I,
+             addr: u64,
+             val: u64,
+             expected_rd: u64,
+             expected_mem: u64|
+             -> Scenario<F> {
+                ScenarioBuilder::default()
+                    .set_setup_hook(setup_hook!(core, F, {
+                        core.main_memory.set_all_readable_writeable();
+                        core.main_memory.write(addr, expected_rd).unwrap();
+                        core.hart.xregisters.write(x1, addr);
+                        core.hart.xregisters.write(x3, val);
+                    }))
+                    .set_instructions(&[constructor(
+                        x2,
+                        x1,
+                        x3,
+                        false,
+                        false,
+                        InstrWidth::Uncompressed,
+                    )])
+                    .set_assert_hook(assert_hook!(core, F, {
+                        // Check rd gets the original memory value
+                        assert_eq!(
+                            core.hart.xregisters.read(x2),
+                            expected_rd,
+                            "rd value mismatch"
+                        );
+                        // Check memory gets the new value from rs2
+                        let mem_val: u64 = core.main_memory.read(addr).unwrap();
+                        assert_eq!(mem_val, expected_mem, "memory value mismatch");
+                    }))
+                    .build()
+            };
+
+        let scenarios: &[Scenario<F>] = &[
+            // 32-bit atomic swap (4-byte aligned address)
+            test_atomic_swap(
+                I::new_x32_atomic_swap,
+                ADDRESS_BASE_ATOMICS, // 4-byte aligned address
+                0x200,                // New value to swap
+                0x100,                // Expected original value in rd
+                0x200,                // Expected new value in memory
+            ),
+            // 64-bit atomic swap (8-byte aligned address)
+            test_atomic_swap(
+                I::new_x64_atomic_swap,
+                ADDRESS_BASE_ATOMICS + 8, // 8-byte aligned address
+                0x200,                    // New value to swap
+                0x100,                    // Expected original value in rd
+                0x200,                    // Expected new value in memory
+            ),
+            // 32-bit atomic swap with truncation
+            test_atomic_swap(
+                I::new_x32_atomic_swap,
+                ADDRESS_BASE_ATOMICS + 16, // Another 4-byte aligned address
+                0xFFFFFFFF_00000200,       // Value that will be truncated to 32-bits
+                0x100,                     // Expected original value in rd
+                0x200,                     // Expected truncated value in memory
+            ),
+        ];
+
+        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut interpreted_bb = InterpretedBlockBuilder;
+
+        for scenario in scenarios {
+            scenario.run(&mut jit, &mut interpreted_bb);
+        }
+    });
 }

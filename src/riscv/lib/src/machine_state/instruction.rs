@@ -484,7 +484,7 @@ impl OpCode {
             Self::JalrAbsolute => Args::run_jalr_absolute,
             Self::X32AtomicLoad => Args::run_x32_atomic_load,
             Self::X32AtomicStore => Args::run_x32_atomic_store,
-            Self::Amoswapw => Args::run_amoswapw,
+            Self::Amoswapw => Args::run_x32_atomic_swap,
             Self::Amoaddw => Args::run_amoaddw,
             Self::Amoxorw => Args::run_amoxorw,
             Self::Amoandw => Args::run_amoandw,
@@ -495,7 +495,7 @@ impl OpCode {
             Self::Amomaxuw => Args::run_amomaxuw,
             Self::X64AtomicLoad => Args::run_x64_atomic_load,
             Self::X64AtomicStore => Args::run_x64_atomic_store,
-            Self::Amoswapd => Args::run_amoswapd,
+            Self::Amoswapd => Args::run_x64_atomic_swap,
             Self::X64AtomicAdd => Args::run_x64_atomic_add,
             Self::Amoxord => Args::run_amoxord,
             Self::Amoandd => Args::run_amoandd,
@@ -714,6 +714,8 @@ impl OpCode {
             Self::X32AtomicStore => Some(Args::run_x32_atomic_store),
             Self::X64AtomicStore => Some(Args::run_x64_atomic_store),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
+            Self::Amoswapw => Some(Args::run_x32_atomic_swap),
+            Self::Amoswapd => Some(Args::run_x64_atomic_swap),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1480,7 +1482,7 @@ impl Args {
     // RV64A atomic instructions
     impl_amo_type!(atomics::run_x32_atomic_load, run_x32_atomic_load);
     impl_amo_type!(atomics::run_x32_atomic_store, run_x32_atomic_store);
-    impl_amo_type!(run_amoswapw);
+    impl_amo_type!(atomics::run_x32_atomic_swap, run_x32_atomic_swap);
     impl_amo_type!(run_amoaddw);
     impl_amo_type!(run_amoxorw);
     impl_amo_type!(run_amoandw);
@@ -1491,7 +1493,7 @@ impl Args {
     impl_amo_type!(run_amomaxuw);
     impl_amo_type!(atomics::run_x64_atomic_load, run_x64_atomic_load);
     impl_amo_type!(atomics::run_x64_atomic_store, run_x64_atomic_store);
-    impl_amo_type!(run_amoswapd);
+    impl_amo_type!(atomics::run_x64_atomic_swap, run_x64_atomic_swap);
     impl_amo_type!(atomics::run_x64_atomic_add, run_x64_atomic_add);
     impl_amo_type!(run_amoxord);
     impl_amo_type!(run_amoandd);
@@ -1863,10 +1865,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoswapw(args) => Instruction {
-                opcode: OpCode::Amoswapw,
-                args: args.into(),
-            },
+            InstrCacheable::Amoswapw(args) => Instruction::new_x32_atomic_swap(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoaddw(args) => Instruction {
                 opcode: OpCode::Amoaddw,
                 args: args.into(),
@@ -1914,10 +1920,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoswapd(args) => Instruction {
-                opcode: OpCode::Amoswapd,
-                args: args.into(),
-            },
+            InstrCacheable::Amoswapd(args) => Instruction::new_x64_atomic_swap(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoaddd(args) => Instruction::new_x64_atomic_add(
                 args.rd,
                 args.rs1,
