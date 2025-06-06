@@ -283,7 +283,7 @@ pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
 /// unsupported instructions, a fallback to [`Interpreted`] mode occurs.
 ///
 /// Blocks are compiled upon calling [`Block::run_block`], in a *stop the world* fashion.
-pub struct Jitted<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> {
+pub struct Jitted<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     fallback: Interpreted<MC, M>,
     dispatch: DispatchTarget<D, MC, M>,
 }

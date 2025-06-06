@@ -59,6 +59,7 @@ use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
+use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
@@ -75,11 +76,11 @@ macro_rules! register_jsa_functions {
         }
 
         /// Identifications of globally imported [`JitStateAccess`] methods.
-        pub(super) struct JsaImports<MC: MemoryConfig, JSA: JitStateAccess> {
+        pub(super) struct JsaImports<MC: MemoryConfig, M: $crate::state_backend::ManagerBase> {
             $(
                 pub $name: FuncId,
             )*
-            _pd: PhantomData<(MC, JSA)>,
+            _pd: PhantomData<(MC, M)>,
         }
 
         impl<MC: MemoryConfig, JSA: JitStateAccess> JsaImports<MC, JSA> {
@@ -425,9 +426,9 @@ impl<M: ManagerReadWrite> JitStateAccess for ProofGen<M> {}
 
 /// References to locally imported [`JitStateAccess`] methods, used to directly call
 /// these accessor methods in the JIT-compilation context.
-pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
+pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
     module: &'a mut JITModule,
-    imports: &'a JsaImports<MC, JSA>,
+    imports: &'a JsaImports<MC, M>,
     ptr_type: Type,
     pc_write: Option<FuncRef>,
     xreg_read: Option<FuncRef>,
@@ -452,14 +453,14 @@ pub struct JsaCalls<'a, MC: MemoryConfig, JSA: JitStateAccess> {
     memory_load_u64: Option<FuncRef>,
     reservation_set_write: Option<FuncRef>,
     reservation_set_read: Option<FuncRef>,
-    _pd: PhantomData<(MC, JSA)>,
+    _pd: PhantomData<(MC, M)>,
 }
 
-impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
+impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
     /// Wrapper to simplify calling JSA methods from within the function under construction.
     pub(super) fn func_calls(
         module: &'a mut JITModule,
-        imports: &'a JsaImports<MC, JSA>,
+        imports: &'a JsaImports<MC, M>,
         ptr_type: Type,
     ) -> Self {
         Self {
@@ -630,7 +631,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         core_ptr: Value,
         phys_address: X64,
         value: X64,
-    ) -> impl Errno<(), MC, JSA> + 'static {
+    ) -> impl Errno<(), MC, M> + 'static {
         let memory_store = match V::WIDTH {
             LoadStoreWidth::Byte => self.memory_store_u8.get_or_insert_with(|| {
                 self.module
@@ -680,7 +681,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> JsaCalls<'a, MC, JSA> {
         builder: &mut FunctionBuilder<'_>,
         core_ptr: Value,
         phys_address: X64,
-    ) -> impl Errno<X64, MC, JSA> + 'static {
+    ) -> impl Errno<X64, MC, M> + 'static {
         let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
         let exception_ptr = exception_slot.ptr(builder);
 
