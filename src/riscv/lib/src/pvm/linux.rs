@@ -794,7 +794,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `sigaltstack` system call. The new signal stack configuration is discarded. If the
     /// old signal stack configuration is requested, it will be zeroed out.
     fn handle_sigaltstack(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         old: parameters::SignalAction,
@@ -818,7 +818,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigaction.2.html>
     fn handle_rt_sigaction(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
@@ -843,7 +843,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `rt_sigprocmask` system call. This does nothing effectively. If the previous mask is
     /// requested, it will simply be zeroed out.
     fn handle_rt_sigprocmask(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
@@ -896,7 +896,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/clock_gettime.2.html>
     fn handle_clock_gettime(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _clockid: u64,
         tp: u64,
@@ -922,7 +922,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/gettimeofday.2.html>
     fn handle_gettimeofday(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         tv: u64,
         tz: u64,
@@ -1380,7 +1380,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let supervisor_state = SupervisorState::new(&mut manager);
 
         // Set up necessary registers for mmap
         machine_state

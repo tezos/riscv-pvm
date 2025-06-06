@@ -63,7 +63,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `madvise` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/madvise.2.html>
-    pub(super) fn handle_madvise(&mut self) -> Result<u64, Error> {
+    pub(super) fn handle_madvise(&self) -> Result<u64, Error> {
         // We don't make use of advice yet. We just return 0 to indicate success.
         Ok(0)
     }
@@ -72,7 +72,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
     pub(super) fn handle_mprotect<MC>(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<MC, M>,
         addr: PageAligned<VirtAddr>,
         length: u64,
@@ -97,7 +97,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         reason = "The system call dispatch mechanism needs these arguments to exist, they can't be on a nested structure"
     )]
     pub(super) fn handle_mmap<MC>(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<MC, M>,
         addr: VirtAddr,
         length: NonZeroU64,
@@ -152,7 +152,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mmap.2.html>
     pub(super) fn handle_munmap<MC>(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<MC, M>,
         addr: u64,
         length: u64,

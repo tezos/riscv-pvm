@@ -55,7 +55,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See <https://man7.org/linux/man-pages/man2/write.2.html>
     pub(super) fn handle_write(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         hooks: &mut PvmHooks,
         fd: parameters::FileDescriptorWriteable,
@@ -74,7 +74,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See <https://man7.org/linux/man-pages/man3/writev.3p.html>
     pub(super) fn handle_writev(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         hooks: &mut PvmHooks,
         fd: parameters::FileDescriptorWriteable,
@@ -144,7 +144,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ///
     /// See: <https://man7.org/linux/man-pages/man2/poll.2.html>
     pub(super) fn handle_ppoll(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         fd_ptrs: u64,
         num_fds: parameters::FileDescriptorCount,
