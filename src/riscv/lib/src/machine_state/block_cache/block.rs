@@ -5,7 +5,7 @@
 
 //! Switching of execution strategy for blocks.
 
-mod dispatch;
+pub(crate) mod dispatch;
 
 use dispatch::DispatchCompiler;
 use dispatch::DispatchTarget;

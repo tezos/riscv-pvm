@@ -115,7 +115,20 @@ pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
         M: JitStateAccess;
 }
 
-impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for JIT<MC, M> {
+/// JIT compiler for blocks that performs compilation inline, in the same thread as execution.
+pub struct InlineCompiler<MC: MemoryConfig, M: ManagerBase> {
+    jit: JIT<MC, M>,
+}
+
+impl<MC: MemoryConfig, M: JitStateAccess> Default for InlineCompiler<MC, M> {
+    fn default() -> Self {
+        Self {
+            jit: JIT::default(),
+        }
+    }
+}
+
+impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for InlineCompiler<MC, M> {
     #[inline]
     fn should_compile(&self, _target: &mut DispatchTarget<Self, MC, M>) -> bool {
         // every block must be compiled immediately for inline jit, as it's used for testing
@@ -128,7 +141,7 @@ impl<MC: MemoryConfig, M: JitStateAccess> DispatchCompiler<MC, M> for JIT<MC, M>
         target: &mut DispatchTarget<Self, MC, M>,
         instr: Vec<Instruction>,
     ) -> DispatchFn<Self, MC, M> {
-        let fun = match self.compile(&instr) {
+        let fun = match self.jit.compile(&instr) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
                 // last parameters. These are both thin-pointers, and ignored by the JitFn.
