@@ -1,0 +1,8 @@
+[package]
+name = "etherlink"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+evm_kernel.workspace = true
+tezos-smart-rollup.workspace = true

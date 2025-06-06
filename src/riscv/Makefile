@@ -16,11 +16,11 @@ endif
 # We don't want to check all features in CI, so we provide this varible to configure it.
 CHECK_FLAGS ?= --all-features
 
-# CI needs the ability to toggle some features 
+# CI needs the ability to toggle some features
 EXTRA_FLAGS ?=
 
 # Mechanism to allow enabling additional features - for example JIT
-SANDBOX_ENABLE_FEATURES ?= 
+SANDBOX_ENABLE_FEATURES ?=
 
 # The version of nightly that we use for anything that requires it
 NIGHTLY_VERSION = nightly-2025-01-30
@@ -29,6 +29,7 @@ NIGHTLY_VERSION = nightly-2025-01-30
 build: riscv-dummy.elf riscv-sandbox
 	@cargo build --release --workspace $(NATIVE_OPT) $(EXTRA_FLAGS)
 	@make -C jstz build
+	@make -C etherlink build
 
 .PHONY: riscv-sandbox
 riscv-sandbox::
@@ -74,7 +75,7 @@ endif
 	@rustup toolchain install $(NIGHTLY_VERSION) -c rustfmt -c miri -c rust-src
 
 	# Iterate through all the toolchains. 'rustup show' (before Rustup 1.28) and
-	# 'rustup toolchain install' (Rustup 1.28+) will install the toolchain. 
+	# 'rustup toolchain install' (Rustup 1.28+) will install the toolchain.
 	@find . -iname 'rust-toolchain*' -execdir sh -c "rustup show active-toolchain || rustup toolchain install" \; 2>/dev/null
 
 	@make -C jstz build-deps
@@ -114,6 +115,7 @@ check:
 
 	@make -C dummy_kernel check
 	@make -C jstz check
+	@make -C etherlink check
 
 .PHONY: audit
 audit:
@@ -130,4 +132,5 @@ clean:
 	@cargo clean
 	@make -C dummy_kernel clean
 	@make -C jstz clean
+	@make -C etherlink clean
 	@rm -f riscv-sandbox riscv-dummy.elf
