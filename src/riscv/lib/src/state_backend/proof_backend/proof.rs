@@ -24,6 +24,7 @@ use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::FromProofError;
 use crate::state_backend::Layout;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::proof_backend::merkle;
@@ -356,7 +357,7 @@ impl<I: Iterator<Item = u8>> ProofParserHash<I> {
     /// the generic `L`: [`ProofLayout`].
     pub fn parse_into_backend<L: ProofLayout>(
         self,
-    ) -> Result<<L as Layout>::Allocated<Verifier>, FromProofError> {
+    ) -> Result<(<L as Layout>::Allocated<Verifier>, OwnedProofPart), FromProofError> {
         let bytes: Box<[u8]> = self.0.collect();
         deserialise_stream::deserialise::<L>(&bytes)
     }
