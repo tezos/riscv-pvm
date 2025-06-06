@@ -1564,6 +1564,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicSwap`].
     pub(crate) fn new_x32_atomic_swap(
         rd: XRegister,
         rs1: XRegister,
@@ -1573,7 +1574,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amoswapw,
+            opcode: OpCode::X32AtomicSwap,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1586,6 +1587,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicSwap`].
     pub(crate) fn new_x64_atomic_swap(
         rd: XRegister,
         rs1: XRegister,
@@ -1595,7 +1597,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amoswapd,
+            opcode: OpCode::X64AtomicSwap,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
