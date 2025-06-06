@@ -1,0 +1,20 @@
+[workspace]
+members = ["kernel"]
+resolver = "2"
+
+[patch.crates-io]
+tezos-smart-rollup = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-host = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-core = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-mock = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-encoding = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-entrypoint = { git = "https://gitlab.com/tezos/tezos.git" }
+tezos-smart-rollup-debug = { git = "https://gitlab.com/tezos/tezos.git" }
+
+[workspace.dependencies]
+evm_kernel = { git = "https://gitlab.com/tezos/tezos.git" }
+
+[workspace.dependencies.tezos-smart-rollup]
+version = "0.2.2"
+default-features = false
+features = ["experimental-host-in-memory-store", "native-kernel", "extra"]

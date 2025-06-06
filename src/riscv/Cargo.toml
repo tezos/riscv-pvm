@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["lib", "sandbox"]
-exclude = ["jstz", "dummy_kernel"]
+exclude = ["jstz", "dummy_kernel", "etherlink"]
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
