@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fs;
+use std::fs::File;
+use std::fs::{self};
 use std::io::Write;
 use std::ops::Bound;
 use std::path::Path;
@@ -22,10 +23,20 @@ use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
-fn capture_debug_log(mint: &mut goldenfile::Mint) -> PvmHooks<'_> {
-    let mut log_capture = mint.new_goldenfile("log").unwrap();
-    let hooks = PvmHooks::new(move |c| log_capture.write_all(&[c]).unwrap());
-    hooks
+struct MintCaptureHooks {
+    log_file: File,
+}
+
+impl PvmHooks for MintCaptureHooks {
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        self.log_file.write_all(bytes).unwrap();
+    }
+}
+
+fn capture_debug_log(mint: &mut goldenfile::Mint) -> MintCaptureHooks {
+    MintCaptureHooks {
+        log_file: mint.new_goldenfile("log").unwrap(),
+    }
 }
 
 #[test]
@@ -112,7 +123,7 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<'_, M64M, DefaultCacheConfig, Owned, B>::new(
+        let mut stepper = PvmStepper::<_, M64M, DefaultCacheConfig, Owned, B>::new(
             &program,
             initrd.as_deref(),
             inbox,

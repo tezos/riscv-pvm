@@ -15,6 +15,7 @@ use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
+use octez_riscv::pvm::PvmHooks;
 use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
@@ -80,9 +81,10 @@ fn test_jstz_proofs(full: bool) {
     }
 }
 
-fn run_steps_ladder<F>(make_stepper: F, ladder: &[usize], expected_hash: Option<hash::Hash>)
+fn run_steps_ladder<F, H>(make_stepper: F, ladder: &[usize], expected_hash: Option<hash::Hash>)
 where
-    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
+    F: Fn() -> PvmStepper<H, M64M, DefaultCacheConfig>,
+    H: PvmHooks,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper = make_stepper();
@@ -146,8 +148,8 @@ where
     }
 }
 
-fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
-    stepper: &PvmStepper<'static, MC, BCC>,
+fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig, H: PvmHooks>(
+    stepper: &PvmStepper<H, MC, BCC>,
     proof: &Proof,
     state_hash: hash::Hash,
 ) where
