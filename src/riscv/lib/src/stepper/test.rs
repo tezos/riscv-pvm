@@ -16,12 +16,12 @@ use super::StepResult;
 use super::Stepper;
 use super::StepperStatus;
 use crate::kernel_loader;
-use crate::machine_state::CacheLayouts;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
 use crate::machine_state::StepManyResult;
-use crate::machine_state::TestCacheLayouts;
+use crate::machine_state::block_cache::BlockCacheConfig;
+use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::memory::M1G;
@@ -86,14 +86,14 @@ pub enum TestStepperError {
 
 pub struct TestStepper<
     MC: MemoryConfig = M1G,
-    CL: CacheLayouts = TestCacheLayouts,
+    BCC: BlockCacheConfig = TestCacheConfig,
     B: Block<MC, Owned> = Interpreted<MC, Owned>,
 > {
-    machine_state: MachineState<MC, CL, B, Owned>,
+    machine_state: MachineState<MC, BCC, B, Owned>,
     posix_state: PosixState<Owned>,
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheLayouts, B> {
+impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> {
     /// Initialise an interpreter with a given `program`.
     /// An initial ramdisk can also optionally be passed.
     #[inline]
@@ -173,10 +173,10 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheLayouts, B>
     }
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCacheLayouts, B> {
+impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCacheConfig, B> {
     type MemoryConfig = MC;
 
-    type CacheLayouts = TestCacheLayouts;
+    type BlockCacheConfig = TestCacheConfig;
 
     type Manager = Owned;
 

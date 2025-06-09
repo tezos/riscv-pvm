@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use super::Pvm;
 use super::PvmLayout;
-use crate::machine_state::TestCacheLayouts;
+use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::program::Program;
@@ -39,9 +39,9 @@ pub enum PvmError {
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
-type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheLayouts>;
+type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheConfig>;
 
-type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheLayouts, Interpreted<NodePvmMemConfig, M>, M>;
+type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheConfig, Interpreted<NodePvmMemConfig, M>, M>;
 
 pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
     state: Box<NodePvmState<M>>,

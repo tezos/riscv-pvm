@@ -16,10 +16,10 @@ use tezos_smart_rollup_utils::inbox::Inbox;
 use super::Stepper;
 use super::StepperStatus;
 use crate::kernel_loader;
-use crate::machine_state::CacheLayouts;
-use crate::machine_state::DefaultCacheLayouts;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
+use crate::machine_state::block_cache::BlockCacheConfig;
+use crate::machine_state::block_cache::DefaultCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -62,11 +62,11 @@ pub enum PvmStepperError {
 pub struct PvmStepper<
     'hooks,
     MC: MemoryConfig = M1G,
-    CL: CacheLayouts = DefaultCacheLayouts,
+    BCC: BlockCacheConfig = DefaultCacheConfig,
     M: ManagerBase = Owned,
     B: Block<MC, M> = Interpreted<MC, M>,
 > {
-    pvm: Pvm<MC, CL, B, M>,
+    pvm: Pvm<MC, BCC, B, M>,
     hooks: PvmHooks<'hooks>,
     inbox: Inbox,
     rollup_address: [u8; 20],
@@ -74,8 +74,8 @@ pub struct PvmStepper<
     reveal_request_response_map: RevealRequestResponseMap,
 }
 
-impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, CL: CacheLayouts>
-    PvmStepper<'hooks, MC, CL, Owned, B>
+impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
+    PvmStepper<'hooks, MC, BCC, Owned, B>
 {
     /// Create a new PVM stepper.
     #[expect(
@@ -118,12 +118,12 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, CL: CacheLayouts>
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts> PvmStepper<'_, MC, CL, Owned> {
+impl<MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<'_, MC, BCC, Owned> {
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
     pub fn produce_proof(&mut self) -> Option<Proof>
     where
-        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+        AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
@@ -135,8 +135,8 @@ impl<MC: MemoryConfig, CL: CacheLayouts> PvmStepper<'_, MC, CL, Owned> {
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
-    PvmStepper<'_, MC, CL, M, B>
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWrite>
+    PvmStepper<'_, MC, BCC, M, B>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
@@ -223,7 +223,7 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC, CL>, Ref<'_, M>> {
+    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC, BCC>, Ref<'_, M>> {
         self.pvm.struct_ref::<FnManagerIdent>()
     }
 
@@ -236,8 +236,8 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
     /// [`BlockBuilder`]: Block::BlockBuilder
     pub fn rebind_via_serde(&mut self, block_builder: B::BlockBuilder)
     where
-        for<'a> AllocatedOf<PvmLayout<MC, CL>, Ref<'a, M>>: Serialize,
-        AllocatedOf<PvmLayout<MC, CL>, M>: DeserializeOwned,
+        for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Serialize,
+        AllocatedOf<PvmLayout<MC, BCC>, M>: DeserializeOwned,
     {
         let space = {
             let refs = self.pvm.struct_ref::<FnManagerIdent>();
@@ -249,13 +249,13 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerReadWrite>
     }
 }
 
-impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
-    PvmStepper<'hooks, MC, CL, M>
+impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
+    PvmStepper<'hooks, MC, BCC, M>
 {
     /// Create a new stepper in which the existing PVM is managed by
     /// the proof-generating backend.
-    pub fn start_proof_mode<'a>(&'a self) -> PvmStepper<'hooks, MC, CL, ProofGen<Ref<'a, M>>> {
-        PvmStepper::<'hooks, MC, CL, ProofGen<Ref<'a, M>>> {
+    pub fn start_proof_mode<'a>(&'a self) -> PvmStepper<'hooks, MC, BCC, ProofGen<Ref<'a, M>>> {
+        PvmStepper::<'hooks, MC, BCC, ProofGen<Ref<'a, M>>> {
             pvm: self.pvm.start_proof(),
             rollup_address: self.rollup_address,
             origination_level: self.origination_level,
@@ -275,13 +275,13 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
-        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+        AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, CL>>(proof_tree)
+        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
-        let pvm = Pvm::<MC, CL, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
+        let pvm = Pvm::<MC, BCC, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
         let stepper = PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
@@ -301,7 +301,7 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
         let stepper = stepper.try_step_partial()?;
 
         let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, CL>::partial_state_hash(refs, proof_tree)?;
+        let final_hash = PvmLayout::<MC, BCC>::partial_state_hash(refs, proof_tree)?;
         if final_hash != proof.final_state_hash() {
             return Err(ProofVerificationFailure::FinalHashMismatch {
                 expected: proof.final_state_hash(),
@@ -313,15 +313,15 @@ impl<'hooks, MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite>
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, M: ManagerReadWrite> PvmStepper<'_, MC, CL, M> {
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper<'_, MC, BCC, M> {
     /// Perform one evaluation step.
     pub fn eval_one(&mut self) {
         self.pvm.eval_one(&mut self.hooks)
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>>
-    PvmStepper<'_, MC, CL, Verifier, B>
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>>
+    PvmStepper<'_, MC, BCC, Verifier, B>
 {
     /// Try to take one step. Stepping with the [`Verifier`] backend may panic
     /// when attempting to access absent data. Return [`NotFound`] panics, which
@@ -348,12 +348,12 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>>
     }
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>, CL: CacheLayouts> Stepper
-    for PvmStepper<'_, MC, CL, Owned, B>
+impl<MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig> Stepper
+    for PvmStepper<'_, MC, BCC, Owned, B>
 {
     type MemoryConfig = MC;
 
-    type CacheLayouts = CL;
+    type BlockCacheConfig = BCC;
 
     type Manager = Owned;
 

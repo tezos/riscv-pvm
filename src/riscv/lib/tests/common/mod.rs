@@ -4,7 +4,7 @@
 
 use std::fs;
 
-use octez_riscv::machine_state::CacheLayouts;
+use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::pvm::PvmHooks;
@@ -13,7 +13,8 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
-pub fn make_stepper_factory<CL: CacheLayouts>() -> impl Fn() -> PvmStepper<'static, M64M, CL> {
+pub fn make_stepper_factory<BCC: BlockCacheConfig>() -> impl Fn() -> PvmStepper<'static, M64M, BCC>
+{
     let program = fs::read("../assets/jstz").unwrap();
     let initrd = None::<Vec<u8>>;
 
@@ -29,7 +30,7 @@ pub fn make_stepper_factory<CL: CacheLayouts>() -> impl Fn() -> PvmStepper<'stat
         let hooks = PvmHooks::none();
         let block_builder = InterpretedBlockBuilder;
 
-        PvmStepper::<'_, M64M, CL>::new(
+        PvmStepper::<'_, M64M, BCC>::new(
             &program,
             initrd.as_deref(),
             inbox.clone(),

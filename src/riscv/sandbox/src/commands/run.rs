@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::ops::Bound;
 
-use octez_riscv::machine_state::DefaultCacheLayouts;
+use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::block_cache::block::Block;
 use octez_riscv::machine_state::memory::M1G;
@@ -82,7 +82,7 @@ pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
     common: &CommonOptions,
     block_builder: B::BlockBuilder,
 ) -> Result<
-    PvmStepper<'static, M1G, DefaultCacheLayouts, Owned, B>,
+    PvmStepper<'static, M1G, DefaultCacheConfig, Owned, B>,
     std::boxed::Box<dyn std::error::Error>,
 > {
     let mut inbox = InboxBuilder::new();
@@ -102,7 +102,7 @@ pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
         let _written = console.write(&[c]).unwrap();
     });
 
-    let stepper = PvmStepper::<'_, M1G, DefaultCacheLayouts, Owned, B>::new(
+    let stepper = PvmStepper::<'_, M1G, DefaultCacheConfig, Owned, B>::new(
         program,
         initrd,
         inbox.build(),

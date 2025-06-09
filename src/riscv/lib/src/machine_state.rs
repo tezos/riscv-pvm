@@ -17,9 +17,6 @@ use std::ops::Bound;
 
 use block_cache::BlockCache;
 use block_cache::block::Block;
-pub use cache_layouts::CacheLayouts;
-pub use cache_layouts::DefaultCacheLayouts;
-pub use cache_layouts::TestCacheLayouts;
 use hart_state::HartState;
 use hart_state::HartStateLayout;
 use instruction::Instruction;
@@ -31,6 +28,7 @@ use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
 use crate::devicetree;
+use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::Instr;
 use crate::parser::instruction::InstrCacheable;
 use crate::parser::instruction::InstrUncacheable;
@@ -177,24 +175,28 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
 }
 
 /// Layout for the machine state - everything required to fetch & run instructions.
-pub type MachineStateLayout<MC, CL> = (
+pub type MachineStateLayout<MC, BCC> = (
     MachineCoreStateLayout<MC>,
-    <CL as CacheLayouts>::BlockCacheLayout,
+    <BCC as BlockCacheConfig>::Layout,
 );
 
 /// The machine state contains everything required to fetch & run instructions.
 pub struct MachineState<
     MC: memory::MemoryConfig,
-    CL: CacheLayouts,
+    BCC: block_cache::BlockCacheConfig,
     B: Block<MC, M>,
     M: backend::ManagerBase,
 > {
     pub core: MachineCoreState<MC, M>,
-    pub block_cache: BlockCache<CL::BlockCacheLayout, B, MC, M>,
+    pub block_cache: BCC::State<MC, B, M>,
 }
 
-impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M> + Clone, M: backend::ManagerClone>
-    Clone for MachineState<MC, CL, B, M>
+impl<
+    MC: memory::MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, M> + Clone,
+    M: backend::ManagerClone,
+> Clone for MachineState<MC, BCC, B, M>
 {
     fn clone(&self) -> Self {
         Self {
@@ -263,8 +265,8 @@ macro_rules! run_no_args_instr {
     }};
 }
 
-impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::ManagerBase>
-    MachineState<MC, CL, B, M>
+impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backend::ManagerBase>
+    MachineState<MC, BCC, B, M>
 {
     /// Allocate a new machine state.
     pub fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
@@ -281,7 +283,7 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     ///
     /// [block builder]: Block::BlockBuilder
     pub fn bind(
-        space: backend::AllocatedOf<MachineStateLayout<MC, CL>, M>,
+        space: backend::AllocatedOf<MachineStateLayout<MC, BCC>, M>,
         block_builder: B::BlockBuilder,
     ) -> Self
     where
@@ -289,7 +291,7 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     {
         Self {
             core: MachineCoreState::bind(space.0),
-            block_cache: BlockCache::bind(space.1, block_builder),
+            block_cache: BCC::bind(space.1, block_builder),
         }
     }
 
@@ -297,10 +299,10 @@ impl<MC: memory::MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: backend::Ma
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
         &'a self,
-    ) -> backend::AllocatedOf<MachineStateLayout<MC, CL>, F::Output> {
+    ) -> backend::AllocatedOf<MachineStateLayout<MC, BCC>, F::Output> {
         (
             self.core.struct_ref::<F>(),
-            self.block_cache.struct_ref::<F>(),
+            BCC::struct_ref::<MC, B, M, F>(&self.block_cache),
         )
     }
 
@@ -636,8 +638,9 @@ mod tests {
     use super::instruction::tagged_instruction::TaggedInstruction;
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::machine_state::DefaultCacheLayouts;
-    use crate::machine_state::TestCacheLayouts;
+    use crate::machine_state::block_cache::BlockCache;
+    use crate::machine_state::block_cache::DefaultCacheConfig;
+    use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -662,7 +665,7 @@ mod tests {
     use crate::traps::EnvironException;
 
     backend_test!(test_step, F, {
-        let state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
+        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
@@ -710,7 +713,7 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
+        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
@@ -736,7 +739,7 @@ mod tests {
     });
 
     backend_test!(test_step_exc_us, F, {
-        let state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
+        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
@@ -791,16 +794,16 @@ mod tests {
             }))
         ]);
 
-        type LocalLayout = MachineStateLayout<M4K, TestCacheLayouts>;
+        type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
 
         type BlockRunner<F> = Interpreted<M4K, <F as TestBackendFactory>::Manager>;
 
         type LocalMachineState<F> =
-            MachineState<M4K, TestCacheLayouts, BlockRunner<F>, <F as TestBackendFactory>::Manager>;
+            MachineState<M4K, TestCacheConfig, BlockRunner<F>, <F as TestBackendFactory>::Manager>;
 
         // Configure the machine state.
         let base_state = {
-            let mut state = MachineState::<M4K, TestCacheLayouts, BlockRunner<F>, _>::new(
+            let mut state = MachineState::<M4K, TestCacheConfig, BlockRunner<F>, _>::new(
                 &mut F::manager(),
                 InterpretedBlockBuilder,
             );
@@ -886,7 +889,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, DefaultCacheLayouts, Interpreted<M1M, _>, _>::new(
+        let state = MachineState::<M1M, DefaultCacheConfig, Interpreted<M1M, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
@@ -900,7 +903,7 @@ mod tests {
     });
 
     backend_test!(test_block_cache_crossing_pages_creates_new_block, F, {
-        let mut state = MachineState::<M8K, DefaultCacheLayouts, Interpreted<M8K, _>, _>::new(
+        let mut state = MachineState::<M8K, DefaultCacheConfig, Interpreted<M8K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
@@ -1050,7 +1053,7 @@ mod tests {
             },
         ];
 
-        let mut state = MachineState::<M4K, DefaultCacheLayouts, Interpreted<M4K, _>, _>::new(
+        let mut state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, _>, _>::new(
             &mut F::manager(),
             InterpretedBlockBuilder,
         );
