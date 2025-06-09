@@ -3,16 +3,16 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::boxed::Box;
+use std::error;
 use std::error::Error;
 use std::fs;
-use std::io::Write;
 use std::ops::Bound;
 
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::block_cache::block::Block;
 use octez_riscv::machine_state::memory::M1G;
-use octez_riscv::pvm::PvmHooks;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -71,14 +71,13 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+type PvmStepperRunner<B> = PvmStepper<Console<'static>, M1G, DefaultCacheConfig, Owned, B>;
+
 pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
     program: &[u8],
     common: &CommonOptions,
     block_builder: B::BlockBuilder,
-) -> Result<
-    PvmStepper<'static, M1G, DefaultCacheConfig, Owned, B>,
-    std::boxed::Box<dyn std::error::Error>,
-> {
+) -> Result<PvmStepperRunner<B>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -86,20 +85,16 @@ pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
 
     let rollup_address = SmartRollupAddress::from_b58check(common.inbox.address.as_str())?;
 
-    let mut console = if common.timings {
+    let console = if common.timings {
         Console::with_timings()
     } else {
         Console::new()
     };
 
-    let hooks = PvmHooks::new(move |c| {
-        let _written = console.write(&[c]).unwrap();
-    });
-
-    let stepper = PvmStepper::<'_, M1G, DefaultCacheConfig, Owned, B>::new(
+    let stepper = PvmStepper::<_, M1G, DefaultCacheConfig, Owned, B>::new(
         program,
         inbox.build(),
-        hooks,
+        console,
         rollup_address.into_hash().as_ref().try_into().unwrap(),
         common.inbox.origination_level,
         common.preimage.preimages_dir.clone(),

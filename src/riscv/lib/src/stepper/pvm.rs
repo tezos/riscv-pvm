@@ -27,9 +27,10 @@ use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
 use crate::program::Program;
 use crate::pvm::Pvm;
-use crate::pvm::PvmHooks;
 use crate::pvm::PvmLayout;
 use crate::pvm::PvmStatus;
+use crate::pvm::hooks::NoHooks;
+use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
@@ -64,28 +65,31 @@ pub enum PvmStepperError {
 
 /// Wrapper over a PVM that lets you step through it
 pub struct PvmStepper<
-    'hooks,
+    H,
     MC: MemoryConfig = M1G,
     BCC: BlockCacheConfig = DefaultCacheConfig,
     M: ManagerBase = Owned,
     B: Block<MC, M> = Interpreted<MC, M>,
 > {
     pvm: Pvm<MC, BCC, B, M>,
-    hooks: PvmHooks<'hooks>,
+    hooks: H,
     inbox: Inbox,
     rollup_address: [u8; 20],
     origination_level: u32,
     reveal_request_response_map: RevealRequestResponseMap,
 }
 
-impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
-    PvmStepper<'hooks, MC, BCC, Owned, B>
+/// Variant of the [`PvmStepper`] used for verifying proofs
+type PvmVerifier<MC, BCC> = PvmStepper<NoHooks, MC, BCC, Verifier, Interpreted<MC, Verifier>>;
+
+impl<H, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
+    PvmStepper<H, MC, BCC, Owned, B>
 {
     /// Create a new PVM stepper.
     pub fn new(
         program: &[u8],
         inbox: Inbox,
-        hooks: PvmHooks<'hooks>,
+        hooks: H,
         rollup_address: [u8; 20],
         origination_level: u32,
         preimages_dir: Option<Box<Path>>,
@@ -116,7 +120,7 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<'_, MC, BCC, Owned> {
+impl<H, MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<H, MC, BCC, Owned> {
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
     pub fn produce_proof(&mut self) -> Option<Proof>
@@ -133,8 +137,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<'_, MC, BCC, Owned> {
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWrite>
-    PvmStepper<'_, MC, BCC, M, B>
+impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWrite>
+    PvmStepper<H, MC, BCC, M, B>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
@@ -247,13 +251,11 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWri
     }
 }
 
-impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
-    PvmStepper<'hooks, MC, BCC, M>
-{
+impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper<H, MC, BCC, M> {
     /// Create a new stepper in which the existing PVM is managed by
     /// the proof-generating backend.
-    pub fn start_proof_mode<'a>(&'a self) -> PvmStepper<'hooks, MC, BCC, ProofGen<Ref<'a, M>>> {
-        PvmStepper::<'hooks, MC, BCC, ProofGen<Ref<'a, M>>> {
+    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, BCC, ProofGen<Ref<'_, M>>> {
+        PvmStepper {
             pvm: self.pvm.start_proof(),
             rollup_address: self.rollup_address,
             origination_level: self.origination_level,
@@ -264,7 +266,7 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
 
             // We don't want to re-use the same hooks to avoid polluting logs with refutation game
             // output. Instead we use hooks that don't do anything.
-            hooks: PvmHooks::none(),
+            hooks: NoHooks,
 
             reveal_request_response_map: self.reveal_request_response_map.clone(),
         }
@@ -323,8 +325,7 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
     fn as_verify_stepper(
         &self,
         space: AllocatedOf<PvmLayout<MC, BCC>, Verifier>,
-    ) -> Result<PvmStepper<MC, BCC, Verifier, Interpreted<MC, Verifier>>, ProofVerificationFailure>
-    {
+    ) -> Result<PvmVerifier<MC, BCC>, ProofVerificationFailure> {
         let pvm = Pvm::<MC, BCC, Interpreted<MC, Verifier>, Verifier>::bind(
             space,
             InterpretedBlockBuilder,
@@ -340,22 +341,24 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
 
             // We don't want to re-use the same hooks to avoid polluting logs with refutation game
             // output. Instead we use hooks that don't do anything.
-            hooks: PvmHooks::none(),
+            hooks: NoHooks,
 
             reveal_request_response_map: self.reveal_request_response_map.clone(),
         })
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper<'_, MC, BCC, M> {
+impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
+    PvmStepper<H, MC, BCC, M>
+{
     /// Perform one evaluation step.
     pub fn eval_one(&mut self) {
         self.pvm.eval_one(&mut self.hooks)
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>>
-    PvmStepper<'_, MC, BCC, Verifier, B>
+impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>>
+    PvmStepper<H, MC, BCC, Verifier, B>
 {
     /// Try to take one step. Stepping with the [`Verifier`] backend may panic
     /// when attempting to access absent data. Return [`NotFound`] panics, which
@@ -404,8 +407,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>>
     }
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig> Stepper
-    for PvmStepper<'_, MC, BCC, Owned, B>
+impl<H: PvmHooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig> Stepper
+    for PvmStepper<H, MC, BCC, Owned, B>
 {
     type MemoryConfig = MC;
 

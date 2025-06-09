@@ -16,9 +16,9 @@ use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::program::Program;
 use crate::pvm::InputRequest;
-use crate::pvm::common::PvmHooks;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
+use crate::pvm::hooks::PvmHooks;
 use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
@@ -126,14 +126,14 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
         })
     }
 
-    pub fn compute_step(&mut self, pvm_hooks: &mut PvmHooks)
+    pub fn compute_step(&mut self, pvm_hooks: impl PvmHooks)
     where
         M: state_backend::ManagerReadWrite,
     {
         self.with_backend_mut(|pvm| pvm.eval_one(pvm_hooks))
     }
 
-    pub fn compute_step_many(&mut self, pvm_hooks: &mut PvmHooks, max_steps: usize) -> i64
+    pub fn compute_step_many(&mut self, pvm_hooks: impl PvmHooks, max_steps: usize) -> i64
     where
         M: state_backend::ManagerReadWrite,
     {
@@ -178,7 +178,7 @@ impl NodePvm {
     pub fn produce_proof(
         &self,
         input: Option<PvmInput>,
-        pvm_hooks: &mut PvmHooks,
+        pvm_hooks: impl PvmHooks,
     ) -> Option<Proof> {
         let mut proof_state = self.state.start_proof();
 
@@ -204,7 +204,7 @@ impl NodePvm<Verifier> {
         merkle_proof_tree: &MerkleProof,
         final_state_hash: &Hash,
         input: Option<PvmInput>,
-        pvm_hooks: &mut PvmHooks,
+        pvm_hooks: impl PvmHooks,
     ) -> Option<InputRequest> {
         self.with_backend_mut(|pvm| {
             match input {
