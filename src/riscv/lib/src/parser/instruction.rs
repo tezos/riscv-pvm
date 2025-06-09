@@ -462,6 +462,10 @@ pub enum InstrCacheable {
     /// The `aq` and `rl` bits specify additional memory constraints in
     /// multi-hart environments so they are currently ignored.
     Amoswapw(AmoArgs),
+    /// `AMOADD.W` - Loads in rd the value from the address in rs1 and stores the result of
+    /// adding it to val(rs2) back to the address in rs1.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amoaddw(AmoArgs),
     Amoxorw(AmoArgs),
     Amoandw(AmoArgs),

@@ -3025,4 +3025,65 @@ mod tests {
             scenario.run(&mut jit, &mut interpreted_bb);
         }
     });
+
+    backend_test!(test_x32_atomic_add, F, {
+        use Instruction as I;
+
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
+        use crate::machine_state::registers::XRegister::*;
+
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+
+        const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
+
+        let scenarios: &[Scenario<F>] = &[
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory.write(ADDRESS_BASE_ATOMICS, 10).unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
+                    I::new_li(NZ::x2, 20, InstrWidth::Compressed),
+                    I::new_x32_atomic_add(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(4)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 10);
+
+                    let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
+                    assert_eq!(res, 30);
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory
+                        .write(ADDRESS_BASE_ATOMICS, 0xFFFF_FFFF_u32 as i32)
+                        .unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
+                    I::new_li(NZ::x2, 0xFFFF_FFFF, InstrWidth::Compressed),
+                    I::new_x32_atomic_add(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(4)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 0xFFFF_FFFF_FFFF_FFFF); // 0xFFFF_FFFF_FFFF_FFFF is the sign extended value of 0xFFFF_FFFF
+
+                    let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
+                    assert_eq!(res, -2i32 as u32); // 0xFFFF + 0xFFFF = 0x1FFFE, and 0xFFFE is -2 in 2's complement
+                }))
+                .build(),
+        ];
+
+        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut interpreted_bb = InterpretedBlockBuilder;
+
+        for scenario in scenarios {
+            scenario.run(&mut jit, &mut interpreted_bb);
+        }
+    });
 }
