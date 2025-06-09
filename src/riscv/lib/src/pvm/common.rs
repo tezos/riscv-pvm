@@ -10,6 +10,7 @@ use std::io::stdout;
 use std::ops::Bound;
 
 use tezos_smart_rollup_constants::riscv::SbiError;
+use tezos_smart_rollup_utils::console::Console;
 
 use super::linux;
 use super::reveals::RevealRequest;
@@ -48,39 +49,55 @@ use crate::storage::HashError;
 use crate::struct_layout;
 use crate::traps::EnvironException;
 
-/// PVM configuration
-pub struct PvmHooks<'a> {
-    pub putchar_hook: Box<dyn FnMut(u8) + 'a>,
-}
+/// PVM hooks
+pub trait PvmHooks {
+    /// Write bytes to the debug output.
+    fn write_debug_bytes(&mut self, bytes: &[u8]);
 
-impl<'a> PvmHooks<'a> {
-    /// Create a new configuration.
-    pub fn new<F: FnMut(u8) + 'a>(putchar: F) -> Self {
-        Self {
-            putchar_hook: Box::new(putchar),
-        }
+    /// Write a single byte to the debug output.
+    fn write_debug_byte(&mut self, char: u8) {
+        self.write_debug_bytes(&[char]);
     }
 }
 
-impl PvmHooks<'static> {
-    /// Hook that does nothing.
-    pub fn none() -> Self {
-        Self {
-            putchar_hook: Box::new(|_| {}),
-        }
+impl<H: PvmHooks> PvmHooks for &mut H {
+    fn write_debug_byte(&mut self, char: u8) {
+        H::write_debug_byte(self, char)
+    }
+
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        H::write_debug_bytes(self, bytes)
     }
 }
 
-/// The default PVM configuration prints all debug information from the kernel
-/// to the standard output.
-impl Default for PvmHooks<'_> {
-    fn default() -> Self {
-        fn putchar(char: u8) {
-            stdout().lock().write_all(&[char]).unwrap();
-        }
-
-        Self::new(putchar)
+impl PvmHooks for Console<'_> {
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        self.write_all(bytes).unwrap();
     }
+}
+
+impl PvmHooks for Vec<u8> {
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        self.extend_from_slice(bytes);
+    }
+}
+
+/// PVM hooks that write debug information to the standard output.
+pub struct StdoutDebugHooks;
+
+impl PvmHooks for StdoutDebugHooks {
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        stdout().write_all(bytes).unwrap();
+    }
+}
+
+/// Do nothing with the hooks
+pub struct NoHooks;
+
+impl PvmHooks for NoHooks {
+    fn write_debug_byte(&mut self, _char: u8) {}
+
+    fn write_debug_bytes(&mut self, _bytes: &[u8]) {}
 }
 
 /// Type of input that can be passed to the PVM
@@ -267,7 +284,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
     /// Handle an exception using the defined Execution Environment.
     // The conditional compilation below causes some warnings.
-    fn handle_exception(&mut self, hooks: &mut PvmHooks<'_>, _exception: EnvironException) -> bool
+    fn handle_exception(&mut self, hooks: impl PvmHooks, _exception: EnvironException) -> bool
     where
         M: state_backend::ManagerReadWrite,
     {
@@ -281,7 +298,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 
     /// Perform one evaluation step.
-    pub(crate) fn eval_one(&mut self, hooks: &mut PvmHooks<'_>)
+    pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
         M: state_backend::ManagerReadWrite,
     {
@@ -313,7 +330,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     /// (a possible case: the privilege mode access violation is treated in EE,
     /// but a page fault is not)
     // The conditional compilation below causes some warnings.
-    pub(crate) fn eval_max(&mut self, hooks: &mut PvmHooks<'_>, step_bounds: Bound<usize>) -> usize
+    pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
         M: state_backend::ManagerReadWrite,
     {
@@ -338,7 +355,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
-                    hooks,
+                    &mut hooks,
                 ))
             })
             .steps;
@@ -539,7 +556,7 @@ fn handle_system_call<MC, BCC, B, M>(
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
-    hooks: &mut PvmHooks,
+    hooks: impl PvmHooks,
 ) -> bool
 where
     MC: MemoryConfig,
@@ -555,8 +572,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::mem;
-
     use proptest::proptest;
     use rand::Fill;
     use rand::thread_rng;
@@ -634,7 +649,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(&mut Default::default(), EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for input
@@ -696,7 +711,6 @@ mod tests {
             type B = block::Interpreted<MC, Owned>;
 
             let mut buffer = Vec::new();
-            let mut hooks = PvmHooks::new(|c| buffer.push(c));
 
             // Setup PVM
             let mut pvm = Pvm::<MC, TestCacheConfig, B, _>::new(&mut Owned, InterpretedBlockBuilder);
@@ -733,10 +747,7 @@ mod tests {
                 .xregisters
                 .write(a2, written.len() as u64);
 
-            pvm.handle_exception(&mut hooks, EnvironException::EnvCall);
-
-            // Drop `hooks` to regain access to the mutable references it kept
-            mem::drop(hooks);
+            pvm.handle_exception(&mut buffer, EnvironException::EnvCall);
 
             // Compare what characters have been passed to the hook versus what we
             // intended to write
@@ -784,7 +795,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(&mut Default::default(), EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for reveal
@@ -860,7 +871,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(&mut Default::default(), EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for reveal
