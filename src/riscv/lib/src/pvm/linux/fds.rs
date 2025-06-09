@@ -19,6 +19,23 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
+    /// Handle `ioctl` system call.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man2/ioctl.2.html>
+    pub fn handle_ioctl(
+        &self,
+        _fd: parameters::FileDescriptorWriteable,
+        _op: u32,
+    ) -> Result<u64, Error> {
+        // In jstz this is only used to set the baud rate of the serial port when `/dev/urandom` is
+        // opened.
+        // In other programs, it is mainly used for controlling devices that don't exist in this
+        // PVM, so any effects are unlikely to be useful.
+        // To avoid an incoherent state, this stub fails every time. If an error code isn't
+        // checked, it's unlikely to be important.
+        Err(Error::NoTty)
+    }
+
     /// Write to a file descriptor.
     fn write_to_fd(
         &self,
