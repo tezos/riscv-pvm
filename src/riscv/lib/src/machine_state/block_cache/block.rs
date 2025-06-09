@@ -9,6 +9,7 @@ pub(crate) mod dispatch;
 mod interpreted;
 
 use dispatch::DispatchCompiler;
+pub use dispatch::DispatchFn;
 use dispatch::DispatchTarget;
 pub use dispatch::OutlineCompiler;
 pub use interpreted::Interpreted;
@@ -51,7 +52,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
     /// this is then passed as a parameter to [`Block::run_block`].
     ///
     /// `Sized` bound is required to ensure any reference to `BlockBuilder` will be thin -
-    /// see [`DispatchFn`].
+    /// see [`dispatch::DispatchFn`].
     type BlockBuilder: Default + Sized;
 
     /// Bind the block to the given allocated state.
@@ -120,24 +121,6 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
     where
         M: ManagerReadWrite;
 }
-
-/// The function signature for dispatching a block run.
-///
-/// Internally, this may be interpreted, just-in-time compiled, or do
-/// additional work over just execution.
-///
-/// The first and last parameters must be thin-references, for ABI-compatability reasons.
-#[expect(
-    improper_ctypes_definitions,
-    reason = "The receiving functions know the layout of the referenced types"
-)]
-pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
-    &mut Jitted<D, MC, M>,
-    &mut MachineCoreState<MC, M>,
-    Address,
-    &mut Result<(), EnvironException>,
-    &mut D,
-) -> usize;
 
 /// Blocks that are compiled to native code for execution, when possible.
 ///
