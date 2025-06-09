@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: MIT
 
 pub mod block_cache;
-mod cache_layouts;
 pub(crate) mod csregisters;
 pub(crate) mod hart_state;
 pub mod instruction;
