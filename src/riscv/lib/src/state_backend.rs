@@ -141,7 +141,7 @@ pub trait ManagerBase: Sized {
     /// to its regions. In this case, the root manager would be the owned backend.
     ///
     /// [`Owned`]: owned_backend::Owned
-    type ManagerRoot: ManagerBase;
+    type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 
     /// Upgrade a single-element region to an enriched cell.
     fn enrich_cell<V: EnrichedValueLinked>(cell: Self::Region<V::E, 1>) -> Self::EnrichedCell<V>;
