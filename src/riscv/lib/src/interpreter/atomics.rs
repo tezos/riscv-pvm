@@ -22,6 +22,15 @@ use crate::traps::Exception;
 pub const SC_SUCCESS: u64 = 0;
 pub const SC_FAILURE: u64 = 1;
 
+/// Option to control whether to reset the reservation set.
+#[derive(PartialEq, Eq)]
+pub enum ReservationSetOption {
+    /// Do not reset the reservation set.
+    NoReset,
+    /// Reset the reservation set.
+    Reset,
+}
+
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
@@ -102,7 +111,7 @@ fn run_x64_atomic<I: ICB>(
     let address_rs1 = icb.xregister_read(rs1);
 
     // Handle the case where the address is not aligned.
-    let result = icb.atomic_access_fault_guard::<u64>(address_rs1, false);
+    let result = icb.atomic_access_fault_guard::<u64>(address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
@@ -153,7 +162,7 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     // 64-bit words and four-byte aligned for 32-bit words). If the address
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, false);
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned and load the value from address in rs1.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
@@ -191,7 +200,7 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
     // icb.reset_reservation_set();
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, true);
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::Reset);
 
     I::and_then(result, |_| {
         let cond = test_and_unset_reservation_set::<V, I>(icb, address_rs1);
@@ -239,7 +248,7 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
     // 64-bit words and four-byte aligned for 32-bit words). If the address
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, false);
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));

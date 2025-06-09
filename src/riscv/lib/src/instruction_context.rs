@@ -16,6 +16,7 @@ use comparable::Comparable;
 
 pub use self::value::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
+use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::atomics::reset_reservation_set;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -163,7 +164,7 @@ pub(crate) trait ICB {
     fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        with_reset_reservation: bool,
+        reservation_set_option: ReservationSetOption,
     ) -> Self::IResult<()>;
 
     /// Map the fallible-value into a fallible-value of a different type.
@@ -361,14 +362,14 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Address,
-        with_reset_reservation: bool,
+        reservation_set_option: ReservationSetOption,
     ) -> Self::IResult<()> {
         let width = self.xvalue_of_imm(V::WIDTH as i64);
         let remainder = address.modulus_unsigned(width, self);
         let zero = self.xvalue_of_imm(0);
 
         if remainder.compare(zero, Predicate::NotEqual, self) {
-            if with_reset_reservation {
+            if let ReservationSetOption::Reset = reservation_set_option {
                 reset_reservation_set(self);
             }
             Err(Exception::StoreAMOAccessFault(address))
