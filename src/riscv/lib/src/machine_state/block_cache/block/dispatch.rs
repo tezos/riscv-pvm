@@ -16,14 +16,34 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use super::DispatchFn;
 use super::Jitted;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::JitStateAccess;
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
+use crate::traps::EnvironException;
+
+/// The function signature for dispatching a block run.
+///
+/// Internally, this may be interpreted, just-in-time compiled, or do
+/// additional work over just execution.
+///
+/// The first and last parameters must be thin-references, for ABI-compatability reasons.
+#[expect(
+    improper_ctypes_definitions,
+    reason = "The receiving functions know the layout of the referenced types"
+)]
+pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
+    &mut Jitted<D, MC, M>,
+    &mut MachineCoreState<MC, M>,
+    Address,
+    &mut Result<(), EnvironException>,
+    &mut D,
+) -> usize;
 
 /// Dispatch target that wraps a [`DispatchFn`].
 ///
