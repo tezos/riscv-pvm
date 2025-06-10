@@ -480,7 +480,7 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
 
         // After the recursive parsing, convert all pages into cells.
         Ok(pages_handler.map(|(pages, merkle)| {
-            let region = verify_backend::DynRegion::from_pages(pages);
+            let region = verify_backend::DynRegion::from_pages(pages, LEN);
             (super::DynCells::bind(region), merkle)
         }))
     }
