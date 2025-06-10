@@ -434,6 +434,7 @@ mod tests {
     use crate::state_backend::CommitmentLayout;
     use crate::state_backend::DynArray;
     use crate::state_backend::DynCells;
+    use crate::state_backend::ManagerAlloc;
     use crate::state_backend::ProofLayout;
     use crate::state_backend::Ref;
     use crate::state_backend::layout::Array;
@@ -544,7 +545,8 @@ mod tests {
         proptest!(|(byte_before: u8,
                     bytes_after: [u8; ELEM_SIZE],
                     write_address in &address_range)| {
-            let cells = Box::new([byte_before; DYN_REGION_SIZE]);
+            let mut cells = Owned.allocate_dyn_region::<DYN_REGION_SIZE>();
+            cells.fill(byte_before);
             let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
             let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
                 DynCells::bind(dyn_region);
@@ -559,7 +561,8 @@ mod tests {
             let value: u64 = dyn_cells.read(write_address);
             assert_eq!(value, value_after);
 
-            let cells = Box::new([byte_before; DYN_REGION_SIZE]);
+            let mut cells = Owned.allocate_dyn_region::<DYN_REGION_SIZE>();
+            cells.fill(byte_before);
             let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
             let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
                 DynCells::bind(dyn_region);
@@ -580,7 +583,8 @@ mod tests {
             dyn_cells.read_all(write_address, &mut value);
             assert_eq!(value, value_after);
 
-            let cells = Box::new([byte_before; DYN_REGION_SIZE]);
+            let mut cells = Owned.allocate_dyn_region::<DYN_REGION_SIZE>();
+            cells.fill(byte_before);
             let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
             let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
                 DynCells::bind(dyn_region);
@@ -601,15 +605,16 @@ mod tests {
                     bytes_after: [u8; ELEM_SIZE],
                     reads in array::uniform2(&address_range),
                     writes in array::uniform2(&address_range))| {
-            let dyn_array = Box::new([byte_before; DYN_REGION_SIZE]);
+            let mut cells = Owned.allocate_dyn_region::<DYN_REGION_SIZE>();
+            cells.fill(byte_before);
             let owned_dyn_cells: DynCells<DYN_REGION_SIZE, Ref<'_, Owned>> =
-                DynCells::bind(&dyn_array);
+                DynCells::bind(&cells);
             let initial_root_hash =
                 <DynArray<DYN_REGION_SIZE> as CommitmentLayout>::state_hash(owned_dyn_cells)
                     .unwrap();
 
             let mut proof_dyn_region: ProofDynRegion<DYN_REGION_SIZE, Ref<'_, Owned>> =
-                ProofDynRegion::bind(&dyn_array);
+                ProofDynRegion::bind(&cells);
 
             // Perform memory accesses
             let value_before = [byte_before; ELEM_SIZE];
