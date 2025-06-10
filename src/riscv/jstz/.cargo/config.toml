@@ -11,5 +11,5 @@ rustflags = [
   "-C",
   "target-feature=+crt-static",
   "-C",
-  "default-linker-libraries",
+  "default-linker-libraries=y",
 ]
