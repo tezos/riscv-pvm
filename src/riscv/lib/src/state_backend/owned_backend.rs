@@ -8,6 +8,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::mem::MaybeUninit;
+use std::ops::Deref;
 
 use serde::ser::SerializeTuple;
 
@@ -23,6 +24,7 @@ use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::StaticCopy;
+use crate::machine_state::memory::PAGE_SIZE;
 
 /// Manager that allows state binders to own the state storage
 #[derive(Clone, Copy, Debug)]
@@ -40,7 +42,7 @@ impl Owned {
 impl ManagerBase for Owned {
     type Region<E: 'static, const LEN: usize> = [E; LEN];
 
-    type DynRegion<const LEN: usize> = Box<[u8; LEN]>;
+    type DynRegion<const LEN: usize> = memmap2::MmapMut;
 
     type EnrichedCell<V: EnrichedValue> = (V::E, V::D);
 
@@ -63,13 +65,15 @@ impl ManagerAlloc for Owned {
     }
 
     fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
-        unsafe {
-            let layout = std::alloc::Layout::new::<[u8; LEN]>()
-                .align_to(4096)
-                .unwrap();
-            let alloc = std::alloc::alloc_zeroed(layout);
-            Box::from_raw(alloc.cast())
-        }
+        let region = memmap2::MmapMut::map_anon(LEN).expect("Failed to allocate dynamic region");
+
+        assert_eq!(
+            region.as_ptr().align_offset(PAGE_SIZE.get() as usize),
+            0,
+            "The dynamic region must be page-aligned"
+        );
+
+        region
     }
 }
 
@@ -106,7 +110,7 @@ impl ManagerRead for Owned {
         values: &mut [E],
     ) {
         for (i, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read(
+            *value = Self::dyn_region_read::<E, LEN>(
                 region,
                 E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
             );
@@ -171,7 +175,7 @@ impl ManagerWrite for Owned {
         values: &[E],
     ) {
         for (i, value) in values.iter().enumerate() {
-            Self::dyn_region_write(
+            Self::dyn_region_write::<E, LEN>(
                 region,
                 E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
                 *value,
@@ -227,7 +231,7 @@ impl ManagerSerialise for Owned {
         region: &Self::DynRegion<LEN>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(region.as_slice())
+        serializer.serialize_bytes(region.deref())
     }
 }
 
@@ -294,9 +298,44 @@ impl ManagerDeserialise for Owned {
     fn deserialise_dyn_region<'de, const LEN: usize, D: serde::de::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Self::DynRegion<LEN>, D::Error> {
-        let vec: Vec<u8> = serde::Deserialize::deserialize(deserializer)?;
-        vec.try_into()
-            .map_err(|_err| serde::de::Error::custom("Dynamic region of mismatching length"))
+        // The default borrowed bytes deserializer does not cover both the owned and borrowed
+        // cases. Hence we implement our own visitor that can handle both.
+        struct BytesVisitor<'a> {
+            target: &'a mut memmap2::MmapMut,
+        }
+
+        impl<'de> serde::de::Visitor<'de> for BytesVisitor<'_> {
+            type Value = ();
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a byte slice")
+            }
+
+            fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.target.copy_from_slice(bytes);
+                Ok(())
+            }
+
+            fn visit_borrowed_bytes<E>(self, bytes: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.target.copy_from_slice(bytes);
+                Ok(())
+            }
+        }
+
+        let mut region = Owned::allocate_dyn_region::<LEN>();
+
+        // This will deserialise, but also populate the region with the bytes.
+        deserializer.deserialize_bytes(BytesVisitor {
+            target: &mut region,
+        })?;
+
+        Ok(region)
     }
 }
 
@@ -308,7 +347,9 @@ impl ManagerClone for Owned {
     }
 
     fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
-        region.clone()
+        let mut new_region = Owned::allocate_dyn_region::<LEN>();
+        new_region.copy_from_slice(region.deref());
+        new_region
     }
 
     fn clone_enriched_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
@@ -385,7 +426,8 @@ pub(crate) mod test_helpers {
     #[test]
     fn dyn_cells_serialise() {
         proptest::proptest!(|(address in (0usize..120), value: u64)|{
-            let mut cells: DynCells<128, Owned> = DynCells::bind(Box::new([0u8; 128]));
+            let mapping = Owned::allocate_dyn_region::<128>();
+            let mut cells: DynCells<128, Owned> = DynCells::bind(mapping);
             cells.write(address, value);
             let bytes = bincode::serialize(&cells).unwrap();
 
