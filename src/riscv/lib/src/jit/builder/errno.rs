@@ -15,6 +15,7 @@ use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::frontend::FunctionBuilder;
 
+use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::atomics::reset_reservation_set;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::memory::MemoryConfig;
@@ -112,16 +113,20 @@ where
 pub(crate) struct AtomicAccessGuard {
     errno: ir::Value,
     address: ir::Value,
-    with_reset_reservation: bool,
+    reservation_set_option: ReservationSetOption,
 }
 
 impl AtomicAccessGuard {
     /// Construct a new `Errno` that must be handled.
-    pub(crate) fn new(errno: ir::Value, address: ir::Value, with_reset_reservation: bool) -> Self {
+    pub(crate) fn new(
+        errno: ir::Value,
+        address: ir::Value,
+        reservation_set_option: ReservationSetOption,
+    ) -> Self {
         Self {
             errno,
             address,
-            with_reset_reservation,
+            reservation_set_option,
         }
     }
 }
@@ -146,7 +151,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Errno<(), MC, JSA> for AtomicAccessG
         let exception_ptr = builder
             .jsa_call
             .raise_store_amo_access_fault_exception(&mut builder.builder, self.address);
-        if self.with_reset_reservation {
+        if let ReservationSetOption::Reset = self.reservation_set_option {
             // If the atomic operation was a store_conditional, we reset the reservation.
             reset_reservation_set(builder);
         }

@@ -33,6 +33,7 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::instruction_context::value::PhiValue;
+use crate::interpreter::atomics::ReservationSetOption;
 use crate::jit::builder::block_state::PCUpdate;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
@@ -438,7 +439,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn atomic_access_fault_guard<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        with_reset_reservation: bool,
+        reservation_set_option: ReservationSetOption,
     ) -> Self::IResult<()> {
         let width = self.xvalue_of_imm(V::WIDTH as i64);
         let remainder = address.modulus_unsigned(width, self);
@@ -449,7 +450,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         // comparison here.
         let zero = self.xvalue_of_imm(0);
         let not_aligned = remainder.compare(zero, Predicate::NotEqual, self);
-        let errno = AtomicAccessGuard::new(not_aligned, address.0, with_reset_reservation);
+        let errno = AtomicAccessGuard::new(not_aligned, address.0, reservation_set_option);
         errno.handle(self);
 
         Some(())

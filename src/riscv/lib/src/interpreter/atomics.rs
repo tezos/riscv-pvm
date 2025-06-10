@@ -22,6 +22,15 @@ use crate::traps::Exception;
 pub const SC_SUCCESS: u64 = 0;
 pub const SC_FAILURE: u64 = 1;
 
+/// Option to control whether to reset the reservation set.
+#[derive(PartialEq, Eq)]
+pub enum ReservationSetOption {
+    /// Do not reset the reservation set.
+    NoReset,
+    /// Reset the reservation set.
+    Reset,
+}
+
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
@@ -102,7 +111,7 @@ fn run_x64_atomic<I: ICB>(
     let address_rs1 = icb.xregister_read(rs1);
 
     // Handle the case where the address is not aligned.
-    let result = icb.atomic_access_fault_guard::<u64>(address_rs1, false);
+    let result = icb.atomic_access_fault_guard::<u64>(address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
@@ -153,7 +162,7 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     // 64-bit words and four-byte aligned for 32-bit words). If the address
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, false);
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned and load the value from address in rs1.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
@@ -191,7 +200,7 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
     // icb.reset_reservation_set();
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, true);
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::Reset);
 
     I::and_then(result, |_| {
         let cond = test_and_unset_reservation_set::<V, I>(icb, address_rs1);
@@ -218,6 +227,79 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
             },
         )
     })
+}
+
+/// Atomically swaps the value in `rs2` with the value at the memory address in `rs1`.
+/// The original memory value is loaded into `rd`.
+/// The operation is atomic, meaning no other memory operations can occur between the load and store.
+/// The `aq` and `rl` bits specify additional memory ordering constraints in
+/// multi-hart environments so they are currently ignored.
+/// The address in `rs1` must be naturally aligned to the size of the operand.
+pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+) -> I::IResult<()> {
+    let address_rs1 = icb.xregister_read(rs1);
+
+    // "The A extension requires that the address held in rs1 be naturally
+    // aligned to the size of the operand (i.e., eight-byte aligned for
+    // 64-bit words and four-byte aligned for 32-bit words). If the address
+    // is not naturally aligned, an address-misaligned exception or
+    // an access-fault exception will be generated."
+    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
+
+    // Continue with the operation if the address is aligned.
+    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
+
+    // Continue with the operation if the load was successful.
+    I::and_then(val_rs1_result, |val_rs1| {
+        // Get the value to store from rs2
+        let val_rs2 = icb.xregister_read(rs2);
+
+        // Write the original value from memory to rd
+        icb.xregister_write(rd, val_rs1);
+
+        // Store rs2's value to memory
+        icb.main_memory_store::<V>(address_rs1, val_rs2)
+    })
+}
+
+/// Performs a 32-bit atomic swap operation.
+/// Atomically swaps the low 32 bits of `rs2` with the 32-bit value at the memory address in `rs1`.
+/// The original 32-bit memory value is sign-extended and loaded into `rd`.
+/// The operation is atomic, meaning no other memory operations can occur between the load and store.
+/// The `aq` and `rl` bits specify additional memory ordering constraints in
+/// multi-hart environments so they are currently ignored.
+/// The address in `rs1` must be 4-byte aligned.
+pub fn run_x32_atomic_swap<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _rl: bool,
+    _aq: bool,
+) -> I::IResult<()> {
+    run_atomic_swap::<I, i32>(icb, rs1, rs2, rd)
+}
+
+/// Performs a 64-bit atomic swap operation.
+/// Atomically swaps the value in `rs2` with the 64-bit value at the memory address in `rs1`.
+/// The original 64-bit memory value is loaded into `rd`.
+/// The operation is atomic, meaning no other memory operations can occur between the load and store.
+/// The `aq` and `rl` bits specify additional memory ordering constraints in
+/// multi-hart environments so they are currently ignored.
+/// The address in `rs1` must be 8-byte aligned.
+pub fn run_x64_atomic_swap<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _rl: bool,
+    _aq: bool,
+) -> I::IResult<()> {
+    run_atomic_swap::<I, i64>(icb, rs1, rs2, rd)
 }
 
 /// Loads a word from the address in `rs1`, places the
@@ -450,6 +532,22 @@ pub(crate) mod test {
         u64
     );
 
+    test_atomic!(
+        test_run_x64_atomic_swap,
+        super::run_x64_atomic_swap,
+        |_, val_rs2| val_rs2,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x32_atomic_swap,
+        super::run_x32_atomic_swap,
+        |_, val_rs2| val_rs2,
+        4,
+        i32
+    );
+
     test_atomic_loadstore!(
         test_x64_atomic_loadstore,
         run_x64_atomic_load,
@@ -465,6 +563,7 @@ pub(crate) mod test {
         8,
         u32
     );
+
     test_atomic_loadstore!(
         test_atomic_loadstore_x32_x64,
         run_x32_atomic_load,

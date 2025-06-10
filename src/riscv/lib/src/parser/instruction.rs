@@ -457,6 +457,10 @@ pub enum InstrCacheable {
     /// In case of success, write 0 in `rd`, otherwise write 1.
     /// See also [crate::machine_state::reservation_set].
     Scw(AmoArgs),
+    ///`AMOSWAP.W` - Loads in rd the value from the address in rs1 and writes val(rs2)
+    /// back to the address in rs1.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amoswapw(AmoArgs),
     Amoaddw(AmoArgs),
     Amoxorw(AmoArgs),
@@ -475,6 +479,10 @@ pub enum InstrCacheable {
     /// In case of success, write 0 in `rd`, otherwise write 1.
     /// See also [crate::machine_state::reservation_set].
     Scd(AmoArgs),
+    /// `AMOSWAP.D` - Loads in rd the value from the address in rs1 and writes val(rs2)
+    /// back to the address in rs1.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amoswapd(AmoArgs),
     ///`AMOADD.D` - Loads in rd the value from the address in rs1 and stores the result of
     /// adding it to val(rs2) back to the address in rs1.
