@@ -127,7 +127,7 @@ pub trait ManagerBase: Sized {
     type Region<E: 'static, const LEN: usize>;
 
     /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
-    type DynRegion<const LEN: usize>;
+    type DynRegion;
 
     /// An [enriched] value may have a derived value attached.
     ///
@@ -162,7 +162,7 @@ pub trait ManagerAlloc: 'static + ManagerReadWrite {
     ) -> Self::Region<E, LEN>;
 
     /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region<const LEN: usize>(&mut self) -> Self::DynRegion<LEN>;
+    fn allocate_dyn_region(&mut self, len: usize) -> Self::DynRegion;
 }
 
 /// Manager with read capabilities
@@ -176,18 +176,14 @@ pub trait ManagerRead: ManagerBase {
     /// Read all elements in the region.
     fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E>;
 
+    /// Read the length of the region.
+    fn dyn_region_len(region: &Self::DynRegion) -> usize;
+
     /// Read an element in the region. `address` is in bytes.
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E;
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
 
     /// Read elements from the region. `address` is in bytes.
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    );
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]);
 
     /// Read the value contained in the enriched cell.
     fn enriched_cell_read_stored<V>(cell: &Self::EnrichedCell<V>) -> V::E
@@ -220,18 +216,10 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
     fn region_write_all<E: Copy, const LEN: usize>(region: &mut Self::Region<E, LEN>, value: &[E]);
 
     /// Update an element in the region. `address` is in bytes.
-    fn dyn_region_write<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        value: E,
-    );
+    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
 
     /// Update multiple elements in the region. `address` is in bytes.
-    fn dyn_region_write_all<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        values: &[E],
-    );
+    fn dyn_region_write_all<E: Elem>(region: &mut Self::DynRegion, address: usize, values: &[E]);
 
     /// Update the value contained in an enriched cell. The derived value will be recalculated.
     fn enriched_cell_write<V>(cell: &mut Self::EnrichedCell<V>, value: V::E)
@@ -258,8 +246,8 @@ pub trait ManagerSerialise: ManagerRead {
     ) -> Result<S::Ok, S::Error>;
 
     /// Serialise the contents of the dynamic region.
-    fn serialise_dyn_region<const LEN: usize, S: serde::Serializer>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<S: serde::Serializer>(
+        region: &Self::DynRegion,
         serializer: S,
     ) -> Result<S::Ok, S::Error>;
 }
@@ -277,9 +265,9 @@ pub trait ManagerDeserialise: ManagerBase {
     ) -> Result<Self::Region<E, LEN>, D::Error>;
 
     /// Deserialise the dyanmic region.
-    fn deserialise_dyn_region<'de, const LEN: usize, D: serde::Deserializer<'de>>(
+    fn deserialise_dyn_region<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Self::DynRegion<LEN>, D::Error>;
+    ) -> Result<Self::DynRegion, D::Error>;
 }
 
 /// Manager with the ability to clone regions
@@ -290,7 +278,7 @@ pub trait ManagerClone: ManagerBase {
     ) -> Self::Region<E, LEN>;
 
     /// Clone the dynamic region.
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN>;
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
 
     /// Clone the enriched cell.
     fn clone_enriched_cell<V>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
@@ -306,7 +294,7 @@ pub struct Ref<'backend, M>(std::marker::PhantomData<fn(&'backend M)>);
 impl<'backend, M: ManagerBase> ManagerBase for Ref<'backend, M> {
     type Region<E: 'static, const LEN: usize> = &'backend M::Region<E, LEN>;
 
-    type DynRegion<const LEN: usize> = &'backend M::DynRegion<LEN>;
+    type DynRegion = &'backend M::DynRegion;
 
     type EnrichedCell<V: EnrichedValue> = &'backend M::Region<V::E, 1>;
 
@@ -329,8 +317,8 @@ impl<M: ManagerSerialise> ManagerSerialise for Ref<'_, M> {
         M::serialise_region(region, serializer)
     }
 
-    fn serialise_dyn_region<const LEN: usize, S: serde::Serializer>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<S: serde::Serializer>(
+        region: &Self::DynRegion,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         M::serialise_dyn_region(region, serializer)
@@ -350,18 +338,15 @@ impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
         M::region_read_all(region)
     }
 
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        M::dyn_region_len(region)
+    }
+
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         M::dyn_region_read(region, address)
     }
 
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    ) {
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
         M::dyn_region_read_all(region, address, values)
     }
 

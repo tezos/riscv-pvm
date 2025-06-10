@@ -241,7 +241,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         perms: Permissions,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerWrite;
+        M: ManagerReadWrite;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(

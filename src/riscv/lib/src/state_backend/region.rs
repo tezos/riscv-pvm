@@ -480,27 +480,43 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
 }
 
 /// Multiple elements of an unspecified type
-pub struct DynCells<const LEN: usize, M: ManagerBase> {
-    region: M::DynRegion<LEN>,
+pub struct DynCells<M: ManagerBase> {
+    region: M::DynRegion,
 }
 
-impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
+impl<M: ManagerBase> DynCells<M> {
     /// Bind this state to the given dynamic region.
-    pub fn bind(region: M::DynRegion<LEN>) -> Self {
+    pub fn bind(region: M::DynRegion) -> Self {
         Self { region }
     }
 
     /// Obtain a reference to the underlying dynamic region.
-    pub fn region_ref(&self) -> &M::DynRegion<LEN> {
+    pub fn region_ref(&self) -> &M::DynRegion {
         &self.region
     }
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> DynCells<LEN, F::Output> {
+    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> DynCells<F::Output> {
         DynCells {
             region: F::map_dyn_region(&self.region),
         }
+    }
+
+    /// Get the length of the dynamic region in bytes.
+    pub fn len(&self) -> usize
+    where
+        M: ManagerRead,
+    {
+        M::dyn_region_len(&self.region)
+    }
+
+    /// Check if the dynamic region is empty.
+    pub fn is_empty(&self) -> bool
+    where
+        M: ManagerRead,
+    {
+        self.len() == 0
     }
 
     /// Read an element in the region. `address` is in bytes.
@@ -540,17 +556,18 @@ impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
     }
 }
 
-impl<const LEN: usize, M: ManagerBase> NewState<M> for DynCells<LEN, M> {
-    fn new(manager: &mut M) -> Self
+impl<M: ManagerBase> DynCells<M> {
+    /// Create new DynCells with the specified length
+    pub fn new(manager: &mut M, len: usize) -> Self
     where
         M: ManagerAlloc,
     {
-        let region = manager.allocate_dyn_region();
+        let region = manager.allocate_dyn_region(len);
         Self { region }
     }
 }
 
-impl<const LEN: usize, M: ManagerSerialise> serde::Serialize for DynCells<LEN, M> {
+impl<M: ManagerSerialise> serde::Serialize for DynCells<M> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -559,7 +576,7 @@ impl<const LEN: usize, M: ManagerSerialise> serde::Serialize for DynCells<LEN, M
     }
 }
 
-impl<'de, const LEN: usize, M: ManagerDeserialise> serde::Deserialize<'de> for DynCells<LEN, M> {
+impl<'de, M: ManagerDeserialise> serde::Deserialize<'de> for DynCells<M> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -569,11 +586,13 @@ impl<'de, const LEN: usize, M: ManagerDeserialise> serde::Deserialize<'de> for D
     }
 }
 
-impl<const LEN: usize, M: ManagerRead, N: ManagerRead> PartialEq<DynCells<LEN, N>>
-    for DynCells<LEN, M>
-{
-    fn eq(&self, other: &DynCells<LEN, N>) -> bool {
-        for i in 0..LEN {
+impl<M: ManagerRead, N: ManagerRead> PartialEq<DynCells<N>> for DynCells<M> {
+    fn eq(&self, other: &DynCells<N>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for i in 0..self.len() {
             if self.read::<u8>(i) != other.read::<u8>(i) {
                 return false;
             }
@@ -582,9 +601,9 @@ impl<const LEN: usize, M: ManagerRead, N: ManagerRead> PartialEq<DynCells<LEN, N
     }
 }
 
-impl<const LEN: usize, M: ManagerRead> Eq for DynCells<LEN, M> {}
+impl<M: ManagerRead> Eq for DynCells<M> {}
 
-impl<const LEN: usize, M: ManagerClone> Clone for DynCells<LEN, M> {
+impl<M: ManagerClone> Clone for DynCells<M> {
     fn clone(&self) -> Self {
         Self {
             region: M::clone_dyn_region(&self.region),
@@ -732,7 +751,7 @@ pub(crate) mod tests {
             const LEN: usize = 8;
 
             let mut manager = F::manager();
-            let mut state = DynCells::<LEN, _>::new(&mut manager);
+            let mut state = DynCells::new(&mut manager, LEN);
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
@@ -743,7 +762,7 @@ pub(crate) mod tests {
     backend_test!(test_dynregion_stored_format, F, {
         // Writing to one item of the region must convert to stored format.
         let mut manager = F::manager();
-        let mut region = DynCells::<1024, _>::new(&mut manager);
+        let mut region = DynCells::new(&mut manager, 1024);
 
         region.write(0, Flipper { a: 13, b: 37 });
         assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });

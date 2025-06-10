@@ -11,8 +11,10 @@ use super::PAGE_SIZE;
 use super::Permissions;
 use super::buddy::Buddy;
 use super::protection::PagePermissions;
+use crate::state::NewState;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -22,7 +24,7 @@ use crate::state_backend::ManagerWrite;
 /// Machine's memory
 pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase> {
     /// Memory contents
-    pub(super) data: DynCells<TOTAL_BYTES, M>,
+    pub(super) data: DynCells<M>,
 
     /// Read permissions per page
     pub(super) readable_pages: PagePermissions<PAGES, M>,
@@ -42,8 +44,11 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
 {
     /// Ensure the access is within bounds.
     #[inline]
-    fn check_bounds<E>(address: Address, length: usize, error: E) -> Result<(), E> {
-        if length > TOTAL_BYTES.saturating_sub(address as usize) {
+    fn check_bounds<E>(&self, address: Address, length: usize, error: E) -> Result<(), E>
+    where
+        M: ManagerRead,
+    {
+        if length > self.data.len().saturating_sub(address as usize) {
             return Err(error);
         }
 
@@ -70,15 +75,35 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     ) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerWrite,
+        M: ManagerReadWrite,
     {
         let length = mem::size_of::<E>();
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        self.check_bounds(address, length, BadMemoryAccess)?;
 
         self.data.write(address as usize, value);
         self.readable_pages.modify_access(address, length, true);
         self.executable_pages.modify_access(address, length, true);
         Ok(())
+    }
+}
+
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> NewState<M>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+where
+    B: NewState<M>,
+    M: ManagerBase,
+{
+    fn new(manager: &mut M) -> Self
+    where
+        M: ManagerAlloc,
+    {
+        MemoryImpl {
+            data: DynCells::new(manager, TOTAL_BYTES),
+            readable_pages: PagePermissions::new(manager),
+            writable_pages: PagePermissions::new(manager),
+            executable_pages: PagePermissions::new(manager),
+            allocated_pages: B::new(manager),
+        }
     }
 }
 
@@ -94,7 +119,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        self.check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -114,7 +139,7 @@ where
     {
         let length = mem::size_of::<E>();
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        self.check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -137,7 +162,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        self.check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -159,7 +184,7 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        self.check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -177,7 +202,7 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        self.check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -235,9 +260,9 @@ where
         perms: Permissions,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: ManagerWrite,
+        M: ManagerReadWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        self.check_bounds(address, length, super::MemoryGovernanceError)?;
 
         self.readable_pages
             .modify_access(address, length, perms.can_read());
@@ -257,7 +282,7 @@ where
     where
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        self.check_bounds(address, length, super::MemoryGovernanceError)?;
 
         // See RV-561: Use `u64` for indices and lengths that come from the PVM
         let pages = (length as u64).div_ceil(super::PAGE_SIZE.get());
@@ -286,7 +311,7 @@ where
         match address_hint {
             // Caller wants to allocate at a specific address
             Some(address) => {
-                Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+                self.check_bounds(address, length, super::MemoryGovernanceError)?;
 
                 // Buddy memory manager works on page indices, not addresses
                 let idx = address >> super::OFFSET_BITS;
@@ -347,30 +372,27 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
     use crate::backend_test;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::state::NewState;
     use crate::state_backend::owned_backend::Owned;
 
     #[test]
     fn bounds_check() {
-        type OwnedM0 = MemoryImpl<0, 0, (), Owned>;
         type OwnedM4K = <M4K as MemoryConfig>::State<Owned>;
 
+        let owned_m4k = OwnedM4K::new(&mut Owned);
+
         // Zero-sized reads or writes are always valid
-        assert!(OwnedM0::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM0::check_bounds(1, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(4096, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 0, ()).is_ok());
+        assert!(owned_m4k.check_bounds(0, 0, ()).is_ok());
+        assert!(owned_m4k.check_bounds(4096, 0, ()).is_ok());
+        assert!(owned_m4k.check_bounds(2 * 4096, 0, ()).is_ok());
 
         // Bounds checks
-        assert!(OwnedM0::check_bounds(0, 1, ()).is_err());
-        assert!(OwnedM0::check_bounds(1, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(4096, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 1, ()).is_err());
+        assert!(owned_m4k.check_bounds(4096, 1, ()).is_err());
+        assert!(owned_m4k.check_bounds(2 * 4096, 1, ()).is_err());
     }
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the

@@ -80,7 +80,7 @@ pub struct Verifier;
 impl ManagerBase for Verifier {
     type Region<E: 'static, const LEN: usize> = Region<E, LEN>;
 
-    type DynRegion<const LEN: usize> = DynRegion<{ MERKLE_LEAF_SIZE.get() }, LEN>;
+    type DynRegion = DynRegion<{ MERKLE_LEAF_SIZE.get() }>;
 
     type EnrichedCell<V: EnrichedValue> = EnrichedCell<V>;
 
@@ -110,10 +110,11 @@ impl ManagerRead for Verifier {
         (0..LEN).map(|index| region[index]).collect()
     }
 
-    fn dyn_region_read<E: super::Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        region.length
+    }
+
+    fn dyn_region_read<E: super::Elem>(region: &Self::DynRegion, address: usize) -> E {
         let mut value = MaybeUninit::<E>::uninit();
 
         // SAFETY: `raw_data` points to a byte slice which has same size as `E`.
@@ -132,8 +133,8 @@ impl ManagerRead for Verifier {
         value
     }
 
-    fn dyn_region_read_all<E: super::Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
+    fn dyn_region_read_all<E: super::Elem>(
+        region: &Self::DynRegion,
         address: usize,
         values: &mut [E],
     ) {
@@ -211,8 +212,8 @@ impl ManagerWrite for Verifier {
         }
     }
 
-    fn dyn_region_write<E: super::Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write<E: super::Elem>(
+        region: &mut Self::DynRegion,
         address: usize,
         mut value: E,
     ) {
@@ -227,8 +228,8 @@ impl ManagerWrite for Verifier {
         region.write_bytes(address, raw_data);
     }
 
-    fn dyn_region_write_all<E: super::Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write_all<E: super::Elem>(
+        region: &mut Self::DynRegion,
         base_address: usize,
         values: &[E],
     ) {
@@ -265,7 +266,7 @@ impl ManagerClone for Verifier {
         region.clone()
     }
 
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         region.clone()
     }
 
@@ -463,25 +464,29 @@ impl<const LEAF_SIZE: usize> Default for Page<LEAF_SIZE> {
 
 /// Verifier dynamic region
 #[derive(Clone, Debug)]
-pub struct DynRegion<const LEAF_SIZE: usize, const LEN: usize> {
+pub struct DynRegion<const LEAF_SIZE: usize> {
+    length: usize,
     pages: BTreeMap<PageId<LEAF_SIZE>, Page<LEAF_SIZE>>,
 }
 
-impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
-    const SANE: bool = {
-        if LEN.rem_euclid(LEAF_SIZE) != 0 {
-            panic!("LEN must be a multiple of LEAF_SIZE")
+impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
+    /// Construct a new empty dynamic region with the given length.
+    pub fn new(length: usize) -> Self {
+        Self {
+            length,
+            pages: BTreeMap::new(),
         }
+    }
 
-        true
-    };
-
-    /// Construct a verifier dynamic region using the given known pages.
+    /// Construct a verifier dynamic region using the given known pages. This returns `None` if the
+    /// total length is not a multiple of `LEAF_SIZE`.
     pub fn from_pages(
         pages: impl IntoIterator<Item = (PageId<LEAF_SIZE>, Box<[u8; LEAF_SIZE]>)>,
+        length: usize,
     ) -> Self {
-        if !Self::SANE {
-            unreachable!()
+        if length.rem_euclid(LEAF_SIZE) != 0 {
+            // TODO: Find better way than panicking here.
+            panic!();
         }
 
         let pages = pages
@@ -489,7 +494,7 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             .map(|(id, data)| (id, Page::from_full(data)))
             .collect();
 
-        DynRegion { pages }
+        DynRegion { length, pages }
     }
 
     /// Read bytes from the dynamic region.
@@ -498,7 +503,7 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             return;
         }
 
-        if buffer.len() > LEN.saturating_sub(address) {
+        if buffer.len() > self.length.saturating_sub(address) {
             not_found()
         }
 
@@ -532,7 +537,7 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             return;
         }
 
-        if buffer.len() > LEN.saturating_sub(address) {
+        if buffer.len() > self.length.saturating_sub(address) {
             not_found()
         }
 
@@ -562,14 +567,6 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             Some(page) if page.is_fully_available() => PartialState::Complete(page.data.as_ref()),
             Some(_) => PartialState::Incomplete,
             None => PartialState::Absent,
-        }
-    }
-}
-
-impl<const LEAF_SIZE: usize, const LEN: usize> Default for DynRegion<LEAF_SIZE, LEN> {
-    fn default() -> Self {
-        DynRegion {
-            pages: BTreeMap::new(),
         }
     }
 }
@@ -789,7 +786,7 @@ mod tests {
     fn dyn_region_continuous() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::default();
+        let mut dyn_region = DynRegion::new(LEAF_SIZE * 3);
         dyn_region.write_bytes(
             0,
             [1, 3, 3, 7]
@@ -809,7 +806,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<{ 3 * LEAF_SIZE }, Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
         assert_eq_found!(dyn_cells.read::<[u8; 4]>(0), [1, 3, 3, 7]);
@@ -854,7 +851,7 @@ mod tests {
     fn dyn_region_gaps() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::default();
+        let mut dyn_region = DynRegion::new(LEAF_SIZE * 3);
         dyn_region.write_bytes(
             0,
             [7, 3, 3]
@@ -874,7 +871,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<{ 3 * LEAF_SIZE }, Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
         assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);
         assert_eq_found!(dyn_cells.read::<[u8; 2]>(1), [3, 3]);

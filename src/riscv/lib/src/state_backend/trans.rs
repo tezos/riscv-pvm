@@ -15,9 +15,7 @@ pub trait FnManager<I: ManagerBase> {
     ) -> <Self::Output as ManagerBase>::Region<E, LEN>;
 
     /// Transform the dynamic region of manager `I` to one of manager `O`.
-    fn map_dyn_region<const LEN: usize>(
-        input: I::DynRegion<LEN>,
-    ) -> <Self::Output as ManagerBase>::DynRegion<LEN>;
+    fn map_dyn_region(input: I::DynRegion) -> <Self::Output as ManagerBase>::DynRegion;
 }
 
 /// Identity transformation for [`FnManager`]
@@ -30,7 +28,7 @@ impl<M: ManagerBase> FnManager<M> for FnManagerIdent {
         input
     }
 
-    fn map_dyn_region<const LEN: usize>(input: M::DynRegion<LEN>) -> M::DynRegion<LEN> {
+    fn map_dyn_region(input: M::DynRegion) -> M::DynRegion {
         input
     }
 }
