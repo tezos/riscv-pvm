@@ -92,24 +92,6 @@ where
         })
     }
 
-    /// `AMOMINU.D` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the minimum
-    /// between it and val(rs2) back to the address in rs1, treating both as
-    /// unsigned values.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amominud(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_d(rs1, rs2, rd, u64::min)
-    }
-
     /// `AMOMAXU.D` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and stores the maximum
@@ -156,8 +138,6 @@ mod test {
         8,
         u64
     );
-
-    test_amo!(run_amominud, u64::min, 8, u64);
 
     test_amo!(run_amomaxud, u64::max, 8, u64);
 }

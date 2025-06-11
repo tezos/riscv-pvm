@@ -283,7 +283,7 @@ pub enum OpCode {
     Amoord,
     X64AtomicMinSigned,
     Amomaxd,
-    Amominud,
+    X64AtomicMinUnsigned,
     Amomaxud,
 
     // RV64M division instructions
@@ -502,7 +502,7 @@ impl OpCode {
             Self::Amoord => Args::run_amoord,
             Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
             Self::Amomaxd => Args::run_amomaxd,
-            Self::Amominud => Args::run_amominud,
+            Self::X64AtomicMinUnsigned => Args::run_x64_atomic_min_unsigned,
             Self::Amomaxud => Args::run_amomaxud,
             Self::X64RemSigned => Args::run_x64_rem_signed,
             Self::X64RemUnsigned => Args::run_x64_rem_unsigned,
@@ -717,6 +717,7 @@ impl OpCode {
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
+            Self::X64AtomicMinUnsigned => Some(Args::run_x64_atomic_min_unsigned),
             Self::X32AtomicAdd => Some(Args::run_x32_atomic_add),
 
             // Errors
@@ -1505,7 +1506,10 @@ impl Args {
         run_x64_atomic_min_signed
     );
     impl_amo_type!(run_amomaxd);
-    impl_amo_type!(run_amominud);
+    impl_amo_type!(
+        atomics::run_x64_atomic_min_unsigned,
+        run_x64_atomic_min_unsigned
+    );
     impl_amo_type!(run_amomaxud);
 
     // RV64M multiplication and division instructions
@@ -1969,10 +1973,14 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Amomaxd,
                 args: args.into(),
             },
-            InstrCacheable::Amominud(args) => Instruction {
-                opcode: OpCode::Amominud,
-                args: args.into(),
-            },
+            InstrCacheable::Amominud(args) => Instruction::new_x64_atomic_min_unsigned(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amomaxud(args) => Instruction {
                 opcode: OpCode::Amomaxud,
                 args: args.into(),
