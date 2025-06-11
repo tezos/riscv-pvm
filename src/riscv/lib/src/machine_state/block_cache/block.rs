@@ -10,6 +10,7 @@ mod interpreted;
 mod jitted;
 
 pub use dispatch::DispatchFn;
+pub use dispatch::InlineCompiler;
 pub use dispatch::OutlineCompiler;
 pub use interpreted::Interpreted;
 pub use interpreted::InterpretedBlockBuilder;

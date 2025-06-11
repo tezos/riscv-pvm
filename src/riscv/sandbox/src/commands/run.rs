@@ -31,7 +31,7 @@ cfg_if::cfg_if! {
         type BlockImplInner = block::Interpreted<M1G, Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Jitted<octez_riscv::jit::JIT<M1G, Owned>, M1G, Owned>;
+        type BlockImplInner = block::Jitted<octez_riscv::machine_state::block_cache::block::InlineCompiler<M1G, Owned>, M1G, Owned>;
     } else {
         /// Inner execution strategy for blocks.
         type BlockImplInner = block::Jitted<
