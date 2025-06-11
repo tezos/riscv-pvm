@@ -3,10 +3,35 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::sync::Once;
+
 use tezos_smart_rollup::entrypoint;
 use tezos_smart_rollup::prelude::*;
+use tezos_smart_rollup::storage::path::RefPath;
+// use tezos_smart_rollup_installer_config::yaml::YamlConfig;
 
 #[entrypoint::main]
 pub fn entry(host: &mut impl Runtime) {
+    static ONCE: Once = Once::new();
+
+    ONCE.call_once(|| {
+        let values = [
+            ("/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/balance", "00000000000000000000dc0a0713000c1e020000000000000000000000000000"),
+            ("/evm/ticketer", "4b5431445841445357587563414a3650756a5a6555534b39627270546f46744339667a36"),
+            ("/evm/feature_flags/enable_fa_bridge", "01"),
+            ("/evm/world_state/eth_accounts/0000000000000000000000000000000000000000/ticket_table/8cddc35907a9062880f22f5c815bb5f808ddfc4839363eb2762a4f0300917cbe/f0affc80a5f69f4a9a3ee01a640873b6ba53e539", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"),
+            ("/evm/world_state/eth_accounts/0000000000000000000000000000000000000000/ticket_table/fc2a0f0107d0e2d1b32bd9d99dd3da5bbda4edf016e64d5eec8d64310d3eeb88/f0affc80a5f69f4a9a3ee01a640873b6ba53e539", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F"),
+            ("/tezlink/context/contracts/index/000002298c03ed7d454a101eb7022bc95f7e5f41ac78/balance", "00"),
+        ];
+
+        for (path, value) in values {
+            let data = hex::decode(value).unwrap();
+            host.store_write_all(
+                &RefPath::assert_from(path.as_bytes()),
+                &data,
+            ).unwrap();
+        }
+    });
+
     evm_kernel::kernel_loop(host);
 }

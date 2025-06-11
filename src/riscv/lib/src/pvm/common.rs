@@ -511,6 +511,10 @@ where
 {
     system_state.handle_system_call(core, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
+        eprintln!(
+            "(octez_riscv_pvm::common::handle_system_call) Finished, PVM status is {:?}",
+            status.read()
+        );
         status.read() == PvmStatus::Evaluating
     })
 }

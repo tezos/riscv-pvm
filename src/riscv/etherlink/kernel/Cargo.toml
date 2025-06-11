@@ -4,6 +4,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
+hex = "0.4.3"
 tezos-smart-rollup.workspace = true
 
 [dependencies.evm_kernel]
