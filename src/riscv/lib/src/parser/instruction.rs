@@ -493,6 +493,8 @@ pub enum InstrCacheable {
     Amoxord(AmoArgs),
     Amoandd(AmoArgs),
     Amoord(AmoArgs),
+    /// `AMOMIN.D` Loads in `rd` the value from the address in `rs1` and stores the minimum
+    /// between it and `val(rs2)` back to the address in `rs1`.
     Amomind(AmoArgs),
     Amomaxd(AmoArgs),
     Amominud(AmoArgs),
