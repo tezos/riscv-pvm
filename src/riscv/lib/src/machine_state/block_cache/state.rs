@@ -5,6 +5,7 @@
 
 use std::marker::PhantomData;
 
+use crate::array_utils;
 use crate::cache_utils::FenceCounter;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -109,7 +110,7 @@ impl<M: ManagerBase> PartialBlock<M> {
         // start a new block
         self.in_progress.write(true);
         self.progress.write(0);
-        self.addr.write(entry.address.read());
+        self.addr.write(entry.address);
 
         self.run_partial_inner(core, max_steps, entry)
     }
@@ -200,51 +201,36 @@ impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
     }
 }
 
-/// The layout of block cache entries, see [`Cached`] for more information.
-pub type CachedLayout = (Atom<Address>, Atom<FenceCounter>);
-
 /// Block cache entry.
 ///
 /// Contains the physical address & fence counter for validity checks, the
 /// underlying [`Block`] state.
 pub struct Cached<MC: MemoryConfig, B, M: ManagerBase> {
     pub(super) block: B,
-    address: Cell<Address, M>,
-    fence_counter: Cell<FenceCounter, M>,
-    _pd: PhantomData<MC>,
+    address: Address,
+    fence_counter: FenceCounter,
+    _pd: PhantomData<(MC, M)>,
 }
 
 impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
-    /// Bind the allocated space to produce a [`Cached`] entry.
-    pub(super) fn bind(space: AllocatedOf<CachedLayout, M>) -> Self
+    /// Create a new cache entry.
+    pub fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            address: space.0,
-            fence_counter: space.1,
             block: B::new(),
+            address: !0,
+            fence_counter: FenceCounter::INITIAL,
             _pd: PhantomData,
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the [`CachedLayout`]'s allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    pub(super) fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
-        &'a self,
-    ) -> AllocatedOf<CachedLayout, F::Output> {
-        (
-            self.address.struct_ref::<F>(),
-            self.fence_counter.struct_ref::<F>(),
-        )
     }
 
     fn invalidate(&mut self)
     where
         M: ManagerWrite,
     {
-        self.address.write(!0);
+        self.address = !0;
         self.block.invalidate();
     }
 
@@ -252,8 +238,8 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerReadWrite,
     {
-        self.address.write(!0);
-        self.fence_counter.write(FenceCounter::INITIAL);
+        self.address = !0;
+        self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
@@ -261,32 +247,18 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerWrite,
     {
-        self.address.write(block_addr);
+        self.address = block_addr;
         self.block.start_block();
-        self.fence_counter.write(fence_counter);
-    }
-}
-
-impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<MC, B, M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            address: Cell::new_with(manager, !0),
-            block: B::new(),
-            fence_counter: Cell::new(manager),
-            _pd: PhantomData,
-        }
+        self.fence_counter = fence_counter;
     }
 }
 
 impl<MC: MemoryConfig, B: Clone, M: ManagerClone> Clone for Cached<MC, B, M> {
     fn clone(&self) -> Self {
         Self {
-            address: self.address.clone(),
+            address: self.address,
             block: self.block.clone(),
-            fence_counter: self.fence_counter.clone(),
+            fence_counter: self.fence_counter,
             _pd: PhantomData,
         }
     }
@@ -355,7 +327,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let fence_counter = self.fence_counter.read();
 
         let mut entry = Self::entry_mut(&mut self.entries, block_addr);
-        let start = entry.address.read();
+        let start = entry.address;
 
         let mut len_instr = entry.block.num_instr();
 
@@ -380,8 +352,8 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         self.next_instr_addr.write(next_addr);
 
         let possible_block = Self::entry(&self.entries, next_addr);
-        let adjacent_block_found = possible_block.address.read() == next_addr
-            && possible_block.fence_counter.read() == fence_counter
+        let adjacent_block_found = possible_block.address == next_addr
+            && possible_block.fence_counter == fence_counter
             && next_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
@@ -427,7 +399,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             next_instr_addr: Cell::new_with(manager, !0),
             fence_counter: Cell::new(manager),
             partial_block: PartialBlock::new(manager),
-            entries: NewState::new(manager),
+            entries: array_utils::boxed_from_fn(|| Cached::new()),
             block_builder,
         }
     }
@@ -486,8 +458,8 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
         let entry = Self::entry_mut(&mut self.entries, addr);
 
-        if entry.address.read() == addr
-            && self.fence_counter.read() == entry.fence_counter.read()
+        if entry.address == addr
+            && self.fence_counter.read() == entry.fence_counter
             && entry.block.num_instr() > 0
         {
             Some(BlockCall {

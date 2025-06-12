@@ -4,10 +4,10 @@
 // SPDX-License-Identifier: MIT
 
 use super::block::Block;
+use crate::array_utils;
 use crate::cache_utils::FenceCounter;
 use crate::machine_state::block_cache::state::BlockCache;
 use crate::machine_state::block_cache::state::Cached;
-use crate::machine_state::block_cache::state::CachedLayout;
 use crate::machine_state::block_cache::state::PartialBlock;
 use crate::machine_state::block_cache::state::PartialBlockLayout;
 use crate::machine_state::memory::Address;
@@ -17,7 +17,6 @@ use crate::state_backend::Atom;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::Many;
 use crate::state_backend::Ref;
 
 /// Configuration for a block cache
@@ -63,7 +62,6 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
         Atom<Address>,
         Atom<FenceCounter>,
         PartialBlockLayout,
-        Many<CachedLayout, SIZE>,
     );
 
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = BlockCache<SIZE, B, MC, M>;
@@ -83,14 +81,7 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
             next_instr_addr: space.1,
             fence_counter: space.2,
             partial_block: PartialBlock::bind(space.3),
-            entries: space
-                .4
-                .into_iter()
-                .map(Cached::bind)
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| "mismatching vector lengths for instruction cache")
-                .unwrap(),
+            entries: array_utils::boxed_from_fn(|| Cached::new()),
             block_builder,
         }
     }
@@ -109,11 +100,6 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
             instance.next_instr_addr.struct_ref::<F>(),
             instance.fence_counter.struct_ref::<F>(),
             instance.partial_block.struct_ref::<F>(),
-            instance
-                .entries
-                .iter()
-                .map(|entry| entry.struct_ref::<F>())
-                .collect(),
         )
     }
 }
