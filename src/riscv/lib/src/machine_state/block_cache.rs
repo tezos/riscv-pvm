@@ -162,7 +162,7 @@ pub struct BlockCall<'a, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     ///
     /// The same block builder must always be passed through to `run_block`.
     builder: &'a mut B::BlockBuilder,
-    partial: &'a mut state::PartialBlock<M>,
+    partial: &'a mut state::PartialBlock,
 }
 
 impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC, M> {

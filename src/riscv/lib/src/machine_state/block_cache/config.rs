@@ -9,7 +9,6 @@ use crate::cache_utils::FenceCounter;
 use crate::machine_state::block_cache::state::BlockCache;
 use crate::machine_state::block_cache::state::Cached;
 use crate::machine_state::block_cache::state::PartialBlock;
-use crate::machine_state::block_cache::state::PartialBlockLayout;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::AllocatedOf;
@@ -57,12 +56,7 @@ impl<const SIZE: usize> BlockCacheConfig<SIZE> {
 }
 
 impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
-    type Layout = (
-        Atom<Address>,
-        Atom<Address>,
-        Atom<FenceCounter>,
-        PartialBlockLayout,
-    );
+    type Layout = (Atom<Address>, Atom<Address>, Atom<FenceCounter>);
 
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = BlockCache<SIZE, B, MC, M>;
 
@@ -80,7 +74,7 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
             current_block_addr: space.0,
             next_instr_addr: space.1,
             fence_counter: space.2,
-            partial_block: PartialBlock::bind(space.3),
+            partial_block: PartialBlock::new(),
             entries: array_utils::boxed_from_fn(|| Cached::new()),
             block_builder,
         }
@@ -99,7 +93,6 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
             instance.current_block_addr.struct_ref::<F>(),
             instance.next_instr_addr.struct_ref::<F>(),
             instance.fence_counter.struct_ref::<F>(),
-            instance.partial_block.struct_ref::<F>(),
         )
     }
 }

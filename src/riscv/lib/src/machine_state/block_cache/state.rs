@@ -21,21 +21,14 @@ use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
-
-/// Layout of a partial block.
-pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 
 /// Structure used to remember that a block was only partway executed
 /// before needing to pause due to `max_steps == 0`.
@@ -44,52 +37,27 @@ pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 /// - an error occurs
 /// - a jump or branch occurs then the partial block is reset, and execution will continue with a
 ///   potentially different block.
-pub struct PartialBlock<M: ManagerBase> {
-    addr: Cell<Address, M>,
-    in_progress: Cell<bool, M>,
-    progress: Cell<u8, M>,
+#[derive(Clone)]
+pub struct PartialBlock {
+    addr: Address,
+    in_progress: bool,
+    progress: u8,
 }
 
-impl<M: ManagerClone> Clone for PartialBlock<M> {
-    fn clone(&self) -> Self {
+impl PartialBlock {
+    /// Create a new partial block.
+    pub(super) fn new() -> Self {
         Self {
-            addr: self.addr.clone(),
-            in_progress: self.in_progress.clone(),
-            progress: self.progress.clone(),
-        }
-    }
-}
-
-impl<M: ManagerBase> PartialBlock<M> {
-    /// Bind the allocated space to produce a [`PartialBlock`].
-    pub(super) fn bind(space: AllocatedOf<PartialBlockLayout, M>) -> Self {
-        Self {
-            addr: space.0,
-            in_progress: space.1,
-            progress: space.2,
+            addr: !0,
+            in_progress: false,
+            progress: 0,
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the [`PartialBlockLayout`]'s allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    pub(super) fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
-        &'a self,
-    ) -> AllocatedOf<PartialBlockLayout, F::Output> {
-        (
-            self.addr.struct_ref::<F>(),
-            self.in_progress.struct_ref::<F>(),
-            self.progress.struct_ref::<F>(),
-        )
-    }
-
-    fn reset(&mut self)
-    where
-        M: ManagerWrite,
-    {
-        self.in_progress.write(false);
-        self.addr.write(0);
-        self.progress.write(0);
+    fn reset(&mut self) {
+        self.in_progress = false;
+        self.addr = 0;
+        self.progress = 0;
     }
 
     /// Run a block against the machine state.
@@ -98,30 +66,34 @@ impl<M: ManagerBase> PartialBlock<M> {
     /// this, you must always run [`super::BlockCache::complete_current_block`] prior to fetching
     /// and running a new block.
     #[cold]
-    pub(super) fn run_block_partial<B: Block<MC, M>, MC: MemoryConfig>(
+    pub(super) fn run_block_partial<MC, B, M>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
     ) -> StepManyResult<EnvironException>
     where
+        MC: MemoryConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // start a new block
-        self.in_progress.write(true);
-        self.progress.write(0);
-        self.addr.write(entry.address);
+        self.in_progress = true;
+        self.progress = 0;
+        self.addr = entry.address;
 
         self.run_partial_inner(core, max_steps, entry)
     }
 
-    fn run_partial_inner<B: Block<MC, M>, MC: MemoryConfig>(
+    fn run_partial_inner<MC, B, M>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
     ) -> StepManyResult<EnvironException>
     where
+        MC: MemoryConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         let mut result = StepManyResult::ZERO;
@@ -132,7 +104,7 @@ impl<M: ManagerBase> PartialBlock<M> {
             return result;
         }
 
-        let mut progress = self.progress.read();
+        let mut progress = self.progress;
         let mut instr_pc = core.hart.pc.read();
 
         let range = progress as usize..;
@@ -181,23 +153,10 @@ impl<M: ManagerBase> PartialBlock<M> {
         } else {
             // Remember the progress made through the block, when we later
             // continue executing it
-            self.progress.write(progress);
+            self.progress = progress;
         }
 
         result
-    }
-}
-
-impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            addr: Cell::new(manager),
-            in_progress: Cell::new(manager),
-            progress: Cell::new(manager),
-        }
     }
 }
 
@@ -281,7 +240,7 @@ pub struct BlockCache<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: M
     pub(super) fence_counter: Cell<FenceCounter, M>,
 
     /// Current block being executed
-    pub(super) partial_block: PartialBlock<M>,
+    pub(super) partial_block: PartialBlock,
 
     /// Block entries
     pub(super) entries: Entries<SIZE, MC, B, M>,
@@ -398,7 +357,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             current_block_addr: Cell::new_with(manager, !0),
             next_instr_addr: Cell::new_with(manager, !0),
             fence_counter: Cell::new(manager),
-            partial_block: PartialBlock::new(manager),
+            partial_block: PartialBlock::new(),
             entries: array_utils::boxed_from_fn(|| Cached::new()),
             block_builder,
         }
@@ -452,7 +411,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         M: ManagerRead,
     {
         debug_assert!(
-            !self.partial_block.in_progress.read(),
+            !self.partial_block.in_progress,
             "Get block was called with a partial block in progress"
         );
 
@@ -528,11 +487,11 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        if !self.partial_block.in_progress.read() {
+        if !self.partial_block.in_progress {
             return StepManyResult::ZERO;
         }
 
-        let entry = Self::entry_mut(&mut self.entries, self.partial_block.addr.read());
+        let entry = Self::entry_mut(&mut self.entries, self.partial_block.addr);
 
         self.partial_block.run_partial_inner(core, max_steps, entry)
     }
@@ -754,9 +713,9 @@ mod tests {
         };
 
         assert_eq!(steps, 5);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(5, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute no steps
@@ -767,9 +726,9 @@ mod tests {
         };
 
         assert_eq!(steps, 0);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(5, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute the next 2 instructions
@@ -780,9 +739,9 @@ mod tests {
         };
 
         assert_eq!(steps, 2);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(7, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(7, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 7 * 4, core_state.hart.pc.read());
 
         // Finish the block. We don't consume all the steps
@@ -793,9 +752,9 @@ mod tests {
         };
 
         assert_eq!(steps, 3);
-        assert!(!block_state.partial_block.in_progress.read());
-        assert_eq!(0, block_state.partial_block.progress.read());
-        assert_eq!(0, block_state.partial_block.addr.read());
+        assert!(!block_state.partial_block.in_progress);
+        assert_eq!(0, block_state.partial_block.progress);
+        assert_eq!(0, block_state.partial_block.addr);
         assert_eq!(block_addr + 10 * 4, core_state.hart.pc.read());
     });
 
