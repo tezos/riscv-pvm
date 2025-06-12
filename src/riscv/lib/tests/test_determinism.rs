@@ -48,7 +48,7 @@ fn test_jstz_determinism() {
 fn run_steps_ladder<F>(
     make_stepper: F,
     ladder: &[usize],
-    expected_refs: &RefOwnedAlloc<PvmLayout<M64M, DefaultCacheConfig>>,
+    expected_refs: &RefOwnedAlloc<PvmLayout<M64M>>,
     expected_hash: hash::Hash,
 ) where
     F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
@@ -114,8 +114,8 @@ where
 }
 
 fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2>(
-    refs: RefOwnedAlloc<'regions1, PvmLayout<M64M, DefaultCacheConfig>>,
-    expected: &'a RefOwnedAlloc<'regions2, PvmLayout<M64M, DefaultCacheConfig>>,
+    refs: RefOwnedAlloc<'regions1, PvmLayout<M64M>>,
+    expected: &'a RefOwnedAlloc<'regions2, PvmLayout<M64M>>,
 ) {
     // SAFETY: Rust does not allow us to compare two references with different lifetimes.
     // Theoretically this should be possible and safe thanks to `PartialEq`. However, Rust's
@@ -125,7 +125,6 @@ fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2>(
     // the `==` operator need to be identical in type. This also means lifetimes are forcibly
     // unified. We can work around this by transmuting the references to the same lifetime. This is
     // safe because lifetimes are not violated as dictated by the interface of this function.
-    let refs: RefOwnedAlloc<'regions2, PvmLayout<M64M, DefaultCacheConfig>> =
-        unsafe { std::mem::transmute(refs) };
+    let refs: RefOwnedAlloc<'regions2, PvmLayout<M64M>> = unsafe { std::mem::transmute(refs) };
     assert_eq_struct(&refs, expected);
 }

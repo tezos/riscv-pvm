@@ -96,15 +96,10 @@ use super::memory::Address;
 use super::memory::MemoryConfig;
 use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::instruction::Args;
-use crate::state_backend;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
@@ -197,9 +192,9 @@ fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
 /// Block cache implementation
 pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     /// Instantiate a new block cache instance.
-    fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
+    fn new(block_builder: B::BlockBuilder) -> Self
     where
-        M: ManagerAlloc;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Clone the entire block cache.
     fn clone(&self) -> Self
@@ -245,32 +240,6 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
 
 /// Configuration for a block cache
 pub trait BlockCacheConfig {
-    /// Layout for the block cache instance's state
-    type Layout: state_backend::CommitmentLayout + state_backend::ProofLayout;
-
     /// Block cache instance
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>: BlockCache<MC, B, M>;
-
-    /// Bind the allocated regions to produce a memory instance.
-    fn bind<MC, B, M>(
-        space: AllocatedOf<Self::Layout, M>,
-        block_builder: B::BlockBuilder,
-    ) -> Self::State<MC, B, M>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        M::ManagerRoot: ManagerReadWrite;
-
-    /// Given a manager morphism `f : &M -> N`, return the block cache instance layout's allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    fn struct_ref<'a, MC, B, M, F>(
-        instance: &'a Self::State<MC, B, M>,
-    ) -> AllocatedOf<Self::Layout, F::Output>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        F: FnManager<Ref<'a, M>>;
 }
