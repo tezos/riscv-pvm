@@ -5,6 +5,7 @@
 
 use std::marker::PhantomData;
 
+use crate::array_utils;
 use crate::cache_utils::FenceCounter;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -19,22 +20,12 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Atom;
-use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
-
-/// Layout of a partial block.
-pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 
 /// Structure used to remember that a block was only partway executed
 /// before needing to pause due to `max_steps == 0`.
@@ -43,52 +34,27 @@ pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 /// - an error occurs
 /// - a jump or branch occurs then the partial block is reset, and execution will continue with a
 ///   potentially different block.
-pub struct PartialBlock<M: ManagerBase> {
-    addr: Cell<Address, M>,
-    in_progress: Cell<bool, M>,
-    progress: Cell<u8, M>,
+#[derive(Clone)]
+pub struct PartialBlock {
+    addr: Address,
+    in_progress: bool,
+    progress: u8,
 }
 
-impl<M: ManagerClone> Clone for PartialBlock<M> {
-    fn clone(&self) -> Self {
+impl PartialBlock {
+    /// Create a new partial block.
+    pub(super) fn new() -> Self {
         Self {
-            addr: self.addr.clone(),
-            in_progress: self.in_progress.clone(),
-            progress: self.progress.clone(),
-        }
-    }
-}
-
-impl<M: ManagerBase> PartialBlock<M> {
-    /// Bind the allocated space to produce a [`PartialBlock`].
-    pub(super) fn bind(space: AllocatedOf<PartialBlockLayout, M>) -> Self {
-        Self {
-            addr: space.0,
-            in_progress: space.1,
-            progress: space.2,
+            addr: !0,
+            in_progress: false,
+            progress: 0,
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the [`PartialBlockLayout`]'s allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    pub(super) fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
-        &'a self,
-    ) -> AllocatedOf<PartialBlockLayout, F::Output> {
-        (
-            self.addr.struct_ref::<F>(),
-            self.in_progress.struct_ref::<F>(),
-            self.progress.struct_ref::<F>(),
-        )
-    }
-
-    fn reset(&mut self)
-    where
-        M: ManagerWrite,
-    {
-        self.in_progress.write(false);
-        self.addr.write(0);
-        self.progress.write(0);
+    fn reset(&mut self) {
+        self.in_progress = false;
+        self.addr = 0;
+        self.progress = 0;
     }
 
     /// Run a block against the machine state.
@@ -97,30 +63,34 @@ impl<M: ManagerBase> PartialBlock<M> {
     /// this, you must always run [`super::BlockCache::complete_current_block`] prior to fetching
     /// and running a new block.
     #[cold]
-    pub(super) fn run_block_partial<B: Block<MC, M>, MC: MemoryConfig>(
+    pub(super) fn run_block_partial<MC, B, M>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
     ) -> StepManyResult<EnvironException>
     where
+        MC: MemoryConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // start a new block
-        self.in_progress.write(true);
-        self.progress.write(0);
-        self.addr.write(entry.address.read());
+        self.in_progress = true;
+        self.progress = 0;
+        self.addr = entry.address;
 
         self.run_partial_inner(core, max_steps, entry)
     }
 
-    fn run_partial_inner<B: Block<MC, M>, MC: MemoryConfig>(
+    fn run_partial_inner<MC, B, M>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
     ) -> StepManyResult<EnvironException>
     where
+        MC: MemoryConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         let mut result = StepManyResult::ZERO;
@@ -131,7 +101,7 @@ impl<M: ManagerBase> PartialBlock<M> {
             return result;
         }
 
-        let mut progress = self.progress.read();
+        let mut progress = self.progress;
         let mut instr_pc = core.hart.pc.read();
 
         let range = progress as usize..;
@@ -180,33 +150,12 @@ impl<M: ManagerBase> PartialBlock<M> {
         } else {
             // Remember the progress made through the block, when we later
             // continue executing it
-            self.progress.write(progress);
+            self.progress = progress;
         }
 
         result
     }
 }
-
-impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            addr: Cell::new(manager),
-            in_progress: Cell::new(manager),
-            progress: Cell::new(manager),
-        }
-    }
-}
-
-/// The layout of block cache entries, see [`Cached`] for more information.
-pub type CachedLayout = (
-    Atom<Address>,
-    Atom<FenceCounter>,
-    Atom<u8>,
-    [Atom<Instruction>; CACHE_INSTR],
-);
 
 /// Block cache entry.
 ///
@@ -214,45 +163,30 @@ pub type CachedLayout = (
 /// underlying [`Block`] state.
 pub struct Cached<MC: MemoryConfig, B, M: ManagerBase> {
     pub(super) block: B,
-    address: Cell<Address, M>,
-    fence_counter: Cell<FenceCounter, M>,
-    _pd: PhantomData<MC>,
+    address: Address,
+    fence_counter: FenceCounter,
+    _pd: PhantomData<(MC, M)>,
 }
 
 impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
-    /// Bind the allocated space to produce a [`Cached`] entry.
-    pub(super) fn bind(space: AllocatedOf<CachedLayout, M>) -> Self
+    /// Create a new cache entry.
+    pub fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            address: space.0,
-            fence_counter: space.1,
-            block: B::bind((space.2, space.3)),
+            block: B::new(),
+            address: !0,
+            fence_counter: FenceCounter::INITIAL,
             _pd: PhantomData,
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the [`CachedLayout`]'s allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    pub(super) fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
-        &'a self,
-    ) -> AllocatedOf<CachedLayout, F::Output> {
-        let (len_instr, instr) = self.block.struct_ref::<'a, F>();
-        (
-            self.address.struct_ref::<F>(),
-            self.fence_counter.struct_ref::<F>(),
-            len_instr,
-            instr,
-        )
     }
 
     fn invalidate(&mut self)
     where
         M: ManagerWrite,
     {
-        self.address.write(!0);
+        self.address = !0;
         self.block.invalidate();
     }
 
@@ -260,8 +194,8 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerReadWrite,
     {
-        self.address.write(!0);
-        self.fence_counter.write(FenceCounter::INITIAL);
+        self.address = !0;
+        self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
@@ -269,32 +203,18 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     where
         M: ManagerWrite,
     {
-        self.address.write(block_addr);
+        self.address = block_addr;
         self.block.start_block();
-        self.fence_counter.write(fence_counter);
-    }
-}
-
-impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<MC, B, M> {
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            address: Cell::new_with(manager, !0),
-            block: B::new(manager),
-            fence_counter: Cell::new(manager),
-            _pd: PhantomData,
-        }
+        self.fence_counter = fence_counter;
     }
 }
 
 impl<MC: MemoryConfig, B: Clone, M: ManagerClone> Clone for Cached<MC, B, M> {
     fn clone(&self) -> Self {
         Self {
-            address: self.address.clone(),
+            address: self.address,
             block: self.block.clone(),
-            fence_counter: self.fence_counter.clone(),
+            fence_counter: self.fence_counter,
             _pd: PhantomData,
         }
     }
@@ -308,16 +228,16 @@ type Entries<const SIZE: usize, MC, B, M> = Box<[Cached<MC, B, M>; SIZE]>;
 /// The number of entries is controlled by the `BCL` layout parameter.
 pub struct BlockCache<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     /// Starting address of the current block
-    pub(super) current_block_addr: Cell<Address, M>,
+    pub(super) current_block_addr: Address,
 
     /// The address of the next instruction to be injected into the current block
-    pub(super) next_instr_addr: Cell<Address, M>,
+    pub(super) next_instr_addr: Address,
 
     /// Fence counter for the entire block cache
-    pub(super) fence_counter: Cell<FenceCounter, M>,
+    pub(super) fence_counter: FenceCounter,
 
     /// Current block being executed
-    pub(super) partial_block: PartialBlock<M>,
+    pub(super) partial_block: PartialBlock,
 
     /// Block entries
     pub(super) entries: Entries<SIZE, MC, B, M>,
@@ -338,8 +258,8 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerWrite,
     {
-        self.current_block_addr.write(addr);
-        self.next_instr_addr.write(0);
+        self.current_block_addr = addr;
+        self.next_instr_addr = 0;
     }
 
     /// Add the instruction into a block.
@@ -355,11 +275,11 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        let mut block_addr = self.current_block_addr.read();
-        let fence_counter = self.fence_counter.read();
+        let mut block_addr = self.current_block_addr;
+        let fence_counter = self.fence_counter;
 
         let mut entry = Self::entry_mut(&mut self.entries, block_addr);
-        let start = entry.address.read();
+        let start = entry.address;
 
         let mut len_instr = entry.block.num_instr();
 
@@ -381,11 +301,11 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let new_len = len_instr + 1;
 
         let next_addr = addr + WIDTH;
-        self.next_instr_addr.write(next_addr);
+        self.next_instr_addr = next_addr;
 
         let possible_block = Self::entry(&self.entries, next_addr);
-        let adjacent_block_found = possible_block.address.read() == next_addr
-            && possible_block.fence_counter.read() == fence_counter
+        let adjacent_block_found = possible_block.address == next_addr
+            && possible_block.fence_counter == fence_counter
             && next_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
@@ -395,14 +315,14 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
                 // Need to resolve the adjacent block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let new_block = Self::entry_mut(&mut self.entries, next_addr);
-                let new_instr = new_block.block.instr()[i].read_stored();
+                let new_instr = new_block.block.instr()[i].instr;
                 // Need to resolve the target block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let current_entry = Self::entry_mut(&mut self.entries, block_addr);
                 current_entry.block.push_instr(new_instr);
             }
-            self.next_instr_addr.write(!0);
-            self.current_block_addr.write(!0);
+            self.next_instr_addr = !0;
+            self.current_block_addr = !0;
         }
     }
 
@@ -415,23 +335,23 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     {
         let entry = Self::entry_mut(&mut self.entries, addr);
         let instr = entry.block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
+        instr.iter().map(|cell| cell.instr).collect()
     }
 }
 
 impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     super::BlockCache<MC, B, M> for BlockCache<SIZE, B, MC, M>
 {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
-        M: ManagerAlloc,
+        M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            current_block_addr: Cell::new_with(manager, !0),
-            next_instr_addr: Cell::new_with(manager, !0),
-            fence_counter: Cell::new(manager),
-            partial_block: PartialBlock::new(manager),
-            entries: NewState::new(manager),
+            current_block_addr: !0,
+            next_instr_addr: !0,
+            fence_counter: FenceCounter::INITIAL,
+            partial_block: PartialBlock::new(),
+            entries: array_utils::boxed_from_fn(|| Cached::new()),
         }
     }
 
@@ -441,9 +361,9 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         M: ManagerClone,
     {
         Self {
-            current_block_addr: self.current_block_addr.clone(),
-            fence_counter: self.fence_counter.clone(),
-            next_instr_addr: self.next_instr_addr.clone(),
+            current_block_addr: self.current_block_addr,
+            fence_counter: self.fence_counter,
+            next_instr_addr: self.next_instr_addr,
             partial_block: self.partial_block.clone(),
             // This may appear like a wild way to clone a boxed array. But! This way avoids that
             // the array gets temporarily allocated on the stack whhich causes a stack overflow on
@@ -461,7 +381,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        self.fence_counter.write(FenceCounter::INITIAL);
+        self.fence_counter = FenceCounter::INITIAL;
         self.reset_to(!0);
         self.entries.iter_mut().for_each(Cached::reset);
         self.partial_block.reset();
@@ -471,8 +391,8 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        let counter = self.fence_counter.read();
-        self.fence_counter.write(counter.next());
+        let counter = self.fence_counter;
+        self.fence_counter = counter.next();
         self.reset_to(!0);
         Self::entry_mut(&mut self.entries, counter.0 as Address).invalidate();
     }
@@ -482,14 +402,14 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         M: ManagerRead,
     {
         debug_assert!(
-            !self.partial_block.in_progress.read(),
+            !self.partial_block.in_progress,
             "Get block was called with a partial block in progress"
         );
 
         let entry = Self::entry_mut(&mut self.entries, addr);
 
-        if entry.address.read() == addr
-            && self.fence_counter.read() == entry.fence_counter.read()
+        if entry.address == addr
+            && self.fence_counter == entry.fence_counter
             && entry.block.num_instr() > 0
         {
             Some(BlockCall {
@@ -511,7 +431,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             "expected compressed instruction, found: {instr:?}"
         );
 
-        let next_addr = self.next_instr_addr.read();
+        let next_addr = self.next_instr_addr;
 
         // If the instruction is at the start of the page, we _must_ start a new block,
         // as we cannot allow blocks to cross page boundaries.
@@ -538,7 +458,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             return;
         }
 
-        let next_addr = self.next_instr_addr.read();
+        let next_addr = self.next_instr_addr;
 
         // If the instruction is at the start of the page, we _must_ start a new block,
         // as we cannot allow blocks to cross page boundaries.
@@ -557,11 +477,11 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M: ManagerReadWrite,
     {
-        if !self.partial_block.in_progress.read() {
+        if !self.partial_block.in_progress {
             return StepManyResult::ZERO;
         }
 
-        let entry = Self::entry_mut(&mut self.entries, self.partial_block.addr.read());
+        let entry = Self::entry_mut(&mut self.entries, self.partial_block.addr);
 
         self.partial_block.run_partial_inner(core, max_steps, entry)
     }
@@ -604,7 +524,7 @@ mod tests {
 
     // writing CACHE_INSTR to the block cache creates new block
     backend_test!(test_writing_full_block_fetchable_uncompressed, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let uncompressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::X64Store,
@@ -630,7 +550,7 @@ mod tests {
     });
 
     backend_test!(test_writing_full_block_fetchable_compressed, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let compressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::Li,
@@ -658,7 +578,7 @@ mod tests {
 
     // writing instructions immediately creates block
     backend_test!(test_writing_half_block_fetchable_compressed, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let compressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::Li,
@@ -685,7 +605,7 @@ mod tests {
     });
 
     backend_test!(test_writing_two_blocks_fetchable_compressed, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let compressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::Li,
@@ -717,7 +637,7 @@ mod tests {
 
     // writing across pages offset two blocks next to each other
     backend_test!(test_crossing_page_exactly_creates_new_block, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let compressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::Li,
@@ -750,7 +670,7 @@ mod tests {
     backend_test!(test_partial_block_executes, F, {
         let mut manager = F::manager();
         let mut core_state = MachineCoreState::<M4K, _>::new(&mut manager);
-        let mut block_state = TestState::<F::Manager>::new(&mut manager);
+        let mut block_state = TestState::<F::Manager>::new();
 
         let addiw = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::AddWordImmediate,
@@ -783,9 +703,9 @@ mod tests {
         };
 
         assert_eq!(steps, 5);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(5, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute no steps
@@ -796,9 +716,9 @@ mod tests {
         };
 
         assert_eq!(steps, 0);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(5, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(5, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
 
         // Execute the next 2 instructions
@@ -809,9 +729,9 @@ mod tests {
         };
 
         assert_eq!(steps, 2);
-        assert!(block_state.partial_block.in_progress.read());
-        assert_eq!(7, block_state.partial_block.progress.read());
-        assert_eq!(block_addr, block_state.partial_block.addr.read());
+        assert!(block_state.partial_block.in_progress);
+        assert_eq!(7, block_state.partial_block.progress);
+        assert_eq!(block_addr, block_state.partial_block.addr);
         assert_eq!(block_addr + 7 * 4, core_state.hart.pc.read());
 
         // Finish the block. We don't consume all the steps
@@ -822,14 +742,14 @@ mod tests {
         };
 
         assert_eq!(steps, 3);
-        assert!(!block_state.partial_block.in_progress.read());
-        assert_eq!(0, block_state.partial_block.progress.read());
-        assert_eq!(0, block_state.partial_block.addr.read());
+        assert!(!block_state.partial_block.in_progress);
+        assert_eq!(0, block_state.partial_block.progress);
+        assert_eq!(0, block_state.partial_block.addr);
         assert_eq!(block_addr + 10 * 4, core_state.hart.pc.read());
     });
 
     backend_test!(test_concat_blocks_suitable, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let uncompressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::X64Store,
@@ -865,7 +785,7 @@ mod tests {
     });
 
     backend_test!(test_concat_blocks_too_big, F, {
-        let mut state = TestState::<F::Manager>::new(&mut F::manager());
+        let mut state = TestState::<F::Manager>::new();
 
         let uncompressed = Instruction::try_from(TaggedInstruction {
             opcode: OpCode::X64Store,
@@ -939,7 +859,7 @@ mod tests {
             }
         };
 
-        let mut block: TestState<Owned> = TestState::new(&mut Owned);
+        let mut block: TestState<Owned> = TestState::new();
 
         // The initial block cache should not return any blocks.
         check_block(&mut block);
@@ -986,7 +906,7 @@ mod tests {
     /// be empty, which causes the step function to loop indefinitely when it runs the block.
     #[test]
     fn test_get_empty_block_fails() {
-        let mut block_cache = TestState::new(&mut Owned);
+        let mut block_cache = TestState::<Owned>::new();
 
         // Fetching empty block fails
         assert!(block_cache.get_block(0).is_none());

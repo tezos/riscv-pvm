@@ -27,7 +27,6 @@ use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CommitmentLayout;
@@ -94,8 +93,8 @@ pub enum PvmInput<'a> {
 }
 
 struct_layout! {
-    pub struct PvmLayout<MC, CL> {
-        machine_state: machine_state::MachineStateLayout<MC, CL>,
+    pub struct PvmLayout<MC> {
+        machine_state: machine_state::MachineStateLayout<MC>,
         reveal_request: RevealRequestLayout,
         system_state: linux::SupervisorStateLayout,
         version: Atom<u64>,
@@ -193,7 +192,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     ///
     /// [block builder]: block::Block::BlockBuilder
     pub(crate) fn bind(
-        space: state_backend::AllocatedOf<PvmLayout<MC, BCC>, M>,
+        space: state_backend::AllocatedOf<PvmLayout<MC>, M>,
         block_builder: B::BlockBuilder,
     ) -> Self
     where
@@ -216,7 +215,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub(crate) fn struct_ref<'a, F: state_backend::FnManager<state_backend::Ref<'a, M>>>(
         &'a self,
-    ) -> state_backend::AllocatedOf<PvmLayout<MC, BCC>, F::Output> {
+    ) -> state_backend::AllocatedOf<PvmLayout<MC>, F::Output> {
         PvmLayoutF {
             machine_state: self.machine_state.struct_ref::<F>(),
             reveal_request: self.reveal_request.struct_ref::<F>(),
@@ -460,7 +459,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, 
 
     pub(crate) fn hash(&self) -> Result<Hash, HashError> {
         let refs = self.struct_ref::<FnManagerIdent>();
-        PvmLayout::<MC, BCC>::state_hash(refs)
+        PvmLayout::<MC>::state_hash(refs)
     }
 }
 
@@ -468,18 +467,15 @@ impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, 
     Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
-    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
+    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
         // This read guarantees that the input request can be recovered from the proof.
         let _ = self.input_request();
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC, BCC>::to_merkle_tree(refs)?.to_merkle_proof()?;
+        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, BCC>::state_hash(refs)?;
+        let final_hash = PvmLayout::<MC>::state_hash(refs)?;
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
@@ -501,11 +497,8 @@ pub enum InputRequest {
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BCC, B, Verifier> {
     /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof))
+    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self> {
+        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))
             .ok()?
             .0;
         Some(Self::bind(space, block_builder))

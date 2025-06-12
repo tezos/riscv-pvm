@@ -12,12 +12,11 @@ mod jitted;
 pub use dispatch::DispatchFn;
 pub use dispatch::InlineCompiler;
 pub use dispatch::OutlineCompiler;
+pub use interpreted::CachedInstruction;
 pub use interpreted::Interpreted;
 pub use interpreted::InterpretedBlockBuilder;
 pub use jitted::Jitted;
 
-use super::CACHE_INSTR;
-use super::ICallPlaced;
 use super::run_instr;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -25,27 +24,18 @@ use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Atom;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
-
-/// State Layout for Blocks
-pub type BlockLayout = (Atom<u8>, [Atom<Instruction>; CACHE_INSTR]);
 
 /// Functionality required to construct & execute blocks.
 ///
 /// A block is a sequence of at least one instruction, which may be executed sequentially.
-/// Blocks will never contain more than [`CACHE_INSTR`] instructions.
-pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
+/// Blocks will never contain more than [`super::CACHE_INSTR`] instructions.
+pub trait Block<MC: MemoryConfig, M: ManagerBase> {
     /// Block construction may require additional state not kept in storage,
     /// this is then passed as a parameter to [`Block::run_block`].
     ///
@@ -53,14 +43,10 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
     /// see [`dispatch::DispatchFn`].
     type BlockBuilder: Default + Sized;
 
-    /// Bind the block to the given allocated state.
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self
+    /// Create a new block instance.
+    fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite;
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output>;
 
     /// Ready a block for construction.
     ///
@@ -89,7 +75,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         M: ManagerReadWrite;
 
     /// Returns the underlying slice of instructions stored in the block.
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[CachedInstruction<MC, M>]
     where
         M: ManagerRead;
 
@@ -121,7 +107,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
 }
 
 fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
-    instr: &[EnrichedCell<ICallPlaced<MC, M>, M>],
+    instr: &[CachedInstruction<MC, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
 ) -> StepManyResult<Exception> {

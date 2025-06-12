@@ -173,10 +173,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
 }
 
 /// Layout for the machine state - everything required to fetch & run instructions.
-pub type MachineStateLayout<MC, BCC> = (
-    MachineCoreStateLayout<MC>,
-    <BCC as BlockCacheConfig>::Layout,
-);
+pub type MachineStateLayout<MC> = MachineCoreStateLayout<MC>;
 
 /// The machine state contains everything required to fetch & run instructions.
 pub struct MachineState<
@@ -278,7 +275,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         Self {
             core: MachineCoreState::new(manager),
-            block_cache: BlockCache::new(manager),
+            block_cache: BlockCache::new(),
             block_builder,
         }
     }
@@ -287,15 +284,15 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     ///
     /// [block builder]: Block::BlockBuilder
     pub fn bind(
-        space: backend::AllocatedOf<MachineStateLayout<MC, BCC>, M>,
+        space: backend::AllocatedOf<MachineStateLayout<MC>, M>,
         block_builder: B::BlockBuilder,
     ) -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            core: MachineCoreState::bind(space.0),
-            block_cache: BCC::bind(space.1),
+            core: MachineCoreState::bind(space),
+            block_cache: BCC::State::new(),
             block_builder,
         }
     }
@@ -304,11 +301,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
         &'a self,
-    ) -> backend::AllocatedOf<MachineStateLayout<MC, BCC>, F::Output> {
-        (
-            self.core.struct_ref::<F>(),
-            BCC::struct_ref::<MC, B, M, F>(&self.block_cache),
-        )
+    ) -> backend::AllocatedOf<MachineStateLayout<MC>, F::Output> {
+        self.core.struct_ref::<F>()
     }
 
     /// Reset the machine state.
@@ -772,7 +766,7 @@ mod tests {
             }))
         ]);
 
-        type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
+        type LocalLayout = MachineStateLayout<M4K>;
 
         type BlockRunner<F> = Interpreted<M4K, <F as TestBackendFactory>::Manager>;
 

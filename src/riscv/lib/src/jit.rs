@@ -305,8 +305,7 @@ mod tests {
     where
         M: ManagerRead,
     {
-        let instr = block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
+        block.instr().iter().map(|cell| cell.instr).collect()
     }
 
     type SetupHook<F> = dyn Fn(&mut MachineCoreState<M4K, <F as TestBackendFactory>::Manager>);
@@ -347,7 +346,7 @@ mod tests {
             jitted.main_memory.set_all_readable_writeable();
 
             // Create the block of instructions.
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, _>::new();
             block.start_block();
             for instr in self.instructions.iter() {
                 block.push_instr(*instr);
@@ -1702,7 +1701,7 @@ mod tests {
             let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
 
             let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, F::Manager>::new();
 
             block.start_block();
             for instr in failure.iter() {
