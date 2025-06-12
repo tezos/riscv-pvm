@@ -84,8 +84,6 @@ mod config;
 pub mod metrics;
 mod state;
 
-use std::marker::PhantomData;
-
 use self::block::Block;
 pub use self::config::DefaultCacheConfig;
 pub use self::config::TestCacheConfig;
@@ -96,11 +94,10 @@ use super::instruction::Instruction;
 use super::instruction::RunInstr;
 use super::memory::Address;
 use super::memory::MemoryConfig;
+use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::instruction::Args;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::EnrichedValue;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -113,18 +110,6 @@ use crate::traps::Exception;
 
 /// The maximum number of instructions that may be contained in a block.
 pub const CACHE_INSTR: usize = 20;
-
-/// Bindings for deriving an [`ICall`] from an [`Instruction`] via the [`EnrichedCell`] mechanism.
-pub struct ICallPlaced<MC: MemoryConfig, M: ManagerBase> {
-    _pd0: PhantomData<MC>,
-    _pd1: PhantomData<M>,
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> EnrichedValue for ICallPlaced<MC, M> {
-    type E = Instruction;
-
-    type D = ICall<MC, M::ManagerRoot>;
-}
 
 /// A function derived from an [OpCode] that can be directly run over the [MachineCoreState].
 ///
@@ -200,16 +185,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
 
 #[inline(always)]
 fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
-    instr: &EnrichedCell<ICallPlaced<MC, M>, M>,
+    instr: &CachedInstruction<MC, M>,
     core: &mut MachineCoreState<MC, M>,
 ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-    let args = instr.read_ref_stored().args();
-    let icall = instr.read_derived();
-
     // SAFETY: This is safe, as the function we are calling is derived directly from the
     // same instruction as the `Args` we are calling with. Therefore `args` will be of the
     // required shape.
-    unsafe { icall.run(args, core) }
+    unsafe { instr.runner.run(instr.instr.args(), core) }
 }
 
 /// Block cache implementation

@@ -5,29 +5,22 @@
 
 //! JIT-compiled blocks of instructions
 
-use super::ICallPlaced;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
-use crate::machine_state::block_cache::block::BlockLayout;
+use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::block_cache::block::dispatch::DispatchCompiler;
 use crate::machine_state::block_cache::block::dispatch::DispatchTarget;
 use crate::machine_state::block_cache::block::interpreted;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 
 /// Blocks that are compiled to native code for execution, when possible.
@@ -67,10 +60,10 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         // trigger JIT compilation
         let instr = self
             .fallback
-            .instr
+            .instr()
             .iter()
             .take(<Self as Block<MC, M>>::num_instr(self))
-            .map(|i| i.read_stored())
+            .map(|i| i.instr)
             .collect::<Vec<_>>();
 
         let fun = block_builder.compile(&mut self.dispatch, instr);
@@ -107,20 +100,6 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         };
 
         block_result.steps
-    }
-}
-
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M>
-    for Jitted<D, MC, M>
-{
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            fallback: interpreted::Interpreted::new(manager),
-            dispatch: DispatchTarget::default(),
-        }
     }
 }
 
@@ -161,22 +140,21 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         self.fallback.push_instr(instr)
     }
 
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[CachedInstruction<MC, M>]
     where
         M: ManagerRead,
     {
         self.fallback.instr()
     }
 
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self {
+    fn new() -> Self
+    where
+        M::ManagerRoot: ManagerReadWrite,
+    {
         Self {
-            fallback: interpreted::Interpreted::bind(allocated),
+            fallback: interpreted::Interpreted::new(),
             dispatch: DispatchTarget::default(),
         }
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
-        self.fallback.struct_ref::<F>()
     }
 
     /// Run a block, using the currently selected dispatch mechanism

@@ -201,12 +201,7 @@ impl<M: ManagerBase> NewState<M> for PartialBlock<M> {
 }
 
 /// The layout of block cache entries, see [`Cached`] for more information.
-pub type CachedLayout = (
-    Atom<Address>,
-    Atom<FenceCounter>,
-    Atom<u8>,
-    [Atom<Instruction>; CACHE_INSTR],
-);
+pub type CachedLayout = (Atom<Address>, Atom<FenceCounter>);
 
 /// Block cache entry.
 ///
@@ -228,7 +223,7 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         Self {
             address: space.0,
             fence_counter: space.1,
-            block: B::bind((space.2, space.3)),
+            block: B::new(),
             _pd: PhantomData,
         }
     }
@@ -239,12 +234,9 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
     pub(super) fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
         &'a self,
     ) -> AllocatedOf<CachedLayout, F::Output> {
-        let (len_instr, instr) = self.block.struct_ref::<'a, F>();
         (
             self.address.struct_ref::<F>(),
             self.fence_counter.struct_ref::<F>(),
-            len_instr,
-            instr,
         )
     }
 
@@ -282,7 +274,7 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<M
     {
         Self {
             address: Cell::new_with(manager, !0),
-            block: B::new(manager),
+            block: B::new(),
             fence_counter: Cell::new(manager),
             _pd: PhantomData,
         }
@@ -399,7 +391,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
                 // Need to resolve the adjacent block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let new_block = Self::entry_mut(&mut self.entries, next_addr);
-                let new_instr = new_block.block.instr()[i].read_stored();
+                let new_instr = new_block.block.instr()[i].instr;
                 // Need to resolve the target block again because we may only keep one reference at a time
                 // to `self.entries`.
                 let current_entry = Self::entry_mut(&mut self.entries, block_addr);
@@ -419,7 +411,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     {
         let entry = Self::entry_mut(&mut self.entries, addr);
         let instr = entry.block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
+        instr.iter().map(|cell| cell.instr).collect()
     }
 }
 
