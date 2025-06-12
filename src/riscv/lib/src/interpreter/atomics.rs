@@ -230,6 +230,23 @@ pub fn run_x64_atomic_max_signed<I: ICB>(
     run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.max_signed(y, icb))
 }
 
+/// Loads in `rd` the value from the address in `rs1` and stores the maximum
+/// between it and `val(rs2)` back to the address in `rs1`, treating both as
+/// unsigned values.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_max_unsigned<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.max_unsigned(y, icb))
+}
+
 /// Loads in `rd` the sign-extended value from the address in `rs1`(32-bit) and
 /// stores the result of adding it to `val(rs2)`(32-bit) back to the address in `rs1`.
 ///
@@ -668,6 +685,14 @@ pub(crate) mod test {
         test_run_x64_atomic_max_signed,
         super::run_x64_atomic_max_signed,
         |r1_val, r2_val| i64::max(r1_val as i64, r2_val as i64) as u64,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_max_unsigned,
+        super::run_x64_atomic_max_unsigned,
+        u64::max,
         8,
         u64
     );
