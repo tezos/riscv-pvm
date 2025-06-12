@@ -3026,7 +3026,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_x32_atomic_add, F, {
+    backend_test!(test_x32_atomic_arithmetic, F, {
         use Instruction as I;
 
         use crate::machine_state::registers::NonZeroXRegister as NZ;
@@ -3036,47 +3036,90 @@ mod tests {
 
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
-        let scenarios: &[Scenario<F>] = &[
-            ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(core, F, {
-                    core.main_memory.write(ADDRESS_BASE_ATOMICS, 10).unwrap();
-                }))
-                .set_instructions(&[
-                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, 20, InstrWidth::Compressed),
-                    I::new_x32_atomic_add(x3, x1, x2, false, false, InstrWidth::Uncompressed),
-                    I::new_nop(InstrWidth::Compressed),
-                ])
-                .set_expected_steps(4)
-                .set_assert_hook(assert_hook!(core, F, {
-                    let value = core.hart.xregisters.read(x3);
-                    assert_eq!(value, 10);
+        type ConstructAtomicFn = fn(
+            rd: XRegister,
+            rs1: XRegister,
+            rs2: XRegister,
+            aq: bool,
+            rl: bool,
+            width: InstrWidth,
+        ) -> I;
 
-                    let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
-                    assert_eq!(res, 30);
-                }))
-                .build(),
+        let valid_x32_atomic_unsigned = |constructor: ConstructAtomicFn,
+                                         val1: u64,
+                                         val2: u64,
+                                         fun: fn(u64, u64) -> u64|
+         -> Scenario<F> {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(core, F, {
                     core.main_memory
-                        .write(ADDRESS_BASE_ATOMICS, 0xFFFF_FFFF_u32 as i32)
+                        .write(ADDRESS_BASE_ATOMICS, val1 as i32)
                         .unwrap();
                 }))
                 .set_instructions(&[
                     I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, 0xFFFF_FFFF, InstrWidth::Compressed),
-                    I::new_x32_atomic_add(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
+                    constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(4)
                 .set_assert_hook(assert_hook!(core, F, {
                     let value = core.hart.xregisters.read(x3);
-                    assert_eq!(value, 0xFFFF_FFFF_FFFF_FFFF); // 0xFFFF_FFFF_FFFF_FFFF is the sign extended value of 0xFFFF_FFFF
-
+                    assert_eq!(value, val1 as i32 as u64);
+                    let expected = fun(val1, val2) as u32;
                     let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
-                    assert_eq!(res, -2i32 as u32); // 0xFFFF + 0xFFFF = 0x1FFFE, and 0xFFFE is -2 in 2's complement
+                    assert_eq!(res, expected);
                 }))
-                .build(),
+                .build()
+        };
+
+        let invalid_x32_atomic_unsigned = |constructor: ConstructAtomicFn,
+                                           val1: u64,
+                                           val2: u64,
+                                           fun: fn(u64, u64) -> u64|
+         -> Scenario<F> {
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    core.main_memory
+                        .write(ADDRESS_BASE_ATOMICS + 2, val1 as i32)
+                        .unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(
+                        NZ::x1,
+                        (ADDRESS_BASE_ATOMICS + 2) as i64,
+                        InstrWidth::Compressed,
+                    ),
+                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
+                    constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let value = core.hart.xregisters.read(x3);
+                    assert_eq!(value, 0);
+                    let expected = fun(val1, val2) as u32;
+                    let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS + 2).unwrap();
+                    assert_eq!(res, val1 as u32, "Found {value:x}, expected {expected:x}");
+                }))
+                .build()
+        };
+
+        let scenarios: &[Scenario<F>] = &[
+            valid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
+            valid_x32_atomic_unsigned(
+                I::new_x32_atomic_add,
+                0xFFFF_FFFF,
+                0xFFFF_FFFF,
+                u64::wrapping_add,
+            ),
+            invalid_x32_atomic_unsigned(
+                I::new_x32_atomic_add,
+                0xFFFF_FFFF,
+                0xFFFF_FFFF,
+                u64::wrapping_add,
+            ),
         ];
 
         let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
