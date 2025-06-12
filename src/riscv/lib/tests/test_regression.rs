@@ -8,7 +8,7 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 
-use octez_riscv::machine_state::DefaultCacheLayouts;
+use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block::Block;
 use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -112,7 +112,7 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<'_, M64M, DefaultCacheLayouts, Owned, B>::new(
+        let mut stepper = PvmStepper::<'_, M64M, DefaultCacheConfig, Owned, B>::new(
             &program,
             initrd.as_deref(),
             inbox,

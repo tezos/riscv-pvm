@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-use crate::machine_state::CacheLayouts;
 use crate::machine_state::MachineState;
+use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::a0;
@@ -39,9 +39,9 @@ impl<M: ManagerBase> PosixState<M> {
     }
 
     /// Handle a POSIX system call. Returns `Ok(true)` if it makes sense to continue execution.
-    pub fn handle_call<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>>(
+    pub fn handle_call<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
         &mut self,
-        machine: &mut MachineState<MC, CL, B, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
     ) -> Result<bool, String>
     where
         M: ManagerReadWrite,

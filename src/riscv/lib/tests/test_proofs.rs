@@ -10,9 +10,9 @@ use std::ops::Bound;
 use std::time::Instant;
 
 use common::*;
-use octez_riscv::machine_state::CacheLayouts;
-use octez_riscv::machine_state::DefaultCacheLayouts;
-use octez_riscv::machine_state::TestCacheLayouts;
+use octez_riscv::machine_state::block_cache::BlockCacheConfig;
+use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
+use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::state_backend::AllocatedOf;
@@ -42,7 +42,7 @@ fn test_jstz_proofs_full() {
 fn test_jstz_initial_proof_regression() {
     // Configuring the stepper with `TestCachelayouts` to match the node PVM
     // and make the test run faster.
-    let make_stepper = make_stepper_factory::<TestCacheLayouts>();
+    let make_stepper = make_stepper_factory::<TestCacheConfig>();
     let mut stepper = make_stepper();
 
     eprintln!("> Producing proof ...");
@@ -58,7 +58,7 @@ fn test_jstz_initial_proof_regression() {
 }
 
 fn test_jstz_proofs(full: bool) {
-    let make_stepper = make_stepper_factory::<DefaultCacheLayouts>();
+    let make_stepper = make_stepper_factory::<DefaultCacheConfig>();
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);
@@ -82,7 +82,7 @@ fn test_jstz_proofs(full: bool) {
 
 fn run_steps_ladder<F>(make_stepper: F, ladder: &[usize], expected_hash: Option<hash::Hash>)
 where
-    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheLayouts>,
+    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper = make_stepper();
@@ -146,12 +146,12 @@ where
     }
 }
 
-fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, CL: CacheLayouts>(
-    stepper: &PvmStepper<'static, MC, CL>,
+fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
+    stepper: &PvmStepper<'static, MC, BCC>,
     proof: &Proof,
     state_hash: hash::Hash,
 ) where
-    AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+    AllocatedOf<BCC::Layout, Verifier>: 'static,
 {
     // A fully blinded proof could only be valid if every single leaf
     // in the state is written to and proof compression were to optimise

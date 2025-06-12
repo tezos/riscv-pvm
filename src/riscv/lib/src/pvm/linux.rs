@@ -21,10 +21,10 @@ use self::error::Error;
 use self::memory::STACK_SIZE;
 use super::Pvm;
 use super::PvmHooks;
-use crate::machine_state::CacheLayouts;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
+use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::Memory;
@@ -148,8 +148,8 @@ enum AuxVectorKey {
     ProgramHeadersPtr = 3,
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerBase>
-    MachineState<MC, CL, B, M>
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
+    MachineState<MC, BCC, B, M>
 {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
@@ -225,10 +225,10 @@ impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, M>, M: ManagerBase>
     }
 }
 
-impl<MC, CL, B, M> Pvm<MC, CL, B, M>
+impl<MC, BCC, B, M> Pvm<MC, BCC, B, M>
 where
     MC: MemoryConfig,
-    CL: CacheLayouts,
+    BCC: BlockCacheConfig,
     B: Block<MC, M>,
     M: ManagerBase,
 {

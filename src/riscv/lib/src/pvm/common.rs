@@ -17,7 +17,7 @@ use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::machine_state;
-use crate::machine_state::CacheLayouts;
+use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::csregisters::CSRegister;
@@ -156,8 +156,8 @@ pub(crate) type PvmProofGen<'a, MC, CL, M> = Pvm<
 >;
 
 /// Proof-generating virtual machine
-pub struct Pvm<MC: MemoryConfig, CL: CacheLayouts, B: block::Block<MC, M>, M: ManagerBase> {
-    pub(crate) machine_state: machine_state::MachineState<MC, CL, B, M>,
+pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: ManagerBase> {
+    pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, M>,
     reveal_request: RevealRequest<M>,
     pub(super) system_state: linux::SupervisorState<M>,
     version: Cell<u64, M>,
@@ -168,12 +168,8 @@ pub struct Pvm<MC: MemoryConfig, CL: CacheLayouts, B: block::Block<MC, M>, M: Ma
     status: Cell<PvmStatus, M>,
 }
 
-impl<
-    MC: MemoryConfig,
-    CL: machine_state::CacheLayouts,
-    B: block::Block<MC, M>,
-    M: state_backend::ManagerBase,
-> Pvm<MC, CL, B, M>
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_backend::ManagerBase>
+    Pvm<MC, BCC, B, M>
 {
     /// Allocate a new PVM.
     pub fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
@@ -197,7 +193,7 @@ impl<
     ///
     /// [block builder]: block::Block::BlockBuilder
     pub(crate) fn bind(
-        space: state_backend::AllocatedOf<PvmLayout<MC, CL>, M>,
+        space: state_backend::AllocatedOf<PvmLayout<MC, BCC>, M>,
         block_builder: B::BlockBuilder,
     ) -> Self
     where
@@ -220,7 +216,7 @@ impl<
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub(crate) fn struct_ref<'a, F: state_backend::FnManager<state_backend::Ref<'a, M>>>(
         &'a self,
-    ) -> state_backend::AllocatedOf<PvmLayout<MC, CL>, F::Output> {
+    ) -> state_backend::AllocatedOf<PvmLayout<MC, BCC>, F::Output> {
         PvmLayoutF {
             machine_state: self.machine_state.struct_ref::<F>(),
             reveal_request: self.reveal_request.struct_ref::<F>(),
@@ -235,7 +231,7 @@ impl<
     }
 
     /// Generate a proof-generating version of this PVM.
-    pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, CL, M>
+    pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, BCC, M>
     where
         M: state_backend::ManagerRead,
     {
@@ -434,54 +430,54 @@ impl<
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Owned>> Pvm<MC, CL, B, Owned> {
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, B, Owned> {
     pub(crate) fn empty(block_builder: B::BlockBuilder) -> Self {
         Self::new(&mut Owned, block_builder)
     }
 
     pub(crate) fn hash(&self) -> Result<Hash, HashError> {
         let refs = self.struct_ref::<FnManagerIdent>();
-        PvmLayout::<MC, CL>::state_hash(refs)
+        PvmLayout::<MC, BCC>::state_hash(refs)
     }
 }
 
-impl<'a, MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, ProofGen<Ref<'a, Owned>>>>
-    Pvm<MC, CL, B, ProofGen<Ref<'a, Owned>>>
+impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, Owned>>>>
+    Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
     pub(crate) fn to_proof(&self) -> Result<Proof, HashError>
     where
-        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+        AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC, CL>::to_merkle_tree(refs)?.to_merkle_proof()?;
+        let merkle_proof = PvmLayout::<MC, BCC>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, CL>::state_hash(refs)?;
+        let final_hash = PvmLayout::<MC, BCC>::state_hash(refs)?;
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
     }
 }
 
-impl<MC: MemoryConfig, CL: CacheLayouts, B: Block<MC, Verifier>> Pvm<MC, CL, B, Verifier> {
+impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BCC, B, Verifier> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
     where
-        AllocatedOf<<CL as CacheLayouts>::BlockCacheLayout, Verifier>: 'static,
+        AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
         let space =
-            deserialise_owned::deserialise::<PvmLayout<MC, CL>>(ProofTree::Present(proof)).ok()?;
+            deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof)).ok()?;
         Some(Self::bind(space, block_builder))
     }
 }
 
 impl<
     MC: MemoryConfig,
-    CL: CacheLayouts,
+    BCC: BlockCacheConfig,
     B: block::Block<MC, M> + Clone,
     M: state_backend::ManagerClone,
-> Clone for Pvm<MC, CL, B, M>
+> Clone for Pvm<MC, BCC, B, M>
 {
     fn clone(&self) -> Self {
         Self {
@@ -529,7 +525,7 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
-    use crate::machine_state::TestCacheLayouts;
+    use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
@@ -551,7 +547,7 @@ mod tests {
         type B = block::Interpreted<MC, Owned>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, TestCacheLayouts, B, _>::new(&mut Owned, InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, TestCacheConfig, B, _>::new(&mut Owned, InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core
@@ -661,7 +657,7 @@ mod tests {
             let mut hooks = PvmHooks::new(|c| buffer.push(c));
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, TestCacheLayouts, B, _>::new(&mut Owned, InterpretedBlockBuilder);
+            let mut pvm = Pvm::<MC, TestCacheConfig, B, _>::new(&mut Owned, InterpretedBlockBuilder);
             pvm.reset();
             pvm.machine_state
                 .core
@@ -712,7 +708,7 @@ mod tests {
 
         // Setup PVM
         let mut pvm =
-            Pvm::<MC, TestCacheLayouts, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
+            Pvm::<MC, TestCacheConfig, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core
@@ -786,7 +782,7 @@ mod tests {
 
         // Setup PVM
         let mut pvm =
-            Pvm::<MC, TestCacheLayouts, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
+            Pvm::<MC, TestCacheConfig, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core
