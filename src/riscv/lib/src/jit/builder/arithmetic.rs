@@ -82,6 +82,10 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
     fn min_unsigned(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         X64(icb.builder.ins().umin(self.0, other.0))
     }
+
+    fn max_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
+        X64(icb.builder.ins().smax(self.0, other.0))
+    }
 }
 
 impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for X32 {
@@ -151,5 +155,9 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
 
     fn min_unsigned(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         X32(icb.builder.ins().umin(self.0, other.0))
+    }
+
+    fn max_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
+        X32(icb.builder.ins().smax(self.0, other.0))
     }
 }

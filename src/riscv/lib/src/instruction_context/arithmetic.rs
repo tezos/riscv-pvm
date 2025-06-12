@@ -63,6 +63,9 @@ pub trait Arithmetic<I: ICB + ?Sized>: Copy {
 
     /// Return the unsigned minimum of two **XValues**.
     fn min_unsigned(self, other: Self, icb: &mut I) -> Self;
+
+    /// Return the signed maximum of two **XValues**.
+    fn max_signed(self, other: Self, icb: &mut I) -> Self;
 }
 
 impl<I: ICB> Arithmetic<I> for XValue {
@@ -125,6 +128,10 @@ impl<I: ICB> Arithmetic<I> for XValue {
     fn min_unsigned(self, other: Self, _: &mut I) -> Self {
         self.min(other)
     }
+
+    fn max_signed(self, other: Self, _: &mut I) -> Self {
+        (self as i64).max(other as i64) as Self
+    }
 }
 
 impl<I: ICB> Arithmetic<I> for XValue32 {
@@ -186,5 +193,9 @@ impl<I: ICB> Arithmetic<I> for XValue32 {
 
     fn min_unsigned(self, other: Self, _: &mut I) -> Self {
         self.min(other)
+    }
+
+    fn max_signed(self, other: Self, _: &mut I) -> Self {
+        (self as i32).max(other as i32) as Self
     }
 }

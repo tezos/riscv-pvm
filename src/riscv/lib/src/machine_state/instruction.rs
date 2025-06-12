@@ -282,7 +282,7 @@ pub enum OpCode {
     Amoandd,
     Amoord,
     X64AtomicMinSigned,
-    Amomaxd,
+    X64AtomicMaxSigned,
     X64AtomicMinUnsigned,
     Amomaxud,
 
@@ -501,7 +501,7 @@ impl OpCode {
             Self::Amoandd => Args::run_amoandd,
             Self::Amoord => Args::run_amoord,
             Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
-            Self::Amomaxd => Args::run_amomaxd,
+            Self::X64AtomicMaxSigned => Args::run_x64_atomic_max_signed,
             Self::X64AtomicMinUnsigned => Args::run_x64_atomic_min_unsigned,
             Self::Amomaxud => Args::run_amomaxud,
             Self::X64RemSigned => Args::run_x64_rem_signed,
@@ -718,6 +718,7 @@ impl OpCode {
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
             Self::X64AtomicMinUnsigned => Some(Args::run_x64_atomic_min_unsigned),
+            Self::X64AtomicMaxSigned => Some(Args::run_x64_atomic_max_signed),
             Self::X32AtomicAdd => Some(Args::run_x32_atomic_add),
 
             // Errors
@@ -1505,7 +1506,10 @@ impl Args {
         atomics::run_x64_atomic_min_signed,
         run_x64_atomic_min_signed
     );
-    impl_amo_type!(run_amomaxd);
+    impl_amo_type!(
+        atomics::run_x64_atomic_max_signed,
+        run_x64_atomic_max_signed
+    );
     impl_amo_type!(
         atomics::run_x64_atomic_min_unsigned,
         run_x64_atomic_min_unsigned
@@ -1969,10 +1973,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amomaxd(args) => Instruction {
-                opcode: OpCode::Amomaxd,
-                args: args.into(),
-            },
+            InstrCacheable::Amomaxd(args) => Instruction::new_x64_atomic_max_signed(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amominud(args) => Instruction::new_x64_atomic_min_unsigned(
                 args.rd,
                 args.rs1,

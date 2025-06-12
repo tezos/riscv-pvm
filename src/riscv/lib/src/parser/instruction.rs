@@ -500,6 +500,8 @@ pub enum InstrCacheable {
     /// `AMOMIN.D` Loads in `rd` the value from the address in `rs1` and stores the minimum
     /// between it and `val(rs2)` back to the address in `rs1`.
     Amomind(AmoArgs),
+    /// `AMOMAX.D` Loads in `rd` the value from the address in `rs1` and stores the maximum
+    /// between it and `val(rs2)` back to the address in `rs1`.
     Amomaxd(AmoArgs),
     /// `AMOMINU.D` Loads in `rd` the value from the address in `rs1` and stores the minimum
     /// between it and `val(rs2)` back to the address in `rs1`, treating both as
