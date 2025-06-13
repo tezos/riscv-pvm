@@ -570,7 +570,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch0!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch0 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         trace_call!($system_call);
@@ -584,7 +584,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch1!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch1 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -599,7 +599,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch2!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch2 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -615,7 +615,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch3!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch3 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -632,7 +632,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch4!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch4 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -654,7 +654,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             reason = "There is no system call handler with 5 parameters yet"
         )]
         macro_rules! dispatch5 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -673,7 +673,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // `dispatch6!(system_call_no [, optional_arguments_passed_to_handler])`
         // Converts the system call name to the handler
         macro_rules! dispatch6 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
@@ -697,7 +697,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             reason = "There is no system call handler with 7 parameters yet"
         )]
         macro_rules! dispatch7 {
-            ($system_call:ty$(, $arg:ident)*) => {{
+            ($system_call:ty$(, $arg:expr)*) => {{
                 try_blocks::try_block! {
                     paste::paste! {
                         let arg1 = read_arg!($system_call, a0);
