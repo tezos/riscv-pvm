@@ -115,8 +115,14 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
         }
 
         let mut flag_builder = settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false")?;
-        flag_builder.set("is_pic", "false")?;
+
+        // Optimization level for generated code. Configured to Generate the fastest possible code
+        // https://docs.wasmtime.dev/api/cranelift/prelude/settings/struct.Flags.html#method.opt_level
+        flag_builder.set("opt_level", "speed")?;
+
+        // Disable the Cranelift IR verifier
+        // https://docs.wasmtime.dev/api/cranelift/prelude/settings/struct.Flags.html#method.enable_verifier
+        flag_builder.set("enable_verifier", "false")?;
 
         let isa_builder = cranelift_native::builder().map_err(JitError::UnsupportedPlatform)?;
         let isa = isa_builder.finish(settings::Flags::new(flag_builder))?;
