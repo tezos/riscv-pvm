@@ -1424,6 +1424,29 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicOr`].
+    pub(crate) fn new_x64_atomic_or(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicOr,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinSigned`].
     pub(crate) fn new_x64_atomic_min_signed(
         rd: XRegister,

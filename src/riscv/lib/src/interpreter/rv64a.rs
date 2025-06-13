@@ -7,7 +7,6 @@
 //!
 //! Chapter 8 - Unprivileged spec
 
-use std::ops::BitOr;
 use std::ops::BitXor;
 
 use crate::machine_state::MachineCoreState;
@@ -37,28 +36,10 @@ where
     ) -> Result<(), Exception> {
         self.run_amo_d(rs1, rs2, rd, u64::bitxor)
     }
-
-    /// `AMOOR.D` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the result of
-    /// ORing it to val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoord(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_d(rs1, rs2, rd, u64::bitor)
-    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::ops::BitOr;
     use std::ops::BitXor;
 
     use proptest::prelude::*;
@@ -71,6 +52,4 @@ mod test {
     use crate::machine_state::registers::a2;
 
     test_amo!(run_amoxord, u64::bitxor, 8, u64);
-
-    test_amo!(run_amoord, u64::bitor, 8, u64);
 }
