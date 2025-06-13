@@ -279,7 +279,7 @@ pub enum OpCode {
     X64AtomicSwap,
     X64AtomicAdd,
     Amoxord,
-    Amoandd,
+    X64AtomicAnd,
     Amoord,
     X64AtomicMinSigned,
     X64AtomicMaxSigned,
@@ -498,7 +498,7 @@ impl OpCode {
             Self::X64AtomicSwap => Args::run_x64_atomic_swap,
             Self::X64AtomicAdd => Args::run_x64_atomic_add,
             Self::Amoxord => Args::run_amoxord,
-            Self::Amoandd => Args::run_amoandd,
+            Self::X64AtomicAnd => Args::run_x64_atomic_and,
             Self::Amoord => Args::run_amoord,
             Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
             Self::X64AtomicMaxSigned => Args::run_x64_atomic_max_signed,
@@ -714,6 +714,7 @@ impl OpCode {
             Self::X32AtomicStore => Some(Args::run_x32_atomic_store),
             Self::X64AtomicStore => Some(Args::run_x64_atomic_store),
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
+            Self::X64AtomicAnd => Some(Args::run_x64_atomic_and),
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
@@ -1501,7 +1502,7 @@ impl Args {
     impl_amo_type!(atomics::run_x64_atomic_swap, run_x64_atomic_swap);
     impl_amo_type!(atomics::run_x64_atomic_add, run_x64_atomic_add);
     impl_amo_type!(run_amoxord);
-    impl_amo_type!(run_amoandd);
+    impl_amo_type!(atomics::run_x64_atomic_and, run_x64_atomic_and);
     impl_amo_type!(run_amoord);
     impl_amo_type!(
         atomics::run_x64_atomic_min_signed,
@@ -1961,10 +1962,14 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Amoxord,
                 args: args.into(),
             },
-            InstrCacheable::Amoandd(args) => Instruction {
-                opcode: OpCode::Amoandd,
-                args: args.into(),
-            },
+            InstrCacheable::Amoandd(args) => Instruction::new_x64_atomic_and(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoord(args) => Instruction {
                 opcode: OpCode::Amoord,
                 args: args.into(),

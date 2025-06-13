@@ -343,7 +343,7 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | X32LoadUnsigned | X64LoadSigned | X8Store | X16Store | X32Store | X64Store
         | X32AtomicLoad | X32AtomicStore | X32AtomicSwap | X32AtomicAdd | Amoxorw | Amoandw
         | Amoorw | Amominw | Amomaxw | Amominuw | Amomaxuw | X64AtomicLoad | X64AtomicStore
-        | X64AtomicSwap | X64AtomicAdd | Amoxord | Amoandd | Amoord | X64AtomicMinSigned
+        | X64AtomicSwap | X64AtomicAdd | Amoxord | X64AtomicAnd | Amoord | X64AtomicMinSigned
         | X64AtomicMaxSigned | X64AtomicMinUnsigned | X64AtomicMaxUnsigned | X32Mul | Csrrw
         | Csrrs | Csrrc | Csrrwi | Csrrsi | Csrrci => ArgsShape::XSrcXDest,
 

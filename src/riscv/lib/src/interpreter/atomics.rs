@@ -181,6 +181,22 @@ pub fn run_x64_atomic_add<I: ICB>(
     run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.add(y, icb))
 }
 
+/// Loads in `rd` the value from the address in `rs1` and stores the result of
+/// ANDing it to `val(rs2)` back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_and<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.and(y, icb))
+}
+
 /// Loads in `rd` the value from the address in `rs1` and stores the minimum
 /// between it and `val(rs2)` back to the address in `rs1`.
 ///
@@ -533,6 +549,8 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::ops::BitAnd;
+
     use proptest::prelude::*;
 
     use super::*;
@@ -645,6 +663,14 @@ pub(crate) mod test {
         test_run_x64_atomic_add,
         super::run_x64_atomic_add,
         u64::wrapping_add,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_and,
+        super::run_x64_atomic_and,
+        u64::bitand,
         8,
         u64
     );
