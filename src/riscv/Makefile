@@ -93,7 +93,7 @@ test: build
 
 .PHONY: test-long
 test-long:
-	@cargo test --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs -- test_jstz_determinism test_jstz_proofs_one_step --nocapture --ignored
+	@cargo test --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs -- test_jstz_determinism test_jstz_proofs_one_step --nocapture --ignored --test-threads=1
 
 .PHONY: test-miri
 test-miri:

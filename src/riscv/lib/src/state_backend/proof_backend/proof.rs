@@ -251,12 +251,19 @@ pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
     // Here we collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
     // by compressing the tags to a byte-array, fully utilising the bytes capacity.
     let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
-    let tags_encoding = serialise_raw_tags(iter_raw_tags(&proof.partial_tree)).into_iter();
-    let nodes_encoding = serialise_proof_values(&proof.partial_tree);
+    let proof_tree_encoding = serialise_merkle_tree(proof.tree());
 
-    final_hash_encoding
-        .chain(tags_encoding)
-        .chain(nodes_encoding)
+    final_hash_encoding.chain(proof_tree_encoding)
+}
+
+/// Serialise just the proof tree part of a general [`Proof`] object.
+///
+/// Useful for testing
+pub fn serialise_merkle_tree(tree: &MerkleProof) -> impl Iterator<Item = u8> + '_ {
+    let tags_encoding = serialise_raw_tags(iter_raw_tags(tree)).into_iter();
+    let nodes_encoding = serialise_proof_values(tree);
+
+    tags_encoding.chain(nodes_encoding)
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
