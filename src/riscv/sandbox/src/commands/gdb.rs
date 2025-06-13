@@ -41,7 +41,7 @@ use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::BadMemoryAccess;
 use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::machine_state::memory::Memory;
-use octez_riscv::pvm::PvmHooks;
+use octez_riscv::pvm::StdoutDebugHooks;
 use octez_riscv::state_backend::FnManagerIdent;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -71,11 +71,11 @@ pub fn gdb_server(opts: GdbServerOptions) -> Result<(), Box<dyn Error>> {
 
     let rollup_address = SmartRollupAddress::from_b58check(opts.inbox.address.as_str())?;
 
-    let mut stepper = PvmStepper::<M1G>::new(
+    let mut stepper = PvmStepper::<_, M1G>::new(
         program.as_slice(),
         initrd.as_deref(),
         inbox,
-        PvmHooks::default(),
+        StdoutDebugHooks,
         rollup_address.into_hash().as_ref().try_into()?,
         opts.inbox.origination_level,
         opts.preimage.preimages_dir,
