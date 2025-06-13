@@ -1401,6 +1401,75 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicAnd`].
+    pub(crate) fn new_x64_atomic_and(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicAnd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicOr`].
+    pub(crate) fn new_x64_atomic_or(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicOr,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicXor`].
+    pub(crate) fn new_x64_atomic_xor(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicXor,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinSigned`].
     pub(crate) fn new_x64_atomic_min_signed(
         rd: XRegister,
@@ -1412,6 +1481,75 @@ impl Instruction {
     ) -> Self {
         Self {
             opcode: OpCode::X64AtomicMinSigned,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinUnsigned`].
+    pub(crate) fn new_x64_atomic_min_unsigned(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicMinUnsigned,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMaxSigned`].
+    pub(crate) fn new_x64_atomic_max_signed(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicMaxSigned,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMaxUnsigned`].
+    pub(crate) fn new_x64_atomic_max_unsigned(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X64AtomicMaxUnsigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
