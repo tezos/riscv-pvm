@@ -488,6 +488,8 @@ pub enum InstrCacheable {
     /// stores the result of adding it to val(rs2) back to the address in rs1.
     Amoaddd(AmoArgs),
     Amoxord(AmoArgs),
+    /// `AMOAND.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the result of ANDing it to `val(rs2)` back to the address in `rs1`.
     Amoandd(AmoArgs),
     Amoord(AmoArgs),
     /// `AMOMIN.D` Atomically loads in `rd` the value from the address in `rs1` and
