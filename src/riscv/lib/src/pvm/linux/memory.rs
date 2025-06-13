@@ -27,8 +27,9 @@ use super::parameters::Flags;
 use super::parameters::NoFileDescriptor;
 use super::parameters::Visibility;
 use super::parameters::Zero;
-use crate::machine_state::MachineCoreState;
-use crate::machine_state::memory::Memory;
+use crate::machine_state::MachineState;
+use crate::machine_state::block_cache::BlockCacheConfig;
+use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
@@ -71,19 +72,20 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `mprotect` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
-    pub(super) fn handle_mprotect<MC>(
+    pub(super) fn handle_mprotect<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: PageAligned<VirtAddr>,
         length: u64,
         perms: Permissions,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        B: Block<MC, M>,
+        BCC: BlockCacheConfig,
         M: ManagerReadWrite,
     {
-        core.main_memory
-            .protect_pages(addr.to_machine_address(), length as usize, perms)?;
+        machine.protect_pages(addr.to_machine_address(), length as usize, perms)?;
 
         // Return 0 to indicate success.
         Ok(0)
@@ -96,18 +98,20 @@ impl<M: ManagerBase> SupervisorState<M> {
         clippy::too_many_arguments,
         reason = "The system call dispatch mechanism needs these arguments to exist, they can't be on a nested structure"
     )]
-    pub(super) fn handle_mmap<MC>(
+    pub(super) fn handle_mmap<MC, B, BCC>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: VirtAddr,
         length: NonZeroU64,
         perms: Permissions,
         flags: Flags,
-        _fd: NoFileDescriptor,
-        _offset: Zero,
+        NoFileDescriptor: NoFileDescriptor,
+        Zero: Zero,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // We don't allow shared mappings
@@ -122,46 +126,44 @@ impl<M: ManagerBase> SupervisorState<M> {
             Backend::File => return Err(Error::NoSystemCall),
         }
 
-        let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => core.main_memory.allocate_and_protect_pages(
-                None,
-                length.get() as usize,
-                perms,
-                false,
-            )?,
+        let res_addr = match flags.addr_hint {
+            AddressHint::Hint => {
+                machine.allocate_and_protect_pages(None, length.get() as usize, perms, false)?
+            }
 
             AddressHint::Fixed { allow_replace } => {
                 if !addr.is_aligned(PAGE_SIZE) {
                     return Err(Error::InvalidArgument);
                 }
 
-                core.main_memory.allocate_and_protect_pages(
+                machine.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
                     length.get() as usize,
                     perms,
                     allow_replace,
                 )?
             }
-        }
-        .into();
+        };
 
-        Ok(res_addr.to_machine_address())
+        Ok(res_addr)
     }
 
     /// Handle `munmap` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mmap.2.html>
-    pub(super) fn handle_munmap<MC>(
+    pub(super) fn handle_munmap<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: u64,
         length: u64,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
-        core.main_memory
+        machine
             .deallocate_and_protect_pages(addr, length as usize)
             .map_err(|_| Error::InvalidArgument)?;
 

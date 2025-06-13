@@ -253,11 +253,8 @@ where
         let program_length = program_end.saturating_sub(program_start) as usize;
 
         // Allow the program to be written to main memory
-        self.machine_state.core.main_memory.protect_pages(
-            program_start,
-            program_length,
-            Permissions::WRITE,
-        )?;
+        self.machine_state
+            .protect_pages(program_start, program_length, Permissions::WRITE)?;
 
         // Write program to main memory
         for (&addr, data) in program.segments.iter() {
@@ -265,16 +262,13 @@ where
         }
 
         // Remove access to the program that has just been placed into memory
-        self.machine_state.core.main_memory.protect_pages(
-            program_start,
-            program_length,
-            Permissions::NONE,
-        )?;
+        self.machine_state
+            .protect_pages(program_start, program_length, Permissions::NONE)?;
 
         // Configure memory permissions using the ELF program headers, if present
         if let Some(program_headers) = &program.program_headers {
             for mem_perms in program_headers.permissions.iter() {
-                self.machine_state.core.main_memory.protect_pages(
+                self.machine_state.protect_pages(
                     mem_perms.start_address,
                     mem_perms.length as usize,
                     mem_perms.permissions,
@@ -289,6 +283,11 @@ where
             .align_up(PAGE_SIZE)
             .ok_or(MachineError::MemoryTooSmall)?;
         self.system_state.program.write(program_start..program_end);
+
+        // self.machine_state.block_cache.insert_range(
+        //     program_start.to_machine_address(),
+        //     (program_end - program_start) as u64,
+        // );
 
         Ok(())
     }
@@ -323,14 +322,14 @@ where
         // Guard the stack with a guard page. This prevents stack overflows spilling into the heap
         // or even worse, the program's .bss or .data area.
         let stack_guard = stack_bottom - PAGE_SIZE.get();
-        self.machine_state.core.main_memory.protect_pages(
+        self.machine_state.protect_pages(
             stack_guard.to_machine_address(),
             PAGE_SIZE.get() as usize,
             Permissions::NONE,
         )?;
 
         // Make sure the stack region is readable and writable
-        self.machine_state.core.main_memory.protect_pages(
+        self.machine_state.protect_pages(
             stack_bottom.to_machine_address(),
             stack_space,
             Permissions::READ_WRITE,
@@ -744,9 +743,9 @@ impl<M: ManagerBase> SupervisorState<M> {
             RT_SIGACTION => dispatch4!(rt_sigaction, &mut machine.core),
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
             BRK => dispatch0!(brk),
-            MMAP => dispatch6!(mmap, &mut machine.core),
-            MPROTECT => dispatch3!(mprotect, &mut machine.core),
-            MUNMAP => dispatch2!(munmap, &mut machine.core),
+            MMAP => dispatch6!(mmap, machine),
+            MPROTECT => dispatch3!(mprotect, machine),
+            MUNMAP => dispatch2!(munmap, machine),
             MADVISE => dispatch0!(madvise),
             GETRANDOM => dispatch2!(getrandom, &mut machine.core),
             CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
@@ -1199,8 +1198,6 @@ mod tests {
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
-            .core
-            .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
@@ -1271,8 +1268,6 @@ mod tests {
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
-            .core
-            .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
@@ -1380,8 +1375,6 @@ mod tests {
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
-            .core
-            .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
@@ -1701,8 +1694,6 @@ mod tests {
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
-            .core
-            .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
@@ -1773,8 +1764,6 @@ mod tests {
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
-            .core
-            .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
@@ -1862,8 +1851,6 @@ mod tests {
 
         // Allocate all memory to ensure subsequent allocations will fail
         machine_state
-            .core
-            .main_memory
             .allocate_and_protect_pages(
                 Some(0),
                 MemLayout::TOTAL_BYTES,
@@ -1895,7 +1882,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 addr.into(),
                 length,
                 perms,
@@ -1923,7 +1910,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 VirtAddr::new(addr),
                 length,
                 perms,

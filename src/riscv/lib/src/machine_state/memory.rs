@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
+use crate::machine_state::block_cache::ranged::RangedBlockCache;
 use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
@@ -234,14 +235,17 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerWrite;
 
     /// Protect the pages that belong to the given address range.
-    fn protect_pages(
+    fn protect_pages<MC, BC>(
         &mut self,
+        block_cache: &mut BC,
         address: Address,
         length: usize,
         perms: Permissions,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerWrite;
+        MC: MemoryConfig<State<M> = Self>,
+        BC: RangedBlockCache<MC, M>,
+        M: ManagerReadWrite;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(
@@ -263,27 +267,33 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerReadWrite;
 
     /// Allocate pages for the given address range and amend the protections for them.
-    fn allocate_and_protect_pages(
+    fn allocate_and_protect_pages<MC, BC>(
         &mut self,
+        block_cache: &mut BC,
         address_hint: Option<Address>,
         length: usize,
         perms: Permissions,
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
     where
+        MC: MemoryConfig<State<M> = Self>,
+        BC: RangedBlockCache<MC, M>,
         M: ManagerReadWrite;
 
     /// Free the pages in that address range and make sure the range is no longer accessible.
-    fn deallocate_and_protect_pages(
+    fn deallocate_and_protect_pages<MC, BC>(
         &mut self,
+        block_cache: &mut BC,
         address: Address,
         length: usize,
     ) -> Result<(), MemoryGovernanceError>
     where
+        MC: MemoryConfig<State<M> = Self>,
+        BC: RangedBlockCache<MC, M>,
         M: ManagerReadWrite,
     {
         self.deallocate_pages(address, length)?;
-        self.protect_pages(address, length, Permissions::NONE)
+        self.protect_pages(block_cache, address, length, Permissions::NONE)
     }
 }
 

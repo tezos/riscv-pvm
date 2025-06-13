@@ -342,10 +342,10 @@ mod tests {
             // Create the states for the interpreted and jitted runs.
             let mut manager = F::manager();
             let mut interpreted = MachineCoreState::<M4K, _>::new(&mut manager);
-            interpreted.main_memory.set_all_readable_writeable();
+            interpreted.main_memory.set_all_readable_writeable::<M4K>();
 
             let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            jitted.main_memory.set_all_readable_writeable();
+            jitted.main_memory.set_all_readable_writeable::<M4K>();
 
             // Create the block of instructions.
             let mut block = Interpreted::<M4K, _>::new();
@@ -2998,7 +2998,7 @@ mod tests {
              -> Scenario<F> {
                 ScenarioBuilder::default()
                     .set_setup_hook(setup_hook!(core, F, {
-                        core.main_memory.set_all_readable_writeable();
+                        core.main_memory.set_all_readable_writeable::<M4K>();
                         core.main_memory.write(addr, expected_rd).unwrap();
                         core.hart.xregisters.write(x1, addr);
                         core.hart.xregisters.write(x3, val);

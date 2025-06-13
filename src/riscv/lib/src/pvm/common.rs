@@ -587,7 +587,7 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .set_all_readable_writeable();
+            .set_all_readable_writeable::<MC>();
 
         let level_addr = memory::FIRST_ADDRESS;
         let counter_addr = level_addr + 4;
@@ -697,7 +697,7 @@ mod tests {
             pvm.machine_state
                 .core
                 .main_memory
-                .set_all_readable_writeable();
+                .set_all_readable_writeable::<MC>();
 
             // Write characters
             pvm.machine_state
@@ -748,7 +748,7 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .set_all_readable_writeable();
+            .set_all_readable_writeable::<MC>();
 
         let input_address = memory::FIRST_ADDRESS;
         let buffer = [1u8, 2, 3, 4];
@@ -822,7 +822,7 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .set_all_readable_writeable();
+            .set_all_readable_writeable::<MC>();
 
         const OUTPUT_BUFFER_SIZE: usize = 10;
         let input_address = memory::FIRST_ADDRESS;

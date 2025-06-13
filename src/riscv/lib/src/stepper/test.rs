@@ -25,7 +25,6 @@ use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::memory::M1G;
-use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::Permissions;
 use crate::program::Program;
@@ -126,8 +125,6 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
 
         stepper
             .machine_state
-            .core
-            .main_memory
             .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC)
             .unwrap();
 

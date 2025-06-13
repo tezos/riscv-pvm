@@ -11,6 +11,7 @@ use super::PAGE_SIZE;
 use super::Permissions;
 use super::buddy::Buddy;
 use super::protection::PagePermissions;
+use crate::machine_state::block_cache::ranged::RangedBlockCache;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
@@ -52,13 +53,21 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
 
     /// Mark the whole memory as readable and writeable
     #[cfg(test)]
-    pub(crate) fn set_all_readable_writeable(&mut self)
+    pub(crate) fn set_all_readable_writeable<MC>(&mut self)
     where
+        MC: super::MemoryConfig<State<M> = Self>,
         B: Buddy<M>,
         M: ManagerReadWrite,
     {
-        self.protect_pages(0, TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        use crate::machine_state::block_cache::ranged::DummyRangedBlockCache;
+
+        self.protect_pages(
+            &mut DummyRangedBlockCache::<MC, M>::default(),
+            0,
+            TOTAL_BYTES,
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
     }
 
     /// Update an element in the region without checking memory protections. `address` is in bytes.
@@ -228,14 +237,17 @@ where
         }
     }
 
-    fn protect_pages(
+    fn protect_pages<MC, BC>(
         &mut self,
+        block_cache: &mut BC,
         address: Address,
         length: usize,
         perms: Permissions,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: ManagerWrite,
+        MC: super::MemoryConfig<State<M> = Self>,
+        BC: RangedBlockCache<MC, M>,
+        M: ManagerReadWrite,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
@@ -245,6 +257,14 @@ where
             .modify_access(address, length, perms.can_write());
         self.executable_pages
             .modify_access(address, length, perms.can_exec());
+
+        if !perms.can_exec() || perms.can_write() {
+            block_cache.remove_range(address, length as u64);
+        }
+
+        if perms.can_exec() && !perms.can_write() {
+            block_cache.insert_range(address, length as u64);
+        }
 
         Ok(())
     }
@@ -304,21 +324,27 @@ where
         .ok_or(super::MemoryGovernanceError)
     }
 
-    fn allocate_and_protect_pages(
+    fn allocate_and_protect_pages<MC, BC>(
         &mut self,
+        block_cache: &mut BC,
         address_hint: Option<Address>,
         length: usize,
         perms: Permissions,
         allow_replace: bool,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
+        MC: super::MemoryConfig<State<M> = Self>,
+        BC: RangedBlockCache<MC, M>,
         M: ManagerReadWrite,
     {
         // Mark the page range as occupied
         let address = self.allocate_pages(address_hint, length, allow_replace)?;
 
         // Configure the permissions on the page range
-        if self.protect_pages(address, length, perms).is_err() {
+        if self
+            .protect_pages(block_cache, address, length, perms)
+            .is_err()
+        {
             self.deallocate_pages(address, length)?;
         }
 
@@ -349,6 +375,7 @@ where
 pub mod tests {
     use super::*;
     use crate::backend_test;
+    use crate::machine_state::block_cache::ranged::DummyRangedBlockCache;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
     use crate::state::NewState;
@@ -381,6 +408,7 @@ pub mod tests {
 
         let mut manager = F::manager();
         let mut memory = <<M4K as MemoryConfig>::State<_>>::new(&mut manager);
+        let mut block_cache = DummyRangedBlockCache::<M4K, _>::default();
 
         // Write a pattern to ensure memory contains non-zero values
         for i in 0..PAGE_SIZE.get() {
@@ -390,7 +418,13 @@ pub mod tests {
         // Request size that's not a multiple of page size
         let requested_size = (PAGE_SIZE.get() as usize) - 100;
         let address = memory
-            .allocate_and_protect_pages(None, requested_size, Permissions::READ_WRITE, false)
+            .allocate_and_protect_pages(
+                &mut block_cache,
+                None,
+                requested_size,
+                Permissions::READ_WRITE,
+                false,
+            )
             .expect("Memory allocation should succeed");
 
         // Verify that memory is zeroed for the entire page, not just the requested length

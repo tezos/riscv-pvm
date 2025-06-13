@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: MIT
 
 use super::block::Block;
-use crate::cache_utils::FenceCounter;
 use crate::machine_state::block_cache::state::BlockCache;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -21,10 +20,7 @@ impl<const SIZE: usize> BlockCacheConfig<SIZE> {
         panic!("BITS parameter does not match SIZE parameter");
     };
 
-    const CACHE_MASK: usize = {
-        Self::fence_counter_wrapping_protection();
-        Self::CACHE_SIZE - 1
-    };
+    const CACHE_MASK: usize = Self::CACHE_SIZE - 1;
 
     /// Compute the index of a cache bucket for a given address.
     #[inline(always)]
@@ -32,18 +28,6 @@ impl<const SIZE: usize> BlockCacheConfig<SIZE> {
         // We know that addr here is always u16-aligned. Therefore, we can safely halve the number
         // of buckets we look at.
         (addr >> 1) as usize & Self::CACHE_MASK
-    }
-
-    /// Assert that the fence counter would not wrap before every cache entry has been invalidated
-    /// _at least_ once.
-    const fn fence_counter_wrapping_protection() {
-        let invalidation_count_until_wrapping = FenceCounter::MAX.0 as usize;
-        let cache_entries = Self::CACHE_SIZE;
-
-        assert!(
-            invalidation_count_until_wrapping > cache_entries,
-            "The fence counter does a full cycle before all cache entries could be invalidated!"
-        );
     }
 }
 

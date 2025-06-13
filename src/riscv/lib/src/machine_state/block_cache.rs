@@ -77,7 +77,8 @@
 pub mod block;
 mod config;
 pub mod metrics;
-mod state;
+pub(crate) mod ranged;
+pub(crate) mod state;
 
 use self::block::Block;
 pub use self::config::DefaultCacheConfig;
@@ -187,11 +188,7 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     where
         B: Clone;
 
-    /// Invalidate the entire block cache. This is more efficient than [`BlockCache::reset`],
-    fn invalidate(&mut self);
-
-    /// Reset the entire block cache to its initial state. This is less efficient than
-    /// [`BlockCache::invalidate`].
+    /// Reset the entire block cache to its initial state.
     fn reset(&mut self)
     where
         M::ManagerRoot: ManagerReadWrite;

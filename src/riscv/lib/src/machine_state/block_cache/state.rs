@@ -6,7 +6,6 @@
 use std::marker::PhantomData;
 
 use crate::array_utils;
-use crate::cache_utils::FenceCounter;
 use crate::machine_state::block_cache::BlockCall;
 use crate::machine_state::block_cache::CACHE_INSTR;
 use crate::machine_state::block_cache::block::Block;
@@ -27,7 +26,6 @@ use crate::state_backend::ManagerReadWrite;
 pub struct Cached<MC: MemoryConfig, B, M: ManagerBase> {
     pub(super) block: B,
     address: Address,
-    fence_counter: FenceCounter,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -40,14 +38,8 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         Self {
             block: B::new(),
             address: !0,
-            fence_counter: FenceCounter::INITIAL,
             _pd: PhantomData,
         }
-    }
-
-    fn invalidate(&mut self) {
-        self.address = !0;
-        self.block.invalidate();
     }
 
     fn reset(&mut self)
@@ -55,14 +47,12 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         M::ManagerRoot: ManagerReadWrite,
     {
         self.address = !0;
-        self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
-    fn start_block(&mut self, block_addr: Address, fence_counter: FenceCounter) {
+    fn start_block(&mut self, block_addr: Address) {
         self.address = block_addr;
         self.block.start_block();
-        self.fence_counter = fence_counter;
     }
 }
 
@@ -71,7 +61,6 @@ impl<MC: MemoryConfig, B: Clone, M: ManagerBase> Clone for Cached<MC, B, M> {
         Self {
             address: self.address,
             block: self.block.clone(),
-            fence_counter: self.fence_counter,
             _pd: PhantomData,
         }
     }
@@ -89,9 +78,6 @@ pub struct BlockCache<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: M
 
     /// The address of the next instruction to be injected into the current block
     pub(super) next_instr_addr: Address,
-
-    /// Fence counter for the entire block cache
-    pub(super) fence_counter: FenceCounter,
 
     /// Block entries
     pub(super) entries: Entries<SIZE, MC, B, M>,
@@ -127,7 +113,6 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         M::ManagerRoot: ManagerReadWrite,
     {
         let mut block_addr = self.current_block_addr;
-        let fence_counter = self.fence_counter;
 
         let mut entry = Self::entry_mut(&mut self.entries, block_addr);
         let start = entry.address;
@@ -135,7 +120,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let mut len_instr = entry.block.num_instr();
 
         if start != block_addr || start == addr {
-            entry.start_block(block_addr, fence_counter);
+            entry.start_block(block_addr);
             len_instr = 0;
         } else if len_instr == CACHE_INSTR {
             // The current block is full, start a new one
@@ -143,7 +128,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             block_addr = addr;
 
             entry = Self::entry_mut(&mut self.entries, block_addr);
-            entry.start_block(block_addr, fence_counter);
+            entry.start_block(block_addr);
 
             len_instr = 0;
         }
@@ -156,7 +141,6 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
         let possible_block = Self::entry(&self.entries, next_addr);
         let adjacent_block_found = possible_block.address == next_addr
-            && possible_block.fence_counter == fence_counter
             && next_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
@@ -197,7 +181,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         Self {
             current_block_addr: !0,
             next_instr_addr: !0,
-            fence_counter: FenceCounter::INITIAL,
             entries: array_utils::boxed_from_fn(|| Cached::new()),
         }
     }
@@ -208,7 +191,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     {
         Self {
             current_block_addr: self.current_block_addr,
-            fence_counter: self.fence_counter,
             next_instr_addr: self.next_instr_addr,
             // This may appear like a wild way to clone a boxed array. But! This way avoids that
             // the array gets temporarily allocated on the stack whhich causes a stack overflow on
@@ -226,25 +208,14 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M::ManagerRoot: ManagerReadWrite,
     {
-        self.fence_counter = FenceCounter::INITIAL;
         self.reset_to(!0);
         self.entries.iter_mut().for_each(Cached::reset);
-    }
-
-    fn invalidate(&mut self) {
-        let counter = self.fence_counter;
-        self.fence_counter = counter.next();
-        self.reset_to(!0);
-        Self::entry_mut(&mut self.entries, counter.0 as Address).invalidate();
     }
 
     fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>> {
         let entry = Self::entry_mut(&mut self.entries, addr);
 
-        if entry.address == addr
-            && self.fence_counter == entry.fence_counter
-            && entry.block.num_instr() > 0
-        {
+        if entry.address == addr && entry.block.num_instr() > 0 {
             Some(BlockCall { entry })
         } else {
             None
@@ -601,7 +572,9 @@ mod tests {
         // one go.
         for _ in 0..TestCacheConfig::CACHE_SIZE {
             populate_block(&mut block);
-            block.invalidate();
+
+            // XXX: Technically, the invalidation logic is no longer the same.
+            block.reset();
 
             // The invalidated block cache should not return any blocks.
             check_block(&mut block);

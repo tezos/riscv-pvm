@@ -655,7 +655,7 @@ pub(crate) mod test {
                 )| {
                     let mut state = state_cell.borrow_mut();
                     state.reset();
-                    state.main_memory.set_all_readable_writeable();
+                    state.main_memory.set_all_readable_writeable::<M4K>();
 
                     state.hart.xregisters.write(a0, r1_addr);
                     state.write_to_bus(0, a0, r1_val)?;
@@ -701,7 +701,7 @@ pub(crate) mod test {
                 )| {
                     let mut state = state_cell.borrow_mut();
                     state.reset();
-                    state.main_memory.set_all_readable_writeable();
+                    state.main_memory.set_all_readable_writeable::<M4K>();
 
                     state.hart.xregisters.write(a0, r1_addr);
                     state.write_to_bus(0, a0, r1_val)?;
@@ -870,7 +870,7 @@ pub(crate) mod test {
 
     backend_test!(test_alignment, F, {
         let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
-        state.main_memory.set_all_readable_writeable();
+        state.main_memory.set_all_readable_writeable::<M4K>();
         state.hart.xregisters.write(a0, 80); // LR.D starting address.
         state.hart.xregisters.write(a1, 84); // SC.W starting address.
         state.hart.xregisters.write(a2, 200); // Value to store.
