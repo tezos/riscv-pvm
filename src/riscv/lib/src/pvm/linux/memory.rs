@@ -27,7 +27,11 @@ use super::parameters::Flags;
 use super::parameters::NoFileDescriptor;
 use super::parameters::Visibility;
 use super::parameters::Zero;
-use crate::machine_state::MachineCoreState;
+use crate::log;
+use crate::machine_state::MachineState;
+use crate::machine_state::block_cache::BlockCache;
+use crate::machine_state::block_cache::BlockCacheConfig;
+use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
@@ -71,19 +75,33 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `mprotect` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
-    pub(super) fn handle_mprotect<MC>(
+    pub(super) fn handle_mprotect<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: PageAligned<VirtAddr>,
         length: u64,
         perms: Permissions,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        B: Block<MC, M>,
+        BCC: BlockCacheConfig,
         M: ManagerReadWrite,
     {
-        core.main_memory
-            .protect_pages(addr.to_machine_address(), length as usize, perms)?;
+        machine.core.main_memory.protect_pages(
+            addr.to_machine_address(),
+            length as usize,
+            perms,
+        )?;
+
+        // Change in permissions may affect the block cache entries which may no longer be
+        // executable or generally cacheable.
+        if !perms.can_exec() || perms.can_write() {
+            log::warning!("mprotect: invalidate block cache {}+{}", *addr, length);
+            machine
+                .block_cache
+                .invalidate_range(addr.to_machine_address(), length);
+        }
 
         // Return 0 to indicate success.
         Ok(0)
@@ -96,18 +114,20 @@ impl<M: ManagerBase> SupervisorState<M> {
         clippy::too_many_arguments,
         reason = "The system call dispatch mechanism needs these arguments to exist, they can't be on a nested structure"
     )]
-    pub(super) fn handle_mmap<MC>(
+    pub(super) fn handle_mmap<MC, B, BCC>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: VirtAddr,
         length: NonZeroU64,
         perms: Permissions,
         flags: Flags,
-        _fd: NoFileDescriptor,
-        _offset: Zero,
+        NoFileDescriptor: NoFileDescriptor,
+        Zero: Zero,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // We don't allow shared mappings
@@ -122,8 +142,8 @@ impl<M: ManagerBase> SupervisorState<M> {
             Backend::File => return Err(Error::NoSystemCall),
         }
 
-        let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => core.main_memory.allocate_and_protect_pages(
+        let res_addr = match flags.addr_hint {
+            AddressHint::Hint => machine.core.main_memory.allocate_and_protect_pages(
                 None,
                 length.get() as usize,
                 perms,
@@ -135,35 +155,58 @@ impl<M: ManagerBase> SupervisorState<M> {
                     return Err(Error::InvalidArgument);
                 }
 
-                core.main_memory.allocate_and_protect_pages(
+                let res_addr = machine.core.main_memory.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
                     length.get() as usize,
                     perms,
                     allow_replace,
-                )?
-            }
-        }
-        .into();
+                )?;
 
-        Ok(res_addr.to_machine_address())
+                // Only fixed mappings can override existing mappings, thereby changing the
+                // permissions of the existing mapping. This requires us to invalidate any
+                // corresponding block cache entries.
+                if allow_replace && (!perms.can_exec() || perms.can_write()) {
+                    log::warning!(
+                        "mmap: invalidate block cache {:#x}+{}",
+                        res_addr,
+                        length.get()
+                    );
+                    machine.block_cache.invalidate_range(res_addr, length.get());
+                }
+
+                res_addr
+            }
+        };
+
+        Ok(res_addr)
     }
 
     /// Handle `munmap` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mmap.2.html>
-    pub(super) fn handle_munmap<MC>(
+    pub(super) fn handle_munmap<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         addr: u64,
         length: u64,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
-        core.main_memory
+        machine
+            .core
+            .main_memory
             .deallocate_and_protect_pages(addr, length as usize)
             .map_err(|_| Error::InvalidArgument)?;
+
+        log::warning!("munmap: invalidate block cache: {:#x}+{}", addr, length);
+
+        // Block cache entries may no longer be valid after unmapping memory, given that this
+        // memory area is no longer accessible.
+        machine.block_cache.invalidate_range(addr, length);
 
         Ok(0)
     }

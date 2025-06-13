@@ -121,10 +121,7 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
 impl<MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<'_, MC, BCC, Owned> {
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
-    pub fn produce_proof(&mut self) -> Option<Proof>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
+    pub fn produce_proof(&mut self) -> Option<Proof> {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
 
@@ -223,7 +220,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWri
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC, BCC>, Ref<'_, M>> {
+    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC>, Ref<'_, M>> {
         self.pvm.struct_ref::<FnManagerIdent>()
     }
 
@@ -236,8 +233,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWri
     /// [`BlockBuilder`]: Block::BlockBuilder
     pub fn rebind_via_serde(&mut self, block_builder: B::BlockBuilder)
     where
-        for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Serialize,
-        AllocatedOf<PvmLayout<MC, BCC>, M>: DeserializeOwned,
+        for<'a> AllocatedOf<PvmLayout<MC>, Ref<'a, M>>: Serialize,
+        AllocatedOf<PvmLayout<MC>, M>: DeserializeOwned,
     {
         let space = {
             let refs = self.pvm.struct_ref::<FnManagerIdent>();
@@ -273,12 +270,9 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
     }
 
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
-    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
+    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
+        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(proof_tree)
             .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
 
         let pvm = Pvm::<MC, BCC, Interpreted<_, _>, Verifier>::bind(space, InterpretedBlockBuilder);
@@ -301,7 +295,7 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
         let stepper = stepper.try_step_partial()?;
 
         let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, BCC>::partial_state_hash(refs, proof_tree)?;
+        let final_hash = PvmLayout::<MC>::partial_state_hash(refs, proof_tree)?;
         if final_hash != proof.final_state_hash() {
             return Err(ProofVerificationFailure::FinalHashMismatch {
                 expected: proof.final_state_hash(),

@@ -9,53 +9,56 @@ use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::CACHE_INSTR;
-use crate::machine_state::block_cache::ICallPlaced;
+use crate::machine_state::block_cache::ICall;
 use crate::machine_state::block_cache::block::Block;
-use crate::machine_state::block_cache::block::BlockLayout;
 use crate::machine_state::block_cache::block::run_block_inner;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Cell;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 
 /// Interpreted blocks are built automatically, and require no additional context.
 #[derive(Debug, Default)]
 pub struct InterpretedBlockBuilder;
 
-/// Blocks that are executed via interpreting the individual instructions.
-///
-/// Interpreted blocks use the [`EnrichedCell`] mechanism, in order to dispatch
-/// opcode to function statically during block construction. This saves time over
-/// dispatching on every 'instruction run'. See [`ICall`] for more information.
-///
-/// [`ICall`]: super::super::ICall
-pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
-    pub(super) instr: [EnrichedCell<ICallPlaced<MC, M>, M>; CACHE_INSTR],
-    len_instr: Cell<u8, M>,
+/// An instruction in the cache
+pub struct CachedInstruction<MC: MemoryConfig, M: ManagerBase> {
+    /// Run function for the instruction
+    pub runner: ICall<MC, M::ManagerRoot>,
+
+    /// Instruction itself
+    pub instr: Instruction,
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> NewState<M> for Interpreted<MC, M> {
-    fn new(manager: &mut M) -> Self
+impl<MC: MemoryConfig, M: ManagerBase> CachedInstruction<MC, M> {
+    /// Creates a new cached instruction with the given instruction.
+    pub fn new(instr: Instruction) -> Self
     where
-        M: ManagerAlloc,
+        M::ManagerRoot: ManagerReadWrite,
     {
+        let runner = ICall::from(&instr);
+        Self { instr, runner }
+    }
+}
+
+impl<MC: MemoryConfig, M: ManagerBase> Clone for CachedInstruction<MC, M> {
+    fn clone(&self) -> Self {
         Self {
-            len_instr: Cell::new(manager),
-            instr: NewState::new(manager),
+            instr: self.instr,
+            runner: self.runner,
         }
     }
+}
+
+/// Blocks that are executed via interpreting the individual instructions
+pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
+    instr: [CachedInstruction<MC, M>; CACHE_INSTR],
+    len_instr: u8,
 }
 
 impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
@@ -65,11 +68,11 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
     where
         M: ManagerRead,
     {
-        self.len_instr.read() as usize
+        self.len_instr as usize
     }
 
     #[inline]
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[CachedInstruction<MC, M>]
     where
         M: ManagerRead,
     {
@@ -80,50 +83,42 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
     where
         M: ManagerWrite,
     {
-        self.len_instr.write(0);
+        self.len_instr = 0;
     }
 
     fn push_instr(&mut self, instr: Instruction)
     where
         M: ManagerReadWrite,
     {
-        let len = self.len_instr.read();
-        self.instr[len as usize].write(instr);
-        self.len_instr.write(len + 1);
+        self.instr[self.len_instr as usize] = CachedInstruction::new(instr);
+        self.len_instr = self.len_instr.saturating_add(1);
     }
 
     fn reset(&mut self)
     where
         M: ManagerReadWrite,
     {
-        self.len_instr.write(0);
+        self.len_instr = 0;
         self.instr
             .iter_mut()
-            .for_each(|lc| lc.write(Instruction::DEFAULT));
+            .for_each(|entry| *entry = CachedInstruction::new(Instruction::DEFAULT));
     }
 
     fn start_block(&mut self)
     where
         M: ManagerWrite,
     {
-        self.len_instr.write(0);
+        self.len_instr = 0;
     }
 
-    fn bind(space: AllocatedOf<BlockLayout, M>) -> Self
+    fn new() -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            len_instr: space.0,
-            instr: space.1.map(EnrichedCell::bind),
+            len_instr: 0,
+            instr: std::array::from_fn(|_| CachedInstruction::new(Instruction::DEFAULT)),
         }
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
-        (
-            self.len_instr.struct_ref::<F>(),
-            self.instr.each_ref().map(|entry| entry.struct_ref::<F>()),
-        )
     }
 
     /// # SAFETY
@@ -163,7 +158,7 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
 impl<MC: MemoryConfig, M: ManagerClone> Clone for Interpreted<MC, M> {
     fn clone(&self) -> Self {
         Self {
-            len_instr: self.len_instr.clone(),
+            len_instr: self.len_instr,
             instr: self.instr.clone(),
         }
     }

@@ -741,9 +741,9 @@ impl<M: ManagerBase> SupervisorState<M> {
             RT_SIGACTION => dispatch4!(rt_sigaction, &mut machine.core),
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
             BRK => dispatch0!(brk),
-            MMAP => dispatch6!(mmap, &mut machine.core),
-            MPROTECT => dispatch3!(mprotect, &mut machine.core),
-            MUNMAP => dispatch2!(munmap, &mut machine.core),
+            MMAP => dispatch6!(mmap, machine),
+            MPROTECT => dispatch3!(mprotect, machine),
+            MUNMAP => dispatch2!(munmap, machine),
             MADVISE => dispatch0!(madvise),
             GETRANDOM => dispatch2!(getrandom, &mut machine.core),
             CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
@@ -1809,7 +1809,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 addr.into(),
                 length,
                 perms,
@@ -1837,7 +1837,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 VirtAddr::new(addr),
                 length,
                 perms,
