@@ -15,6 +15,7 @@ use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::program::Program;
+use crate::pvm::InputRequest;
 use crate::pvm::common::PvmHooks;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
@@ -189,6 +190,8 @@ impl NodePvm {
             }
         }
 
+        let _ = proof_state.input_request();
+
         let proof = proof_state.to_proof().ok()?;
         Some(proof)
     }
@@ -202,8 +205,7 @@ impl NodePvm<Verifier> {
         proof: &Proof,
         input: Option<PvmInput>,
         pvm_hooks: &mut PvmHooks,
-    ) -> Option<()> {
-        let expected_final_hash = proof.final_state_hash();
+    ) -> Option<InputRequest> {
         let proof_tree = proof.tree();
 
         self.with_backend_mut(|pvm| {
@@ -220,12 +222,18 @@ impl NodePvm<Verifier> {
             let final_hash =
                 NodePvmLayout::partial_state_hash(refs, ProofTree::Present(proof_tree)).ok()?;
 
-            if final_hash != expected_final_hash {
+            if final_hash != proof.final_state_hash() {
                 return None;
             }
 
-            // TODO: RV-556: Construct and return input request upon successful verification
-            todo!()
+            Some(pvm.input_request())
+        })
+    }
+
+    pub fn partial_state_hash(&self, proof_tree: ProofTree) -> Result<Hash, PvmError> {
+        let refs = self.state.struct_ref::<FnManagerIdent>();
+        NodePvmLayout::partial_state_hash(refs, proof_tree).map_err(|e| {
+            PvmError::SerializationError(format!("Failed to compute partial state hash: {}", e))
         })
     }
 }

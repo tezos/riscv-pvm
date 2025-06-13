@@ -20,6 +20,7 @@ use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
@@ -109,7 +110,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         }))
     }
 
-    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<T>>> {
+    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         let tag = match self.next_tag() {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));
@@ -120,10 +121,17 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             Tag::Node => return Err(DeserError::UnexpectedNode),
             Tag::Leaf(leaf_type) => move |input: &mut StreamInput| match leaf_type {
                 LeafTag::Blind => Ok(Partial::Blinded(input.deserialise::<Hash>()?)),
-                LeafTag::Read => Ok(Partial::Present(input.deserialise::<T>()?)),
+                LeafTag::Read => Ok({
+                    let initial_position = input.cursor.position() as usize;
+                    let data = input.deserialise::<T>()?;
+                    let end_position = input.cursor.position() as usize;
+                    let raw_bytes = input.cursor.get_ref()[initial_position..end_position].to_vec();
+                    Partial::Present((data, raw_bytes))
+                }),
             },
         }))
     }
+
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
         let tags = match self {
             StreamDeserialiser::Absent => {
@@ -307,14 +315,14 @@ impl<R> StreamParserComb<'_, R> {
     }
 }
 
-/// Deserialise into a type `T::Output` given the raw bytes.
+/// Deserialise raw bytes into a [`Verifier`] backend and the partial state hash helper [`OwnedProofPart`].
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
 pub fn deserialise<L: ProofLayout>(
     proof_tree_raw_bytes: &[u8],
-) -> Result<AllocatedOf<L, Verifier>, DeserError> {
+) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
     let tags_rc = Rc::new(RefCell::new(TagIter::new(proof_tree_raw_bytes)));
-    let comp_fn = L::to_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
+    let comp_fn = L::into_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation
