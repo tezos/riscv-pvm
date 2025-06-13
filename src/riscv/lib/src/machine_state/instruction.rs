@@ -278,7 +278,7 @@ pub enum OpCode {
     X64AtomicStore,
     X64AtomicSwap,
     X64AtomicAdd,
-    Amoxord,
+    X64AtomicXor,
     X64AtomicAnd,
     X64AtomicOr,
     X64AtomicMinSigned,
@@ -497,7 +497,7 @@ impl OpCode {
             Self::X64AtomicStore => Args::run_x64_atomic_store,
             Self::X64AtomicSwap => Args::run_x64_atomic_swap,
             Self::X64AtomicAdd => Args::run_x64_atomic_add,
-            Self::Amoxord => Args::run_amoxord,
+            Self::X64AtomicXor => Args::run_x64_atomic_xor,
             Self::X64AtomicAnd => Args::run_x64_atomic_and,
             Self::X64AtomicOr => Args::run_x64_atomic_or,
             Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
@@ -716,6 +716,7 @@ impl OpCode {
             Self::X64AtomicAdd => Some(Args::run_x64_atomic_add),
             Self::X64AtomicAnd => Some(Args::run_x64_atomic_and),
             Self::X64AtomicOr => Some(Args::run_x64_atomic_or),
+            Self::X64AtomicXor => Some(Args::run_x64_atomic_xor),
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
@@ -1502,7 +1503,7 @@ impl Args {
     impl_amo_type!(atomics::run_x64_atomic_store, run_x64_atomic_store);
     impl_amo_type!(atomics::run_x64_atomic_swap, run_x64_atomic_swap);
     impl_amo_type!(atomics::run_x64_atomic_add, run_x64_atomic_add);
-    impl_amo_type!(run_amoxord);
+    impl_amo_type!(atomics::run_x64_atomic_xor, run_x64_atomic_xor);
     impl_amo_type!(atomics::run_x64_atomic_and, run_x64_atomic_and);
     impl_amo_type!(atomics::run_x64_atomic_or, run_x64_atomic_or);
     impl_amo_type!(
@@ -1959,10 +1960,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoxord(args) => Instruction {
-                opcode: OpCode::Amoxord,
-                args: args.into(),
-            },
+            InstrCacheable::Amoxord(args) => Instruction::new_x64_atomic_xor(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoandd(args) => Instruction::new_x64_atomic_and(
                 args.rd,
                 args.rs1,
