@@ -266,7 +266,7 @@ pub enum OpCode {
     X32AtomicLoad,
     X32AtomicStore,
     X32AtomicSwap,
-    Amoaddw,
+    X32AtomicAdd,
     Amoxorw,
     Amoandw,
     Amoorw,
@@ -282,9 +282,9 @@ pub enum OpCode {
     Amoandd,
     Amoord,
     X64AtomicMinSigned,
-    Amomaxd,
-    Amominud,
-    Amomaxud,
+    X64AtomicMaxSigned,
+    X64AtomicMinUnsigned,
+    X64AtomicMaxUnsigned,
 
     // RV64M division instructions
     X64RemSigned,
@@ -485,7 +485,7 @@ impl OpCode {
             Self::X32AtomicLoad => Args::run_x32_atomic_load,
             Self::X32AtomicStore => Args::run_x32_atomic_store,
             Self::X32AtomicSwap => Args::run_x32_atomic_swap,
-            Self::Amoaddw => Args::run_amoaddw,
+            Self::X32AtomicAdd => Args::run_x32_atomic_add,
             Self::Amoxorw => Args::run_amoxorw,
             Self::Amoandw => Args::run_amoandw,
             Self::Amoorw => Args::run_amoorw,
@@ -501,9 +501,9 @@ impl OpCode {
             Self::Amoandd => Args::run_amoandd,
             Self::Amoord => Args::run_amoord,
             Self::X64AtomicMinSigned => Args::run_x64_atomic_min_signed,
-            Self::Amomaxd => Args::run_amomaxd,
-            Self::Amominud => Args::run_amominud,
-            Self::Amomaxud => Args::run_amomaxud,
+            Self::X64AtomicMaxSigned => Args::run_x64_atomic_max_signed,
+            Self::X64AtomicMinUnsigned => Args::run_x64_atomic_min_unsigned,
+            Self::X64AtomicMaxUnsigned => Args::run_x64_atomic_max_unsigned,
             Self::X64RemSigned => Args::run_x64_rem_signed,
             Self::X64RemUnsigned => Args::run_x64_rem_unsigned,
             Self::X32RemSigned => Args::run_x32_rem_signed,
@@ -717,6 +717,10 @@ impl OpCode {
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
+            Self::X64AtomicMinUnsigned => Some(Args::run_x64_atomic_min_unsigned),
+            Self::X64AtomicMaxSigned => Some(Args::run_x64_atomic_max_signed),
+            Self::X64AtomicMaxUnsigned => Some(Args::run_x64_atomic_max_unsigned),
+            Self::X32AtomicAdd => Some(Args::run_x32_atomic_add),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1484,7 +1488,7 @@ impl Args {
     impl_amo_type!(atomics::run_x32_atomic_load, run_x32_atomic_load);
     impl_amo_type!(atomics::run_x32_atomic_store, run_x32_atomic_store);
     impl_amo_type!(atomics::run_x32_atomic_swap, run_x32_atomic_swap);
-    impl_amo_type!(run_amoaddw);
+    impl_amo_type!(atomics::run_x32_atomic_add, run_x32_atomic_add);
     impl_amo_type!(run_amoxorw);
     impl_amo_type!(run_amoandw);
     impl_amo_type!(run_amoorw);
@@ -1503,9 +1507,18 @@ impl Args {
         atomics::run_x64_atomic_min_signed,
         run_x64_atomic_min_signed
     );
-    impl_amo_type!(run_amomaxd);
-    impl_amo_type!(run_amominud);
-    impl_amo_type!(run_amomaxud);
+    impl_amo_type!(
+        atomics::run_x64_atomic_max_signed,
+        run_x64_atomic_max_signed
+    );
+    impl_amo_type!(
+        atomics::run_x64_atomic_min_unsigned,
+        run_x64_atomic_min_unsigned
+    );
+    impl_amo_type!(
+        atomics::run_x64_atomic_max_unsigned,
+        run_x64_atomic_max_unsigned
+    );
 
     // RV64M multiplication and division instructions
     impl_r_type!(integer::run_x64_rem_signed, run_x64_rem_signed, non_zero_rd);
@@ -1877,10 +1890,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoaddw(args) => Instruction {
-                opcode: OpCode::Amoaddw,
-                args: args.into(),
-            },
+            InstrCacheable::Amoaddw(args) => Instruction::new_x32_atomic_add(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoxorw(args) => Instruction {
                 opcode: OpCode::Amoxorw,
                 args: args.into(),
@@ -1960,18 +1977,30 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amomaxd(args) => Instruction {
-                opcode: OpCode::Amomaxd,
-                args: args.into(),
-            },
-            InstrCacheable::Amominud(args) => Instruction {
-                opcode: OpCode::Amominud,
-                args: args.into(),
-            },
-            InstrCacheable::Amomaxud(args) => Instruction {
-                opcode: OpCode::Amomaxud,
-                args: args.into(),
-            },
+            InstrCacheable::Amomaxd(args) => Instruction::new_x64_atomic_max_signed(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amominud(args) => Instruction::new_x64_atomic_min_unsigned(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amomaxud(args) => Instruction::new_x64_atomic_max_unsigned(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
 
             // RV64M multiplication and division instructions
             InstrCacheable::Rem(args) => Instruction::from_ic_rem(args),

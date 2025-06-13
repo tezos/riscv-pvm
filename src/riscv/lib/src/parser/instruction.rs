@@ -457,11 +457,13 @@ pub enum InstrCacheable {
     /// In case of success, write 0 in `rd`, otherwise write 1.
     /// See also [crate::machine_state::reservation_set].
     Scw(AmoArgs),
-    ///`AMOSWAP.W` - Loads in rd the value from the address in rs1 and writes val(rs2)
-    /// back to the address in rs1.
+    ///`AMOSWAP.W` - Atomically loads in rd the value from the address in rs1 and
+    /// writes val(rs2) back to the address in rs1.
+    Amoswapw(AmoArgs),
+    /// `AMOADD.W` - Loads in rd the value from the address in rs1 and stores the result of
+    /// adding it to val(rs2) back to the address in rs1.
     /// The `aq` and `rl` bits specify additional memory constraints in
     /// multi-hart environments so they are currently ignored.
-    Amoswapw(AmoArgs),
     Amoaddw(AmoArgs),
     Amoxorw(AmoArgs),
     Amoandw(AmoArgs),
@@ -479,25 +481,28 @@ pub enum InstrCacheable {
     /// In case of success, write 0 in `rd`, otherwise write 1.
     /// See also [crate::machine_state::reservation_set].
     Scd(AmoArgs),
-    /// `AMOSWAP.D` - Loads in rd the value from the address in rs1 and writes val(rs2)
-    /// back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
+    /// `AMOSWAP.D` - Atomically loads in rd the value from the address in rs1 and
+    /// writes val(rs2) back to the address in rs1.
     Amoswapd(AmoArgs),
-    ///`AMOADD.D` - Loads in rd the value from the address in rs1 and stores the result of
-    /// adding it to val(rs2) back to the address in rs1.
-    ///
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
+    ///`AMOADD.D` - Atomically loads in rd the value from the address in rs1 and
+    /// stores the result of adding it to val(rs2) back to the address in rs1.
     Amoaddd(AmoArgs),
     Amoxord(AmoArgs),
     Amoandd(AmoArgs),
     Amoord(AmoArgs),
-    /// `AMOMIN.D` Loads in `rd` the value from the address in `rs1` and stores the minimum
-    /// between it and `val(rs2)` back to the address in `rs1`.
+    /// `AMOMIN.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the minimum between it and `val(rs2)` back to the address in `rs1`.
     Amomind(AmoArgs),
+    /// `AMOMAX.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the maximum between it and `val(rs2)` back to the address in `rs1`.
     Amomaxd(AmoArgs),
+    /// `AMOMINU.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the minimum between it and `val(rs2)` back to the address in `rs1`,
+    /// treating both as unsigned values.
     Amominud(AmoArgs),
+    /// `AMOMAXU.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the maximum between it and `val(rs2)` back to the address in `rs1`,
+    /// treating both as unsigned values.
     Amomaxud(AmoArgs),
 
     // RV64M division instructions

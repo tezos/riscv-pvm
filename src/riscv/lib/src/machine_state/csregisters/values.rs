@@ -28,7 +28,7 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
-use crate::state_backend::VerifierAlloc;
+use crate::state_backend::VerifierAllocResult;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::hash::HashError;
 use crate::state_backend::owned_backend::Owned;
@@ -37,7 +37,6 @@ use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
 use crate::state_backend::proof_backend::proof::deserialiser::Partial;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
-use crate::state_backend::proof_layout;
 use crate::state_backend::verify_backend;
 use crate::storage::binary;
 
@@ -163,17 +162,20 @@ impl ProofLayout for CSRValuesLayout {
         MerkleTree::make_merkle_leaf(serialised, state.aggregate_access_info())
     }
 
-    fn to_verifier_alloc<D: Deserialiser>(
-        proof: D,
-    ) -> Result<D::Suspended<VerifierAlloc<Self>>, proof_layout::FromProofError> {
+    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
         fn make_absent() -> AllocatedOf<CSRValuesLayout, verify_backend::Verifier> {
             CSRValuesF::new_with(|| Cell::bind(verify_backend::Region::Absent))
         }
 
         let leaf = proof.into_leaf::<AllocatedOf<CSRValuesLayout, Owned>>()?;
-        let handler = leaf.map(move |leaf| match leaf {
-            Partial::Absent | Partial::Blinded(_) => make_absent(),
-            Partial::Present(data) => data.map(Cell::from_owned),
+        let handler = leaf.map(move |leaf| {
+            let (leaf, merkle_bytes) = leaf.split();
+            let leaf = match leaf {
+                Partial::Absent | Partial::Blinded(_) => make_absent(),
+                Partial::Present(data) => data.map(Cell::from_owned),
+            };
+            let merkle = merkle_bytes.into_leaf_proof_tree();
+            (leaf, merkle)
         });
 
         Ok(handler)

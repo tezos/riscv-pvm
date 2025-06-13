@@ -130,6 +130,41 @@ fn run_x64_atomic<I: ICB>(
     })
 }
 
+fn run_x32_atomic<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    f: fn(I::XValue, I::XValue, &mut I) -> I::XValue,
+) -> I::IResult<()> {
+    let address_rs1 = icb.xregister_read(rs1);
+
+    // Handle the case where the address is not aligned.
+    let result = icb.atomic_access_fault_guard::<u32>(address_rs1, ReservationSetOption::NoReset);
+
+    // Continue with the operation if the address is aligned.
+    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u32>(address_rs1));
+
+    // Continue with the operation if the load was successful.
+    I::and_then(val_rs1_result, |val_rs1| {
+        // Apply the binary operation to the loaded value and the value in rs2
+        let val_rs2 = icb.xregister_read(rs2);
+        let res = f(val_rs1, val_rs2, icb);
+
+        let res = icb.narrow(res);
+        let res = icb.extend_signed(res);
+
+        let val_rs1 = icb.narrow(val_rs1);
+        let val_rs1 = icb.extend_signed(val_rs1);
+
+        // Write the value read fom the address in rs1 in rd
+        icb.xregister_write(rd, val_rs1);
+
+        // Store the resulting value to the address in rs1
+        icb.main_memory_store::<u32>(address_rs1, res)
+    })
+}
+
 /// Loads in `rd` the value from the address in `rs1` and stores the result of
 /// adding it to `val(rs2)` back to the address in `rs1`.
 ///
@@ -160,6 +195,72 @@ pub fn run_x64_atomic_min_signed<I: ICB>(
     _rl: bool,
 ) -> I::IResult<()> {
     run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.min_signed(y, icb))
+}
+
+/// Loads in `rd` the value from the address in `rs1` and stores the minimum
+/// between it and `val(rs2)` back to the address in `rs1`, treating both as
+/// unsigned values.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_min_unsigned<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.min_unsigned(y, icb))
+}
+
+/// Loads in `rd` the value from the address in `rs1` and stores the maximum
+/// between it and `val(rs2)` back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_max_signed<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.max_signed(y, icb))
+}
+
+/// Loads in `rd` the value from the address in `rs1` and stores the maximum
+/// between it and `val(rs2)` back to the address in `rs1`, treating both as
+/// unsigned values.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_max_unsigned<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.max_unsigned(y, icb))
+}
+
+/// Loads in `rd` the sign-extended value from the address in `rs1`(32-bit) and
+/// stores the result of adding it to `val(rs2)`(32-bit) back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_x32_atomic_add<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x32_atomic(icb, rs1, rs2, rd, |x, y, icb| x.add(y, icb))
 }
 
 /// Loads a word or a double from the address in `rs1`, places the
@@ -570,6 +671,38 @@ pub(crate) mod test {
         |r1_val, r2_val| i64::min(r1_val as i64, r2_val as i64) as u64,
         8,
         u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_min_unsigned,
+        super::run_x64_atomic_min_unsigned,
+        |r1_val, r2_val| u64::min(r1_val, r2_val),
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_max_signed,
+        super::run_x64_atomic_max_signed,
+        |r1_val, r2_val| i64::max(r1_val as i64, r2_val as i64) as u64,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_max_unsigned,
+        super::run_x64_atomic_max_unsigned,
+        u64::max,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x32_atomic_add,
+        super::run_x32_atomic_add,
+        i32::wrapping_add,
+        4,
+        i32
     );
 
     test_atomic_loadstore!(
