@@ -32,15 +32,15 @@ pub(crate) use core::block_metrics;
 #[cfg(not(feature = "metrics"))]
 pub(crate) use block_metrics;
 
-use super::ICallPlaced;
 use super::block::Block;
 use crate::machine_state::StepManyResult;
+use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
-use crate::state_backend::EnrichedCell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerReadWrite;
 use crate::storage::Hash;
 use crate::traps::EnvironException;
 
@@ -139,11 +139,7 @@ pub mod core {
                 return;
             }
 
-            let instr = block
-                .instr()
-                .iter()
-                .map(|i| i.read_stored())
-                .collect::<Vec<_>>();
+            let instr = block.instr().iter().map(|i| i.instr).collect::<Vec<_>>();
 
             let metrics = BlockMetrics {
                 instr,
@@ -297,15 +293,15 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
 
     fn reset(&mut self)
     where
-        M: crate::state_backend::ManagerReadWrite,
+        M: ManagerReadWrite,
     {
         self.block.reset();
         self.block_hash = BlockHash::Dirty;
     }
 
-    fn instr(&self) -> &[crate::state_backend::EnrichedCell<super::ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[CachedInstruction<MC, M>]
     where
-        M: crate::state_backend::ManagerRead,
+        M: ManagerRead,
     {
         self.block.instr()
     }
@@ -320,7 +316,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
-        M: crate::state_backend::ManagerReadWrite,
+        M: ManagerReadWrite,
     {
         if let BlockHash::Dirty = self.block_hash {
             let hash = block_hash(self.block.instr());
@@ -336,20 +332,14 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
 
     fn num_instr(&self) -> usize
     where
-        M: crate::state_backend::ManagerRead,
+        M: ManagerRead,
     {
         self.block.num_instr()
     }
 
-    fn struct_ref<'a, F: crate::state_backend::FnManager<crate::state_backend::Ref<'a, M>>>(
-        &'a self,
-    ) -> crate::state_backend::AllocatedOf<super::block::BlockLayout, F::Output> {
-        self.block.struct_ref::<F>()
-    }
-
     fn push_instr(&mut self, instr: crate::machine_state::instruction::Instruction)
     where
-        M: crate::state_backend::ManagerReadWrite,
+        M: ManagerReadWrite,
     {
         self.block.push_instr(instr);
         self.block_hash = BlockHash::Dirty;
@@ -363,12 +353,12 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         self.block_hash = BlockHash::Dirty;
     }
 
-    fn bind(allocated: crate::state_backend::AllocatedOf<super::block::BlockLayout, M>) -> Self
+    fn new() -> Self
     where
-        <M as ManagerBase>::ManagerRoot: crate::state_backend::ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         Self {
-            block: B::bind(allocated),
+            block: B::new(),
             block_hash: BlockHash::Dirty,
         }
     }
@@ -407,13 +397,8 @@ pub enum BlockHash {
 }
 
 /// Construct a block hash from the contained instructions.
-fn block_hash<MC: MemoryConfig, M: ManagerRead>(
-    block: &[EnrichedCell<ICallPlaced<MC, M>, M>],
-) -> Hash {
-    let instr = block
-        .iter()
-        .map(|i| i.read_ref_stored())
-        .collect::<Vec<_>>();
+fn block_hash<MC: MemoryConfig, M: ManagerRead>(block: &[CachedInstruction<MC, M>]) -> Hash {
+    let instr = block.iter().map(|i| i.instr).collect::<Vec<_>>();
 
     Hash::blake2b_hash(instr).expect("Hashing instructions always succeeds")
 }

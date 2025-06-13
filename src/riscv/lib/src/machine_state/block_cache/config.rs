@@ -6,19 +6,9 @@
 use super::block::Block;
 use crate::cache_utils::FenceCounter;
 use crate::machine_state::block_cache::state::BlockCache;
-use crate::machine_state::block_cache::state::Cached;
-use crate::machine_state::block_cache::state::CachedLayout;
-use crate::machine_state::block_cache::state::PartialBlock;
-use crate::machine_state::block_cache::state::PartialBlockLayout;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::Atom;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::Many;
-use crate::state_backend::Ref;
 
 /// Configuration for a block cache
 pub struct BlockCacheConfig<const SIZE: usize>;
@@ -44,6 +34,26 @@ impl<const SIZE: usize> BlockCacheConfig<SIZE> {
         (addr >> 1) as usize & Self::CACHE_MASK
     }
 
+    /// Iterate over all cache indices that cover the given address range.
+    pub fn for_each_cache_index(addr: Address, size: u64, mut f: impl FnMut(usize)) {
+        let num_entries = size.div_ceil(2) as usize;
+
+        // Covers the entire range?
+        if num_entries >= Self::CACHE_SIZE {
+            (0..Self::CACHE_SIZE).for_each(&mut f);
+            return;
+        }
+
+        let base_start = (addr >> 1) as usize;
+        let base_end = base_start + num_entries;
+
+        (base_start..base_end)
+            .map(|index| index.rem_euclid(Self::CACHE_SIZE))
+            .for_each(&mut f);
+
+        // TODO: Validate whether this covers all
+    }
+
     /// Assert that the fence counter would not wrap before every cache entry has been invalidated
     /// _at least_ once.
     const fn fence_counter_wrapping_protection() {
@@ -58,64 +68,7 @@ impl<const SIZE: usize> BlockCacheConfig<SIZE> {
 }
 
 impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
-    type Layout = (
-        Atom<Address>,
-        Atom<Address>,
-        Atom<FenceCounter>,
-        PartialBlockLayout,
-        Many<CachedLayout, SIZE>,
-    );
-
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = BlockCache<SIZE, B, MC, M>;
-
-    fn bind<MC, B, M>(
-        space: AllocatedOf<Self::Layout, M>,
-        block_builder: B::BlockBuilder,
-    ) -> Self::State<MC, B, M>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        M::ManagerRoot: ManagerReadWrite,
-    {
-        Self::State {
-            current_block_addr: space.0,
-            next_instr_addr: space.1,
-            fence_counter: space.2,
-            partial_block: PartialBlock::bind(space.3),
-            entries: space
-                .4
-                .into_iter()
-                .map(Cached::bind)
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| "mismatching vector lengths for instruction cache")
-                .unwrap(),
-            block_builder,
-        }
-    }
-
-    fn struct_ref<'a, MC, B, M, F>(
-        instance: &'a Self::State<MC, B, M>,
-    ) -> AllocatedOf<Self::Layout, F::Output>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        F: FnManager<Ref<'a, M>>,
-    {
-        (
-            instance.current_block_addr.struct_ref::<F>(),
-            instance.next_instr_addr.struct_ref::<F>(),
-            instance.fence_counter.struct_ref::<F>(),
-            instance.partial_block.struct_ref::<F>(),
-            instance
-                .entries
-                .iter()
-                .map(|entry| entry.struct_ref::<F>())
-                .collect(),
-        )
-    }
 }
 
 /// The default block cache index bits
