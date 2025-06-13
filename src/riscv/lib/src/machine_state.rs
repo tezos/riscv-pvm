@@ -445,15 +445,6 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         let mut result = StepManyResult::ZERO;
 
-        let current_block_result = self
-            .block_cache
-            .complete_current_block(&mut self.core, max_steps);
-
-        // Executing the current block may fail
-        if result.merge_and_return(current_block_result) {
-            return result;
-        }
-
         while result.steps < max_steps {
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();

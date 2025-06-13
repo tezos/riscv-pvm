@@ -59,15 +59,10 @@
 //!
 //! ## Solution
 //!
-//! Instead, we introduce the notion of a [`state::PartialBlock`], that can
-//! remember that we were executing a _specific_ entry in the block cache
-//! - and indeed the progress made.
-//!
-//! Then, when insufficient steps are remaining to run a block in full,
+//! Instead, when insufficient steps are remaining to run a block in full,
 //! we proceed to run the block anyway, but step-by-step. Once we
-//! exhaust any remaining steps, we save progress in a partial block,
-//! and execute the remainder of it with [`BlockCache::complete_current_block`]
-//! on the next iteration.
+//! exhaust any remaining steps, execution continues from the current
+//! program counter position on the next iteration.
 //!
 //! Since we now guarantee that we always execute the _same_ set of instructions,
 //! no matter how many steps are remaining, we solve this possible divergence.
@@ -147,13 +142,9 @@ impl<'a, MC: MemoryConfig, M: ManagerReadWrite> From<&'a Instruction> for ICall<
 /// A block that is available to be run.
 ///
 /// If there are sufficiently many steps remaining, the entire block is executed in one go.
-/// Otherwise, it will fall back to partial evaluation.
-///
-/// As a result, before starting to run blocks from the block cache, you must first ensure that
-/// any left-over partially-run block is cleared up with [`BlockCache::complete_current_block`].
+/// Otherwise, it will execute as many instructions as possible within the step limit.
 pub struct BlockCall<'a, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     entry: &'a mut state::Cached<MC, B, M>,
-    partial: &'a mut state::PartialBlock,
 }
 
 impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC, M> {
@@ -166,11 +157,11 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<EnvironException> {
-        if self.entry.block.num_instr() <= max_steps {
-            // Safety: the same block builder is passed through every time.
-            unsafe { self.entry.block.run_block(core, instr_pc, block_builder) }
-        } else {
-            self.partial.run_block_partial(core, max_steps, self.entry)
+        // Safety: the same block builder is passed through every time.
+        unsafe {
+            self.entry
+                .block
+                .run_block(core, instr_pc, max_steps, block_builder)
         }
     }
 }
@@ -222,15 +213,6 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
 
     /// Insert an uncompressed instruction into the block cache at the given  address.
     fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
-    where
-        M: ManagerReadWrite;
-
-    /// Mark the current block as complete, and reset the partial block state.
-    fn complete_current_block(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        max_steps: usize,
-    ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite;
 }

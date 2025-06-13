@@ -97,7 +97,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         // first param ignored
         let core_ptr_val = builder.block_params(entry_block)[1];
         let pc_val = X64(builder.block_params(entry_block)[2]);
-        let result_ptr_val = builder.block_params(entry_block)[3];
+        let result_ptr_val = builder.block_params(entry_block)[4];
         // last param ignored
 
         Self {

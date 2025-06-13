@@ -313,6 +313,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         &mut self,
         core: &mut crate::machine_state::MachineCoreState<MC, M>,
         instr_pc: crate::machine_state::memory::Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
@@ -327,7 +328,10 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
 
         block_metrics!(hash = &self.block_hash, record_called);
 
-        unsafe { self.block.run_block(core, instr_pc, block_builder) }
+        unsafe {
+            self.block
+                .run_block(core, instr_pc, max_steps, block_builder)
+        }
     }
 
     fn num_instr(&self) -> usize

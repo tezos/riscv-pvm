@@ -7,9 +7,6 @@ use std::marker::PhantomData;
 
 use crate::array_utils;
 use crate::cache_utils::FenceCounter;
-use crate::machine_state::MachineCoreState;
-use crate::machine_state::ProgramCounterUpdate;
-use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::BlockCall;
 use crate::machine_state::block_cache::CACHE_INSTR;
 use crate::machine_state::block_cache::block::Block;
@@ -25,137 +22,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::traps::EnvironException;
-
-/// Structure used to remember that a block was only partway executed
-/// before needing to pause due to `max_steps == 0`.
-///
-/// If a block is being partially executed, if either:
-/// - an error occurs
-/// - a jump or branch occurs then the partial block is reset, and execution will continue with a
-///   potentially different block.
-#[derive(Clone)]
-pub struct PartialBlock {
-    addr: Address,
-    in_progress: bool,
-    progress: u8,
-}
-
-impl PartialBlock {
-    /// Create a new partial block.
-    pub(super) fn new() -> Self {
-        Self {
-            addr: !0,
-            in_progress: false,
-            progress: 0,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.in_progress = false;
-        self.addr = 0;
-        self.progress = 0;
-    }
-
-    /// Run a block against the machine state.
-    ///
-    /// When calling this function, there must be no partial block in progress. To ensure
-    /// this, you must always run [`super::BlockCache::complete_current_block`] prior to fetching
-    /// and running a new block.
-    #[cold]
-    pub(super) fn run_block_partial<MC, B, M>(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        max_steps: usize,
-        entry: &mut Cached<MC, B, M>,
-    ) -> StepManyResult<EnvironException>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerReadWrite,
-    {
-        // start a new block
-        self.in_progress = true;
-        self.progress = 0;
-        self.addr = entry.address;
-
-        self.run_partial_inner(core, max_steps, entry)
-    }
-
-    fn run_partial_inner<MC, B, M>(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        max_steps: usize,
-        entry: &mut Cached<MC, B, M>,
-    ) -> StepManyResult<EnvironException>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerReadWrite,
-    {
-        let mut result = StepManyResult::ZERO;
-
-        // Protect against partial blocks being executed when
-        // no steps are remaining
-        if max_steps == 0 {
-            return result;
-        }
-
-        let mut progress = self.progress;
-        let mut instr_pc = core.hart.pc.read();
-
-        let range = progress as usize..;
-        for instr in entry.block.instr()[range].iter() {
-            match super::run_instr(instr, core) {
-                Ok(ProgramCounterUpdate::Next(width)) => {
-                    instr_pc += width as u64;
-                    core.hart.pc.write(instr_pc);
-                    result.steps += 1;
-                    progress += 1;
-
-                    if result.steps >= max_steps {
-                        break;
-                    }
-                }
-
-                Ok(ProgramCounterUpdate::Set(instr_pc)) => {
-                    // Setting the instr_pc implies execution continuing
-                    // elsewhere - and no longer within the current block.
-                    core.hart.pc.write(instr_pc);
-                    result.steps += 1;
-                    self.reset();
-                    return result;
-                }
-
-                Err(e) => {
-                    self.reset();
-
-                    // Exceptions lead to a new address being set to handle it,
-                    // with no guarantee of it being the next instruction.
-                    if let Err(error) = core.handle_step_result(instr_pc, Err(e)) {
-                        result.error = Some(error);
-                        return result;
-                    }
-
-                    // If we succesfully handled an error, need to increment steps one more.
-                    result.steps += 1;
-                    return result;
-                }
-            }
-        }
-
-        if progress as usize == entry.block.num_instr() {
-            // We finished the block in exactly the number of steps left
-            self.reset();
-        } else {
-            // Remember the progress made through the block, when we later
-            // continue executing it
-            self.progress = progress;
-        }
-
-        result
-    }
-}
 
 /// Block cache entry.
 ///
@@ -235,9 +101,6 @@ pub struct BlockCache<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: M
 
     /// Fence counter for the entire block cache
     pub(super) fence_counter: FenceCounter,
-
-    /// Current block being executed
-    pub(super) partial_block: PartialBlock,
 
     /// Block entries
     pub(super) entries: Entries<SIZE, MC, B, M>,
@@ -350,7 +213,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             current_block_addr: !0,
             next_instr_addr: !0,
             fence_counter: FenceCounter::INITIAL,
-            partial_block: PartialBlock::new(),
             entries: array_utils::boxed_from_fn(|| Cached::new()),
         }
     }
@@ -364,7 +226,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             current_block_addr: self.current_block_addr,
             fence_counter: self.fence_counter,
             next_instr_addr: self.next_instr_addr,
-            partial_block: self.partial_block.clone(),
             // This may appear like a wild way to clone a boxed array. But! This way avoids that
             // the array gets temporarily allocated on the stack whhich causes a stack overflow on
             // most platforms.
@@ -384,7 +245,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         self.fence_counter = FenceCounter::INITIAL;
         self.reset_to(!0);
         self.entries.iter_mut().for_each(Cached::reset);
-        self.partial_block.reset();
     }
 
     fn invalidate(&mut self)
@@ -401,21 +261,13 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     where
         M: ManagerRead,
     {
-        debug_assert!(
-            !self.partial_block.in_progress,
-            "Get block was called with a partial block in progress"
-        );
-
         let entry = Self::entry_mut(&mut self.entries, addr);
 
         if entry.address == addr
             && self.fence_counter == entry.fence_counter
             && entry.block.num_instr() > 0
         {
-            Some(BlockCall {
-                entry,
-                partial: &mut self.partial_block,
-            })
+            Some(BlockCall { entry })
         } else {
             None
         }
@@ -468,32 +320,13 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
         self.cache_inner::<{ InstrWidth::Uncompressed as u64 }>(addr, instr);
     }
-
-    fn complete_current_block(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        max_steps: usize,
-    ) -> StepManyResult<EnvironException>
-    where
-        M: ManagerReadWrite,
-    {
-        if !self.partial_block.in_progress {
-            return StepManyResult::ZERO;
-        }
-
-        let entry = Self::entry_mut(&mut self.entries, self.partial_block.addr);
-
-        self.partial_block.run_partial_inner(core, max_steps, entry)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
-    use crate::machine_state::StepManyResult;
     use crate::machine_state::block_cache::BlockCache;
     use crate::machine_state::block_cache::BlockCacheConfig;
     use crate::machine_state::block_cache::CACHE_INSTR;
@@ -506,17 +339,14 @@ mod tests {
     use crate::machine_state::instruction::tagged_instruction::TaggedArgs;
     use crate::machine_state::instruction::tagged_instruction::TaggedInstruction;
     use crate::machine_state::instruction::tagged_instruction::TaggedRegister;
-    use crate::machine_state::memory;
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::registers::XRegister;
-    use crate::machine_state::registers::a1;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::InstrWidth;
-    use crate::state::NewState;
     use crate::state_backend::owned_backend::Owned;
     use crate::traps::EnvironException;
 
@@ -665,87 +495,6 @@ mod tests {
         let block = state.get_block(addr + 10);
         assert!(block.is_some());
         assert_eq!(5, block.unwrap().entry.block.num_instr());
-    });
-
-    backend_test!(test_partial_block_executes, F, {
-        let mut manager = F::manager();
-        let mut core_state = MachineCoreState::<M4K, _>::new(&mut manager);
-        let mut block_state = TestState::<F::Manager>::new();
-
-        let addiw = Instruction::try_from(TaggedInstruction {
-            opcode: OpCode::AddWordImmediate,
-            args: TaggedArgs {
-                rd: nz::a1.into(),
-                rs1: a1.into(),
-                imm: 257,
-                rs2: TaggedRegister::X(XRegister::x1),
-                ..TaggedArgs::DEFAULT
-            },
-        })
-        .unwrap();
-
-        let block_addr = memory::FIRST_ADDRESS;
-
-        for offset in 0..10 {
-            block_state.push_instr_uncompressed(block_addr + offset * 4, addiw);
-        }
-
-        core_state.hart.pc.write(block_addr);
-
-        // Execute the first 5 instructions
-        let block = block_state.get_block(block_addr).unwrap();
-        let StepManyResult { steps, error: None } =
-            block
-                .partial
-                .run_block_partial(&mut core_state, 5, block.entry)
-        else {
-            panic!()
-        };
-
-        assert_eq!(steps, 5);
-        assert!(block_state.partial_block.in_progress);
-        assert_eq!(5, block_state.partial_block.progress);
-        assert_eq!(block_addr, block_state.partial_block.addr);
-        assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
-
-        // Execute no steps
-        let StepManyResult { steps, error: None } =
-            block_state.complete_current_block(&mut core_state, 0)
-        else {
-            panic!()
-        };
-
-        assert_eq!(steps, 0);
-        assert!(block_state.partial_block.in_progress);
-        assert_eq!(5, block_state.partial_block.progress);
-        assert_eq!(block_addr, block_state.partial_block.addr);
-        assert_eq!(block_addr + 5 * 4, core_state.hart.pc.read());
-
-        // Execute the next 2 instructions
-        let StepManyResult { steps, error: None } =
-            block_state.complete_current_block(&mut core_state, 2)
-        else {
-            panic!()
-        };
-
-        assert_eq!(steps, 2);
-        assert!(block_state.partial_block.in_progress);
-        assert_eq!(7, block_state.partial_block.progress);
-        assert_eq!(block_addr, block_state.partial_block.addr);
-        assert_eq!(block_addr + 7 * 4, core_state.hart.pc.read());
-
-        // Finish the block. We don't consume all the steps
-        let StepManyResult { steps, error: None } =
-            block_state.complete_current_block(&mut core_state, 5)
-        else {
-            panic!()
-        };
-
-        assert_eq!(steps, 3);
-        assert!(!block_state.partial_block.in_progress);
-        assert_eq!(0, block_state.partial_block.progress);
-        assert_eq!(0, block_state.partial_block.addr);
-        assert_eq!(block_addr + 10 * 4, core_state.hart.pc.read());
     });
 
     backend_test!(test_concat_blocks_suitable, F, {

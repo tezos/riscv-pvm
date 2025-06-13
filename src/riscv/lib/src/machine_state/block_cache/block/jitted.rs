@@ -10,6 +10,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::CachedInstruction;
+use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::block_cache::block::dispatch::DispatchCompiler;
 use crate::machine_state::block_cache::block::dispatch::DispatchTarget;
 use crate::machine_state::block_cache::block::interpreted;
@@ -50,11 +51,14 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut D,
     ) -> usize {
         if !block_builder.should_compile(&mut self.dispatch) {
-            return unsafe { self.run_block_not_compiled(core, instr_pc, result, block_builder) };
+            return unsafe {
+                self.run_block_not_compiled(core, instr_pc, max_steps, result, block_builder)
+            };
         }
 
         // trigger JIT compilation
@@ -70,7 +74,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
-        unsafe { (fun)(self, core, instr_pc, result, block_builder) }
+        unsafe { (fun)(self, core, instr_pc, max_steps, result, block_builder) }
     }
 
     /// Run a block where JIT-compilation has been attempted, but failed for any reason.
@@ -85,13 +89,18 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
         let block_result = unsafe {
             // Safety: this function is always safe to call
-            self.fallback
-                .run_block(core, instr_pc, &mut interpreted::InterpretedBlockBuilder)
+            self.fallback.run_block(
+                core,
+                instr_pc,
+                max_steps,
+                &mut interpreted::InterpretedBlockBuilder,
+            )
         };
 
         *result = match block_result.error {
@@ -169,18 +178,32 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
+        // If this block is too large to run with a compiled function in one go, we must fall back
+        // to the interpreted version.
+        if self.fallback.num_instr() > max_steps {
+            unsafe {
+                return self.fallback.run_block(
+                    core,
+                    instr_pc,
+                    max_steps,
+                    &mut InterpretedBlockBuilder,
+                );
+            }
+        }
+
         let mut result = Ok(());
 
         let fun = self.dispatch.get();
 
         // SAFETY: The block builder is always the same instance, guaranteeing that any JIT-compiled
         // function is still alive.
-        let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
+        let steps = unsafe { (fun)(self, core, instr_pc, max_steps, &mut result, block_builder) };
 
         StepManyResult {
             steps,

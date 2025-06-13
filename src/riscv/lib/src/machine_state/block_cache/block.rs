@@ -81,11 +81,8 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase> {
 
     /// Run a block against the machine state.
     ///
-    /// When calling this function, there must be no partial block in progress. To ensure
-    /// this, you must always run [`BlockCache::complete_current_block`] prior to fetching
-    /// and running a new block.
-    ///
-    /// There _must_ also be sufficient steps remaining, to execute the block in full.
+    /// This function will execute as many instructions from the block as possible
+    /// within the given step limit.
     ///
     /// # Safety
     ///
@@ -94,12 +91,11 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase> {
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this block may be run.
-    ///
-    /// [`BlockCache::complete_current_block`]: super::BlockCache::complete_current_block
     unsafe fn run_block(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
@@ -110,10 +106,11 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
     instr: &[CachedInstruction<MC, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
+    max_steps: usize,
 ) -> StepManyResult<Exception> {
     let mut result = StepManyResult::ZERO;
 
-    for instr in instr.iter() {
+    for instr in instr.iter().take(max_steps) {
         match run_instr(instr, core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 *instr_pc += width as u64;

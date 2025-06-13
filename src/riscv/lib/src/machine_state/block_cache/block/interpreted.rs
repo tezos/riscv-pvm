@@ -129,12 +129,13 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         mut instr_pc: Address,
+        max_steps: usize,
         _block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
-        let mut result = run_block_inner(self.instr(), core, &mut instr_pc);
+        let mut result = run_block_inner(self.instr(), core, &mut instr_pc, max_steps);
 
         if let Some(exc) = result.error {
             if let Err(err) = core.handle_step_result(instr_pc, Err(exc)) {
