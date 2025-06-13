@@ -271,6 +271,7 @@ impl<MC: MemoryConfig, M: JitStateAccess> Default for JIT<MC, M> {
 #[cfg(test)]
 mod tests {
     use std::ops::BitAnd;
+    use std::ops::BitOr;
     use std::ptr::null;
 
     use Instruction as I;
@@ -2417,6 +2418,8 @@ mod tests {
             invalid_x64_atomic_unsigned(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
             valid_x64_atomic_unsigned(I::new_x64_atomic_and, 10, 30, u64::bitand),
             invalid_x64_atomic_unsigned(I::new_x64_atomic_and, 10, 30, u64::bitand),
+            valid_x64_atomic_unsigned(I::new_x64_atomic_or, 10, 30, u64::bitor),
+            invalid_x64_atomic_unsigned(I::new_x64_atomic_or, 10, 30, u64::bitor),
             valid_x64_atomic_signed(I::new_x64_atomic_min_signed, -10, 30, i64::min),
             invalid_x64_atomic_signed(I::new_x64_atomic_min_signed, 10, -30, i64::min),
             valid_x64_atomic_unsigned(I::new_x64_atomic_min_unsigned, 10, 30, u64::min),
