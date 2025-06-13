@@ -1673,6 +1673,72 @@ impl Instruction {
         }
     }
 
+    pub(crate) fn new_x32_atomic_xor(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Amoxorw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_atomic_and(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Amoandw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_x32_atomic_or(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Amoorw,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     pub(crate) fn new_x64_rem_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,

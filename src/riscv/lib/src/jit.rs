@@ -3122,6 +3122,10 @@ mod tests {
                 .build()
         };
 
+        let bitwise_xor = |x: u64, y: u64| x ^ y;
+        let bitwise_and = |x: u64, y: u64| x & y;
+        let bitwise_or = |x: u64, y: u64| x | y;
+
         let scenarios: &[Scenario<F>] = &[
             valid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
             invalid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
@@ -3137,6 +3141,37 @@ mod tests {
                 0xFFFF_FFFF,
                 u64::wrapping_add,
             ),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 0xFF00_00FF, 0x00FF_FF00, bitwise_xor),
+            invalid_x32_atomic_unsigned(
+                I::new_x32_atomic_xor,
+                0xFFFF_FFFF,
+                0xFFFF_FFFF,
+                bitwise_xor,
+            ),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 0xFF00_00FF, 0x00FF_FF00, bitwise_xor),
+            invalid_x32_atomic_unsigned(
+                I::new_x32_atomic_xor,
+                0xFFFF_FFFF,
+                0xFFFF_FFFF,
+                bitwise_xor,
+            ),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_and, 10, 20, bitwise_and),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_and, 10, 20, bitwise_and),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_and, 0xFF00_00FF, 0x00FF_FF00, bitwise_and),
+            invalid_x32_atomic_unsigned(
+                I::new_x32_atomic_and,
+                0xFFFF_FFFF,
+                0xFFFF_FFFF,
+                bitwise_and,
+            ),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_or, 10, 20, bitwise_or),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_or, 10, 20, bitwise_or),
+            valid_x32_atomic_unsigned(I::new_x32_atomic_or, 0xFF00_00FF, 0x00FF_FF00, bitwise_or),
+            invalid_x32_atomic_unsigned(I::new_x32_atomic_or, 0xFFFF_FFFF, 0xFFFF_FFFF, bitwise_or),
         ];
 
         let mut jit = JIT::<M4K, F::Manager>::new().unwrap();

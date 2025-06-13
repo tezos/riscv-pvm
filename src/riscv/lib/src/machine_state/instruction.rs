@@ -486,9 +486,9 @@ impl OpCode {
             Self::X32AtomicStore => Args::run_x32_atomic_store,
             Self::X32AtomicSwap => Args::run_x32_atomic_swap,
             Self::X32AtomicAdd => Args::run_x32_atomic_add,
-            Self::Amoxorw => Args::run_amoxorw,
-            Self::Amoandw => Args::run_amoandw,
-            Self::Amoorw => Args::run_amoorw,
+            Self::Amoxorw => Args::run_x32_atomic_xor,
+            Self::Amoandw => Args::run_x32_atomic_and,
+            Self::Amoorw => Args::run_x32_atomic_or,
             Self::Amominw => Args::run_amominw,
             Self::Amomaxw => Args::run_amomaxw,
             Self::Amominuw => Args::run_amominuw,
@@ -724,6 +724,9 @@ impl OpCode {
             Self::X64AtomicMaxSigned => Some(Args::run_x64_atomic_max_signed),
             Self::X64AtomicMaxUnsigned => Some(Args::run_x64_atomic_max_unsigned),
             Self::X32AtomicAdd => Some(Args::run_x32_atomic_add),
+            Self::Amoxorw => Some(Args::run_x32_atomic_xor),
+            Self::Amoandw => Some(Args::run_x32_atomic_and),
+            Self::Amoorw => Some(Args::run_x32_atomic_or),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1492,9 +1495,9 @@ impl Args {
     impl_amo_type!(atomics::run_x32_atomic_store, run_x32_atomic_store);
     impl_amo_type!(atomics::run_x32_atomic_swap, run_x32_atomic_swap);
     impl_amo_type!(atomics::run_x32_atomic_add, run_x32_atomic_add);
-    impl_amo_type!(run_amoxorw);
-    impl_amo_type!(run_amoandw);
-    impl_amo_type!(run_amoorw);
+    impl_amo_type!(atomics::run_x32_atomic_xor, run_x32_atomic_xor);
+    impl_amo_type!(atomics::run_x32_atomic_and, run_x32_atomic_and);
+    impl_amo_type!(atomics::run_x32_atomic_or, run_x32_atomic_or);
     impl_amo_type!(run_amominw);
     impl_amo_type!(run_amomaxw);
     impl_amo_type!(run_amominuw);
@@ -1901,18 +1904,30 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoxorw(args) => Instruction {
-                opcode: OpCode::Amoxorw,
-                args: args.into(),
-            },
-            InstrCacheable::Amoandw(args) => Instruction {
-                opcode: OpCode::Amoandw,
-                args: args.into(),
-            },
-            InstrCacheable::Amoorw(args) => Instruction {
-                opcode: OpCode::Amoorw,
-                args: args.into(),
-            },
+            InstrCacheable::Amoxorw(args) => Instruction::new_x32_atomic_xor(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amoandw(args) => Instruction::new_x32_atomic_and(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amoorw(args) => Instruction::new_x32_atomic_or(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amominw(args) => Instruction {
                 opcode: OpCode::Amominw,
                 args: args.into(),
