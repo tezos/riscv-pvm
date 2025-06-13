@@ -19,6 +19,11 @@ use crate::state_backend::ManagerWrite;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(i32)]
 pub enum Error {
+    /// Operation not permitted
+    ///
+    /// See [`EPERM`](https://github.com/torvalds/linux/blob/0ad2507d5d93f39619fc42372c347d6006b64319/include/uapi/asm-generic/errno-base.h#L5)
+    NotPermitted = 1,
+
     /// Process or thread not found
     ///
     /// See [`ESRCH`](https://github.com/torvalds/linux/blob/0ad2507d5d93f39619fc42372c347d6006b64319/include/uapi/asm-generic/errno-base.h#L7)
