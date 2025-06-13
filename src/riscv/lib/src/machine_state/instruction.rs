@@ -266,7 +266,7 @@ pub enum OpCode {
     X32AtomicLoad,
     X32AtomicStore,
     X32AtomicSwap,
-    Amoaddw,
+    X32AtomicAdd,
     Amoxorw,
     Amoandw,
     Amoorw,
@@ -485,7 +485,7 @@ impl OpCode {
             Self::X32AtomicLoad => Args::run_x32_atomic_load,
             Self::X32AtomicStore => Args::run_x32_atomic_store,
             Self::X32AtomicSwap => Args::run_x32_atomic_swap,
-            Self::Amoaddw => Args::run_amoaddw,
+            Self::X32AtomicAdd => Args::run_x32_atomic_add,
             Self::Amoxorw => Args::run_amoxorw,
             Self::Amoandw => Args::run_amoandw,
             Self::Amoorw => Args::run_amoorw,
@@ -717,6 +717,7 @@ impl OpCode {
             Self::X32AtomicSwap => Some(Args::run_x32_atomic_swap),
             Self::X64AtomicSwap => Some(Args::run_x64_atomic_swap),
             Self::X64AtomicMinSigned => Some(Args::run_x64_atomic_min_signed),
+            Self::X32AtomicAdd => Some(Args::run_x32_atomic_add),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1484,7 +1485,7 @@ impl Args {
     impl_amo_type!(atomics::run_x32_atomic_load, run_x32_atomic_load);
     impl_amo_type!(atomics::run_x32_atomic_store, run_x32_atomic_store);
     impl_amo_type!(atomics::run_x32_atomic_swap, run_x32_atomic_swap);
-    impl_amo_type!(run_amoaddw);
+    impl_amo_type!(atomics::run_x32_atomic_add, run_x32_atomic_add);
     impl_amo_type!(run_amoxorw);
     impl_amo_type!(run_amoandw);
     impl_amo_type!(run_amoorw);
@@ -1877,10 +1878,14 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amoaddw(args) => Instruction {
-                opcode: OpCode::Amoaddw,
-                args: args.into(),
-            },
+            InstrCacheable::Amoaddw(args) => Instruction::new_x32_atomic_add(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Amoxorw(args) => Instruction {
                 opcode: OpCode::Amoxorw,
                 args: args.into(),

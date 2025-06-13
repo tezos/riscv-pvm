@@ -1512,6 +1512,29 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicAdd`].
+    pub(crate) fn new_x32_atomic_add(
+        rd: XRegister,
+        rs1: XRegister,
+        rs2: XRegister,
+        aq: bool,
+        rl: bool,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::X32AtomicAdd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                aq,
+                rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     pub(crate) fn new_x64_rem_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,

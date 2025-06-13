@@ -22,23 +22,6 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    /// `AMOADD.W` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the result of
-    /// adding it to val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoaddw(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_w(rs1, rs2, rd, i32::wrapping_add)
-    }
-
     /// `AMOXOR.W` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and stores the result of
@@ -215,13 +198,6 @@ pub(super) mod test {
     }
 
     pub(crate) use test_amo;
-
-    test_amo!(
-        run_amoaddw,
-        |r1_val, r2_val| (r1_val as i32).wrapping_add(r2_val as i32),
-        4,
-        i32
-    );
 
     test_amo!(
         run_amoxorw,
