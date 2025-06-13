@@ -12,7 +12,6 @@ pub mod load_store;
 pub mod rv32a;
 pub mod rv32c;
 pub mod rv32i;
-pub mod rv64a;
 pub mod rv64c;
 pub mod rv64d;
 pub mod rv64dc;

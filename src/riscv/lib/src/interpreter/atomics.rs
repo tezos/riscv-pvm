@@ -84,18 +84,6 @@ where
     ) -> Result<(), Exception> {
         self.run_amo(rs1, rs2, rd, f, |x| x as i32, |x| x as u64)
     }
-
-    /// Generic implementation of an atomic memory operation which works on
-    /// 64-bit values
-    pub(super) fn run_amo_d(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        f: fn(u64, u64) -> u64,
-    ) -> Result<(), Exception> {
-        self.run_amo(rs1, rs2, rd, f, |x| x, |x| x)
-    }
 }
 
 /// Generic implementation of any atomic memory operation which works on 64-bit values,
@@ -211,6 +199,22 @@ pub fn run_x64_atomic_or<I: ICB>(
     _rl: bool,
 ) -> I::IResult<()> {
     run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.or(y, icb))
+}
+
+// Loads in `rd` the value from the address in `rs1` and stores the result of
+/// XORing it to `val(rs2)` back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints in
+/// multi-hart environments so they are currently ignored.
+pub fn run_x64_atomic_xor<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x64_atomic(icb, rs1, rs2, rd, |x, y, icb| x.xor(y, icb))
 }
 
 /// Loads in `rd` the value from the address in `rs1` and stores the minimum
@@ -567,6 +571,7 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
 pub(crate) mod test {
     use std::ops::BitAnd;
     use std::ops::BitOr;
+    use std::ops::BitXor;
 
     use proptest::prelude::*;
 
@@ -696,6 +701,14 @@ pub(crate) mod test {
         test_run_x64_atomic_or,
         super::run_x64_atomic_or,
         u64::bitor,
+        8,
+        u64
+    );
+
+    test_atomic!(
+        test_run_x64_atomic_xor,
+        super::run_x64_atomic_xor,
+        u64::bitxor,
         8,
         u64
     );
