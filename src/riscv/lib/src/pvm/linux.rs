@@ -493,32 +493,36 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 
     /// Handle a Linux system call.
-    pub fn handle_system_call<MC>(
+    pub fn handle_system_call<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        machine: &mut MachineState<MC, BCC, B, M>,
         hooks: &mut PvmHooks,
         on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> bool,
     ) -> bool
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // We need to jump to the next instruction. The ECall instruction which triggered this
         // function is 4 byte wide.
-        let pc = core.hart.pc.read().saturating_add(4);
-        core.hart.pc.write(pc);
+        let pc = machine.core.hart.pc.read().saturating_add(4);
+        machine.core.hart.pc.write(pc);
 
         /// Read an argument from a register and interpret it as a system call argument.
         /// If that fails, log the failure.
         macro_rules! read_arg {
             ($system_call:ident, $reg:ident) => {
-                core.hart
+                machine
+                    .core
+                    .hart
                     .xregisters
                     .try_read(registers::$reg)
                     .inspect_err(|err| {
                         crate::log::warning! {
                             argument = stringify!($reg),
-                            value = core.hart.xregisters.read(registers::$reg),
+                            value = machine.core.hart.xregisters.read(registers::$reg),
                             error = format!("{err:?}"),
                             pc,
                             "{} failed",
@@ -562,7 +566,7 @@ impl<M: ManagerBase> SupervisorState<M> {
                         }
                     })?
                     .into();
-                core.hart.xregisters.write(registers::a0, result);
+                machine.core.hart.xregisters.write(registers::a0, result);
                 control_flow
             }};
         }
@@ -716,49 +720,51 @@ impl<M: ManagerBase> SupervisorState<M> {
         }
 
         // Programs targeting a Linux kernel pass the system call number in register a7
-        let system_call_no = core.hart.xregisters.read(registers::a7);
+        let system_call_no = machine.core.hart.xregisters.read(registers::a7);
 
         let result = match system_call_no {
-            GETCWD => dispatch2!(getcwd, core),
+            GETCWD => dispatch2!(getcwd, &mut machine.core),
             FACCESSAT => dispatch0!(faccessat),
             OPENAT => dispatch0!(openat),
             CLOSE => dispatch0!(close),
             READ => dispatch1!(read),
-            WRITE => dispatch3!(write, core, hooks),
-            WRITEV => dispatch3!(writev, core, hooks),
-            PPOLL => dispatch2!(ppoll, core),
+            WRITE => dispatch3!(write, &mut machine.core, hooks),
+            WRITEV => dispatch3!(writev, &mut machine.core, hooks),
+            PPOLL => dispatch2!(ppoll, &mut machine.core),
             READLINKAT => dispatch0!(readlinkat),
             EXIT | EXITGROUP => dispatch1!(exit),
-            SET_TID_ADDRESS => dispatch1!(set_tid_address, core),
+            SET_TID_ADDRESS => dispatch1!(set_tid_address, &mut machine.core),
             GETPID => dispatch0!(getpid),
             SET_ROBUST_LIST => dispatch2!(set_robust_list),
             TKILL => dispatch2!(tkill),
-            SIGALTSTACK => dispatch2!(sigaltstack, core),
-            RT_SIGACTION => dispatch4!(rt_sigaction, core),
-            RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, core),
+            SIGALTSTACK => dispatch2!(sigaltstack, &mut machine.core),
+            RT_SIGACTION => dispatch4!(rt_sigaction, &mut machine.core),
+            RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
             BRK => dispatch0!(brk),
-            MMAP => dispatch6!(mmap, core),
-            MPROTECT => dispatch3!(mprotect, core),
-            MUNMAP => dispatch2!(munmap, core),
+            MMAP => dispatch6!(mmap, &mut machine.core),
+            MPROTECT => dispatch3!(mprotect, &mut machine.core),
+            MUNMAP => dispatch2!(munmap, &mut machine.core),
             MADVISE => dispatch0!(madvise),
-            GETRANDOM => dispatch2!(getrandom, core),
-            CLOCK_GETTIME => dispatch2!(clock_gettime, core),
-            SCHED_GETAFFINITY => dispatch3!(sched_getaffinity, core),
-            GETTIMEOFDAY => dispatch2!(gettimeofday, core),
-            SBI_FIRMWARE_TEZOS => return on_tezos(core),
+            GETRANDOM => dispatch2!(getrandom, &mut machine.core),
+            CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
+            SCHED_GETAFFINITY => dispatch3!(sched_getaffinity, &mut machine.core),
+            GETTIMEOFDAY => dispatch2!(gettimeofday, &mut machine.core),
+            SBI_FIRMWARE_TEZOS => return on_tezos(&mut machine.core),
             _ => Err(Error::NoSystemCall),
         };
 
         match result {
             Err(Error::NoSystemCall) => {
-                core.hart
+                machine
+                    .core
+                    .hart
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
                 false
             }
 
             Err(error) => {
-                core.hart.xregisters.write_system_call_error(error);
+                machine.core.hart.xregisters.write_system_call_error(error);
                 true
             }
 
@@ -1037,6 +1043,9 @@ mod tests {
     use super::parameters::Visibility;
     use super::*;
     use crate::backend_test;
+    use crate::machine_state::block_cache::DefaultCacheConfig;
+    use crate::machine_state::block_cache::block::Interpreted;
+    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
     use crate::pvm::linux::error::Error;
     use crate::pvm::linux::parameters::NoFileDescriptor;
@@ -1060,16 +1069,22 @@ mod tests {
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, SET_TID_ADDRESS);
 
         let tid_address = rand::thread_rng().gen_range(0..MEM_BYTES as Address);
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a0, tid_address);
@@ -1089,11 +1104,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
+            .core
             .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
@@ -1102,24 +1122,35 @@ mod tests {
             let mut supervisor_state = SupervisorState::new(&mut manager);
 
             let base_address = 0x10;
-            machine_state.main_memory.write(base_address, fd).unwrap();
             machine_state
+                .core
+                .main_memory
+                .write(base_address, fd)
+                .unwrap();
+            machine_state
+                .core
                 .main_memory
                 .write(base_address + 4, -1i16)
                 .unwrap();
             machine_state
+                .core
                 .main_memory
                 .write(base_address + 6, -1i16)
                 .unwrap();
 
             machine_state
+                .core
                 .hart
                 .xregisters
                 .write(registers::a0, base_address);
-            machine_state.hart.xregisters.write(registers::a1, 1);
-            machine_state.hart.xregisters.write(registers::a2, 0);
-            machine_state.hart.xregisters.write(registers::a3, 0);
-            machine_state.hart.xregisters.write(registers::a7, PPOLL);
+            machine_state.core.hart.xregisters.write(registers::a1, 1);
+            machine_state.core.hart.xregisters.write(registers::a2, 0);
+            machine_state.core.hart.xregisters.write(registers::a3, 0);
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a7, PPOLL);
 
             let result = supervisor_state.handle_system_call(
                 &mut machine_state,
@@ -1128,10 +1159,11 @@ mod tests {
             );
             assert!(result);
 
-            let ret = machine_state.hart.xregisters.read(registers::a0);
+            let ret = machine_state.core.hart.xregisters.read(registers::a0);
             assert_eq!(ret, 0);
 
             let revents = machine_state
+                .core
                 .main_memory
                 .read::<i16>(base_address + 6)
                 .unwrap();
@@ -1144,11 +1176,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
+            .core
             .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
@@ -1157,28 +1194,39 @@ mod tests {
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, RT_SIGACTION);
 
         // Signal is SIGPIPE
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a0, 13i32 as u64);
 
         // New handler is located at this address
-        machine_state.hart.xregisters.write(registers::a1, 0x20);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a1, 0x20);
 
         // Old handler will be written to this address
-        machine_state.hart.xregisters.write(registers::a2, 0x40);
         machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a2, 0x40);
+        machine_state
+            .core
             .main_memory
             .write(0x40, array::from_fn::<u8, 32, _>(|i| i as u8))
             .unwrap();
 
         // Size of sigset_t
-        machine_state.hart.xregisters.write(registers::a3, 8);
+        machine_state.core.hart.xregisters.write(registers::a3, 8);
 
         // Perform the system call
         let result = supervisor_state.handle_system_call(
@@ -1189,7 +1237,11 @@ mod tests {
         assert!(result);
 
         // Check if the location where the old handler was is now zeroed out
-        let old_action = machine_state.main_memory.read::<[u8; 32]>(0x40).unwrap();
+        let old_action = machine_state
+            .core
+            .main_memory
+            .read::<[u8; 32]>(0x40)
+            .unwrap();
         assert_eq!(old_action, [0u8; 32]);
     });
 
@@ -1198,17 +1250,26 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, SIGALTSTACK);
 
         // Zero old signal
-        machine_state.hart.xregisters.write(registers::a0, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 0u64);
 
         // Perform the system call
         let result = supervisor_state.handle_system_call(
@@ -1224,11 +1285,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
+            .core
             .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
@@ -1239,6 +1305,7 @@ mod tests {
         for i in 1..=64_u64 {
             // Fill the memory with non-zero values to verify they are written to later
             machine_state
+                .core
                 .main_memory
                 .write_all(mask_address.to_machine_address(), &vec![
                     0xFF_u8;
@@ -1248,18 +1315,24 @@ mod tests {
 
             // System call number
             machine_state
+                .core
                 .hart
                 .xregisters
                 .write(registers::a7, SCHED_GETAFFINITY);
 
             // Zero or one `pid` can both mean the main hart
-            machine_state.hart.xregisters.write(registers::a0, i % 2);
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a0, i % 2);
 
             // Set cpu set size
-            machine_state.hart.xregisters.write(registers::a1, i);
+            machine_state.core.hart.xregisters.write(registers::a1, i);
 
             // Set mask address
             machine_state
+                .core
                 .hart
                 .xregisters
                 .write(registers::a2, mask_address.to_machine_address());
@@ -1276,6 +1349,7 @@ mod tests {
             // Verify that a single bit is set in the mask
             for j in 1..i {
                 let leading_mask = machine_state
+                    .core
                     .main_memory
                     .read::<u8>((mask_address + j - 1).to_machine_address())
                     .unwrap();
@@ -1284,6 +1358,7 @@ mod tests {
             }
 
             let end_mask = machine_state
+                .core
                 .main_memory
                 .read::<u8>((mask_address + i - 1).to_machine_address())
                 .unwrap();
@@ -1297,7 +1372,11 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // Mask pointer (must be non-zero)
@@ -1305,18 +1384,24 @@ mod tests {
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, SCHED_GETAFFINITY);
 
         // One `pid`
-        machine_state.hart.xregisters.write(registers::a0, 1u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 1u64);
 
         // Set a zero cpu set size
-        machine_state.hart.xregisters.write(registers::a1, 0);
+        machine_state.core.hart.xregisters.write(registers::a1, 0);
 
         // Set mask address
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a2, mask_address.to_machine_address());
@@ -1330,7 +1415,7 @@ mod tests {
 
         assert!(result);
 
-        let result = machine_state.hart.xregisters.read(registers::a0);
+        let result = machine_state.core.hart.xregisters.read(registers::a0);
 
         // Verify we get an error
         assert!(result != 0);
@@ -1341,7 +1426,11 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // Mask pointer (must be non-zero)
@@ -1349,33 +1438,42 @@ mod tests {
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, SCHED_GETAFFINITY);
 
         // One `pid`
-        machine_state.hart.xregisters.write(registers::a0, 1u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 1u64);
 
         // Set an unreasonably large cpu set size
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a1, 1_000_000);
 
         // Set mask address
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a2, mask_address.to_machine_address());
 
         // Set mask address
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a2, mask_address.to_machine_address());
 
         // Set mask address
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a2, mask_address.to_machine_address());
@@ -1389,7 +1487,7 @@ mod tests {
 
         assert!(result);
 
-        let result: u64 = machine_state.hart.xregisters.read(registers::a0);
+        let result: u64 = machine_state.core.hart.xregisters.read(registers::a0);
 
         // Verify we get an error
         assert!(result != 0);
@@ -1400,24 +1498,45 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, RT_SIGACTION);
 
-        machine_state.hart.xregisters.write(registers::a0, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 0u64);
 
-        machine_state.hart.xregisters.write(registers::a1, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a1, 0u64);
 
         // Zero old signal
-        machine_state.hart.xregisters.write(registers::a2, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a2, 0u64);
 
         // Size of sigset_t
-        machine_state.hart.xregisters.write(registers::a3, 8u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a3, 8u64);
 
         // Perform the system call
         let result = supervisor_state.handle_system_call(
@@ -1433,24 +1552,45 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         let mut supervisor_state = SupervisorState::new(&mut manager);
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, RT_SIGPROCMASK);
 
-        machine_state.hart.xregisters.write(registers::a0, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 0u64);
 
-        machine_state.hart.xregisters.write(registers::a1, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a1, 0u64);
 
         // Zero old signal
-        machine_state.hart.xregisters.write(registers::a2, 0u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a2, 0u64);
 
         // Size of sigset_t
-        machine_state.hart.xregisters.write(registers::a3, 8u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a3, 8u64);
 
         // Perform the system call
         let result = supervisor_state.handle_system_call(
@@ -1466,11 +1606,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
+            .core
             .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
@@ -1479,23 +1624,30 @@ mod tests {
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, CLOCK_GETTIME);
 
         // Any clock ID (we ignore it anyway)
-        machine_state.hart.xregisters.write(registers::a0, 1u64);
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 1u64);
 
         // Timespec pointer (must be non-zero)
         let timespec_ptr = 0x100;
 
         // Fill the timespec struct with non-zero values to verify they are zeroed
         machine_state
+            .core
             .main_memory
             .write(timespec_ptr, [0xFF; 16])
             .unwrap();
 
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a1, timespec_ptr);
@@ -1509,11 +1661,12 @@ mod tests {
         assert!(result);
 
         // Verify that a0 contains 0 (success)
-        let ret = machine_state.hart.xregisters.read(registers::a0);
+        let ret = machine_state.core.hart.xregisters.read(registers::a0);
         assert_eq!(ret, 0);
 
         // Verify that the timespec is zeroed out
         let timespec = machine_state
+            .core
             .main_memory
             .read::<[u8; 16]>(timespec_ptr)
             .unwrap();
@@ -1525,11 +1678,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
+            .core
             .main_memory
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
@@ -1538,6 +1696,7 @@ mod tests {
 
         // System call number
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a7, GETTIMEOFDAY);
@@ -1547,11 +1706,13 @@ mod tests {
 
         // Fill the timeval struct with non-zero values to verify they are zeroed
         machine_state
+            .core
             .main_memory
             .write(timeval_ptr, [0xFF; 16])
             .unwrap();
 
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a0, timeval_ptr);
@@ -1561,11 +1722,13 @@ mod tests {
 
         // Fill the timezone struct with non-zero values to verify they are zeroed
         machine_state
+            .core
             .main_memory
             .write(timezone_ptr, [0xFF; 8])
             .unwrap();
 
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a1, timezone_ptr);
@@ -1579,11 +1742,12 @@ mod tests {
         assert!(result);
 
         // Verify that a0 contains 0 (success)
-        let ret = machine_state.hart.xregisters.read(registers::a0);
+        let ret = machine_state.core.hart.xregisters.read(registers::a0);
         assert_eq!(ret, 0);
 
         // Verify that the timeval is zeroed out
         let timeval = machine_state
+            .core
             .main_memory
             .read::<[u8; 16]>(timeval_ptr)
             .unwrap();
@@ -1591,6 +1755,7 @@ mod tests {
 
         // Verify that the timezone is zeroed out
         let timezone = machine_state
+            .core
             .main_memory
             .read::<[u8; 8]>(timezone_ptr)
             .unwrap();
@@ -1602,11 +1767,16 @@ mod tests {
         type MemLayout = M4K;
 
         let mut manager = F::manager();
-        let mut machine_state = MachineCoreState::<MemLayout, _>::new(&mut manager);
+        let mut machine_state =
+            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
+                &mut manager,
+                InterpretedBlockBuilder,
+            );
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail
         machine_state
+            .core
             .main_memory
             .allocate_and_protect_pages(
                 Some(0),
@@ -1620,10 +1790,11 @@ mod tests {
 
         // Set up necessary registers for mmap
         machine_state
+            .core
             .hart
             .xregisters
             .write(registers::a4, -1i64 as u64); // NoFileDescriptor
-        machine_state.hart.xregisters.write(registers::a5, 0); // Zero offset
+        machine_state.core.hart.xregisters.write(registers::a5, 0); // Zero offset
 
         // Case 1: Test with AddressHint::Hint
         {
@@ -1638,7 +1809,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state,
+                &mut machine_state.core,
                 addr.into(),
                 length,
                 perms,
@@ -1666,7 +1837,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state,
+                &mut machine_state.core,
                 VirtAddr::new(addr),
                 length,
                 perms,

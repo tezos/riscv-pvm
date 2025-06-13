@@ -272,7 +272,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
         M: state_backend::ManagerReadWrite,
     {
         handle_system_call(
-            &mut self.machine_state.core,
+            &mut self.machine_state,
             &mut self.system_state,
             &mut self.status,
             &mut self.reveal_request,
@@ -334,7 +334,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
             .machine_state
             .step_max_handle::<Infallible>(step_bounds, |machine_state, _exception| {
                 Ok(handle_system_call(
-                    &mut machine_state.core,
+                    machine_state,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
@@ -494,8 +494,8 @@ impl<
     }
 }
 
-fn handle_system_call<MC, M>(
-    core: &mut machine_state::MachineCoreState<MC, M>,
+fn handle_system_call<MC, BCC, B, M>(
+    machine: &mut machine_state::MachineState<MC, BCC, B, M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
@@ -503,9 +503,11 @@ fn handle_system_call<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, M>,
     M: state_backend::ManagerReadWrite,
 {
-    system_state.handle_system_call(core, hooks, |core| {
+    system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
         status.read() == PvmStatus::Evaluating
     })
