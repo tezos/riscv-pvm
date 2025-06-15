@@ -252,7 +252,7 @@ pub struct InboxOptions {
     pub keep_going: bool,
 
     /// Rollup address
-    #[arg(short, long, default_value = "sr1UNDWPUYVeomgG15wn5jSw689EJ4RNnVQa")]
+    #[arg(short, long, default_value = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57")]
     pub address: String,
 
     /// Rollup origination level
