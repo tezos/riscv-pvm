@@ -208,20 +208,17 @@ impl AccessInfoAggregatable for () {
 ///
 /// [`CommitmentLayout`]: crate::state_backend::commitment_layout::CommitmentLayout
 /// [`ProofLayout`]: crate::state_backend::proof_layout::ProofLayout
-pub(crate) fn chunks_to_writer<
-    const LEN: usize,
-    T: std::io::Write,
-    F: Fn(usize) -> [u8; MERKLE_LEAF_SIZE.get()],
->(
+pub(crate) fn chunks_to_writer<T: std::io::Write, F: Fn(usize) -> [u8; MERKLE_LEAF_SIZE.get()]>(
+    len: usize,
     writer: &mut T,
     read: F,
 ) -> Result<(), std::io::Error> {
     let merkle_leaf_size = MERKLE_LEAF_SIZE.get();
-    assert!(LEN >= merkle_leaf_size);
+    assert!(len >= merkle_leaf_size);
 
     let mut address = 0;
 
-    while address + merkle_leaf_size <= LEN {
+    while address + merkle_leaf_size <= len {
         writer.write_all(read(address).as_slice())?;
         address += merkle_leaf_size;
     }
@@ -229,10 +226,10 @@ pub(crate) fn chunks_to_writer<
     // When the last chunk is smaller than `MERKLE_LEAF_SIZE`,
     // read the last `MERKLE_LEAF_SIZE` bytes and pass a subslice containing
     // only the bytes not previously read to the writer.
-    if address != LEN {
+    if address != len {
         address += merkle_leaf_size;
-        let buffer = read(LEN.saturating_sub(merkle_leaf_size));
-        writer.write_all(&buffer[address.saturating_sub(LEN)..])?;
+        let buffer = read(len.saturating_sub(merkle_leaf_size));
+        writer.write_all(&buffer[address.saturating_sub(len)..])?;
     };
 
     Ok(())
@@ -693,7 +690,7 @@ mod tests {
                     };
 
                     let mut writer = Cursor::new(Vec::new());
-                    chunks_to_writer::<LEN, _, _>(&mut writer, read).unwrap();
+                    chunks_to_writer::< _, _>(LEN, &mut writer, read).unwrap();
                     assert_eq!(writer.into_inner(), data);
                 }
             }

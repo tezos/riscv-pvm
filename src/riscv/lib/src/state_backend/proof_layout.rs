@@ -414,7 +414,7 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
         );
         let read =
             |address| -> [u8; MERKLE_LEAF_SIZE.get()] { region.inner_dyn_region_read(address) };
-        chunks_to_writer::<LEN, _, _>(&mut writer, read)?;
+        chunks_to_writer::<_, _>(LEN, &mut writer, read)?;
         writer.finalise()
     }
 

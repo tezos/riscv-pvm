@@ -77,7 +77,6 @@ mod test {
     use crate::backend_test;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::registers::fa2;
     use crate::machine_state::registers::fa3;
     use crate::machine_state::registers::parse_xregister;

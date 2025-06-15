@@ -16,13 +16,19 @@ use crate::state_backend::Ref;
 /// State layout for the memory component
 pub struct MemoryConfig<const PAGES: usize, const TOTAL_BYTES: usize>;
 
+impl<const PAGES: usize, const TOTAL_BYTES: usize> MemoryConfig<PAGES, TOTAL_BYTES> {
+    /// The number of pages in the memory configuration.
+    pub const PAGES: usize = PAGES;
+
+    /// The total number of bytes in the memory configuration.
+    pub const TOTAL_BYTES: usize = TOTAL_BYTES;
+}
+
 impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
     for MemoryConfig<PAGES, TOTAL_BYTES>
 where
     BuddyLayoutProxy<PAGES>: BuddyLayout + 'static,
 {
-    const TOTAL_BYTES: usize = TOTAL_BYTES;
-
     type Layout = (
         DynArray<TOTAL_BYTES>,
         PagePermissionsLayout<PAGES>,
