@@ -16,7 +16,6 @@ use tezos_smart_rollup_utils::inbox::InboxBuilder;
 pub fn make_stepper_factory<BCC: BlockCacheConfig>() -> impl Fn() -> PvmStepper<'static, M64M, BCC>
 {
     let program = fs::read("../assets/jstz").unwrap();
-    let initrd = None::<Vec<u8>>;
 
     let mut inbox = InboxBuilder::new();
     inbox
@@ -32,7 +31,6 @@ pub fn make_stepper_factory<BCC: BlockCacheConfig>() -> impl Fn() -> PvmStepper<
 
         PvmStepper::<'_, M64M, BCC>::new(
             &program,
-            initrd.as_deref(),
             inbox.clone(),
             hooks,
             address,

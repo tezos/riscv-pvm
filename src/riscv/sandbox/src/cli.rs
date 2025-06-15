@@ -53,10 +53,6 @@ pub struct RunOptions {
     #[arg(long, short)]
     pub input: Box<Path>,
 
-    /// Path to the initrd
-    #[arg(long)]
-    pub initrd: Option<Box<Path>>,
-
     /// Print the number of steps taken by `run`.
     #[arg(long, default_value_t = false)]
     pub print_steps: bool,
@@ -72,10 +68,6 @@ pub struct GdbServerOptions {
     /// Path to the input ELF executable
     #[arg(long, short)]
     pub input: Box<Path>,
-
-    /// Path to the initrd
-    #[arg(long)]
-    pub initrd: Option<Box<Path>>,
 
     /// Port to listen on for gdb client (on `localhost:<PORT>`).
     #[arg(long, short)]
@@ -138,10 +130,6 @@ pub struct BenchRunOptions {
     /// Paths to the input ELF executable
     #[arg(long, short, num_args=1..)]
     pub inputs: Vec<Box<Path>>,
-
-    /// Path to the initrd
-    #[arg(long)]
-    pub initrd: Option<Box<Path>>,
 
     #[command(flatten)]
     pub sort_args: TableSortArgs,

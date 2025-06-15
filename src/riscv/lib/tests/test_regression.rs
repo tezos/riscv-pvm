@@ -96,7 +96,6 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
         // We need to read the kernel in any case
         let program = fs::read(kernel_path)
             .expect("Failed to read kernel from disk. Try running `make build`.");
-        let initrd = None::<Vec<u8>>;
 
         let inbox = {
             let mut inbox = InboxBuilder::new();
@@ -114,7 +113,6 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
 
         let mut stepper = PvmStepper::<'_, M64M, DefaultCacheConfig, Owned, B>::new(
             &program,
-            initrd.as_deref(),
             inbox,
             hooks,
             ROLLUP_ADDRESS,

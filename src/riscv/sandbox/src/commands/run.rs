@@ -52,14 +52,9 @@ pub type BlockImpl = octez_riscv::machine_state::block_cache::metrics::BlockMetr
 
 pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     let program = fs::read(&opts.input)?;
-    let initrd = opts.initrd.as_ref().map(fs::read).transpose()?;
 
-    let stepper = make_pvm_stepper::<BlockImpl>(
-        program.as_slice(),
-        initrd.as_deref(),
-        &opts.common,
-        Default::default(),
-    )?;
+    let stepper =
+        make_pvm_stepper::<BlockImpl>(program.as_slice(), &opts.common, Default::default())?;
 
     let steps = run_stepper(stepper, opts.common.max_steps)?;
 
@@ -78,7 +73,6 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
 
 pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
     program: &[u8],
-    initrd: Option<&[u8]>,
     common: &CommonOptions,
     block_builder: B::BlockBuilder,
 ) -> Result<
@@ -104,7 +98,6 @@ pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
 
     let stepper = PvmStepper::<'_, M1G, DefaultCacheConfig, Owned, B>::new(
         program,
-        initrd,
         inbox.build(),
         hooks,
         rollup_address.into_hash().as_ref().try_into().unwrap(),

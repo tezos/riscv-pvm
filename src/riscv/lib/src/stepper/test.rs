@@ -95,14 +95,9 @@ pub struct TestStepper<
 
 impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> {
     /// Initialise an interpreter with a given `program`.
-    /// An initial ramdisk can also optionally be passed.
     #[inline]
-    pub fn new(
-        program: &[u8],
-        initrd: Option<&[u8]>,
-        block_builder: B::BlockBuilder,
-    ) -> Result<Self, TestStepperError> {
-        Ok(Self::new_with_parsed_program(program, initrd, block_builder)?.0)
+    pub fn new(program: &[u8], block_builder: B::BlockBuilder) -> Result<Self, TestStepperError> {
+        Ok(Self::new_with_parsed_program(program, block_builder)?.0)
     }
 
     /// Consumes the stepper, returning the [`BlockBuilder`] used internally.
@@ -114,13 +109,11 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
         self.machine_state.block_cache.block_builder
     }
 
-    /// Initialise an interpreter with a given `program`.
-    /// An initial ramdisk can also optionally be passed. Returns both the interpreter
-    /// and the fully parsed program.
+    /// Initialise an interpreter with a given `program`. Returns both the interpreter and the fully
+    /// parsed program.
     #[inline]
     pub fn new_with_parsed_program(
         program: &[u8],
-        initrd: Option<&[u8]>,
         block_builder: B::BlockBuilder,
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
@@ -138,7 +131,7 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
             .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC)
             .unwrap();
 
-        stepper.machine_state.setup_boot(&elf_program, initrd)?;
+        stepper.machine_state.setup_boot(&elf_program)?;
 
         Ok((stepper, elf_program.parsed()))
     }

@@ -61,8 +61,6 @@ pub fn gdb_server(opts: GdbServerOptions) -> Result<(), Box<dyn Error>> {
 
     let program = fs::read(fname)?;
 
-    let initrd = opts.initrd.as_ref().map(fs::read).transpose()?;
-
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = opts.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -73,7 +71,6 @@ pub fn gdb_server(opts: GdbServerOptions) -> Result<(), Box<dyn Error>> {
 
     let mut stepper = PvmStepper::<M1G>::new(
         program.as_slice(),
-        initrd.as_deref(),
         inbox,
         PvmHooks::default(),
         rollup_address.into_hash().as_ref().try_into()?,
