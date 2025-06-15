@@ -1,0 +1,39 @@
+name: Benchmark
+
+on:
+  pull_request:
+
+  push:
+    branches: [main]
+
+# Only one job may reserve the reference machine at a time
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.BENCH_SSH_KEY }}
+
+      - name: Configure SSH's known hosts
+        run: echo "${{ secrets.BENCH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Benchmark
+        run: |
+          scp src/riscv/scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ssh ${{ secrets.BENCH_HOST }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          ssh ${{ secrets.BENCH_HOST }} rm ./bench-${{ github.run_id }}.sh
