@@ -310,7 +310,7 @@ where
     where
         M: ManagerReadWrite,
     {
-        let stack_top = VirtAddr::new(MC::TOTAL_BYTES as u64);
+        let stack_top = VirtAddr::new(self.machine_state.core.main_memory.len() as u64);
 
         // We must fit at least one guard page between the program break and the stack
         let guarded_stack_space = stack_top - self.system_state.program.end;
@@ -404,10 +404,11 @@ where
 
         // Mark all memory as allocated. This also has the benefit of initialising the buddy memory
         // manager properly.
-        self.machine_state
-            .core
-            .main_memory
-            .allocate_pages(Some(0), MC::TOTAL_BYTES, true)?;
+        self.machine_state.core.main_memory.allocate_pages(
+            Some(0),
+            self.machine_state.core.main_memory.len(),
+            true,
+        )?;
 
         // Make sure only the heap can be used for allocation by the user kernel.
         self.machine_state.core.main_memory.deallocate_pages(
@@ -1056,27 +1057,6 @@ impl<M: ManagerBase> SupervisorState<M> {
         // the ability to set these limits to arbitrary values.
         // So it does! By using its own predefined limits and returning EPERM.
 
-        struct MemorySize<MC>(MC);
-        impl<MC: MemoryConfig> MemorySize<MC> {
-            const SIZE: u64 = MC::TOTAL_BYTES as u64;
-
-            const UPPER_BOUND: () = assert!(MC::TOTAL_BYTES <= u64::MAX as usize);
-
-            // Hard limit on the size of the data segment
-            const RLIMIT_DATA: u64 = Self::SIZE;
-
-            // Hard limit on resident set size. Not used.
-            const RLIMIT_RSS: u64 = Self::SIZE;
-
-            // Hard limit on the memory that may be locked into RAM (B)
-            const RLIMIT_MEMLOCK: u64 = Self::SIZE;
-
-            // Hard limit on the size of a process's virtual memory (B)
-            const RLIMIT_AS: u64 = Self::SIZE;
-        }
-
-        let () = MemorySize::<MC>::UPPER_BOUND;
-
         // If new_limit is not NULL, the system call is being used to write new limits, so ignore
         // it and return a permissions error
         if new_limit != 0 {
@@ -1087,17 +1067,17 @@ impl<M: ManagerBase> SupervisorState<M> {
         let limit = match resource {
             parameters::Rlimit::Cpu => parameters::RLIMIT_CPU,
             parameters::Rlimit::Fsize => parameters::RLIMIT_FSIZE,
-            parameters::Rlimit::Data => MemorySize::<MC>::RLIMIT_DATA,
+            parameters::Rlimit::Data => core.main_memory.len() as u64,
 
             // Hard limit on the size of the process stack
             parameters::Rlimit::Stack => STACK_SIZE,
 
             parameters::Rlimit::Core => parameters::RLIMIT_CORE,
-            parameters::Rlimit::Rss => MemorySize::<MC>::RLIMIT_RSS,
+            parameters::Rlimit::Rss => core.main_memory.len() as u64,
             parameters::Rlimit::Nproc => parameters::RLIMIT_NPROC,
             parameters::Rlimit::Nofile => parameters::RLIMIT_NOFILE,
-            parameters::Rlimit::Memlock => MemorySize::<MC>::RLIMIT_MEMLOCK,
-            parameters::Rlimit::As => MemorySize::<MC>::RLIMIT_AS,
+            parameters::Rlimit::Memlock => core.main_memory.len() as u64,
+            parameters::Rlimit::As => core.main_memory.len() as u64,
             parameters::Rlimit::Locks => parameters::RLIMIT_LOCKS,
             parameters::Rlimit::Sigpending => parameters::RLIMIT_SIGPENDING,
             parameters::Rlimit::Msgqueue => parameters::RLIMIT_MSGQUEUE,

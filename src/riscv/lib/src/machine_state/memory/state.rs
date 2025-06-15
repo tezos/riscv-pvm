@@ -114,6 +114,11 @@ where
     M: ManagerBase,
 {
     #[inline]
+    fn len(&self) -> usize {
+        TOTAL_BYTES
+    }
+
+    #[inline]
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
         E: Elem,
