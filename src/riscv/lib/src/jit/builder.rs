@@ -303,15 +303,24 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     }
 
     fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        JSA::ir_xreg_read(
+        // check the xregister cache first, to avoid unnecessary reads.
+        if let Some(value) = self.dynamic.get_cached_xreg_val(reg) {
+            return X64(value);
+        }
+        let val = JSA::ir_xreg_read(
             &mut self.jsa_call,
             &mut self.builder,
             self.core_ptr_val,
             reg,
-        )
+        );
+
+        self.dynamic.cache_xreg_val(reg, val.0);
+        val
     }
 
     fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
+        self.dynamic.cache_xreg_val(reg, value.0);
+
         JSA::ir_xreg_write(
             &mut self.jsa_call,
             &mut self.builder,
@@ -431,6 +440,11 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
 
         // The post-block is the common exit point for both branches.
         self.builder.switch_to_block(post_block);
+
+        // Either parent block can modify registers or perform different number of steps.
+        // Hence we must invalidate the register cache for the subsequent block.
+        self.dynamic.clear_xreg_cache();
+
         let params = self.builder.block_params(post_block);
 
         Phi::from_ir_vals(params.to_vec().as_slice(), self)

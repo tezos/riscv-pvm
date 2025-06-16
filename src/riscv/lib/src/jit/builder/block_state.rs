@@ -4,11 +4,15 @@
 
 //! State that is kept per Cranelift-IR block.
 
+use std::collections::HashMap;
+
 use cranelift::codegen::ir::InstBuilder;
+use cranelift::codegen::ir::{self};
 use cranelift::frontend::FunctionBuilder;
 
 use super::X64;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::registers::NonZeroXRegister;
 
 /// Program Counter update, within the context of JIT-compilation.
 ///
@@ -64,6 +68,9 @@ pub struct DynamicValues {
     /// The current offset of the pc, as a result of steps taken
     /// so far.
     pc_offset: i64,
+
+    /// XRegister cache
+    xregs: HashMap<NonZeroXRegister, ir::Value>,
 }
 
 impl DynamicValues {
@@ -73,6 +80,7 @@ impl DynamicValues {
             pc_val,
             steps: 0,
             pc_offset: 0,
+            xregs: HashMap::with_capacity(16),
         }
     }
 
@@ -116,5 +124,21 @@ impl DynamicValues {
     /// where 'step' maps to the lowering of an instruction.
     pub fn steps(&self) -> usize {
         self.steps
+    }
+
+    /// Get a value for the given XRegister, if it exists.
+    /// If it does not exist, `None` is returned.
+    pub fn get_cached_xreg_val(&self, xreg: NonZeroXRegister) -> Option<ir::Value> {
+        self.xregs.get(&xreg).copied()
+    }
+
+    /// Set a value for the given XRegister, caching it for later use.
+    pub fn cache_xreg_val(&mut self, xreg: NonZeroXRegister, value: ir::Value) {
+        self.xregs.insert(xreg, value);
+    }
+
+    /// Clear the cache of XRegister values.
+    pub fn clear_xreg_cache(&mut self) {
+        self.xregs.clear();
     }
 }
