@@ -8,13 +8,17 @@
 //! Currently, this is only 'inline' jit, but will soon be expanded to 'outline' jit also;
 //! where 'outline' means any JIT compilation occurs in a separate thread.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+
+use lazy_static;
 
 use super::Jitted;
 use crate::jit::JIT;
@@ -22,6 +26,7 @@ use crate::jit::JitFn;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::instruction::OpCode;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
@@ -251,6 +256,15 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompile
                             "Unexpected function pointer in dispatch target"
                         );
 
+                        FUNS.write().unwrap().insert(
+                            jitfn as usize,
+                            msg.instr
+                                .iter()
+                                .map(|i| i.opcode)
+                                .collect::<Vec<_>>()
+                                .into_boxed_slice(),
+                        );
+
                         // Safety: this function will be retrieved as a DispatchFn, rather than a
                         // JitFn. The two function signatures are identical, apart from the first and
                         // last parameters. These are both thin-pointers, and ignored by the JitFn.
@@ -287,6 +301,14 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> Default
     fn default() -> Self {
         Self::new()
     }
+}
+
+lazy_static::lazy_static! {
+    static ref FUNS: RwLock<HashMap<usize, Box<[OpCode]>>> = RwLock::new(HashMap::new());
+}
+
+pub(crate) fn lookup_fun(fun: usize) -> Option<Box<[OpCode]>> {
+    FUNS.read().unwrap().get(&fun).cloned()
 }
 
 impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompiler<MC, M>

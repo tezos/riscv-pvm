@@ -39,6 +39,7 @@ itertools.workspace = true
 range-collections.workspace = true
 elf.workspace = true
 quanta.workspace = true
+lazy_static.workspace = true
 
 [dependencies.__tracing_do_not_use_directly]
 workspace = true
