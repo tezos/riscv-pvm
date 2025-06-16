@@ -26,7 +26,6 @@ use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
-use crate::devicetree;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::Instr;
 use crate::parser::instruction::InstrCacheable;
@@ -553,16 +552,13 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     }
 
     /// Install a program and set the program counter to its start.
-    pub fn setup_boot(
-        &mut self,
-        program: &Program<MC>,
-        initrd: Option<&[u8]>,
-    ) -> Result<(), MachineError>
+    pub fn setup_boot(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
         M: backend::ManagerReadWrite,
     {
         // Reset hart state & set pc to entrypoint
         self.core.hart.reset(program.entrypoint);
+
         // Write program to main memory and point the PC at its start
         for (addr, data) in program.segments.iter() {
             self.core.main_memory.write_all(*addr, data)?;
@@ -570,35 +566,6 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
         // Set booting Hart ID (a0) to 0
         self.core.hart.xregisters.write(registers::a0, 0);
-
-        // Load the initial program into memory
-        let initrd_addr = program
-            .segments
-            .iter()
-            .map(|(base, data)| base + data.len() as Address)
-            .max()
-            .unwrap_or(memory::FIRST_ADDRESS);
-
-        // Write initial ramdisk, if any
-        let (dtb_addr, initrd) = if let Some(initrd) = initrd {
-            self.core.main_memory.write_all(initrd_addr, initrd)?;
-            let length = initrd.len() as u64;
-            let dtb_options = devicetree::InitialRamDisk {
-                start: initrd_addr,
-                length,
-            };
-            let dtb_addr = initrd_addr + length;
-            (dtb_addr, Some(dtb_options))
-        } else {
-            (initrd_addr, None)
-        };
-
-        // Write device tree to memory
-        let fdt = devicetree::generate::<MC>(initrd)?;
-        self.core.main_memory.write_all(dtb_addr, fdt.as_slice())?;
-
-        // Point DTB boot argument (a1) at the written device tree
-        self.core.hart.xregisters.write(registers::a1, dtb_addr);
 
         Ok(())
     }

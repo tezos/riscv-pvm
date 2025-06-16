@@ -57,7 +57,7 @@ fn run_test_with_check<B: Block<M1M, Owned>>(
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
     let mut interpreter: TestStepper<M1M, _, B> =
-        TestStepper::new(&contents, None, block_builder).expect("Boot failed");
+        TestStepper::new(&contents, block_builder).expect("Boot failed");
 
     let res = interpreter.step_max(Bound::Included(MAX_STEPS));
     // Record the result to compare to the expected result

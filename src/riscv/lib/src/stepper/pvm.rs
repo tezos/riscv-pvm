@@ -81,13 +81,8 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
     PvmStepper<'hooks, MC, BCC, Owned, B>
 {
     /// Create a new PVM stepper.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Not worth refactoring this constructor function"
-    )]
     pub fn new(
         program: &[u8],
-        initrd: Option<&[u8]>,
         inbox: Inbox,
         hooks: PvmHooks<'hooks>,
         rollup_address: [u8; 20],
@@ -100,7 +95,6 @@ impl<'hooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
         let program = Program::<MC>::from_elf(program)?;
 
         pvm.setup_linux_process(&program)?;
-        assert!(initrd.is_none(), "initrd is not supported");
 
         let reveal_request_response_map =
             RevealRequestResponseMap::new(rollup_address, origination_level, preimages_dir);
