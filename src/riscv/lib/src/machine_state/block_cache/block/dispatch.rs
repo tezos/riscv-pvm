@@ -308,6 +308,11 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompil
         let fun = Jitted::run_block_not_compiled;
         target.set(fun);
 
+        // Single instruction blocks don't perform as well when compiled
+        if instr.len() <= 1 {
+            return fun;
+        }
+
         let request = CompilationRequest {
             instr,
             fun: target.fun.clone(),
