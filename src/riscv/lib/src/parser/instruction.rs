@@ -487,8 +487,14 @@ pub enum InstrCacheable {
     ///`AMOADD.D` - Atomically loads in rd the value from the address in rs1 and
     /// stores the result of adding it to val(rs2) back to the address in rs1.
     Amoaddd(AmoArgs),
+    /// `AMOXOR.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the result of XORing it to `val(rs2)` back to the address in `rs1`.
     Amoxord(AmoArgs),
+    /// `AMOAND.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the result of ANDing it to `val(rs2)` back to the address in `rs1`.
     Amoandd(AmoArgs),
+    /// `AMOOR.D` Atomically loads in `rd` the value from the address in `rs1` and
+    /// stores the  result of ORing it to `val(rs2)` back to the address in `rs1`.
     Amoord(AmoArgs),
     /// `AMOMIN.D` Atomically loads in `rd` the value from the address in `rs1` and
     /// stores the minimum between it and `val(rs2)` back to the address in `rs1`.
