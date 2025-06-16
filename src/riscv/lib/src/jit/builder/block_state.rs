@@ -47,7 +47,7 @@ impl From<ProgramCounterUpdate<X64>> for PCUpdate {
 /// The non-branching block, can otherwise be considered as the 'fallthrough' block.
 /// That is to say, the fallthrough block is the block taken when execution 'falls through'
 /// a branching instruction--the branch is not taken.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct DynamicValues {
     /// The number of steps taken within the current compilation context.
     steps: usize,

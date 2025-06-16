@@ -236,7 +236,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         // both IR blocks need access to the dynamic values at this point in time.
         // These are modified by the jump to the end block below, and possibly by the
         // `on_branching` function.
-        let snapshot = self.dynamic;
+        let snapshot = self.dynamic.clone();
 
         self.builder.switch_to_block(on_branch);
 
@@ -401,7 +401,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
 
         // both IR blocks need access to the dynamic values at this point in time.
         // These can be modified by the `true_branch` and `false_branch` functions.
-        let snapshot = self.dynamic;
+        let snapshot = self.dynamic.clone();
         self.builder.switch_to_block(true_block);
 
         let res_val = Phi::to_ir_vals(true_branch(self));
