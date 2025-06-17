@@ -428,6 +428,29 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     {
         self.status.read()
     }
+
+    /// Construct an [`InputRequest`] based on the PVM's current status and level.
+    pub fn input_request(&self) -> InputRequest
+    where
+        M: state_backend::ManagerRead,
+    {
+        match self.status.read() {
+            PvmStatus::Evaluating => InputRequest::NoInputRequired,
+            PvmStatus::WaitingForReveal => {
+                InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
+            }
+            PvmStatus::WaitingForInput => {
+                if self.level_is_set.read() {
+                    InputRequest::Initial
+                } else {
+                    InputRequest::FirstAfter {
+                        level: self.level.read(),
+                        counter: self.message_counter.read(),
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, B, Owned> {
@@ -445,10 +468,13 @@ impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, 
     Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
-    pub(crate) fn to_proof(&self) -> Result<Proof, HashError>
+    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError>
     where
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
+        // This read guarantees that the input request can be recovered from the proof.
+        let _ = self.input_request();
+
         let refs = self.struct_ref::<FnManagerIdent>();
         let merkle_proof = PvmLayout::<MC, BCC>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
@@ -458,6 +484,19 @@ impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, 
 
         Ok(proof)
     }
+}
+
+/// An [`InputRequest`] is what the PVM expects as input for a specific tick.
+pub enum InputRequest {
+    /// No input is required at the moment, normal execution can continue.
+    NoInputRequired,
+    /// The PVM is waiting for an initial inbox input.
+    Initial,
+    /// The PVM is waiting for a message at a specific level and inbox index.
+    /// `FirstAfter(level, counter)` represents the message at `level`, and index `counter + 1`.
+    FirstAfter { level: u32, counter: u64 },
+    /// The PVM is asking for a reveal response. The arguments are encoded by the payload bytes.
+    NeedsReveal(Box<[u8]>),
 }
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BCC, B, Verifier> {
