@@ -250,12 +250,8 @@ impl OwnedProofPart {
     pub fn leaf_from_partial<T>(partial: Partial<T>, f: impl FnOnce(T) -> Vec<u8>) -> Self {
         match partial {
             Partial::Absent => OwnedProofPart::Absent,
-            Partial::Blinded(hash) => {
-                OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)))
-            }
-            Partial::Present(data) => {
-                OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Read(f(data))))
-            }
+            Partial::Blinded(hash) => OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
+            Partial::Present(data) => OwnedProofPart::Present(MerkleProof::leaf_read(f(data))),
         }
     }
 
@@ -263,9 +259,7 @@ impl OwnedProofPart {
     pub fn node_from_partial(partial: Partial<Vec<MerkleProof>>) -> Self {
         match partial {
             Partial::Absent => OwnedProofPart::Absent,
-            Partial::Blinded(hash) => {
-                OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)))
-            }
+            Partial::Blinded(hash) => OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
             Partial::Present(children) => OwnedProofPart::Present(MerkleProof::Node(children)),
         }
     }
@@ -442,13 +436,11 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
                     Partial::Absent => (vec![], OwnedProofPart::Absent),
                     Partial::Blinded(hash) => (
                         vec![],
-                        OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))),
+                        OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
                     ),
                     Partial::Present(data) => (
                         vec![(page, data.clone())],
-                        OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Read(
-                            data.to_vec(),
-                        ))),
+                        OwnedProofPart::Present(MerkleProof::leaf_read(data.to_vec())),
                     ),
                 });
                 Ok(ctx)
@@ -970,7 +962,7 @@ where
                     (acc, match merkle_children {
                         Partial::Absent => OwnedProofPart::Absent,
                         Partial::Blinded(hash) => {
-                            OwnedProofPart::Present(MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)))
+                            OwnedProofPart::Present(MerkleProof::leaf_blind(hash))
                         }
                         Partial::Present(children) => {
                             OwnedProofPart::Present(MerkleProof::Node(children))

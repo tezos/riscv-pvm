@@ -101,6 +101,16 @@ pub enum MerkleProofLeaf {
 }
 
 impl MerkleProof {
+    /// Create a new Merkle proof as a read leaf.
+    pub fn leaf_read(data: Vec<u8>) -> Self {
+        MerkleProof::Leaf(MerkleProofLeaf::Read(data))
+    }
+
+    /// Create a new Merkle proof as a blind leaf.
+    pub fn leaf_blind(hash: Hash) -> Self {
+        MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
+    }
+
     /// Return a 2-bit tag for the variant of the node in the proof.
     pub fn to_raw_tag(&self) -> Tag {
         match self {
