@@ -408,6 +408,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
 
     fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>> {
         Err(Exception::EnvCall)
+        //Ok(ProgramCounterUpdate::Next)
     }
 
     #[inline(always)]

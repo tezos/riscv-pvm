@@ -228,7 +228,22 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
     }
 }
 
-pub fn handle_inlined<MC, M>(
+pub extern "C" fn handle_inlined<MC, M>(
+    core: &mut MachineCoreState<MC, M>,
+    system_call_no: u64,
+) -> i64
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let result = handle_inlined_inner(core, system_call_no);
+    if result == Err(Error::NoSystemCall) {
+        return -1
+    }
+    result.unwrap().try_into().unwrap()
+}
+
+pub fn handle_inlined_inner<MC, M>(
     core: &mut MachineCoreState<MC, M>,
     system_call_no: u64,
 ) -> Result<u64, Error>

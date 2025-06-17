@@ -37,7 +37,7 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
-use crate::machine_state::registers::x0;
+use crate::machine_state::registers::a7;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
@@ -475,18 +475,17 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
                 None => self.run_instr_at(instr_pc),
             };
-            match self.core.handle_step_result(instr_pc, res) {
-                Err(error) => {
-                    let ecall = self.core.hart.xregisters.read(x0);
-                    if let Err(_) = handle_inlined(&mut self.core, ecall) {
-                        result.error = Some(error);
-                        return result;
-                    }
-                    result.steps += 1;
-                    let pc = self.core.hart.pc.read();
-                    self.core.hart.pc.write(pc + 4);
+
+            if let Err(error) =  self.core.handle_step_result(instr_pc, res) {
+                let ecall = self.core.hart.xregisters.read(a7);
+                let handle_result = handle_inlined(&mut self.core, ecall);
+                if handle_result < 0 {
+                    result.error = Some(error);
+                    return result;
                 }
-                Ok(_) => {},
+                result.steps += 1;
+                let pc = self.core.hart.pc.read();
+                self.core.hart.pc.write(pc + 4);
             }
 
             result.steps += 1;

@@ -58,6 +58,8 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
+use crate::machine_state::registers::a7;
+use crate::pvm::linux::handle_inlined;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
@@ -234,8 +236,15 @@ extern "C" fn raise_store_amo_access_fault_exception(
 extern "C" fn ecall<MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     exception_out: &mut MaybeUninit<Exception>,
-) {
-    exception_out.write(core.hart.run_ecall());
+) -> i64 {
+    //exception_out.write(core.hart.run_ecall());
+    let ecall = core.hart.xregisters.read(a7);
+
+    let result = handle_inlined(core, ecall);
+    if result < 0 {
+        exception_out.write(core.hart.run_ecall());
+    }
+    result
 }
 
 /// Store the lowest `width` bytes of the given value to memory, at the physical address.
