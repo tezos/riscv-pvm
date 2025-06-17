@@ -20,6 +20,10 @@ jobs:
   benchmark:
     name: Benchmark
     runs-on: ubuntu-latest
+    if: (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || github.event_name != 'pull_request'
+
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Configure SSH
@@ -41,3 +45,14 @@ jobs:
 
           # Delete the benchmark script if the job suceeded, otherwise keep it for investigation
           ssh ${{ secrets.BENCH_HOST }} rm ./bench-${{ github.run_id }}.sh
+
+          echo "Benchmark results for revision ${{ github.sha }}:" >> pr-comment.md
+          echo >> pr-comment.md
+          cat $GITHUB_STEP_SUMMARY >> pr-comment.md
+
+      - name: Comment results on PR
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          file-path: pr-comment.md
+          comment-tag: bench-result

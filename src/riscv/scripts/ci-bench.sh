@@ -58,3 +58,6 @@ done
 
 # Collect results and display them
 nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.toml --bin inbox-bench -- results --inbox-file "$inbox_file" --expected-transfers 15 "${result_args[@]}"
+
+# Clean up
+rm -rf "$inbox_file" "$dir" "$result_dir"
