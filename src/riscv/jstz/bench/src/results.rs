@@ -64,29 +64,73 @@ pub fn handle_results(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let mut all_results = comfy_table::Table::new();
+    all_results.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+    all_results.set_header(["Run", "Transfers", "Duration", "TPS"]);
+    all_results
+        .column_mut(2)
+        .unwrap()
+        .set_cell_alignment(comfy_table::CellAlignment::Right);
+    all_results
+        .column_mut(3)
+        .unwrap()
+        .set_cell_alignment(comfy_table::CellAlignment::Right);
+
+    for (run, metrics) in all_metrics.iter().enumerate() {
+        all_results.add_row([
+            format!("{}", run + 1),
+            format!("{}", metrics.transfers),
+            format!("{:?}", metrics.duration),
+            format!("{:.3}", metrics.tps),
+        ]);
+    }
+
+    println!();
+    println!("{all_results}");
+
     if all_metrics.len() > 1 {
-        let len = all_metrics.len();
-
-        for (num, metrics) in all_metrics.iter().enumerate() {
-            println!("Run {} / {len} => {metrics}", num + 1);
-        }
-
-        println!();
+        let mut aggregate_result = comfy_table::Table::new();
+        aggregate_result.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        aggregate_result.set_header(["Metric", "Duration", "TPS"]);
+        aggregate_result
+            .column_mut(1)
+            .unwrap()
+            .set_cell_alignment(comfy_table::CellAlignment::Right);
+        aggregate_result
+            .column_mut(2)
+            .unwrap()
+            .set_cell_alignment(comfy_table::CellAlignment::Right);
 
         let average_metrics = TransferMetrics::mean(&all_metrics);
-        println!("Average => {average_metrics}");
+        aggregate_result.add_row([
+            "Mean".to_string(),
+            format!("{:?}", average_metrics.duration),
+            format!("{:.3}", average_metrics.tps),
+        ]);
 
         let worst_metrics = TransferMetrics::worst(&all_metrics);
-        println!("Worst   => {worst_metrics}");
+        aggregate_result.add_row([
+            "Worst".to_string(),
+            format!("{:?}", worst_metrics.duration),
+            format!("{:.3}", worst_metrics.tps),
+        ]);
 
         let best_metrics = TransferMetrics::best(&all_metrics);
-        println!("Best    => {best_metrics}");
+        aggregate_result.add_row([
+            "Best".to_string(),
+            format!("{:?}", best_metrics.duration),
+            format!("{:.3}", best_metrics.tps),
+        ]);
 
         let stddev_metrics = TransferMetrics::standard_deviation(&all_metrics);
-        println!("StdDev  => {:?}", stddev_metrics.duration);
-        println!("        => {:.3} TPS", stddev_metrics.tps);
-    } else if let Some(metrics) = all_metrics.first() {
-        println!("{metrics}");
+        aggregate_result.add_row([
+            "Standard Deviation".to_string(),
+            format!("±{:?}", stddev_metrics.duration),
+            format!("±{:.3}", stddev_metrics.tps),
+        ]);
+
+        println!();
+        println!("{aggregate_result}");
     }
 
     Ok(())
