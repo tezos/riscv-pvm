@@ -14,6 +14,7 @@ pub(crate) mod reservation_set;
 
 use std::ops::Bound;
 
+use crate::pvm::linux::handle_inlined;
 use block_cache::BlockCache;
 use block_cache::block::Block;
 use hart_state::HartState;
@@ -36,6 +37,7 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
+use crate::machine_state::registers::x0;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
@@ -473,10 +475,18 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
                 None => self.run_instr_at(instr_pc),
             };
-
-            if let Err(error) = self.core.handle_step_result(instr_pc, res) {
-                result.error = Some(error);
-                return result;
+            match self.core.handle_step_result(instr_pc, res) {
+                Err(error) => {
+                    let ecall = self.core.hart.xregisters.read(x0);
+                    if let Err(_) = handle_inlined(&mut self.core, ecall) {
+                        result.error = Some(error);
+                        return result;
+                    }
+                    result.steps += 1;
+                    let pc = self.core.hart.pc.read();
+                    self.core.hart.pc.write(pc + 4);
+                }
+                Ok(_) => {},
             }
 
             result.steps += 1;

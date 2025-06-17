@@ -12,10 +12,12 @@ mod rng;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
+use std::num::NonZeroU64;
 use std::ops::Range;
 
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 
+use self::addr::PageAligned;
 use self::addr::VirtAddr;
 use self::error::Error;
 use self::memory::STACK_SIZE;
@@ -33,6 +35,7 @@ use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::registers;
 use crate::program::Program;
+use crate::pvm::linux::parameters::AddressHint;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -224,6 +227,102 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
         Ok(())
     }
 }
+
+pub fn handle_inlined<MC, M>(
+    core: &mut MachineCoreState<MC, M>,
+    system_call_no: u64,
+) -> Result<u64, Error>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    /// Read an argument from a register and interpret it as a system call argument.
+    macro_rules! read_arg {
+        ($system_call:ident, $reg:ident) => {
+            core.hart
+            .xregisters
+            .try_read(registers::$reg)?
+        };
+    }
+
+    /// Check the result of a system call. If it failed, log the error.
+    // `dispatch0!(system_call_no [, optional_arguments_passed_to_handler])`
+    // Converts the system call name to the handler
+    macro_rules! dispatch0 {
+        ($system_call:ty$(, $arg:expr)*) => {{
+            paste::paste! {
+                [<inline_$system_call>]($($arg)*)
+            }
+        }};
+    }
+
+    // `dispatch1!(system_call_no [, optional_arguments_passed_to_handler])`
+    // Converts the system call name to the handler
+    macro_rules! dispatch1 {
+        ($system_call:ty$(, $arg:expr)*) => {{
+            paste::paste! {
+                let arg1 = read_arg!($system_call, a0);
+                [<inline_$system_call>]($($arg,)* arg1)
+            }
+        }};
+    }
+
+    // `dispatch2!(system_call_no [, optional_arguments_passed_to_handler])`
+    // Converts the system call name to the handler
+    macro_rules! dispatch2 {
+        ($system_call:ty$(, $arg:expr)*) => {{
+            paste::paste! {
+                let arg1 = read_arg!($system_call, a0);
+                let arg2 = read_arg!($system_call, a1);
+                [<inline_$system_call>]($($arg,)* arg1, arg2)
+            }
+        }};
+    }
+
+    // `dispatch3!(system_call_no [, optional_arguments_passed_to_handler])`
+    // Converts the system call name to the handler
+    macro_rules! dispatch3 {
+        ($system_call:ty$(, $arg:expr)*) => {{
+            paste::paste! {
+                let arg1 = read_arg!($system_call, a0);
+                let arg2 = read_arg!($system_call, a1);
+                let arg3 = read_arg!($system_call, a2);
+                [<inline_$system_call>]($($arg,)* arg1, arg2, arg3)
+            }
+        }};
+    }
+
+    // `dispatch4!(system_call_no [, optional_arguments_passed_to_handler])`
+    // Converts the system call name to the handler
+    macro_rules! dispatch4 {
+        ($system_call:ty$(, $arg:expr)*) => {{
+            paste::paste! {
+                let arg1 = read_arg!($system_call, a0);
+                let arg2 = read_arg!($system_call, a1);
+                let arg3 = read_arg!($system_call, a2);
+                let arg4 = read_arg!($system_call, a3);
+                [<inline_$system_call>]($($arg,)* arg1, arg2, arg3, arg4)
+            }
+        }};
+    }
+
+    match system_call_no {
+        FACCESSAT => dispatch0!(faccessat),
+        OPENAT => dispatch0!(openat),
+        CLOSE => dispatch0!(close),
+        READ => dispatch1!(read),
+        READLINKAT => dispatch0!(readlinkat),
+        GETPID => dispatch0!(getpid),
+        SET_ROBUST_LIST => dispatch0!(set_robust_list),
+        SET_TID_ADDRESS => dispatch0!(set_tid_address),
+        MADVISE => dispatch0!(madvise),
+        MPROTECT => dispatch3!(mprotect, core),
+        MMAP => dispatch4!(mmap, core),
+        MUNMAP => dispatch2!(munmap, core),
+        _ => Err(Error::NoSystemCall),
+    }
+}
+
 
 impl<MC, BCC, B, M> Pvm<MC, BCC, B, M>
 where
@@ -449,6 +548,159 @@ pub struct SupervisorState<M: ManagerBase> {
 
     /// Stack guard
     stack_guard: Cell<Range<VirtAddr>, M>,
+}
+
+/// Inline `getpid` system call.
+///
+/// See: <https://man7.org/linux/man-pages/man2/getpid.2.html>
+fn inline_getpid() -> Result<u64, Error> {
+    // We only have one process
+    Ok(1)
+}
+
+/// Inline the `faccessat` system call. All access to the file system is denied.
+///
+/// See: <https://www.man7.org/linux/man-pages/man3/faccessat.3p.html>
+fn inline_faccessat() -> Result<u64, Error> {
+    Err(Error::Access)
+}
+
+/// Inline the `openat` system call. All access to the file system is denied.
+///
+/// See: <https://www.man7.org/linux/man-pages/man3/openat.3p.html>
+fn inline_openat() -> Result<u64, Error>
+{
+    Err(Error::Access)
+}
+
+/// Inline `close` system call. All access to the file system is denied.
+///
+/// See <https://man7.org/linux/man-pages/man2/close.2.html>
+fn inline_close() -> Result<u64, Error>
+{
+    // None of the file descriptors we allow (stdout/stderr) can sensibly be closed.
+    Err(Error::Access)
+}
+
+/// inline `read` system call. All access to the file system is denied.
+///
+/// See <https://man7.org/linux/man-pages/man2/read.2.html>
+fn inline_read(length: u64) -> Result<u64, Error>
+{
+    if length == 0 {
+        // If the length is zero then POSIX allows returning zero without reading or checking
+        // for errors.
+        return Ok(0);
+    }
+    Err(Error::Access)
+}
+
+/// Inline the `readlinkat` system call. All access to the file system is denied.
+///
+/// See: <https://man7.org/linux/man-pages/man2/readlink.2.html>
+fn inline_readlinkat() -> Result<u64, Error>
+{
+    Err(Error::Access)
+}
+
+/// Inline `set_robust_list` system call.
+///
+/// See: <https://www.man7.org/linux/man-pages/man2/set_robust_list.2.html>
+fn inline_set_robust_list() -> Result<u64, Error> {
+    // Return 0 as an indicator of success
+    Ok(0)
+}
+
+
+/// Inline `set_tid_address` system call.
+fn inline_set_tid_address() -> Result<u64, Error> {
+    Ok(MAIN_THREAD_ID)
+}
+
+fn inline_madvise() -> Result<u64, Error> {
+    Ok(0)
+}
+
+fn inline_mprotect<MC, M>(
+    core: &mut MachineCoreState<MC, M>,
+    addr: PageAligned<VirtAddr>,
+    length: u64,
+    perms: Permissions,
+) -> Result<u64, Error>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    core.main_memory
+        .protect_pages(addr.to_machine_address(), length as usize, perms)?;
+
+    // Return 0 to indicate success.
+    Ok(0)
+}
+
+fn inline_munmap<MC, M>(
+    core: &mut MachineCoreState<MC, M>,
+    addr: u64,
+    length: u64,
+) -> Result<u64, Error>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    core.main_memory
+        .deallocate_and_protect_pages(addr, length as usize)
+        .map_err(|_| Error::InvalidArgument)?;
+
+    Ok(0)
+}
+
+fn inline_mmap<MC, M>(
+    core: &mut MachineCoreState<MC, M>,
+    addr: VirtAddr,
+    length: NonZeroU64,
+    perms: Permissions,
+    flags: parameters::Flags,
+) -> Result<u64, Error>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    // We don't allow shared mappings
+    match flags.visibility {
+        parameters::Visibility::Private => {}
+        parameters::Visibility::Shared => return Err(Error::NoSystemCall),
+    }
+
+    // We don't support file descriptors yet
+    match flags.backend {
+        parameters::Backend::None => {}
+        parameters::Backend::File => return Err(Error::NoSystemCall),
+    }
+
+    let res_addr: VirtAddr = match flags.addr_hint {
+        AddressHint::Hint => core.main_memory.allocate_and_protect_pages(
+            None,
+            length.get() as usize,
+            perms,
+            false,
+        )?,
+
+        AddressHint::Fixed { allow_replace } => {
+            if !addr.is_aligned(PAGE_SIZE) {
+                return Err(Error::InvalidArgument);
+            }
+
+            core.main_memory.allocate_and_protect_pages(
+                Some(addr.to_machine_address()),
+                length.get() as usize,
+                perms,
+                allow_replace,
+            )?
+        }
+    }
+    .into();
+
+    Ok(res_addr.to_machine_address())
 }
 
 impl<M: ManagerBase> SupervisorState<M> {
@@ -922,7 +1174,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `getpid` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/getpid.2.html>
-    pub(super) fn handle_getpid(&self) -> Result<u64, Infallible> {
+    pub(super) fn handle_getpid(&self) -> Result<u64, Error> {
         // We only have one process
         Ok(1)
     }
