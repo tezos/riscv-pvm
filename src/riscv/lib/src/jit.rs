@@ -162,6 +162,10 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
                 return None;
             };
 
+            // adding a method on the builder to be able to create a marker for the start of each instruction
+            // by creating new 'basic' block, and switching to it.
+            builder.start_instruction(i.width());
+
             let pc_update = unsafe {
                 // # SAFETY: lower is called with args from the same instruction that it
                 // was derived

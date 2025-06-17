@@ -82,6 +82,8 @@ pub(crate) struct Builder<'a, MC: MemoryConfig, M: ManagerBase> {
 
     /// Value representing a pointer to `result: Result<(), EnvironException>`
     result_ptr_val: Value,
+
+    instruction_stack: Vec<(ir::Block, InstrWidth)>,
 }
 
 impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
@@ -110,6 +112,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
             result_ptr_val,
             dynamic: DynamicValues::new(pc_val, steps_var),
             end_block: None,
+            instruction_stack: Vec::new(),
         }
     }
 
@@ -250,6 +253,33 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         self.dynamic = snapshot;
         self.builder.switch_to_block(fallthrough);
     }
+
+    pub(crate) fn start_instruction(&mut self, width: InstrWidth) {
+        // creates the start of the instruction.
+        let new_block = self.builder.create_block();
+        self.instruction_stack.push((new_block, width));
+        self.builder.ins().jump(new_block, &[]);
+
+        self.builder.switch_to_block(new_block);
+    }
+
+    fn find_relative_instruction(&self, offset: i64) -> Option<ir::Block> {
+        if offset >= 0 {
+            return None;
+        }
+        let mut offset = offset.unsigned_abs();
+        for &(block, width) in self.instruction_stack.iter().rev().skip(1) {
+            if width as u64 == offset {
+                return Some(block);
+            }
+            if width as u64 > offset {
+                return None;
+            }
+            offset -= width as u64;
+        }
+
+        None
+    }
 }
 
 impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
@@ -377,6 +407,20 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         offset: i64,
         instr_width: InstrWidth,
     ) -> ProgramCounterUpdate<Self::XValue> {
+        // if the offset is negative and within the bounds of the current block, rather than exiting the block,
+        // we can jump to the starting indicator of that instruction.
+        if let Some(instr_start) = self.find_relative_instruction(offset) {
+            let fallthrough = self.builder.create_block();
+            self.builder
+                .ins()
+                .brif(condition, instr_start, [], fallthrough, []);
+
+            self.builder.seal_block(fallthrough);
+
+            self.builder.switch_to_block(fallthrough);
+            return ProgramCounterUpdate::Next(instr_width);
+        }
+
         self.exit_on_branch(condition, |builder| {
             builder.complete_step(block_state::PCUpdate::Offset(offset));
         });
