@@ -16,3 +16,4 @@ http.workspace = true
 bincode.workspace = true
 regex.workspace = true
 tezos_data_encoding.workspace = true
+comfy-table.workspace = true

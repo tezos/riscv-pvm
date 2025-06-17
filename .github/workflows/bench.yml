@@ -37,9 +37,7 @@ jobs:
         run: |
           scp src/riscv/scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
 
-          echo '```' >> $GITHUB_STEP_SUMMARY
           ssh ${{ secrets.BENCH_HOST }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
 
           # Delete the benchmark script if the job suceeded, otherwise keep it for investigation
           ssh ${{ secrets.BENCH_HOST }} rm ./bench-${{ github.run_id }}.sh
