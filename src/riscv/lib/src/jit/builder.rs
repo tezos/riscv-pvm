@@ -19,6 +19,7 @@ use cranelift::codegen::ir::condcodes::IntCC;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::Variable;
 use cranelift::prelude::types::I128;
 use errno::AtomicAccessGuard;
 
@@ -98,6 +99,8 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         let core_ptr_val = builder.block_params(entry_block)[1];
         let pc_val = X64(builder.block_params(entry_block)[2]);
         let result_ptr_val = builder.block_params(entry_block)[3];
+        let steps_var = Variable::from_u32(0);
+        builder.declare_var(steps_var, I64);
         // last param ignored
 
         Self {
@@ -105,7 +108,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
             jsa_call,
             core_ptr_val,
             result_ptr_val,
-            dynamic: DynamicValues::new(pc_val),
+            dynamic: DynamicValues::new(pc_val, steps_var),
             end_block: None,
         }
     }
@@ -121,14 +124,14 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         }
 
         self.builder.switch_to_block(end_block);
-        // We will pass the instr_pc & steps as parameters
+        // We will pass the instr_pc as a parameter.
         let pc_val = self.builder.append_block_param(end_block, I64);
-        let steps_val = self.builder.append_block_param(end_block, I64);
 
         // write the final pc to the state.
         self.jsa_call
             .pc_write(&mut self.builder, self.core_ptr_val, X64(pc_val));
 
+        let steps_val = self.dynamic.get_and_commit_steps(&mut self.builder);
         self.builder.ins().return_(&[steps_val]);
 
         self.end_block = Some(end_block);
@@ -177,7 +180,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
     /// Jump from the current block to the end block, exiting the function.
     fn jump_to_end(&mut self) {
         // compute steps taken so far
-        let steps_val = self.builder.ins().iconst(I64, self.dynamic.steps() as i64);
+        self.dynamic.get_and_commit_steps(&mut self.builder);
 
         // get the new value of the pc to write back to the state
         let pc_val = self.dynamic.read_pc(&mut self.builder);
@@ -186,10 +189,9 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
             .end_block
             .unwrap_or_else(|| self.builder.create_block());
 
-        self.builder.ins().jump(end_block, &[
-            BlockArg::Value(pc_val.0),
-            BlockArg::Value(steps_val),
-        ]);
+        self.builder
+            .ins()
+            .jump(end_block, &[BlockArg::Value(pc_val.0)]);
         self.finalise_end_block(end_block)
     }
 

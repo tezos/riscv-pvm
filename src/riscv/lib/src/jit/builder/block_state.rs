@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::{self};
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::Variable;
 
 use super::X64;
 use crate::machine_state::ProgramCounterUpdate;
@@ -54,7 +55,8 @@ impl From<ProgramCounterUpdate<X64>> for PCUpdate {
 #[derive(Debug, Clone)]
 pub struct DynamicValues {
     /// The number of steps taken within the current compilation context.
-    steps: usize,
+    steps_var: Variable,
+    steps_offset: u64,
 
     /// Value representing the last-updated value of `instr_pc`.
     ///
@@ -75,10 +77,11 @@ pub struct DynamicValues {
 
 impl DynamicValues {
     /// Create a new set of values, given an initial program counter.
-    pub fn new(pc_val: X64) -> Self {
+    pub fn new(pc_val: X64, steps_var: Variable) -> Self {
         Self {
             pc_val,
-            steps: 0,
+            steps_var,
+            steps_offset: 0,
             pc_offset: 0,
             xregs: HashMap::with_capacity(16),
         }
@@ -105,7 +108,7 @@ impl DynamicValues {
     /// If `false` is returned, this indicates an unconditional exit from the instruction
     /// block and compilation can be finalised.
     pub fn complete_step<U: Into<PCUpdate>>(&mut self, pc_update: U) -> bool {
-        self.steps += 1;
+        self.steps_offset += 1;
 
         match pc_update.into() {
             PCUpdate::Offset(offset) => {
@@ -122,8 +125,12 @@ impl DynamicValues {
 
     /// The number of steps that have been taken thus far in the compilation process,
     /// where 'step' maps to the lowering of an instruction.
-    pub fn steps(&self) -> usize {
-        self.steps
+    pub fn get_and_commit_steps(&mut self, builder: &mut FunctionBuilder<'_>) -> ir::Value {
+        let steps_var = builder.use_var(self.steps_var);
+        let new_val = builder.ins().iadd_imm(steps_var, self.steps_offset as i64);
+        self.steps_offset = 0;
+        builder.def_var(self.steps_var, new_val);
+        new_val
     }
 
     /// Get a value for the given XRegister, if it exists.
