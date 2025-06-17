@@ -35,6 +35,7 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
@@ -277,8 +278,20 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
         AllocatedOf<<BCC as BlockCacheConfig>::Layout, Verifier>: 'static,
     {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).collect();
-        let space = deserialise_stream::deserialise::<PvmLayout<MC, BCC>>(&tree_serialisation)
-            .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+        let (space, merkle_tree) =
+            deserialise_stream::deserialise::<PvmLayout<MC, BCC>>(&tree_serialisation)
+                .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+
+        let deserialised_proof_tree = match merkle_tree {
+            OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofPart::Absent => ProofTree::Absent,
+        };
+        debug_assert_eq!(
+            ProofTree::Present(proof.tree()),
+            deserialised_proof_tree,
+            "The Merkle proof tree obtained through deserialisation should match the original proof tree"
+        );
+
         let stepper = self.as_verify_stepper(space)?;
 
         stepper.verify_proof_internal(ProofPart::Present(proof.tree()), proof.final_state_hash())
@@ -290,8 +303,18 @@ impl<'hooks, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite>
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
         let proof_tree = ProofTree::Present(proof.tree());
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
-            .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+        let (space, deserialised_proof_tree) =
+            deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
+                .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+
+        let deserialised_proof_tree = match deserialised_proof_tree {
+            OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofPart::Absent => ProofTree::Absent,
+        };
+        debug_assert_eq!(
+            proof_tree, deserialised_proof_tree,
+            "The Merkle proof tree obtained through deserialisation should match the original proof tree"
+        );
 
         let stepper = self.as_verify_stepper(space)?;
         stepper.verify_proof_internal(proof_tree, proof.final_state_hash())

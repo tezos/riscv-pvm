@@ -505,8 +505,9 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BC
     where
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
-        let space =
-            deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof)).ok()?;
+        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof))
+            .ok()?
+            .0;
         Some(Self::bind(space, block_builder))
     }
 }
