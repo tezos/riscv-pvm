@@ -287,18 +287,6 @@ where
         self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as i64 as i128, Double::from_i128_r)
     }
 
-    /// `FCVT.D.WU` R-type instruction.
-    ///
-    /// See [Self::run_fcvt_int_fmt].
-    pub fn run_fcvt_d_lu(
-        &mut self,
-        rs1: XRegister,
-        rm: InstrRoundingMode,
-        rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.run_fcvt_int_fmt(rs1, rm, rd, |u| u as u128, Double::from_u128_r)
-    }
-
     /// `FCVT.D.S` R-type instruction.
     ///
     /// See [Self::run_fcvt_fmt_fmt].

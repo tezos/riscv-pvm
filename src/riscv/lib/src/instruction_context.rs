@@ -13,6 +13,10 @@ pub(crate) mod value;
 
 use arithmetic::Arithmetic;
 use comparable::Comparable;
+use rustc_apfloat::Float;
+use rustc_apfloat::Status;
+use rustc_apfloat::StatusAnd;
+use rustc_apfloat::ieee::Double;
 
 pub use self::value::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
@@ -32,6 +36,7 @@ use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 use crate::parser::XRegisterParsed;
+use crate::parser::instruction::InstrRoundingMode;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::split_x0;
 use crate::state_backend::ManagerReadWrite;
@@ -78,7 +83,6 @@ pub(crate) trait ICB {
     #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
-    #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
 
     /// Perform a read of the program counter.
@@ -204,6 +208,14 @@ pub(crate) trait ICB {
 
     /// Read the reservation set start address.
     fn reservation_set_read(&mut self) -> Self::XValue;
+
+    /// Take an `XValue`, convert it to a 64-bit float with rounding,
+    /// and return the result as an `FValue`.
+    fn run_f64_from_x64_unsigned(
+        &mut self,
+        xval: Self::XValue,
+        rm: InstrRoundingMode,
+    ) -> Self::IResult<Self::FValue>;
 
     // ----------------
     // Provided Methods
@@ -440,6 +452,24 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     #[inline(always)]
     fn reservation_set_read(&mut self) -> Self::XValue {
         self.hart.reservation_set.start_addr.read()
+    }
+
+    fn run_f64_from_x64_unsigned(
+        &mut self,
+        xval: Self::XValue,
+        rm: InstrRoundingMode,
+    ) -> Self::IResult<FValue> {
+        let extended = xval as u128;
+
+        let rm = self.hart.f_rounding_mode(rm)?;
+
+        let StatusAnd { status, value } = Double::from_u128_r(extended, rm);
+
+        if status != Status::OK {
+            self.hart.csregisters.set_exception_flag_status(status);
+        }
+
+        Ok(value.into())
     }
 }
 
