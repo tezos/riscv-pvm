@@ -68,10 +68,7 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
 
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> = BlockCache<SIZE, B, MC, M>;
 
-    fn bind<MC, B, M>(
-        space: AllocatedOf<Self::Layout, M>,
-        block_builder: B::BlockBuilder,
-    ) -> Self::State<MC, B, M>
+    fn bind<MC, B, M>(space: AllocatedOf<Self::Layout, M>) -> Self::State<MC, B, M>
     where
         MC: MemoryConfig,
         B: Block<MC, M>,
@@ -91,7 +88,6 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
                 .try_into()
                 .map_err(|_| "mismatching vector lengths for instruction cache")
                 .unwrap(),
-            block_builder,
         }
     }
 
