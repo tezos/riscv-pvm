@@ -39,6 +39,7 @@ use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
+use crate::parser::instruction::InstrRoundingMode;
 use crate::parser::instruction::InstrWidth;
 use crate::state_backend::ManagerBase;
 
@@ -549,6 +550,18 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn reservation_set_read(&mut self) -> Self::XValue {
         self.jsa_call
             .reservation_set_read(&mut self.builder, self.core_ptr_val)
+    }
+
+    fn run_f64_from_x64_unsigned(
+        &mut self,
+        xval: Self::XValue,
+        rm: InstrRoundingMode,
+    ) -> Self::IResult<Self::FValue> {
+        let errno =
+            self.jsa_call
+                .f64_from_x64_unsigned(&mut self.builder, self.core_ptr_val, xval, rm);
+        let res = errno.handle(self);
+        Some(res)
     }
 }
 

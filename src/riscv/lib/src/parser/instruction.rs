@@ -174,6 +174,14 @@ impl InstrRoundingMode {
             }
         }
     }
+
+    /// Convert the rounding mode to a `u32` value that can be used in instructions.
+    pub const fn to_u32(self) -> u32 {
+        match self {
+            Self::Dynamic => 0b111,
+            Self::Static(rm) => rm.to_csrrepr() as u32,
+        }
+    }
 }
 
 /// Floating-point R-type instruction, containing
@@ -649,6 +657,9 @@ pub enum InstrCacheable {
     Fcvtdw(XRegToFRegArgsWithRounding),
     Fcvtdwu(XRegToFRegArgsWithRounding),
     Fcvtdl(XRegToFRegArgsWithRounding),
+    /// `FCVT.D.LU` - Converts a 64 bit unsigned integer into a 64 bit float, with rounding.
+    ///
+    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     Fcvtdlu(XRegToFRegArgsWithRounding),
     Fcvtds(FR1ArgWithRounding),
     Fcvtsd(FR1ArgWithRounding),

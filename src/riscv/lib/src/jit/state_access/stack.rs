@@ -54,6 +54,7 @@ use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 
+use crate::machine_state::registers::FValue;
 use crate::traps::Exception;
 
 /// Any value of type `T: StackAddressable` may be placed on the stack, and
@@ -138,6 +139,14 @@ impl StackAddressable for Address {
 
 impl Stackable for Address {
     const IR_TYPE: Type = I64;
+}
+
+impl StackAddressable for FValue {
+    type Underlying = FValue;
+}
+
+impl Stackable for FValue {
+    const IR_TYPE: Type = cranelift::codegen::ir::types::I64;
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.

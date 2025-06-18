@@ -35,6 +35,8 @@ use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::types::I8;
 use cranelift::frontend::FunctionBuilder;
 use cranelift::prelude::MemFlags;
+use cranelift::prelude::types::I32;
+use cranelift::prelude::types::I64;
 use cranelift_jit::JITBuilder;
 use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
@@ -58,6 +60,7 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
+use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
@@ -129,6 +132,7 @@ register_jsa_functions!(
     memory_load_u64 => (memory_load::<u64, MC, JSA>, AbiCall<4>::args),
     reservation_set_write => (reservation_set_write::<MC, JSA>, AbiCall<2>::args),
     reservation_set_read => (reservation_set_read::<MC, JSA>, AbiCall<1>::args),
+    f64_from_x64_unsigned => (f64_from_x64_unsigned::<MC, JSA>, AbiCall<5>::args),
 );
 
 /// Update the instruction pc in the state.
@@ -308,6 +312,32 @@ extern "C" fn reservation_set_read<MC: MemoryConfig, M: ManagerReadWrite>(
     <MachineCoreState<MC, M> as ICB>::reservation_set_read(core)
 }
 
+/// Convert an unsigned 64-bit `XValue` to a 64-bit `FValue` using the given rounding mode.
+extern "C" fn f64_from_x64_unsigned<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    exception_out: &mut MaybeUninit<Exception>,
+    xval: XValue,
+    rm: u32,
+    fval_out: &mut MaybeUninit<FValue>,
+) -> bool {
+    if let Some(round_mode) = InstrRoundingMode::from_rm(rm) {
+        match <MachineCoreState<MC, M> as ICB>::run_f64_from_x64_unsigned(core, xval, round_mode) {
+            Ok(fval) => {
+                fval_out.write(fval);
+                false
+            }
+            Err(e) => {
+                exception_out.write(e);
+                true
+            }
+        }
+    } else {
+        // Invalid rounding mode
+        exception_out.write(Exception::IllegalInstruction);
+        true
+    }
+}
+
 /// State Access that a JIT-compiled block may use
 ///
 /// Methods in this trait are used to provide access to parts of the state. It can be specialised by
@@ -459,7 +489,7 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
 
     /// Reusable stack slot for the PC value
     pc_slot: Option<stack::Slot<stack::Address>>,
-
+    f64_from_x64_unsigned: Option<FuncRef>,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -513,6 +543,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             reservation_set_read: None,
             exception_ptr_slot: None,
             pc_slot: None,
+            f64_from_x64_unsigned: None,
             _pd: PhantomData,
         }
     }
@@ -804,6 +835,44 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
         X64(builder.inst_results(call)[0])
+    }
+
+    /// Emit the required IR to call `f64_from_x64_unsigned`.
+    ///
+    /// Returns `errno` - on success, the new F64 value is returned.
+    pub(super) fn f64_from_x64_unsigned(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        xval: X64,
+        rm: InstrRoundingMode,
+    ) -> impl Errno<F64, MC, M> + 'static {
+        let exception_slot = self.exception_ptr_slot(builder);
+        let exception_ptr = exception_slot.ptr(builder);
+
+        let fval_ptr = stack::Slot::<FValue>::new(self.ptr_type, builder).ptr(builder);
+
+        let new_f64_from_x64_unsigned = self.f64_from_x64_unsigned.get_or_insert_with(|| {
+            self.module
+                .declare_func_in_func(self.imports.f64_from_x64_unsigned, builder.func)
+        });
+
+        let xval_val = xval.0;
+        let rm_val = builder.ins().iconst(I32, rm.to_u32() as i64);
+
+        let call = builder.ins().call(*new_f64_from_x64_unsigned, &[
+            core_ptr,
+            exception_ptr,
+            xval_val,
+            rm_val,
+            fval_ptr,
+        ]);
+
+        let errno = builder.inst_results(call)[0];
+        ErrnoImpl::new(errno, exception_ptr, move |builder| {
+            let fval = builder.ins().load(I64, MemFlags::trusted(), fval_ptr, 0);
+            F64(fval)
+        })
     }
 }
 
