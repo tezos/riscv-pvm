@@ -47,13 +47,19 @@ use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::StoreLoadInt;
+use crate::interpreter::float::RoundRDN;
+use crate::interpreter::float::RoundRMM;
+use crate::interpreter::float::RoundRNE;
+use crate::interpreter::float::RoundRTZ;
+use crate::interpreter::float::RoundRUP;
+use crate::interpreter::float::RoundingMode;
+use crate::interpreter::float::StaticRoundingMode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
-use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
@@ -126,6 +132,30 @@ register_jsa_functions!(
     memory_load_u32 => (memory_load::<u32, MC, JSA>, AbiCall<4>::args),
     memory_load_i64 => (memory_load::<i64, MC, JSA>, AbiCall<4>::args),
     memory_load_u64 => (memory_load::<u64, MC, JSA>, AbiCall<4>::args),
+    f64_from_x64_unsigned_dynamic => (
+        f64_from_x64_unsigned_dynamic::<MC, JSA>,
+        AbiCall<4>::args
+    ),
+    f64_from_x64_unsigned_static_rne => (
+        f64_from_x64_unsigned_static::<RoundRNE, MC, JSA>,
+        AbiCall<2>::args
+    ),
+    f64_from_x64_unsigned_static_rtz => (
+        f64_from_x64_unsigned_static::<RoundRTZ, MC, JSA>,
+        AbiCall<2>::args
+    ),
+    f64_from_x64_unsigned_static_rup => (
+        f64_from_x64_unsigned_static::<RoundRUP, MC, JSA>,
+        AbiCall<2>::args
+    ),
+    f64_from_x64_unsigned_static_rdn => (
+        f64_from_x64_unsigned_static::<RoundRDN, MC, JSA>,
+        AbiCall<2>::args
+    ),
+    f64_from_x64_unsigned_static_rmm => (
+        f64_from_x64_unsigned_static::<RoundRMM, MC, JSA>,
+        AbiCall<2>::args
+    ),
     reservation_set_write => (reservation_set_write::<MC, JSA>, AbiCall<2>::args),
     reservation_set_read => (reservation_set_read::<MC, JSA>, AbiCall<1>::args),
 );
@@ -159,17 +189,19 @@ extern "C" fn xregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
 extern "C" fn fregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     reg: FRegister,
-) -> FValue {
-    core.hart.fregisters.read(reg)
+) -> f64 {
+    let fval = core.hart.fregisters.read(reg);
+    fval.bits()
 }
 
 /// Write the given value to the given [`FRegister`].
 extern "C" fn fregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     reg: FRegister,
-    val: FValue,
+    val: f64,
 ) {
-    core.hart.fregisters.write(reg, val)
+    let fval = val.to_bits();
+    core.hart.fregisters.write(reg, fval.into())
 }
 
 /// Handle an [`Exception`].
@@ -297,14 +329,46 @@ extern "C" fn reservation_set_write<MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
     address: u64,
 ) {
-    <MachineCoreState<MC, M> as ICB>::reservation_set_write(core, address);
+    MachineCoreState::reservation_set_write(core, address);
 }
 
 /// Read the reservation set starting address.
 extern "C" fn reservation_set_read<MC: MemoryConfig, M: ManagerReadWrite>(
     core: &mut MachineCoreState<MC, M>,
 ) -> u64 {
-    <MachineCoreState<MC, M> as ICB>::reservation_set_read(core)
+    MachineCoreState::reservation_set_read(core)
+}
+
+extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig, M: ManagerReadWrite>(
+    core: &mut MachineCoreState<MC, M>,
+    exception_out: &mut MaybeUninit<Exception>,
+    xval: XValue,
+    f64_out: &mut MaybeUninit<f64>,
+) -> bool {
+    match MachineCoreState::f64_from_x64_unsigned_dynamic(core, xval) {
+        Ok(fval) => {
+            let f64val = fval.bits();
+            f64_out.write(f64val);
+            false
+        }
+        Err(e) => {
+            exception_out.write(e);
+            true
+        }
+    }
+}
+
+/// Convert an unsigned 64-bit `XValue` to a 64-bit `FValue` using the given static rounding mode.
+extern "C" fn f64_from_x64_unsigned_static<
+    RM: StaticRoundingMode,
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+>(
+    core: &mut MachineCoreState<MC, M>,
+    xval: XValue,
+) -> f64 {
+    let fval = MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND);
+    fval.bits()
 }
 
 /// State Access that a JIT-compiled block may use
@@ -452,6 +516,8 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
     memory_load_u64: Option<FuncRef>,
     reservation_set_write: Option<FuncRef>,
     reservation_set_read: Option<FuncRef>,
+    f64_from_x64_unsigned_dynamic: Option<FuncRef>,
+    f64_from_x64_unsigned_static: Option<FuncRef>,
 
     /// Reusable stack slot for the exception pointer
     exception_ptr_slot: Option<stack::Slot<Exception>>,
@@ -459,6 +525,8 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
     /// Reusable stack slot for the PC value
     pc_slot: Option<stack::Slot<stack::Address>>,
 
+    // Reusable stack slot for an FValue.
+    f64_ptr_slot: Option<stack::Slot<f64>>,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -474,6 +542,13 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
     fn pc_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<stack::Address> {
         self.pc_slot
             .get_or_insert_with(|| stack::Slot::<stack::Address>::new(self.ptr_type, builder))
+            .clone()
+    }
+
+    /// Get the stack slot for an FValue.
+    fn f64_ptr_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<f64> {
+        self.f64_ptr_slot
+            .get_or_insert_with(|| stack::Slot::<f64>::new(self.ptr_type, builder))
             .clone()
     }
 
@@ -510,8 +585,11 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             memory_load_u64: None,
             reservation_set_write: None,
             reservation_set_read: None,
+            f64_from_x64_unsigned_dynamic: None,
+            f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
             pc_slot: None,
+            f64_ptr_slot: None,
             _pd: PhantomData,
         }
     }
@@ -562,7 +640,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         ]);
 
         let handled = builder.inst_results(call)[0];
-        // Safety: the pc is initialised prior to the call, and is guaranteed to
+        // SAFETY: the pc is initialised prior to the call, and is guaranteed to
         // remain initialised regardless of the result of external call.
         let new_pc = unsafe { pc_slot.load(builder) };
 
@@ -803,6 +881,72 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
         X64(builder.inst_results(call)[0])
+    }
+
+    /// Emit the required IR to call `f64_from_x64_unsigned_dynamic`.
+    ///
+    /// Returns `errno` - on success, the new F64 value is returned.
+    pub(super) fn f64_from_x64_unsigned_dynamic(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        xval: X64,
+    ) -> ErrnoImpl<F64, impl FnOnce(&mut FunctionBuilder<'_>) -> F64 + 'static> {
+        let exception_slot = self.exception_ptr_slot(builder);
+        let exception_ptr = exception_slot.ptr(builder);
+
+        let f64_slot = self.f64_ptr_slot(builder);
+        let f64_ptr = f64_slot.ptr(builder);
+
+        let new_f64_from_x64_unsigned_dynamic =
+            self.f64_from_x64_unsigned_dynamic.get_or_insert_with(|| {
+                self.module
+                    .declare_func_in_func(self.imports.f64_from_x64_unsigned_dynamic, builder.func)
+            });
+
+        let call = builder.ins().call(*new_f64_from_x64_unsigned_dynamic, &[
+            core_ptr,
+            exception_ptr,
+            xval.0,
+            f64_ptr,
+        ]);
+
+        let errno = builder.inst_results(call)[0];
+        ErrnoImpl::new(errno, exception_ptr, move |builder| {
+            // SAFETY: This closure runs after the success case of the call, where the f64_slot
+            // is guaranteed to have been initialised with an f64 value.
+            let fval = unsafe { f64_slot.load(builder) };
+            F64(fval)
+        })
+    }
+
+    /// Emit the required IR to call `f64_from_x64_unsigned_static`.
+    /// The converted value is returned as `F64`.
+    pub(super) fn f64_from_x64_unsigned_static(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        xval: X64,
+        rm: RoundingMode,
+    ) -> F64 {
+        let new_f64_from_x64_unsigned_static =
+            self.f64_from_x64_unsigned_static.get_or_insert_with(|| {
+                let rm_func_id = match rm {
+                    RoundingMode::RNE => self.imports.f64_from_x64_unsigned_static_rne,
+                    RoundingMode::RTZ => self.imports.f64_from_x64_unsigned_static_rtz,
+                    RoundingMode::RUP => self.imports.f64_from_x64_unsigned_static_rup,
+                    RoundingMode::RDN => self.imports.f64_from_x64_unsigned_static_rdn,
+                    RoundingMode::RMM => self.imports.f64_from_x64_unsigned_static_rmm,
+                };
+                self.module.declare_func_in_func(rm_func_id, builder.func)
+            });
+
+        let call = builder
+            .ins()
+            .call(*new_f64_from_x64_unsigned_static, &[core_ptr, xval.0]);
+
+        let fval = builder.inst_results(call)[0];
+        F64(fval)
     }
 }
 

@@ -44,6 +44,7 @@ use crate::instruction_context::Predicate;
 use crate::instruction_context::Shift;
 use crate::interpreter::atomics;
 use crate::interpreter::branching;
+use crate::interpreter::float;
 use crate::interpreter::integer;
 use crate::interpreter::load_store;
 use crate::machine_state::ProgramCounterUpdate::Next;
@@ -354,7 +355,7 @@ pub enum OpCode {
     Fcvtdw,
     Fcvtdwu,
     Fcvtdl,
-    Fcvtdlu,
+    F64FromX64Unsigned,
     Fcvtds,
     Fcvtsd,
     Fcvtwd,
@@ -567,7 +568,7 @@ impl OpCode {
             Self::Fcvtdw => Args::run_fcvt_d_w,
             Self::Fcvtdwu => Args::run_fcvt_d_wu,
             Self::Fcvtdl => Args::run_fcvt_d_l,
-            Self::Fcvtdlu => Args::run_fcvt_d_lu,
+            Self::F64FromX64Unsigned => Args::run_f64_from_x64_unsigned,
             Self::Fcvtds => Args::run_fcvt_d_s,
             Self::Fcvtsd => Args::run_fcvt_s_d,
             Self::Fcvtwd => Args::run_fcvt_w_d,
@@ -731,6 +732,9 @@ impl OpCode {
             Self::X32AtomicMaxSigned => Some(Args::run_x32_atomic_max_signed),
             Self::X32AtomicMinUnsigned => Some(Args::run_x32_atomic_min_unsigned),
             Self::X32AtomicMaxUnsigned => Some(Args::run_x32_atomic_max_unsigned),
+
+            // RV64F instructions
+            Self::F64FromX64Unsigned => Some(Args::run_f64_from_x64_unsigned),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1284,6 +1288,15 @@ macro_rules! impl_f_x_type {
                 .map(|_| Next(self.width))
         }
     };
+
+    ($impl: path, $fn: ident) => {
+        /// SAFETY: This function must only be called on an `Args` belonging
+        /// to the same OpCode as the OpCode used to derive this function.
+        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = $impl(icb, unsafe { self.rs1.x }, self.rm, unsafe { self.rd.f });
+            I::map(res, |_| Next(self.width))
+        }
+    };
 }
 
 macro_rules! impl_x_f_type {
@@ -1613,7 +1626,7 @@ impl Args {
     impl_f_x_type!(run_fcvt_d_w, rm);
     impl_f_x_type!(run_fcvt_d_wu, rm);
     impl_f_x_type!(run_fcvt_d_l, rm);
-    impl_f_x_type!(run_fcvt_d_lu, rm);
+    impl_f_x_type!(float::run_f64_from_x64_unsigned, run_f64_from_x64_unsigned);
     impl_x_f_type!(run_fcvt_w_d, rm);
     impl_x_f_type!(run_fcvt_wu_d, rm);
     impl_x_f_type!(run_fcvt_l_d, rm);
@@ -2286,10 +2299,12 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Fcvtdl,
                 args: args.into(),
             },
-            InstrCacheable::Fcvtdlu(args) => Instruction {
-                opcode: OpCode::Fcvtdlu,
-                args: args.into(),
-            },
+            InstrCacheable::Fcvtdlu(args) => Instruction::new_f64_from_x64_unsigned(
+                args.rd,
+                args.rs1,
+                args.rm,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Fcvtwd(args) => Instruction {
                 opcode: OpCode::Fcvtwd,
                 args: args.into(),

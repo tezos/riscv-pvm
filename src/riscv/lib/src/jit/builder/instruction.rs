@@ -40,6 +40,7 @@ use crate::instruction_context::comparable::Comparable;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics;
 use crate::interpreter::atomics::ReservationSetOption;
+use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::F64;
 use crate::jit::builder::X32;
 use crate::jit::builder::X64;
@@ -312,6 +313,7 @@ impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC,
     }
 
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
+        // The value contained must be a floating-point type.
         M::ir_freg_write(self.ext_calls, self.builder, self.core_param, reg, value)
     }
 
@@ -591,5 +593,44 @@ impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC,
             InstructionResult::NoNext => InstructionResult::NoNext,
             InstructionResult::HasNext(val) => f(val),
         }
+    }
+
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
+        let errno =
+            self.ext_calls
+                .f64_from_x64_unsigned_dynamic(self.builder, self.core_param, xval);
+
+        let exception_block = self.builder.create_block();
+        let success_block = self.builder.create_block();
+
+        self.ins()
+            .brif(errno.is_exception, exception_block, [], success_block, []);
+
+        // All inputs to these blocks are already known, so we can seal them immediately.
+        self.builder.seal_block(exception_block);
+        self.builder.seal_block(success_block);
+
+        // Code for when an exception was raised.
+        {
+            self.builder.switch_to_block(exception_block);
+            self.handle_exception::<()>(errno.exception_ptr);
+        }
+
+        // Code for when the conversion succeeded.
+        {
+            self.builder.switch_to_block(success_block);
+
+            let return_value = (errno.on_ok)(self.builder);
+            InstructionResult::HasNext(return_value)
+        }
+    }
+
+    fn f64_from_x64_unsigned_static(
+        &mut self,
+        xval: Self::XValue,
+        rm: RoundingMode,
+    ) -> Self::FValue {
+        self.ext_calls
+            .f64_from_x64_unsigned_static(self.builder, self.core_param, xval, rm)
     }
 }

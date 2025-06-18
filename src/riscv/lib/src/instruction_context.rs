@@ -13,13 +13,20 @@ pub(crate) mod value;
 
 use arithmetic::Arithmetic;
 use comparable::Comparable;
+use rustc_apfloat::Float;
+use rustc_apfloat::Status;
+use rustc_apfloat::StatusAnd;
+use rustc_apfloat::ieee::Double;
 
 pub use self::value::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::atomics::reset_reservation_set;
+use crate::interpreter::float::RoundingMode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::csregisters::CSRRepr;
+use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::instruction::Args;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
@@ -78,7 +85,7 @@ pub(crate) trait ICB {
     #[expect(unused, reason = "Will Be Used Soon™")]
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
-    #[expect(unused, reason = "Will Be Used Soon™")]
+    /// Perform a write to a [`FRegister`], with the given value.
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
 
     /// Perform a read of the program counter.
@@ -204,6 +211,18 @@ pub(crate) trait ICB {
 
     /// Read the reservation set start address.
     fn reservation_set_read(&mut self) -> Self::XValue;
+
+    /// Take an `XValue` and convert it to a 64-bit float with the dynamic rounding mode in the `frm` field of the
+    /// `fcsr` register, returning the result as an `FValue`.
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue>;
+
+    /// Take an `XValue` and a static rounding mode, and convert it to a 64-bit float
+    /// with the given rounding mode, returning the resulting `FValue`.
+    fn f64_from_x64_unsigned_static(
+        &mut self,
+        xval: Self::XValue,
+        rm: RoundingMode,
+    ) -> Self::FValue;
 
     // ----------------
     // Provided Methods
@@ -440,6 +459,39 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     #[inline(always)]
     fn reservation_set_read(&mut self) -> Self::XValue {
         self.hart.reservation_set.start_addr.read()
+    }
+
+    fn f64_from_x64_unsigned_static(
+        &mut self,
+        xval: Self::XValue,
+        rm: RoundingMode,
+    ) -> Self::FValue {
+        let extended = xval as u128;
+
+        let StatusAnd { status, value } = Double::from_u128_r(extended, rm.into());
+
+        if status != Status::OK {
+            self.hart.csregisters.set_exception_flag_status(status);
+        }
+
+        value.into()
+    }
+
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
+        let extended = xval as u128;
+        let rm: RoundingMode = self
+            .hart
+            .csregisters
+            .read::<CSRRepr>(CSRegister::frm)
+            .try_into()?;
+
+        let StatusAnd { status, value } = Double::from_u128_r(extended, rm.into());
+
+        if status != Status::OK {
+            self.hart.csregisters.set_exception_flag_status(status);
+        }
+
+        Ok(value.into())
     }
 }
 
