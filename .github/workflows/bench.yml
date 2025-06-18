@@ -1,0 +1,58 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+  push:
+    branches: [main]
+
+# Only one job may reserve the reference machine at a time
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || github.event_name != 'pull_request'
+
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.BENCH_SSH_KEY }}
+
+      - name: Configure SSH's known hosts
+        run: echo "${{ secrets.BENCH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Benchmark
+        run: |
+          scp src/riscv/scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
+
+          ssh ${{ secrets.BENCH_HOST }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+
+          # Delete the benchmark script if the job suceeded, otherwise keep it for investigation
+          ssh ${{ secrets.BENCH_HOST }} rm ./bench-${{ github.run_id }}.sh
+
+          echo "Benchmark results for revision ${{ github.sha }}:" >> pr-comment.md
+          echo >> pr-comment.md
+          cat $GITHUB_STEP_SUMMARY >> pr-comment.md
+
+      - name: Comment results on PR
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          file-path: pr-comment.md
+          comment-tag: bench-result
