@@ -1673,6 +1673,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicXor`].
     pub(crate) fn new_x32_atomic_xor(
         rd: XRegister,
         rs1: XRegister,
@@ -1682,7 +1683,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amoxorw,
+            opcode: OpCode::X32AtomicXor,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1695,6 +1696,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicAnd`].
     pub(crate) fn new_x32_atomic_and(
         rd: XRegister,
         rs1: XRegister,
@@ -1704,7 +1706,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amoandw,
+            opcode: OpCode::X32AtomicAnd,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1717,6 +1719,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicOr`].
     pub(crate) fn new_x32_atomic_or(
         rd: XRegister,
         rs1: XRegister,
@@ -1726,7 +1729,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amoorw,
+            opcode: OpCode::X32AtomicOr,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
