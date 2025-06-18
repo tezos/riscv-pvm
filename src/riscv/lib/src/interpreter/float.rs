@@ -14,6 +14,7 @@ use rustc_apfloat::Round;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
 
+use crate::instruction_context::ICB;
 use crate::machine_state::csregisters::CSRRepr;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::csregisters::CSRegisters;
@@ -286,10 +287,10 @@ where
 
     /// `FCVT.int.fmt` instruction.
     ///
-    /// Converts a 32 or 64 bit float, into a 32 or 64 bit integer, with rounding.
+    /// Converts a 32 or 64 bit integer, into a 32 or 64 bit float, with rounding.
     ///
     /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
-    pub(super) fn run_fcvt_int_fmt<F: FloatExt, T>(
+    pub fn run_fcvt_int_fmt<F: FloatExt, T>(
         &mut self,
         rs1: XRegister,
         rm: InstrRoundingMode,
@@ -342,6 +343,11 @@ where
         Ok(())
     }
 
+    /// `FCVT.fmt.int` instruction.
+    ///
+    /// Converts a 32 or 64 bit float, into a 32 or 64 bit integer, with rounding.
+    ///
+    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fcvt_fmt_int<F: FloatExt, T>(
         &mut self,
         rs1: FRegister,
@@ -453,7 +459,7 @@ where
         Ok(())
     }
 
-    pub(super) fn f_rounding_mode(&self, rm: InstrRoundingMode) -> Result<Round, Exception> {
+    pub(crate) fn f_rounding_mode(&self, rm: InstrRoundingMode) -> Result<Round, Exception> {
         let rm = match rm {
             InstrRoundingMode::Static(rm) => rm,
             InstrRoundingMode::Dynamic => self
@@ -527,7 +533,7 @@ pub enum RoundingMode {
     RTZ,
     /// Round Down (towards -∞)
     RDN,
-    /// Round Up (towrads +∞)
+    /// Round Up (towards +∞)
     RUP,
     /// Round to Nearest, ties to Max Magnitude
     RMM,
@@ -580,6 +586,44 @@ impl From<RoundingMode> for Round {
     }
 }
 
+/// A trait to associate a `RoundingMode` with a specific struct.
+/// This is used for associating the correct functionality for
+/// [`run_f64_from_x64_unsigned`] and similar functions.
+pub trait StaticRoundingMode {
+    /// Convert a `RoundingMode` to a `Round` value.
+    const ROUND: RoundingMode;
+}
+
+/// Represents `RoundingMode::RNE` (Round to Nearest, ties to Even).
+pub struct RoundRNE;
+impl StaticRoundingMode for RoundRNE {
+    const ROUND: RoundingMode = RoundingMode::RNE;
+}
+
+/// Represents `RoundingMode::RTZ` (Round towards Zero).
+pub struct RoundRTZ;
+impl StaticRoundingMode for RoundRTZ {
+    const ROUND: RoundingMode = RoundingMode::RTZ;
+}
+
+/// Represents `RoundingMode::RDN` (Round Down).
+pub struct RoundRDN;
+impl StaticRoundingMode for RoundRDN {
+    const ROUND: RoundingMode = RoundingMode::RDN;
+}
+
+/// Represents `RoundingMode::RUP` (Round Up).
+pub struct RoundRUP;
+impl StaticRoundingMode for RoundRUP {
+    const ROUND: RoundingMode = RoundingMode::RUP;
+}
+
+/// Represents `RoundingMode::RMM` (Round to Nearest, ties to Max Magnitude).
+pub struct RoundRMM;
+impl StaticRoundingMode for RoundRMM {
+    const ROUND: RoundingMode = RoundingMode::RMM;
+}
+
 #[cfg_attr(not(test), expect(dead_code, reason = "Only used in tests"))]
 pub enum Fflag {
     /// Inexact
@@ -599,7 +643,7 @@ impl<M: backend::ManagerReadWrite> CSRegisters<M> {
         self.set_bits(CSRegister::fflags, 1 << mask as usize);
     }
 
-    pub(super) fn set_exception_flag_status(&mut self, status: Status) {
+    pub(crate) fn set_exception_flag_status(&mut self, status: Status) {
         let bits = status_to_bits(status);
         self.set_bits(CSRegister::fflags, bits as u64);
     }
@@ -609,9 +653,46 @@ const fn status_to_bits(status: Status) -> u8 {
     status.bits().reverse_bits() >> 3
 }
 
+/// Convert 64-bit unsigned integer in `rs1` to a 64-bit float in `rd` with rounding mode `rm`.
+///
+/// Returns `I::IResult<()>` which is `Ok(())` on success, or an error if the conversion fails.
+pub fn run_f64_from_x64_unsigned<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rm: InstrRoundingMode,
+    rd: FRegister,
+) -> I::IResult<()> {
+    let xval = icb.xregister_read(rs1);
+
+    let res = match rm {
+        InstrRoundingMode::Static(rm) => {
+            let fval = icb.f64_from_x64_unsigned_static(xval, rm);
+            icb.ok(fval)
+        }
+        InstrRoundingMode::Dynamic => icb.f64_from_x64_unsigned_dynamic(xval),
+    };
+    I::and_then(res, |fval| {
+        icb.fregister_write(rd, fval);
+        icb.ok(())
+    })
+}
+
 #[cfg(test)]
 mod test {
+    use XRegister::*;
+    use proptest::arbitrary::any;
+    use proptest::prelude::Just;
+    use proptest::prelude::Strategy;
+    use proptest::prop_assert_eq;
+    use proptest::prop_oneof;
+    use proptest::proptest;
+    use rustc_apfloat::ieee::Double;
+
     use super::*;
+    use crate::backend_test;
+    use crate::machine_state::MachineCoreState;
+    use crate::machine_state::memory::M4K;
+    use crate::state::NewState;
 
     #[test]
     fn test_status_to_bits() {
@@ -622,4 +703,42 @@ mod test {
         assert_eq!(1 << Fflag::DZ as usize, status_to_bits(Status::DIV_BY_ZERO));
         assert_eq!(1 << Fflag::NV as usize, status_to_bits(Status::INVALID_OP));
     }
+
+    /// Generates a `proptest` [`Strategy`] for [`InstrRoundingMode`] values.
+    /// In this case, "simplest" to "most complex" values have been chosen arbitrarily.
+    fn rounding_mode_strategy() -> impl Strategy<Value = InstrRoundingMode> {
+        prop_oneof![
+            Just(InstrRoundingMode::Static(RoundingMode::RNE)),
+            Just(InstrRoundingMode::Static(RoundingMode::RTZ)),
+            Just(InstrRoundingMode::Static(RoundingMode::RDN)),
+            Just(InstrRoundingMode::Static(RoundingMode::RUP)),
+            Just(InstrRoundingMode::Static(RoundingMode::RMM)),
+            Just(InstrRoundingMode::Dynamic),
+        ]
+    }
+
+    backend_test!(test_f64_from_x64_unsigned, F, {
+        proptest!(|(
+            r1_val in any::<u64>(),
+            rm in rounding_mode_strategy(),
+        )| {
+            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+
+            let fval = match rm {
+                InstrRoundingMode::Static(rm) => Double::from_u128_r(r1_val as u128, rm.into()),
+                InstrRoundingMode::Dynamic => {
+                    let rm: RoundingMode = state.hart.csregisters.read::<CSRRepr>(CSRegister::frm).try_into()?;
+                    Double::from_u128_r(r1_val as u128, rm.into())
+                }
+            };
+            let expected: FValue = fval.value.into();
+
+            state.hart.xregisters.write(XRegister::x1, r1_val);
+            run_f64_from_x64_unsigned(&mut state, x1, rm, FRegister::f2)
+                .expect("run_f64_from_x64_unsigned failed");
+
+            let res = state.hart.fregisters.read(FRegister::f2);
+            prop_assert_eq!(res, expected);
+        })
+    });
 }
