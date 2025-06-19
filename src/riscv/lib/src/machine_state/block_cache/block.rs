@@ -25,9 +25,7 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::ManagerWrite;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
@@ -51,33 +49,25 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase> {
     /// Ready a block for construction.
     ///
     /// Previous instructions are removed.
-    fn start_block(&mut self)
-    where
-        M: ManagerWrite;
+    fn start_block(&mut self);
 
     /// Push an instruction to the block.
     fn push_instr(&mut self, instr: Instruction)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
-    fn num_instr(&self) -> usize
-    where
-        M: ManagerRead;
+    fn num_instr(&self) -> usize;
 
     /// Invalidate a block, meaning it should no longer be run.
-    fn invalidate(&mut self)
-    where
-        M: ManagerWrite;
+    fn invalidate(&mut self);
 
     /// Reset a block to the default state, it should no longer be run.
     fn reset(&mut self)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Returns the underlying slice of instructions stored in the block.
-    fn instr(&self) -> &[CachedInstruction<MC, M>]
-    where
-        M: ManagerRead;
+    fn instr(&self) -> &[CachedInstruction<MC, M>];
 
     /// Run a block against the machine state.
     ///

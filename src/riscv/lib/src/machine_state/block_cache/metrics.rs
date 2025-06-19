@@ -293,16 +293,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
 
     fn reset(&mut self)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.block.reset();
         self.block_hash = BlockHash::Dirty;
     }
 
-    fn instr(&self) -> &[CachedInstruction<MC, M>]
-    where
-        M: ManagerRead,
-    {
+    fn instr(&self) -> &[CachedInstruction<MC, M>] {
         self.block.instr()
     }
 
@@ -334,25 +331,19 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         }
     }
 
-    fn num_instr(&self) -> usize
-    where
-        M: ManagerRead,
-    {
+    fn num_instr(&self) -> usize {
         self.block.num_instr()
     }
 
     fn push_instr(&mut self, instr: crate::machine_state::instruction::Instruction)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.block.push_instr(instr);
         self.block_hash = BlockHash::Dirty;
     }
 
-    fn invalidate(&mut self)
-    where
-        M: crate::state_backend::ManagerWrite,
-    {
+    fn invalidate(&mut self) {
         self.block.invalidate();
         self.block_hash = BlockHash::Dirty;
     }
@@ -367,10 +358,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         }
     }
 
-    fn start_block(&mut self)
-    where
-        M: crate::state_backend::ManagerWrite,
-    {
+    fn start_block(&mut self) {
         self.block.start_block();
         self.block_hash = BlockHash::Dirty;
     }

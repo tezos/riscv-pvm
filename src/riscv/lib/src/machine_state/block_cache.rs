@@ -92,8 +92,6 @@ use super::memory::MemoryConfig;
 use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::instruction::Args;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
@@ -187,34 +185,29 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     /// Clone the entire block cache.
     fn clone(&self) -> Self
     where
-        B: Clone,
-        M: ManagerClone;
+        B: Clone;
 
     /// Invalidate the entire block cache. This is more efficient than [`BlockCache::reset`],
-    fn invalidate(&mut self)
-    where
-        M: ManagerReadWrite;
+    fn invalidate(&mut self);
 
     /// Reset the entire block cache to its initial state. This is less efficient than
     /// [`BlockCache::invalidate`].
     fn reset(&mut self)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Retrieve a block at the given address with the purpose of executing it.
-    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>
-    where
-        M: ManagerRead;
+    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>;
 
     /// Insert a compressed instruction into the block cache at the given address.
     fn push_instr_compressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Insert an uncompressed instruction into the block cache at the given  address.
     fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 }
 
 /// Configuration for a block cache

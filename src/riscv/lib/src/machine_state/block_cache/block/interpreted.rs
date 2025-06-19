@@ -17,9 +17,7 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::ManagerWrite;
 use crate::traps::EnvironException;
 
 /// Interpreted blocks are built automatically, and require no additional context.
@@ -64,31 +62,22 @@ pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
 impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
     type BlockBuilder = InterpretedBlockBuilder;
 
-    fn num_instr(&self) -> usize
-    where
-        M: ManagerRead,
-    {
+    fn num_instr(&self) -> usize {
         self.len_instr as usize
     }
 
     #[inline]
-    fn instr(&self) -> &[CachedInstruction<MC, M>]
-    where
-        M: ManagerRead,
-    {
+    fn instr(&self) -> &[CachedInstruction<MC, M>] {
         &self.instr[..self.num_instr()]
     }
 
-    fn invalidate(&mut self)
-    where
-        M: ManagerWrite,
-    {
+    fn invalidate(&mut self) {
         self.len_instr = 0;
     }
 
     fn push_instr(&mut self, instr: Instruction)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.instr[self.len_instr as usize] = CachedInstruction::new(instr);
         self.len_instr = self.len_instr.saturating_add(1);
@@ -96,7 +85,7 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
 
     fn reset(&mut self)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.len_instr = 0;
         self.instr
@@ -104,10 +93,7 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
             .for_each(|entry| *entry = CachedInstruction::new(Instruction::DEFAULT));
     }
 
-    fn start_block(&mut self)
-    where
-        M: ManagerWrite,
-    {
+    fn start_block(&mut self) {
         self.len_instr = 0;
     }
 

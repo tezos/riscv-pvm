@@ -18,10 +18,7 @@ use crate::machine_state::memory::OFFSET_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::ManagerWrite;
 
 /// Block cache entry.
 ///
@@ -48,34 +45,28 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> Cached<MC, B, M> {
         }
     }
 
-    fn invalidate(&mut self)
-    where
-        M: ManagerWrite,
-    {
+    fn invalidate(&mut self) {
         self.address = !0;
         self.block.invalidate();
     }
 
     fn reset(&mut self)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.address = !0;
         self.fence_counter = FenceCounter::INITIAL;
         self.block.reset();
     }
 
-    fn start_block(&mut self, block_addr: Address, fence_counter: FenceCounter)
-    where
-        M: ManagerWrite,
-    {
+    fn start_block(&mut self, block_addr: Address, fence_counter: FenceCounter) {
         self.address = block_addr;
         self.block.start_block();
         self.fence_counter = fence_counter;
     }
 }
 
-impl<MC: MemoryConfig, B: Clone, M: ManagerClone> Clone for Cached<MC, B, M> {
+impl<MC: MemoryConfig, B: Clone, M: ManagerBase> Clone for Cached<MC, B, M> {
     fn clone(&self) -> Self {
         Self {
             address: self.address,
@@ -117,10 +108,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         &mut entries[BlockCacheConfig::<SIZE>::cache_index(addr)]
     }
 
-    fn reset_to(&mut self, addr: Address)
-    where
-        M: ManagerWrite,
-    {
+    fn reset_to(&mut self, addr: Address) {
         self.current_block_addr = addr;
         self.next_instr_addr = 0;
     }
@@ -136,7 +124,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// not exceed the maximum number of instructions).
     fn cache_inner<const WIDTH: u64>(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         let mut block_addr = self.current_block_addr;
         let fence_counter = self.fence_counter;
@@ -192,10 +180,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// *TEST ONLY* - retrieve the underlying instructions contained in the entry at the given
     /// address.
     #[cfg(test)]
-    pub(crate) fn get_block_instr(&mut self, addr: Address) -> Vec<Instruction>
-    where
-        M: ManagerRead,
-    {
+    pub(crate) fn get_block_instr(&mut self, addr: Address) -> Vec<Instruction> {
         let entry = Self::entry_mut(&mut self.entries, addr);
         let instr = entry.block.instr();
         instr.iter().map(|cell| cell.instr).collect()
@@ -220,7 +205,6 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     fn clone(&self) -> Self
     where
         B: Clone,
-        M: ManagerClone,
     {
         Self {
             current_block_addr: self.current_block_addr,
@@ -240,27 +224,21 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
     fn reset(&mut self)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         self.fence_counter = FenceCounter::INITIAL;
         self.reset_to(!0);
         self.entries.iter_mut().for_each(Cached::reset);
     }
 
-    fn invalidate(&mut self)
-    where
-        M: ManagerReadWrite,
-    {
+    fn invalidate(&mut self) {
         let counter = self.fence_counter;
         self.fence_counter = counter.next();
         self.reset_to(!0);
         Self::entry_mut(&mut self.entries, counter.0 as Address).invalidate();
     }
 
-    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>
-    where
-        M: ManagerRead,
-    {
+    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>> {
         let entry = Self::entry_mut(&mut self.entries, addr);
 
         if entry.address == addr
@@ -275,7 +253,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
     fn push_instr_compressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         debug_assert_eq!(
             instr.width(),
@@ -296,7 +274,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
     fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite,
+        M::ManagerRoot: ManagerReadWrite,
     {
         debug_assert_eq!(
             instr.width(),
