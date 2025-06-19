@@ -50,6 +50,9 @@ pub enum FromProofError {
     #[error("Error during tag deserialisation: {0}")]
     TagDeserialise(#[from] DeserialiseError),
 
+    #[error("Proof tree is absent")]
+    AbsentProof,
+
     #[error("Deserialising as a stream and not all bytes are parsed")]
     RemainingBytes,
 
