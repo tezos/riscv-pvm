@@ -187,6 +187,10 @@ pub struct MachineState<
 > {
     pub core: MachineCoreState<MC, M>,
     pub block_cache: BCC::State<MC, B, M>,
+
+    /// The block builder is used to optimise block execution. For example, just-in-time compiling
+    /// them to the host architecture.
+    pub block_builder: B::BlockBuilder,
 }
 
 impl<
@@ -200,6 +204,7 @@ impl<
         Self {
             core: self.core.clone(),
             block_cache: self.block_cache.clone(),
+            block_builder: B::BlockBuilder::default(),
         }
     }
 }
@@ -273,7 +278,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         Self {
             core: MachineCoreState::new(manager),
-            block_cache: BlockCache::new(manager, block_builder),
+            block_cache: BlockCache::new(manager),
+            block_builder,
         }
     }
 
@@ -289,7 +295,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         Self {
             core: MachineCoreState::bind(space.0),
-            block_cache: BCC::bind(space.1, block_builder),
+            block_cache: BCC::bind(space.1),
+            block_builder,
         }
     }
 
@@ -460,7 +467,12 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             let res = match self.block_cache.get_block(instr_pc) {
                 Some(mut block) => {
                     let steps_remaining = max_steps - result.steps;
-                    let block_result = block.run_block(&mut self.core, instr_pc, steps_remaining);
+                    let block_result = block.run_block(
+                        &mut self.core,
+                        &mut self.block_builder,
+                        instr_pc,
+                        steps_remaining,
+                    );
 
                     // Short-circuit if the block failed
                     if result.merge_and_return(block_result) {

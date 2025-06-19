@@ -173,10 +173,6 @@ impl<'a, MC: MemoryConfig, M: ManagerReadWrite> From<&'a Instruction> for ICall<
 /// any left-over partially-run block is cleared up with [`BlockCache::complete_current_block`].
 pub struct BlockCall<'a, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     entry: &'a mut state::Cached<MC, B, M>,
-    /// # Safety
-    ///
-    /// The same block builder must always be passed through to `run_block`.
-    builder: &'a mut B::BlockBuilder,
     partial: &'a mut state::PartialBlock<M>,
 }
 
@@ -186,12 +182,13 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
     pub fn run_block(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
+        block_builder: &mut B::BlockBuilder,
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<EnvironException> {
         if self.entry.block.num_instr() <= max_steps {
             // Safety: the same block builder is passed through every time.
-            unsafe { self.entry.block.run_block(core, instr_pc, self.builder) }
+            unsafe { self.entry.block.run_block(core, instr_pc, block_builder) }
         } else {
             self.partial.run_block_partial(core, max_steps, self.entry)
         }
@@ -215,7 +212,7 @@ fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
 /// Block cache implementation
 pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     /// Instantiate a new block cache instance.
-    fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
+    fn new(manager: &mut M) -> Self
     where
         M: ManagerAlloc;
 
@@ -270,10 +267,7 @@ pub trait BlockCacheConfig {
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>: BlockCache<MC, B, M>;
 
     /// Bind the allocated regions to produce a memory instance.
-    fn bind<MC, B, M>(
-        space: AllocatedOf<Self::Layout, M>,
-        block_builder: B::BlockBuilder,
-    ) -> Self::State<MC, B, M>
+    fn bind<MC, B, M>(space: AllocatedOf<Self::Layout, M>) -> Self::State<MC, B, M>
     where
         MC: MemoryConfig,
         B: Block<MC, M>,

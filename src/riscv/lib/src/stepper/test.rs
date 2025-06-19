@@ -106,7 +106,7 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
     ///
     /// [`BlockBuilder`]: Block::BlockBuilder
     pub fn recover_builder(self) -> B::BlockBuilder {
-        self.machine_state.block_cache.block_builder
+        self.machine_state.block_builder
     }
 
     /// Initialise an interpreter with a given `program`. Returns both the interpreter and the fully
