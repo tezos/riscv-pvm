@@ -23,6 +23,7 @@ use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::StaticCopy;
+use crate::jit::builder::arithmetic::Alignment;
 
 /// Manager that allows state binders to own the state storage
 #[derive(Clone, Copy, Debug)]
@@ -99,7 +100,12 @@ impl ManagerRead for Owned {
         {
             assert!(address + mem::size_of::<E>() <= LEN);
 
-            let mut result = unsafe { region.as_ptr().add(address).cast::<E>().read_unaligned() };
+            let mut result = if E::KNOWN_ALIGNMENT == Alignment::Eight {
+                unsafe { region.as_ptr().add(address).cast::<E>().read() }
+            } else {
+                unsafe { region.as_ptr().add(address).cast::<E>().read_unaligned() }
+            };
+
             result.from_stored_in_place();
 
             result
@@ -176,11 +182,15 @@ impl ManagerWrite for Owned {
         value.to_stored_in_place();
 
         unsafe {
-            region
-                .as_mut_ptr()
-                .add(address)
-                .cast::<E>()
-                .write_unaligned(value);
+            if E::KNOWN_ALIGNMENT == Alignment::Eight {
+                region.as_mut_ptr().add(address).cast::<E>().write(value);
+            } else {
+                region
+                    .as_mut_ptr()
+                    .add(address)
+                    .cast::<E>()
+                    .write_unaligned(value);
+            }
         }
     }
 
