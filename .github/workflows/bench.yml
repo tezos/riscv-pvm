@@ -50,6 +50,8 @@ jobs:
           echo "Benchmark results for revision ${{ github.sha }}:" >> pr-comment.md
           echo >> pr-comment.md
           cat $GITHUB_STEP_SUMMARY >> pr-comment.md
+          echo >> pr-comment.md
+          echo "Compare the results above with [those for the default branch](https://github.com/tezos/riscv-pvm/actions/workflows/bench.yml?query=branch%3Amain)." >> pr-comment.md
 
       - name: Comment results on PR
         if: github.event_name == 'pull_request'

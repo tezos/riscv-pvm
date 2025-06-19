@@ -28,19 +28,6 @@
 make -C src/riscv all
 ```
 
-# Benchmarking
-
-<!--
-    Measure the impact on performance of this MR on your machine and the benchmark machine.
-    Fill in the table below. If there is no runtime performance impact, replace the table with a
-    sentence stating so. 
--->
-
-|  | `main` | This MR | Improvement |
-|--|----------|---------|-------------|
-| $MyMachine | X.XXX TPS | X.XXX TPS | XX.XX% |
-| Benchmark Machine | Y.YYY TPS | Y.YYY TPS | YY.YY% |
-
 # Regressions
 
 <!--
@@ -55,7 +42,6 @@ make -C src/riscv all
 - [ ] Document new public functions, methods and types.
 - [ ] Make sure the documentation for updated functions, methods, and types is correct.
 - [ ] Add tests for bugs that have been fixed.
-- [ ] Benchmark performance and [populate the section above](#benchmarking) if needed.
 - [ ] [Explain changes](#regressions) to regression test captures when applicable.
 - [ ] Write commit messages to reflect the changes they're about.
 - [ ] Self-review your changes to ensure they are high-quality.
