@@ -31,6 +31,7 @@ use super::ManagerRead;
 use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
+use crate::state_backend::AlignedElem;
 
 pub mod merkle;
 pub mod proof;
@@ -172,8 +173,18 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
     ) {
         assert!(address + mem::size_of_val(values) <= LEN);
 
-        for (offset, value) in values.iter().enumerate() {
-            Self::dyn_region_write(region, address + offset * mem::size_of::<E>(), *value)
+        if address % align_of::<u64>() == 0 {
+            for (offset, value) in values.iter().enumerate() {
+                Self::dyn_region_write::<AlignedElem<E>, LEN>(
+                    region,
+                    address + offset * mem::size_of::<AlignedElem<E>>(),
+                    AlignedElem::<E>(*value),
+                )
+            }
+        } else {
+            for (offset, value) in values.iter().enumerate() {
+                Self::dyn_region_write(region, address + offset * mem::size_of::<E>(), *value)
+            }
         }
     }
 

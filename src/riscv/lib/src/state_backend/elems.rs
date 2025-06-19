@@ -4,6 +4,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::jit::builder::arithmetic::Alignment;
 use crate::machine_state::memory::PAGE_SIZE;
 
 /// Types that have a non-zero size
@@ -42,6 +43,8 @@ impl<T: Copy + 'static> StaticCopy for T {}
 
 /// Elements that may be stored using a Backend - i.e. implementors of [super::ManagerBase]
 pub trait Elem: StaticCopy {
+    const KNOWN_ALIGNMENT: Alignment = Alignment::One;
+
     /// Copy from `source` and convert to stored representation.
     fn store(&mut self, source: &Self);
 
@@ -60,9 +63,40 @@ pub trait Elem: StaticCopy {
     fn from_stored(source: &Self) -> Self;
 }
 
+/// `Elem`s which are known to have 8-byte alignment
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct AlignedElem<E: Elem>(pub E);
+
+impl<E: Elem> Elem for AlignedElem<E> {
+    const KNOWN_ALIGNMENT: Alignment = Alignment::Eight;
+
+    #[inline(always)]
+    fn store(&mut self, source: &Self) {
+        self.0.store(&source.0)
+    }
+
+    #[inline(always)]
+    fn to_stored_in_place(&mut self) {
+        self.0.to_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored_in_place(&mut self) {
+        self.0.from_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored(source: &Self) -> Self {
+        AlignedElem(E::from_stored(&source.0))
+    }
+}
+
 macro_rules! impl_elem_prim {
     ( $x:ty ) => {
         impl Elem for $x {
+            const KNOWN_ALIGNMENT: Alignment = Alignment::One;
+
             #[inline(always)]
             fn store(&mut self, source: &Self) {
                 *self = source.to_le();
