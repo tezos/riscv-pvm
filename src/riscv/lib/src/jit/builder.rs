@@ -236,7 +236,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         // both IR blocks need access to the dynamic values at this point in time.
         // These are modified by the jump to the end block below, and possibly by the
         // `on_branching` function.
-        let snapshot = self.dynamic;
+        let snapshot = self.dynamic.clone();
 
         self.builder.switch_to_block(on_branch);
 
@@ -303,15 +303,24 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     }
 
     fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        JSA::ir_xreg_read(
+        // check the xregister cache first, to avoid unnecessary reads.
+        if let Some(value) = self.dynamic.get_cached_xreg_val(reg) {
+            return X64(value);
+        }
+        let val = JSA::ir_xreg_read(
             &mut self.jsa_call,
             &mut self.builder,
             self.core_ptr_val,
             reg,
-        )
+        );
+
+        self.dynamic.cache_xreg_val(reg, val.0);
+        val
     }
 
     fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
+        self.dynamic.cache_xreg_val(reg, value.0);
+
         JSA::ir_xreg_write(
             &mut self.jsa_call,
             &mut self.builder,
@@ -401,7 +410,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
 
         // both IR blocks need access to the dynamic values at this point in time.
         // These can be modified by the `true_branch` and `false_branch` functions.
-        let snapshot = self.dynamic;
+        let snapshot = self.dynamic.clone();
         self.builder.switch_to_block(true_block);
 
         let res_val = Phi::to_ir_vals(true_branch(self));
@@ -431,6 +440,11 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
 
         // The post-block is the common exit point for both branches.
         self.builder.switch_to_block(post_block);
+
+        // Either parent block can modify registers or perform different number of steps.
+        // Hence we must invalidate the register cache for the subsequent block.
+        self.dynamic.clear_xreg_cache();
+
         let params = self.builder.block_params(post_block);
 
         Phi::from_ir_vals(params.to_vec().as_slice(), self)

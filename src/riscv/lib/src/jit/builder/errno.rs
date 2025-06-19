@@ -88,7 +88,7 @@ where
             .ins()
             .brif(errno_code, on_error, &[], on_ok, &[]);
 
-        let snapshot = builder.dynamic;
+        let snapshot = builder.dynamic.clone();
 
         builder.builder.switch_to_block(on_error);
         // Handle the exception in the 'error occurred' block
@@ -144,7 +144,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Errno<(), MC, JSA> for AtomicAccessG
         // both IR blocks need access to the dynamic values at this point in time.
         // These are modified by the jump to the end block below, and possibly by the
         // `on_branching` function.
-        let snapshot = builder.dynamic;
+        let snapshot = builder.dynamic.clone();
 
         builder.builder.switch_to_block(error_branch);
 
