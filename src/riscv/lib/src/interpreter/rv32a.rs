@@ -7,10 +7,6 @@
 //!
 //! Chapter 8 - Unprivileged spec
 
-use std::ops::BitAnd;
-use std::ops::BitOr;
-use std::ops::BitXor;
-
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
 use crate::machine_state::registers::XRegister;
@@ -22,57 +18,6 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    /// `AMOXOR.W` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the result of
-    /// XORing it to val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoxorw(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_w(rs1, rs2, rd, i32::bitxor)
-    }
-
-    /// `AMOAND.W` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the result of
-    /// ANDing it to val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoandw(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_w(rs1, rs2, rd, i32::bitand)
-    }
-
-    /// `AMOOR.W` R-type instruction
-    ///
-    /// Loads in rd the value from the address in rs1 and stores the result of
-    /// ORing it to val(rs2) back to the address in rs1.
-    /// The `aq` and `rl` bits specify additional memory constraints in
-    /// multi-hart environments so they are currently ignored.
-    pub fn run_amoorw(
-        &mut self,
-        rs1: XRegister,
-        rs2: XRegister,
-        rd: XRegister,
-        _rl: bool,
-        _aq: bool,
-    ) -> Result<(), Exception> {
-        self.run_amo_w(rs1, rs2, rd, i32::bitor)
-    }
-
     /// `AMOMIN.W` R-type instruction
     ///
     /// Loads in rd the value from the address in rs1 and stores the minimum
@@ -150,9 +95,6 @@ where
 
 #[cfg(test)]
 pub(super) mod test {
-    use std::ops::BitAnd;
-    use std::ops::BitOr;
-    use std::ops::BitXor;
 
     use proptest::prelude::*;
 
@@ -198,27 +140,6 @@ pub(super) mod test {
     }
 
     pub(crate) use test_amo;
-
-    test_amo!(
-        run_amoxorw,
-        |r1_val, r2_val| (r1_val as i32).bitxor(r2_val as i32),
-        4,
-        i32
-    );
-
-    test_amo!(
-        run_amoandw,
-        |r1_val, r2_val| (r1_val as i32).bitand(r2_val as i32),
-        4,
-        i32
-    );
-
-    test_amo!(
-        run_amoorw,
-        |r1_val, r2_val| (r1_val as i32).bitor(r2_val as i32),
-        4,
-        i32
-    );
 
     test_amo!(
         run_amominw,

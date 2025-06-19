@@ -299,6 +299,57 @@ pub fn run_x32_atomic_add<I: ICB>(
     run_x32_atomic(icb, rs1, rs2, rd, |x, y, icb| x.add(y, icb))
 }
 
+/// Loads in `rd` the sign-extended value from the address in `rs1`(32-bit) and
+/// stores the result of applying bitwise xor between `val(rs1)`(32-bit) and
+/// `val(rs2)`(32-bit) back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_x32_atomic_xor<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x32_atomic(icb, rs1, rs2, rd, |x, y, icb| x.xor(y, icb))
+}
+
+/// Loads in `rd` the sign-extended value from the address in `rs1`(32-bit) and
+/// stores the result of applying bitwise and between `val(rs1)`(32-bit) and
+/// `val(rs2)`(32-bit) back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_x32_atomic_and<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x32_atomic(icb, rs1, rs2, rd, |x, y, icb| x.and(y, icb))
+}
+
+/// Loads in `rd` the sign-extended value from the address in `rs1`(32-bit) and
+/// stores the result of applying bitwise or between `val(rs1)`(32-bit) and
+/// `val(rs2)`(32-bit) back to the address in `rs1`.
+///
+/// The `aq` and `rl` bits specify additional memory constraints
+/// in multi-hart environments so they are currently ignored.
+pub fn run_x32_atomic_or<I: ICB>(
+    icb: &mut I,
+    rs1: XRegister,
+    rs2: XRegister,
+    rd: XRegister,
+    _aq: bool,
+    _rl: bool,
+) -> I::IResult<()> {
+    run_x32_atomic(icb, rs1, rs2, rd, |x, y, icb| x.or(y, icb))
+}
+
 /// Loads a word or a double from the address in `rs1`, places the
 /// sign-extended value in `rd`, and registers a reservation set for
 /// that address.
@@ -765,6 +816,30 @@ pub(crate) mod test {
         test_run_x32_atomic_add,
         super::run_x32_atomic_add,
         i32::wrapping_add,
+        4,
+        i32
+    );
+
+    test_atomic!(
+        test_run_x32_atomic_xor,
+        super::run_x32_atomic_xor,
+        |r1_val, r2_val| r1_val ^ r2_val,
+        4,
+        i32
+    );
+
+    test_atomic!(
+        test_run_x32_atomic_and,
+        super::run_x32_atomic_and,
+        |r1_val, r2_val| r1_val & r2_val,
+        4,
+        i32
+    );
+
+    test_atomic!(
+        test_run_x32_atomic_or,
+        super::run_x32_atomic_or,
+        |r1_val, r2_val| r1_val | r2_val,
         4,
         i32
     );
