@@ -93,10 +93,10 @@ impl DynamicValues {
 
         let new_pc = builder.ins().iadd_imm(self.pc_val.0, self.pc_offset);
 
-        self.pc_val = X64(new_pc);
+        self.pc_val = X64(new_pc, self.pc_val.1);
         self.pc_offset = 0;
 
-        X64(new_pc)
+        X64(new_pc, self.pc_val.1 + self.pc_offset.into())
     }
 
     /// Complete a step, updating the program counter in the process.

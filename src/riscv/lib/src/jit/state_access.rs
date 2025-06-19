@@ -48,6 +48,7 @@ use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::StoreLoadInt;
+use crate::jit::builder::arithmetic::Alignment;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
@@ -330,7 +331,7 @@ pub trait JitStateAccess: ManagerReadWrite {
         });
         let reg = builder.ins().iconst(I8, reg as i64);
         let call = builder.ins().call(*xreg_read, &[core_ptr, reg]);
-        X64(builder.inst_results(call)[0])
+        X64(builder.inst_results(call)[0], Default::default())
     }
 
     /// Emit the required IR to write the value to the given xregister.
@@ -401,7 +402,7 @@ impl JitStateAccess for Owned {
             .ins()
             .load(ir::types::I64, MemFlags::trusted(), core_ptr, offset as i32);
 
-        X64(val)
+        X64(val, Default::default())
     }
 
     fn ir_xreg_write<MC: MemoryConfig>(
@@ -569,7 +570,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         ExceptionHandledOutcome {
             handled,
-            new_pc: X64(new_pc),
+            new_pc: X64(new_pc, Alignment::Two),
         }
     }
 
@@ -766,7 +767,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
                 builder.ins().uextend(ir::types::I64, xval)
             };
 
-            X64(xval)
+            X64(xval, phys_address.1)
         })
     }
 
@@ -803,7 +804,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         });
 
         let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
-        X64(builder.inst_results(call)[0])
+        X64(builder.inst_results(call)[0], Alignment::Eight)
     }
 }
 

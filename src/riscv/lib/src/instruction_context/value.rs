@@ -133,7 +133,7 @@ impl PhiValue for XValue {
         params: &[ir::Value],
         _: &mut jit::builder::Builder<'_, MC, JSA>,
     ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
-        jit::builder::X64(params[0])
+        jit::builder::X64(params[0], Default::default())
     }
 
     const IR_TYPES: &'static [ir::Type] = &[I64];
