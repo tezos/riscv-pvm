@@ -453,10 +453,31 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
     memory_load_u64: Option<FuncRef>,
     reservation_set_write: Option<FuncRef>,
     reservation_set_read: Option<FuncRef>,
+
+    /// Reusable stack slot for the exception pointer
+    exception_ptr_slot: Option<stack::Slot<Exception>>,
+
+    /// Reusable stack slot for the PC value
+    pc_slot: Option<stack::Slot<stack::Address>>,
+
     _pd: PhantomData<(MC, M)>,
 }
 
 impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
+    /// Get the stack slot for the exception pointer.
+    fn exception_ptr_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<Exception> {
+        self.exception_ptr_slot
+            .get_or_insert_with(|| stack::Slot::<Exception>::new(self.ptr_type, builder))
+            .clone()
+    }
+
+    /// Get the stack slot for the PC value.
+    fn pc_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<stack::Address> {
+        self.pc_slot
+            .get_or_insert_with(|| stack::Slot::<stack::Address>::new(self.ptr_type, builder))
+            .clone()
+    }
+
     /// Wrapper to simplify calling JSA methods from within the function under construction.
     pub(super) fn func_calls(
         module: &'a mut JITModule,
@@ -490,6 +511,8 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             memory_load_u64: None,
             reservation_set_write: None,
             reservation_set_read: None,
+            exception_ptr_slot: None,
+            pc_slot: None,
             _pd: PhantomData,
         }
     }
@@ -523,15 +546,14 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         result_ptr: Value,
         current_pc: X64,
     ) -> ExceptionHandledOutcome {
+        let pc_slot = self.pc_slot(builder);
+        pc_slot.store(builder, current_pc.0);
+        let pc_ptr = pc_slot.ptr(builder);
+
         let handle_exception = self.handle_exception.get_or_insert_with(|| {
             self.module
                 .declare_func_in_func(self.imports.handle_exception, builder.func)
         });
-
-        let pc_slot = stack::Slot::<stack::Address>::new(self.ptr_type, builder);
-        pc_slot.store(builder, current_pc.0);
-
-        let pc_ptr = pc_slot.ptr(builder);
 
         let call = builder.ins().call(*handle_exception, &[
             core_ptr,
@@ -558,7 +580,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
     ) -> Value {
-        let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
+        let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
         let raise_illegal = self
@@ -583,7 +605,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         builder: &mut FunctionBuilder<'_>,
         address: Value,
     ) -> Value {
-        let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
+        let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
         let raise_store_amo_access_fault = self
@@ -607,7 +629,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
     /// This returns an initialised pointer to the appropriate environment
     /// call exception for the current machine mode.
     pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder<'_>, core_ptr: Value) -> Value {
-        let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
+        let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
         let ecall_from_mode = self.ecall_from_mode.get_or_insert_with(|| {
@@ -632,6 +654,9 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         phys_address: X64,
         value: X64,
     ) -> impl Errno<(), MC, M> + 'static {
+        let exception_slot = self.exception_ptr_slot(builder);
+        let exception_ptr = exception_slot.ptr(builder);
+
         let memory_store = match V::WIDTH {
             LoadStoreWidth::Byte => self.memory_store_u8.get_or_insert_with(|| {
                 self.module
@@ -650,9 +675,6 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
                     .declare_func_in_func(self.imports.memory_store_u64, builder.func)
             }),
         };
-
-        let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
-        let exception_ptr = exception_slot.ptr(builder);
 
         let value = match V::WIDTH {
             LoadStoreWidth::Byte | LoadStoreWidth::Half | LoadStoreWidth::Word => {
@@ -682,7 +704,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         core_ptr: Value,
         phys_address: X64,
     ) -> impl Errno<X64, MC, M> + 'static {
-        let exception_slot = stack::Slot::<Exception>::new(self.ptr_type, builder);
+        let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
         let xval_ptr = stack::Slot::<V>::new(self.ptr_type, builder).ptr(builder);

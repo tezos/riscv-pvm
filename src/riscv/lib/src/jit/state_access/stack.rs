@@ -141,7 +141,7 @@ impl Stackable for Address {
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.
-pub(super) struct Slot<T: StackAddressable> {
+pub(super) struct Slot<T> {
     slot: StackSlot,
     ptr_type: Type,
     _pd: PhantomData<T>,
@@ -179,5 +179,15 @@ impl<T: Stackable> Slot<T> {
     /// (from uninitialised memory) will be returned.
     pub(super) unsafe fn load(&self, builder: &mut FunctionBuilder<'_>) -> Value {
         builder.ins().stack_load(T::IR_TYPE, self.slot, 0)
+    }
+}
+
+impl<T> Clone for Slot<T> {
+    fn clone(&self) -> Self {
+        Self {
+            slot: self.slot,
+            ptr_type: self.ptr_type,
+            _pd: PhantomData,
+        }
     }
 }
