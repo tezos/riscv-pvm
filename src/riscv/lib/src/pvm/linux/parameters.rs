@@ -92,6 +92,142 @@ impl TryFrom<u64> for ProcessId {
     }
 }
 
+/// Hard limit on CPU time (s)
+pub(crate) const RLIMIT_CPU: u64 = u64::MAX;
+
+/// Hard limit for maximum file size (we don't support writing to a filesystem)
+pub(crate) const RLIMIT_FSIZE: u64 = 0;
+
+/// Hard limit for core dumps (we don't support core dumps)
+pub(crate) const RLIMIT_CORE: u64 = 0;
+
+/// Hard limit on processes (we only support one)
+pub(crate) const RLIMIT_NPROC: u64 = 1;
+
+/// Hard limit on the number of file descriptors that a system call can work with
+///
+/// We also use this constant to implictly limit how much memory can be associated with a system
+/// call. For example, `ppoll` takes a pointer to an array of `struct pollfd`. If we don't limit
+/// the length of that array, then we might read an arbitrary amount of memory. This impacts the
+/// proof size dramatically as everything read would also be in the proof.
+pub const RLIMIT_NOFILE: u64 = 512;
+
+/// Hard limit on the number of flock locks plus fcntl locks. Unused by us (and we only support one hart and no filesystem)
+pub(crate) const RLIMIT_LOCKS: u64 = 0;
+
+/// Hard limit on the number of signals for a user ID. Signals are not currently implemented.
+pub(crate) const RLIMIT_SIGPENDING: u64 = 0;
+
+/// Hard limit on the number of bytes that may be allocated for message queues. Message queues are not currently implemented.
+pub(crate) const RLIMIT_MSGQUEUE: u64 = 0;
+
+/// Hard limit on the niceness of a process. This is inverted and the actual niceness is 20 - the
+/// rlimit. We only support one hart
+pub(crate) const RLIMIT_NICE: u64 = 20;
+
+/// Hard limit on the real time priority of a process. We only support one hart.
+pub(crate) const RLIMIT_RTPRIO: u64 = 0;
+
+/// Hard limit on CPU time without making a blocking system call. We only support one hart.
+pub(crate) const RLIMIT_RTTIME: u64 = u64::MAX;
+
+#[derive(Debug)]
+pub enum Rlimit {
+    // Hard limit on CPU time (s)
+    Cpu,
+    // Hard limit for maximum file size (we don't support writing to a filesystem)
+    Fsize,
+    // Hard limit on the size of the data segment
+    Data,
+    // Hard limit on the size of the process stack
+    Stack,
+    // Hard limit for core dumps (we don't support core dumps)
+    Core,
+    // Hard limit on resident set size. Not used.
+    Rss,
+    // Hard limit on processes (we only support one)
+    Nproc,
+    // Hard limit on the number of file descriptors that a system call can work with
+    Nofile,
+    // Hard limit on the memory that may be locked into RAM (B)
+    Memlock,
+    // Hard limit on the size of a process's virtual memory (B)
+    As,
+    // Hard limit on the number of flock locks plus fcntl locks
+    Locks,
+    // Hard limit on the number of signals for a user ID
+    Sigpending,
+    // Hard limit on the number of bytes that may be allocated for message queues
+    Msgqueue,
+    // Hard limit on the niceness of a process
+    Nice,
+    // Hard limit on the real time priority of a process
+    Rtprio,
+    // Hard limit on CPU time without making a blocking system call. We only support one hart.
+    Rttime,
+}
+
+// Resource limits for system calls
+impl TryFrom<u64> for Rlimit {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value = value.try_into()?;
+
+        let limit = match value {
+            // Hard limit on CPU time (s)
+            0 => Rlimit::Cpu,
+
+            // Hard limit for maximum file size (we don't support writing to a filesystem)
+            1 => Rlimit::Fsize,
+
+            // Hard limit on the size of the data segment
+            2 => Rlimit::Data,
+
+            // Hard limit on the size of the process stack
+            3 => Rlimit::Stack,
+
+            // Hard limit for core dumps (we don't support core dumps)
+            4 => Rlimit::Core,
+
+            // Hard limit on resident set size. Not used.
+            5 => Rlimit::Rss,
+
+            // Hard limit on processes (we only support one)
+            6 => Rlimit::Nproc,
+
+            // Hard limit on the number of file descriptors that a system call can work with
+            7 => Rlimit::Nofile,
+
+            // Hard limit on the memory that may be locked into RAM (B)
+            8 => Rlimit::Memlock,
+
+            // Hard limit on the size of a process's virtual memory (B)
+            9 => Rlimit::As,
+
+            // Hard limit on the number of flock locks plus fcntl locks
+            10 => Rlimit::Locks,
+
+            // Hard limit on the number of signals for a user ID
+            11 => Rlimit::Sigpending,
+
+            // Hard limit on the number of bytes that may be allocated for message queues
+            12 => Rlimit::Msgqueue,
+
+            // Hard limit on the niceness of a process
+            13 => Rlimit::Nice,
+
+            // Hard limit on the real time priority of a process
+            14 => Rlimit::Rtprio,
+
+            // Hard limit on CPU time without making a blocking system call. We only support one hart.
+            15 => Rlimit::Rttime,
+            _ => return Err(Error::Search),
+        };
+        Ok(limit)
+    }
+}
+
 /// A valid size for the cpu set struct.
 ///
 /// see <https://man7.org/linux/man-pages/man3/CPU_SET.3.html>
@@ -232,14 +368,6 @@ impl fmt::Debug for FileDescriptorCount {
         write!(f, "{}", self.0)
     }
 }
-
-/// Hard limit on the number of file descriptors that a system call can work with
-///
-/// We also use this constant to implictly limit how much memory can be associated with a system
-/// call. For example, `ppoll` takes a pointer to an array of `struct pollfd`. If we don't limit
-/// the length of that array, then we might read an arbitrary amount of memory. This impacts the
-/// proof size dramatically as everything read would also be in the proof.
-const RLIMIT_NOFILE: u64 = 512;
 
 impl TryFrom<u64> for FileDescriptorCount {
     type Error = Error;

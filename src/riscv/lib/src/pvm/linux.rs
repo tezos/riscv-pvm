@@ -131,6 +131,9 @@ const SCHED_GETAFFINITY: u64 = 123;
 /// System call number for `gettimeofday` on RISC-V
 const GETTIMEOFDAY: u64 = 169;
 
+/// System call number for `prlimit64` on RISC-V
+const PRLIMIT64: u64 = 261;
+
 /// Key into the auxiliary vector which informs supervised processes of auxiliary information
 #[derive(Clone, Copy)]
 #[repr(u64)]
@@ -749,6 +752,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
             SCHED_GETAFFINITY => dispatch3!(sched_getaffinity, &mut machine.core),
             GETTIMEOFDAY => dispatch2!(gettimeofday, &mut machine.core),
+            PRLIMIT64 => dispatch4!(prlimit64, &mut machine.core),
             SBI_FIRMWARE_TEZOS => return on_tezos(&mut machine.core),
             _ => Err(Error::NoSystemCall),
         };
@@ -1011,6 +1015,88 @@ impl<M: ManagerBase> SupervisorState<M> {
         if tz != 0 {
             core.main_memory.write(tz, [0u8; TIMEZONE_SIZE])?;
         }
+
+        // Return 0 as an indicator of success
+        Ok(0)
+    }
+
+    /// Handle `prlimit64` system call.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man2/prlimit64.2.html>
+    fn handle_prlimit64<MC: MemoryConfig>(
+        &self,
+        core: &mut MachineCoreState<MC, M>,
+        _pid: parameters::ProcessId,
+        resource: parameters::Rlimit,
+        new_limit: VirtAddr,
+        old_limit: VirtAddr,
+    ) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        // In jstz this is only used to set the maximum size of the process stack to infinity. In
+        // other programs, it can be used to set limits for system resources. Allowing programs to
+        // set these values to extreme values would inflate proof size, so is undesirable.
+        // Futhermore, a privileged process (such as the supervisor implemented in this PVM) has
+        // the ability to set these limits to arbitrary values.
+        // So it does! By using its own predefined limits and returning EPERM.
+
+        struct MemorySize<MC>(MC);
+        impl<MC: MemoryConfig> MemorySize<MC> {
+            const SIZE: u64 = MC::TOTAL_BYTES as u64;
+
+            const UPPER_BOUND: () = assert!(MC::TOTAL_BYTES <= u64::MAX as usize);
+
+            // Hard limit on the size of the data segment
+            const RLIMIT_DATA: u64 = Self::SIZE;
+
+            // Hard limit on resident set size. Not used.
+            const RLIMIT_RSS: u64 = Self::SIZE;
+
+            // Hard limit on the memory that may be locked into RAM (B)
+            const RLIMIT_MEMLOCK: u64 = Self::SIZE;
+
+            // Hard limit on the size of a process's virtual memory (B)
+            const RLIMIT_AS: u64 = Self::SIZE;
+        }
+
+        let () = MemorySize::<MC>::UPPER_BOUND;
+
+        // If new_limit is not NULL, the system call is being used to write new limits, so ignore
+        // it and return a permissions error
+        if new_limit != 0 {
+            return Err(Error::NotPermitted);
+        }
+
+        // If the system call is used to read, return any current limit
+        let limit = match resource {
+            parameters::Rlimit::Cpu => parameters::RLIMIT_CPU,
+            parameters::Rlimit::Fsize => parameters::RLIMIT_FSIZE,
+            parameters::Rlimit::Data => MemorySize::<MC>::RLIMIT_DATA,
+
+            // Hard limit on the size of the process stack
+            parameters::Rlimit::Stack => STACK_SIZE,
+
+            parameters::Rlimit::Core => parameters::RLIMIT_CORE,
+            parameters::Rlimit::Rss => MemorySize::<MC>::RLIMIT_RSS,
+            parameters::Rlimit::Nproc => parameters::RLIMIT_NPROC,
+            parameters::Rlimit::Nofile => parameters::RLIMIT_NOFILE,
+            parameters::Rlimit::Memlock => MemorySize::<MC>::RLIMIT_MEMLOCK,
+            parameters::Rlimit::As => MemorySize::<MC>::RLIMIT_AS,
+            parameters::Rlimit::Locks => parameters::RLIMIT_LOCKS,
+            parameters::Rlimit::Sigpending => parameters::RLIMIT_SIGPENDING,
+            parameters::Rlimit::Msgqueue => parameters::RLIMIT_MSGQUEUE,
+            parameters::Rlimit::Nice => parameters::RLIMIT_NICE,
+            parameters::Rlimit::Rtprio => parameters::RLIMIT_RTPRIO,
+            parameters::Rlimit::Rttime => parameters::RLIMIT_RTTIME,
+        };
+
+        const RLIM_T_SIZE: u64 = 8;
+
+        core.main_memory
+            .write(old_limit.to_machine_address(), limit)?;
+        core.main_memory
+            .write((old_limit + RLIM_T_SIZE).to_machine_address(), limit)?;
 
         // Return 0 as an indicator of success
         Ok(0)
