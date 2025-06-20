@@ -44,6 +44,7 @@ impl<T: Copy + 'static> StaticCopy for T {}
 /// Elements that may be stored using a Backend - i.e. implementors of [super::ManagerBase]
 pub trait Elem: StaticCopy {
     const KNOWN_ALIGNMENT: Alignment = Alignment::One;
+    const KNOWN_IN_BOUNDS: bool = false;
 
     /// Copy from `source` and convert to stored representation.
     fn store(&mut self, source: &Self);
@@ -70,6 +71,7 @@ pub struct AlignedElem<E: Elem>(pub E);
 
 impl<E: Elem> Elem for AlignedElem<E> {
     const KNOWN_ALIGNMENT: Alignment = Alignment::Eight;
+    const KNOWN_IN_BOUNDS: bool = false;
 
     #[inline(always)]
     fn store(&mut self, source: &Self) {
@@ -88,7 +90,67 @@ impl<E: Elem> Elem for AlignedElem<E> {
 
     #[inline(always)]
     fn from_stored(source: &Self) -> Self {
-        AlignedElem(E::from_stored(&source.0))
+        Self(E::from_stored(&source.0))
+    }
+}
+
+/// `Elem`s which are known to have addresses in-bounds
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct BoundedElem<E: Elem>(pub E);
+
+impl<E: Elem> Elem for BoundedElem<E> {
+    const KNOWN_ALIGNMENT: Alignment = Alignment::One;
+    const KNOWN_IN_BOUNDS: bool = true;
+
+    #[inline(always)]
+    fn store(&mut self, source: &Self) {
+        self.0.store(&source.0)
+    }
+
+    #[inline(always)]
+    fn to_stored_in_place(&mut self) {
+        self.0.to_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored_in_place(&mut self) {
+        self.0.from_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored(source: &Self) -> Self {
+        Self(E::from_stored(&source.0))
+    }
+}
+
+/// `Elem`s which are known to have 8-byte alignment and addresses in-bounds
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct AlignedBoundedElem<E: Elem>(pub E);
+
+impl<E: Elem> Elem for AlignedBoundedElem<E> {
+    const KNOWN_ALIGNMENT: Alignment = Alignment::Eight;
+    const KNOWN_IN_BOUNDS: bool = true;
+
+    #[inline(always)]
+    fn store(&mut self, source: &Self) {
+        self.0.store(&source.0)
+    }
+
+    #[inline(always)]
+    fn to_stored_in_place(&mut self) {
+        self.0.to_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored_in_place(&mut self) {
+        self.0.from_stored_in_place();
+    }
+
+    #[inline(always)]
+    fn from_stored(source: &Self) -> Self {
+        Self(E::from_stored(&source.0))
     }
 }
 
@@ -96,6 +158,7 @@ macro_rules! impl_elem_prim {
     ( $x:ty ) => {
         impl Elem for $x {
             const KNOWN_ALIGNMENT: Alignment = Alignment::One;
+            const KNOWN_IN_BOUNDS: bool = false;
 
             #[inline(always)]
             fn store(&mut self, source: &Self) {

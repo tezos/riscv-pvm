@@ -376,7 +376,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     }
 }
 
-impl<E: 'static, const LEN: usize> Cells<E, LEN, Owned> {
+impl<E: Elem + 'static, const LEN: usize> Cells<E, LEN, Owned> {
     /// Obtain the byte offset from a pointer to `Cells<E, LEN, M>` to the memory of the elem at
     /// `index`.
     pub(crate) const fn region_elem_offset(index: usize) -> usize {
