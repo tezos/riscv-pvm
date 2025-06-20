@@ -10,6 +10,11 @@ use ed25519_dalek::Signature;
 use ed25519_dalek::Signer;
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::VerifyingKey;
+use libsecp256k1::Message;
+use libsecp256k1::PublicKey;
+use libsecp256k1::Signature as SecpSig;
+use sha3::Digest;
+use sha3::Keccak256;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
 use tezos_smart_rollup_constants::riscv::REVEAL_DATA_MAX_SIZE;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
@@ -19,6 +24,19 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_ED25519_VERIFY;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SbiError;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_secp256k1_verify`
+pub const SBI_TEZOS_SECP256K1_VERIFY: u64 = 0x0a;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_keccak_hash256`
+pub const SBI_TEZOS_KECCAK256_HASH: u64 = 0x0b;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Maximum size of pvm memory access by a host function in bytes
+/// To limit size of proofs in refutation games
+pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
 use super::PvmStatus;
 use super::reveals::RevealRequest;
@@ -249,6 +267,56 @@ where
     Ok(hash.len() as u64)
 }
 
+/// Verify a Secp256k1 signature.
+#[inline]
+fn handle_tezos_secp256k1_verify<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let arg_pk_addr = machine.hart.xregisters.read(a0);
+    let arg_sig_addr = machine.hart.xregisters.read(a1);
+    let arg_msg_addr = machine.hart.xregisters.read(a2);
+
+    let pk_bytes: [u8; 65] = machine.main_memory.read(arg_pk_addr)?;
+    let sig_bytes: [u8; 64] = machine.main_memory.read(arg_sig_addr)?;
+    let msg_bytes: [u8; 32] = machine.main_memory.read(arg_msg_addr)?;
+
+    let pk = PublicKey::parse(&pk_bytes).map_err(|_| SbiError::Failed)?;
+    let sig = SecpSig::parse_standard(&sig_bytes).map_err(|_| SbiError::Failed)?;
+    let msg = Message::parse(&msg_bytes);
+    let valid = libsecp256k1::verify(&msg, &sig, &pk);
+
+    Ok(valid as u64)
+}
+
+/// Compute a Keccak-256 digest.
+#[inline]
+fn handle_tezos_keccak256_hash<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let arg_out_addr = machine.hart.xregisters.read(a0);
+    let arg_msg_addr = machine.hart.xregisters.read(a1);
+    let arg_msg_len = machine.hart.xregisters.read(a2);
+
+    if (arg_msg_len as usize) > MAX_PVM_MEMORY_ACCESS {
+        return Err(SbiError::InvalidParam);
+    }
+
+    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
+    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
+    let hash: [u8; 32] = Keccak256::digest(&msg_bytes).into();
+    machine.main_memory.write(arg_out_addr, hash)?;
+
+    Ok(hash.len() as u64)
+}
+
 /// Handle a [SBI_TEZOS_REVEAL] call.
 #[inline]
 fn handle_tezos_reveal<MC, M>(
@@ -304,6 +372,8 @@ pub(super) fn handle_tezos<MC, M>(
         SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
         SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
+        SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
+        SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }
