@@ -270,10 +270,10 @@ pub enum OpCode {
     X32AtomicXor,
     X32AtomicAnd,
     X32AtomicOr,
-    Amominw,
-    Amomaxw,
-    Amominuw,
-    Amomaxuw,
+    X32AtomicMinSigned,
+    X32AtomicMaxSigned,
+    X32AtomicMinUnsigned,
+    X32AtomicMaxUnsigned,
     X64AtomicLoad,
     X64AtomicStore,
     X64AtomicSwap,
@@ -489,10 +489,10 @@ impl OpCode {
             Self::X32AtomicXor => Args::run_x32_atomic_xor,
             Self::X32AtomicAnd => Args::run_x32_atomic_and,
             Self::X32AtomicOr => Args::run_x32_atomic_or,
-            Self::Amominw => Args::run_x32_atomic_min_signed,
-            Self::Amomaxw => Args::run_x32_atomic_max_signed,
-            Self::Amominuw => Args::run_x32_atomic_min_unsigned,
-            Self::Amomaxuw => Args::run_x32_atomic_max_unsigned,
+            Self::X32AtomicMinSigned => Args::run_x32_atomic_min_signed,
+            Self::X32AtomicMaxSigned => Args::run_x32_atomic_max_signed,
+            Self::X32AtomicMinUnsigned => Args::run_x32_atomic_min_unsigned,
+            Self::X32AtomicMaxUnsigned => Args::run_x32_atomic_max_unsigned,
             Self::X64AtomicLoad => Args::run_x64_atomic_load,
             Self::X64AtomicStore => Args::run_x64_atomic_store,
             Self::X64AtomicSwap => Args::run_x64_atomic_swap,
@@ -727,10 +727,10 @@ impl OpCode {
             Self::X32AtomicXor => Some(Args::run_x32_atomic_xor),
             Self::X32AtomicAnd => Some(Args::run_x32_atomic_and),
             Self::X32AtomicOr => Some(Args::run_x32_atomic_or),
-            Self::Amominw => Some(Args::run_x32_atomic_min_signed),
-            Self::Amomaxw => Some(Args::run_x32_atomic_max_signed),
-            Self::Amominuw => Some(Args::run_x32_atomic_min_unsigned),
-            Self::Amomaxuw => Some(Args::run_x32_atomic_max_unsigned),
+            Self::X32AtomicMinSigned => Some(Args::run_x32_atomic_min_signed),
+            Self::X32AtomicMaxSigned => Some(Args::run_x32_atomic_max_signed),
+            Self::X32AtomicMinUnsigned => Some(Args::run_x32_atomic_min_unsigned),
+            Self::X32AtomicMaxUnsigned => Some(Args::run_x32_atomic_max_unsigned),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1149,24 +1149,6 @@ macro_rules! impl_branch_compare_zero {
 }
 
 macro_rules! impl_amo_type {
-    ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(
-                unsafe { self.rs1.x },
-                unsafe { self.rs2.x },
-                unsafe { self.rd.x },
-                self.rl,
-                self.aq,
-            )
-            .map(|_| Next(self.width))
-        }
-    };
-
     ($impl: path, $fn: ident) => {
         /// SAFETY: This function must only be called on an `Args` belonging
         /// to the same OpCode as the OpCode used to derive this function.
