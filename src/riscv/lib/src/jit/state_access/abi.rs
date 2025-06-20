@@ -21,6 +21,7 @@ use cranelift_module::ModuleResult;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
+use crate::machine_state::registers::XRegister;
 
 /// This struct is used to produce and declare function signatures for external function calls.
 ///
@@ -93,6 +94,10 @@ impl AbiCall<4> {
     impl_abicall!(A1, A2, A3, A4);
 }
 
+impl AbiCall<5> {
+    impl_abicall!(A1, A2, A3, A4, A5);
+}
+
 /// Holds the IR representation of a function parameter's type, which is needed for
 /// registering the function's [`Signature`] in the [`JITModule`].
 pub(super) enum CraneliftRepr {
@@ -139,6 +144,10 @@ impl ToCraneliftRepr for i64 {
 }
 
 impl ToCraneliftRepr for bool {
+    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+}
+
+impl ToCraneliftRepr for XRegister {
     const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
 }
 
