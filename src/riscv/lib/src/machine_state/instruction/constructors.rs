@@ -818,6 +818,20 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64Load`].
+    pub(crate) fn new_f64_load(rd: FRegister, rs1: XRegister, imm: i64, width: InstrWidth) -> Self {
+        Self {
+            opcode: OpCode::F64Load,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                imm,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64Store`].
     pub(crate) fn new_x64_store(
         rs1: XRegister,
@@ -827,6 +841,25 @@ impl Instruction {
     ) -> Self {
         Self {
             opcode: OpCode::X64Store,
+            args: Args {
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                imm,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64Store`].
+    pub(crate) fn new_f64_store(
+        rs1: XRegister,
+        rs2: FRegister,
+        imm: i64,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::F64Store,
             args: Args {
                 rs1: rs1.into(),
                 rs2: rs2.into(),

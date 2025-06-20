@@ -644,7 +644,15 @@ pub enum InstrCacheable {
     Fmsubd(FR3ArgsWithRounding),
     Fnmsubd(FR3ArgsWithRounding),
     Fnmaddd(FR3ArgsWithRounding),
+    /// `FLD` - Loads a double-precision floating point value into `rd` from the address
+    /// starting at `val(rs1) + imm`.
+    ///
+    /// It uses the same address format as integer-base ISA.
     Fld(FLoadArgs),
+    /// `FSD` - Stores a double-precision floating point value `val(rs2)` to the address
+    /// starting at `val(rs1) + imm`.
+    ///
+    /// It uses the same address format as integer-base ISA.
     Fsd(FStoreArgs),
     Fcvtdw(XRegToFRegArgsWithRounding),
     Fcvtdwu(XRegToFRegArgsWithRounding),
