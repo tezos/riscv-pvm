@@ -1562,6 +1562,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMinSigned`].
     pub(crate) fn new_x32_atomic_min_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1571,7 +1572,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amominw,
+            opcode: OpCode::X32AtomicMinSigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1584,6 +1585,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMinUnsigned`].
     pub(crate) fn new_x32_atomic_min_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1593,7 +1595,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amominuw,
+            opcode: OpCode::X32AtomicMinUnsigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1606,6 +1608,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMaxSigned`].
     pub(crate) fn new_x32_atomic_max_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1615,7 +1618,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amomaxw,
+            opcode: OpCode::X32AtomicMaxSigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1628,6 +1631,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMaxUnsigned`].
     pub(crate) fn new_x32_atomic_max_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1637,7 +1641,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Amomaxuw,
+            opcode: OpCode::X32AtomicMaxUnsigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
