@@ -489,10 +489,10 @@ impl OpCode {
             Self::X32AtomicXor => Args::run_x32_atomic_xor,
             Self::X32AtomicAnd => Args::run_x32_atomic_and,
             Self::X32AtomicOr => Args::run_x32_atomic_or,
-            Self::Amominw => Args::run_amominw,
-            Self::Amomaxw => Args::run_amomaxw,
-            Self::Amominuw => Args::run_amominuw,
-            Self::Amomaxuw => Args::run_amomaxuw,
+            Self::Amominw => Args::run_x32_atomic_min_signed,
+            Self::Amomaxw => Args::run_x32_atomic_max_signed,
+            Self::Amominuw => Args::run_x32_atomic_min_unsigned,
+            Self::Amomaxuw => Args::run_x32_atomic_max_unsigned,
             Self::X64AtomicLoad => Args::run_x64_atomic_load,
             Self::X64AtomicStore => Args::run_x64_atomic_store,
             Self::X64AtomicSwap => Args::run_x64_atomic_swap,
@@ -727,6 +727,10 @@ impl OpCode {
             Self::X32AtomicXor => Some(Args::run_x32_atomic_xor),
             Self::X32AtomicAnd => Some(Args::run_x32_atomic_and),
             Self::X32AtomicOr => Some(Args::run_x32_atomic_or),
+            Self::Amominw => Some(Args::run_x32_atomic_min_signed),
+            Self::Amomaxw => Some(Args::run_x32_atomic_max_signed),
+            Self::Amominuw => Some(Args::run_x32_atomic_min_unsigned),
+            Self::Amomaxuw => Some(Args::run_x32_atomic_max_unsigned),
 
             // Errors
             Self::Unknown => Some(Args::run_illegal),
@@ -1498,10 +1502,22 @@ impl Args {
     impl_amo_type!(atomics::run_x32_atomic_xor, run_x32_atomic_xor);
     impl_amo_type!(atomics::run_x32_atomic_and, run_x32_atomic_and);
     impl_amo_type!(atomics::run_x32_atomic_or, run_x32_atomic_or);
-    impl_amo_type!(run_amominw);
-    impl_amo_type!(run_amomaxw);
-    impl_amo_type!(run_amominuw);
-    impl_amo_type!(run_amomaxuw);
+    impl_amo_type!(
+        atomics::run_x32_atomic_min_signed,
+        run_x32_atomic_min_signed
+    );
+    impl_amo_type!(
+        atomics::run_x32_atomic_max_signed,
+        run_x32_atomic_max_signed
+    );
+    impl_amo_type!(
+        atomics::run_x32_atomic_min_unsigned,
+        run_x32_atomic_min_unsigned
+    );
+    impl_amo_type!(
+        atomics::run_x32_atomic_max_unsigned,
+        run_x32_atomic_max_unsigned
+    );
     impl_amo_type!(atomics::run_x64_atomic_load, run_x64_atomic_load);
     impl_amo_type!(atomics::run_x64_atomic_store, run_x64_atomic_store);
     impl_amo_type!(atomics::run_x64_atomic_swap, run_x64_atomic_swap);
@@ -1928,22 +1944,38 @@ impl From<&InstrCacheable> for Instruction {
                 args.rl,
                 InstrWidth::Uncompressed,
             ),
-            InstrCacheable::Amominw(args) => Instruction {
-                opcode: OpCode::Amominw,
-                args: args.into(),
-            },
-            InstrCacheable::Amomaxw(args) => Instruction {
-                opcode: OpCode::Amomaxw,
-                args: args.into(),
-            },
-            InstrCacheable::Amominuw(args) => Instruction {
-                opcode: OpCode::Amominuw,
-                args: args.into(),
-            },
-            InstrCacheable::Amomaxuw(args) => Instruction {
-                opcode: OpCode::Amomaxuw,
-                args: args.into(),
-            },
+            InstrCacheable::Amominw(args) => Instruction::new_x32_atomic_min_signed(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amomaxw(args) => Instruction::new_x32_atomic_max_signed(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amominuw(args) => Instruction::new_x32_atomic_min_unsigned(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
+            InstrCacheable::Amomaxuw(args) => Instruction::new_x32_atomic_max_unsigned(
+                args.rd,
+                args.rs1,
+                args.rs2,
+                args.aq,
+                args.rl,
+                InstrWidth::Uncompressed,
+            ),
             InstrCacheable::Lrd(args) => Instruction::new_x64_atomic_load(
                 args.rd,
                 args.rs1,

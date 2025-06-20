@@ -480,9 +480,27 @@ pub enum InstrCacheable {
     /// The `aq` and `rl` bits specify additional memory constraints in
     /// multi-hart environments so they are currently ignored.
     Amoorw(AmoArgs),
+    /// `AMOMIN.W` - Loads in rd the value from the address in rs1 and stores the minimum
+    /// between it and val(rs2) back to the address in rs1.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amominw(AmoArgs),
+    /// `AMOMAX.W` - Loads in rd the value from the address in rs1 and stores the maximum
+    /// between it and val(rs2) back to the address in rs1.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amomaxw(AmoArgs),
+    /// `AMOMINU.W` - Loads in rd the value from the address in rs1 and stores the minimum
+    /// between it and val(rs2) back to the address in rs1, treating both as
+    /// unsigned values.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amominuw(AmoArgs),
+    /// `AMOMAXU.W` - Loads in rd the value from the address in rs1 and stores the maximum
+    /// between it and val(rs2) back to the address in rs1, treating both as
+    /// unsigned values.
+    /// The `aq` and `rl` bits specify additional memory constraints in
+    /// multi-hart environments so they are currently ignored.
     Amomaxuw(AmoArgs),
     /// `LR.D` - Loads in `rd` a double-length value from the address in `rs1`
     ///  and registers a reservation set on that address.
