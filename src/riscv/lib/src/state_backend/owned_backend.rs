@@ -31,8 +31,12 @@ pub struct Owned;
 
 impl Owned {
     /// Get the byte offset from a pointer to `Owned::Region` to the start of the element at `index`.
-    pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
-        assert!(index < LEN, "Out of bounds access for region");
+    pub(crate) const fn region_elem_offset<E: Elem + 'static, const LEN: usize>(
+        index: usize,
+    ) -> usize {
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(index < LEN, "Out of bounds access for region");
+        }
 
         index * std::mem::size_of::<E>()
     }
@@ -98,7 +102,9 @@ impl ManagerRead for Owned {
         address: usize,
     ) -> E {
         {
-            assert!(address + mem::size_of::<E>() <= LEN);
+            if !E::KNOWN_IN_BOUNDS {
+                assert!(address + mem::size_of::<E>() <= LEN);
+            }
 
             let mut result = if E::KNOWN_ALIGNMENT == Alignment::Eight {
                 unsafe { region.as_ptr().add(address).cast::<E>().read() }
@@ -117,7 +123,9 @@ impl ManagerRead for Owned {
         address: usize,
         values: &mut [E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         unsafe {
             region
@@ -177,7 +185,9 @@ impl ManagerWrite for Owned {
         address: usize,
         mut value: E,
     ) {
-        assert!(address + mem::size_of_val(&value) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(&value) <= LEN);
+        }
 
         value.to_stored_in_place();
 
@@ -199,7 +209,9 @@ impl ManagerWrite for Owned {
         address: usize,
         values: &[E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         unsafe {
             let ptr = region.as_mut_ptr().add(address).cast::<E>();

@@ -174,63 +174,114 @@ impl Sub for Alignment {
 
 impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for X64 {
     fn add(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().iadd(self.0, other.0), self.1 + other.1)
+        X64(
+            icb.builder.ins().iadd(self.0, other.0),
+            self.1 + other.1,
+            Default::default(),
+        )
     }
 
     fn sub(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().isub(self.0, other.0), self.1 - other.1)
+        X64(
+            icb.builder.ins().isub(self.0, other.0),
+            self.1 - other.1,
+            Default::default(),
+        )
     }
 
     fn and(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().band(self.0, other.0), self.1 & other.1)
+        X64(
+            icb.builder.ins().band(self.0, other.0),
+            self.1 & other.1,
+            Default::default(),
+        )
     }
 
     fn or(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().bor(self.0, other.0), self.1 | other.1)
+        X64(
+            icb.builder.ins().bor(self.0, other.0),
+            self.1 | other.1,
+            Default::default(),
+        )
     }
 
     fn xor(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().bxor(self.0, other.0), self.1 ^ other.1)
+        X64(
+            icb.builder.ins().bxor(self.0, other.0),
+            self.1 ^ other.1,
+            Default::default(),
+        )
     }
 
     fn mul(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().imul(self.0, other.0), self.1 * other.1)
+        X64(
+            icb.builder.ins().imul(self.0, other.0),
+            self.1 * other.1,
+            Default::default(),
+        )
     }
 
     fn div_unsigned(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().udiv(self.0, other.0), self.1 / other.1)
+        X64(
+            icb.builder.ins().udiv(self.0, other.0),
+            self.1 / other.1,
+            Default::default(),
+        )
     }
 
     fn div_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().sdiv(self.0, other.0), self.1 / other.1)
+        X64(
+            icb.builder.ins().sdiv(self.0, other.0),
+            self.1 / other.1,
+            Default::default(),
+        )
     }
 
     fn negate(self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().ineg(self.0), -self.1)
+        X64(icb.builder.ins().ineg(self.0), -self.1, Default::default())
     }
 
     fn shift(self, shift: Shift, amount: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         match shift {
-            Shift::Left => X64(icb.builder.ins().ishl(self.0, amount.0), self.1 << amount.0),
-            Shift::RightUnsigned => {
-                X64(icb.builder.ins().ushr(self.0, amount.0), self.1 >> amount.0)
-            }
-            Shift::RightSigned => X64(icb.builder.ins().sshr(self.0, amount.0), self.1 >> amount.0),
+            Shift::Left => X64(
+                icb.builder.ins().ishl(self.0, amount.0),
+                self.1 << amount.0,
+                Default::default(),
+            ),
+            Shift::RightUnsigned => X64(
+                icb.builder.ins().ushr(self.0, amount.0),
+                self.1 >> amount.0,
+                Default::default(),
+            ),
+            Shift::RightSigned => X64(
+                icb.builder.ins().sshr(self.0, amount.0),
+                self.1 >> amount.0,
+                Default::default(),
+            ),
         }
     }
 
     fn modulus_unsigned(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().urem(self.0, other.0), self.1 % other.1)
+        X64(
+            icb.builder.ins().urem(self.0, other.0),
+            self.1 % other.1,
+            Default::default(),
+        )
     }
 
     fn modulus_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
-        X64(icb.builder.ins().srem(self.0, other.0), self.1 % other.1)
+        X64(
+            icb.builder.ins().srem(self.0, other.0),
+            self.1 % other.1,
+            Default::default(),
+        )
     }
 
     fn min_signed(self, other: Self, icb: &mut Builder<'_, MC, JSA>) -> Self {
         X64(
             icb.builder.ins().smin(self.0, other.0),
             std::cmp::min(self.1, other.1), // Assume the worst of the two alignments
+            Default::default(),
         )
     }
 
@@ -238,6 +289,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
         X64(
             icb.builder.ins().umin(self.0, other.0),
             std::cmp::min(self.1, other.1), // Assume the worst of the two alignments
+            Default::default(),
         )
     }
 
@@ -245,6 +297,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
         X64(
             icb.builder.ins().smax(self.0, other.0),
             std::cmp::min(self.1, other.1), // Assume the worst of the two alignments
+            Default::default(),
         )
     }
 
@@ -252,6 +305,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> Arithmetic<Builder<'_, MC, JSA>> for
         X64(
             icb.builder.ins().umax(self.0, other.0),
             std::cmp::min(self.1, other.1), // Assume the worst of the two alignments
+            Default::default(),
         )
     }
 }

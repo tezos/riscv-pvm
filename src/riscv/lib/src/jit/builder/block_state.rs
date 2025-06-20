@@ -11,6 +11,7 @@ use cranelift::codegen::ir::{self};
 use cranelift::frontend::FunctionBuilder;
 
 use super::X64;
+use crate::jit::builder::Bounded;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::registers::NonZeroXRegister;
 
@@ -93,10 +94,14 @@ impl DynamicValues {
 
         let new_pc = builder.ins().iadd_imm(self.pc_val.0, self.pc_offset);
 
-        self.pc_val = X64(new_pc, self.pc_val.1);
+        self.pc_val = X64(new_pc, self.pc_val.1, Bounded::Bounded);
         self.pc_offset = 0;
 
-        X64(new_pc, self.pc_val.1 + self.pc_offset.into())
+        X64(
+            new_pc,
+            self.pc_val.1 + self.pc_offset.into(),
+            Bounded::Bounded,
+        )
     }
 
     /// Complete a step, updating the program counter in the process.
