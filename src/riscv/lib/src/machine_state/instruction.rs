@@ -1039,18 +1039,6 @@ macro_rules! impl_fload_type {
     };
 }
 macro_rules! impl_load_type {
-    ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rd.x })
-                .map(|_| Next(self.width))
-        }
-    };
-
     ($fn: ident, $value: ty) => {
         /// SAFETY: This function must only be called on an `Args` belonging
         /// to the same OpCode as the OpCode used to derive this function.
@@ -1079,18 +1067,6 @@ macro_rules! impl_cfload_sp_type {
 }
 
 macro_rules! impl_store_type {
-    ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rs2.x })
-                .map(|_| Next(self.width))
-        }
-    };
-
     ($fn: ident, $value: ty) => {
         /// SAFETY: This function must only be called on an `Args` belonging
         /// to the same OpCode as the OpCode used to derive this function.
