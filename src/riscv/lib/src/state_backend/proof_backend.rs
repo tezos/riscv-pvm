@@ -90,7 +90,9 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         address: usize,
         values: &mut [E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         for (offset, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read(region, address + offset * mem::size_of::<E>());
@@ -147,7 +149,9 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         address: usize,
         mut value: E,
     ) {
-        assert!(address + mem::size_of_val(&value) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(&value) <= LEN);
+        }
 
         value.to_stored_in_place();
 
@@ -170,7 +174,9 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         address: usize,
         values: &[E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         for (offset, value) in values.iter().enumerate() {
             Self::dyn_region_write(region, address + offset * mem::size_of::<E>(), *value)
@@ -350,7 +356,9 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
     /// Version of [`ManagerRead::dyn_region_read_all`] which does not record
     /// the access as a read.
     fn unrecorded_read_all<E: super::Elem>(&self, address: usize, values: &mut [E]) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         for (offset, value) in values.iter_mut().enumerate() {
             *value = self.unrecorded_read(address + offset * mem::size_of::<E>());

@@ -23,6 +23,7 @@ use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::StaticCopy;
+use crate::jit::builder::arithmetic::Alignment;
 
 /// Manager that allows state binders to own the state storage
 #[derive(Clone, Copy, Debug)]
@@ -30,8 +31,12 @@ pub struct Owned;
 
 impl Owned {
     /// Get the byte offset from a pointer to `Owned::Region` to the start of the element at `index`.
-    pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
-        assert!(index < LEN, "Out of bounds access for region");
+    pub(crate) const fn region_elem_offset<E: Elem + 'static, const LEN: usize>(
+        index: usize,
+    ) -> usize {
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(index < LEN, "Out of bounds access for region");
+        }
 
         index * std::mem::size_of::<E>()
     }
@@ -97,9 +102,16 @@ impl ManagerRead for Owned {
         address: usize,
     ) -> E {
         {
-            assert!(address + mem::size_of::<E>() <= LEN);
+            if !E::KNOWN_IN_BOUNDS {
+                assert!(address + mem::size_of::<E>() <= LEN);
+            }
 
-            let mut result = unsafe { region.as_ptr().add(address).cast::<E>().read_unaligned() };
+            let mut result = if E::KNOWN_ALIGNMENT == Alignment::Eight {
+                unsafe { region.as_ptr().add(address).cast::<E>().read() }
+            } else {
+                unsafe { region.as_ptr().add(address).cast::<E>().read_unaligned() }
+            };
+
             result.from_stored_in_place();
 
             result
@@ -111,14 +123,16 @@ impl ManagerRead for Owned {
         address: usize,
         values: &mut [E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         unsafe {
             region
                 .as_ptr()
                 .add(address)
                 .cast::<E>()
-                .copy_to(values.as_mut_ptr(), values.len());
+                .copy_to_nonoverlapping(values.as_mut_ptr(), values.len());
         }
 
         for elem in values.iter_mut() {
@@ -171,16 +185,22 @@ impl ManagerWrite for Owned {
         address: usize,
         mut value: E,
     ) {
-        assert!(address + mem::size_of_val(&value) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(&value) <= LEN);
+        }
 
         value.to_stored_in_place();
 
         unsafe {
-            region
-                .as_mut_ptr()
-                .add(address)
-                .cast::<E>()
-                .write_unaligned(value);
+            if E::KNOWN_ALIGNMENT == Alignment::Eight {
+                region.as_mut_ptr().add(address).cast::<E>().write(value);
+            } else {
+                region
+                    .as_mut_ptr()
+                    .add(address)
+                    .cast::<E>()
+                    .write_unaligned(value);
+            }
         }
     }
 
@@ -189,7 +209,9 @@ impl ManagerWrite for Owned {
         address: usize,
         values: &[E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
+        if !E::KNOWN_IN_BOUNDS {
+            assert!(address + mem::size_of_val(values) <= LEN);
+        }
 
         unsafe {
             let ptr = region.as_mut_ptr().add(address).cast::<E>();

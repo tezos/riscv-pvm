@@ -11,6 +11,9 @@ use super::PAGE_SIZE;
 use super::Permissions;
 use super::buddy::Buddy;
 use super::protection::PagePermissions;
+use crate::jit::builder::arithmetic::Alignment;
+use crate::state_backend::AlignedBoundedElem;
+use crate::state_backend::BoundedElem;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
@@ -42,7 +45,14 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
 {
     /// Ensure the access is within bounds.
     #[inline]
-    fn check_bounds<E>(address: Address, length: usize, error: E) -> Result<(), E> {
+    fn check_bounds<Element, E>(address: Address, length: usize, error: E) -> Result<(), E>
+    where
+        Element: Elem,
+    {
+        if Element::KNOWN_IN_BOUNDS {
+            return Ok(());
+        }
+
         if length > TOTAL_BYTES.saturating_sub(address as usize) {
             return Err(error);
         }
@@ -73,11 +83,86 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         M: ManagerWrite,
     {
         let length = mem::size_of::<E>();
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, length, BadMemoryAccess)?;
 
         self.data.write(address as usize, value);
         self.readable_pages.modify_access(address, length, true);
         self.executable_pages.modify_access(address, length, true);
+        Ok(())
+    }
+
+    #[inline]
+    fn inner_read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
+    where
+        E: Elem,
+        M: ManagerRead,
+    {
+        if !E::KNOWN_IN_BOUNDS {
+            Self::check_bounds::<E, _>(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        }
+
+        // SAFETY: The bounds check above ensures the access check below is safe
+        unsafe {
+            if !self.readable_pages.can_access_narrow::<E>(address) {
+                return Err(BadMemoryAccess);
+            }
+        }
+        Ok(self.data.read(address as usize))
+    }
+
+    fn inner_read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
+    where
+        E: Elem,
+        M: ManagerRead,
+    {
+        if !E::KNOWN_IN_BOUNDS {
+            Self::check_bounds::<E, _>(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        }
+
+        self.data.read_all(address as usize, values);
+        Ok(())
+    }
+
+    #[inline]
+    fn inner_write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
+    where
+        E: Elem,
+        M: ManagerReadWrite,
+    {
+        if !E::KNOWN_IN_BOUNDS {
+            Self::check_bounds::<E, _>(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        }
+        // SAFETY: The bounds check above ensures the access check below is safe
+        unsafe {
+            if !self.writable_pages.can_access_narrow::<E>(address) {
+                return Err(BadMemoryAccess);
+            }
+        }
+
+        self.data.write(address as usize, value);
+        Ok(())
+    }
+
+    fn inner_write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
+    where
+        E: Elem,
+        M: ManagerReadWrite,
+    {
+        if !E::KNOWN_IN_BOUNDS {
+            Self::check_bounds::<E, _>(address, mem::size_of_val(values), BadMemoryAccess)?;
+        }
+
+        // SAFETY: The bounds check above ensures the access check below is safe
+        unsafe {
+            if !self
+                .writable_pages
+                .can_access(address, mem::size_of_val(values))
+            {
+                return Err(BadMemoryAccess);
+            }
+        }
+
+        self.data.write_all(address as usize, values);
         Ok(())
     }
 }
@@ -94,16 +179,15 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, mem::size_of::<E>(), BadMemoryAccess)?;
 
-        // SAFETY: The bounds check above ensures the access check below is safe
-        unsafe {
-            if !self.readable_pages.can_access_narrow::<E>(address) {
-                return Err(BadMemoryAccess);
-            }
+        if E::KNOWN_IN_BOUNDS && E::KNOWN_ALIGNMENT == Alignment::Eight {
+            self.inner_read(address)
         }
-
-        Ok(self.data.read(address as usize))
+        // SAFETY: The bounds check above ensures the access check below is safe
+        else {
+            self.inner_read::<BoundedElem<E>>(address).map(|x| x.0)
+        }
     }
 
     #[inline]
@@ -114,7 +198,7 @@ where
     {
         let length = mem::size_of::<E>();
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -124,7 +208,11 @@ where
             }
         }
 
-        let data = self.data.read(address as usize);
+        let data = if E::KNOWN_IN_BOUNDS && E::KNOWN_ALIGNMENT == Alignment::Eight {
+            self.inner_read(address)
+        } else {
+            self.inner_read::<BoundedElem<E>>(address).map(|x| x.0)
+        }?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         let writable = unsafe { self.writable_pages.can_access_narrow::<E>(address) };
@@ -137,7 +225,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, mem::size_of_val(values), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -149,8 +237,25 @@ where
             }
         }
 
-        self.data.read_all(address as usize, values);
-        Ok(())
+        if E::KNOWN_IN_BOUNDS && E::KNOWN_ALIGNMENT == Alignment::Eight {
+            self.inner_read_all(address, values)
+        } else if address as usize % align_of::<u64>() == 0 {
+            // SAFETY: Transparent type
+            unsafe {
+                self.inner_read_all::<AlignedBoundedElem<E>>(
+                    address,
+                    std::mem::transmute::<&mut [E], &mut [AlignedBoundedElem<E>]>(values),
+                )
+            }
+        } else {
+            // SAFETY: Transparent type
+            unsafe {
+                self.inner_read_all::<BoundedElem<E>>(
+                    address,
+                    std::mem::transmute::<&mut [E], &mut [BoundedElem<E>]>(values),
+                )
+            }
+        }
     }
 
     #[inline]
@@ -159,17 +264,17 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, mem::size_of::<E>(), BadMemoryAccess)?;
 
-        // SAFETY: The bounds check above ensures the access check below is safe
-        unsafe {
-            if !self.writable_pages.can_access_narrow::<E>(address) {
-                return Err(BadMemoryAccess);
-            }
+        if E::KNOWN_IN_BOUNDS && E::KNOWN_ALIGNMENT == Alignment::Eight {
+            self.inner_write(address, value)
         }
-
-        self.data.write(address as usize, value);
-        Ok(())
+        // SAFETY: The bounds check above ensures the access check below is safe
+        else if address as usize % align_of::<u64>() == 0 {
+            self.inner_write(address, AlignedBoundedElem(value))
+        } else {
+            self.inner_write(address, BoundedElem(value))
+        }
     }
 
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
@@ -177,20 +282,29 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        Self::check_bounds::<E, _>(address, mem::size_of_val(values), BadMemoryAccess)?;
 
+        if E::KNOWN_IN_BOUNDS && E::KNOWN_ALIGNMENT == Alignment::Eight {
+            self.inner_write_all(address, values)
+        }
         // SAFETY: The bounds check above ensures the access check below is safe
-        unsafe {
-            if !self
-                .writable_pages
-                .can_access(address, mem::size_of_val(values))
-            {
-                return Err(BadMemoryAccess);
+        else if address as usize % align_of::<u64>() == 0 {
+            // SAFETY: Transparent type
+            unsafe {
+                self.inner_write_all::<AlignedBoundedElem<E>>(
+                    address,
+                    std::mem::transmute::<&[E], &[AlignedBoundedElem<E>]>(values),
+                )
+            }
+        } else {
+            // SAFETY: Transparent type
+            unsafe {
+                self.inner_write_all::<BoundedElem<E>>(
+                    address,
+                    std::mem::transmute::<&[E], &[BoundedElem<E>]>(values),
+                )
             }
         }
-
-        self.data.write_all(address as usize, values);
-        Ok(())
     }
 
     fn clone(&self) -> Self
@@ -237,7 +351,7 @@ where
     where
         M: ManagerWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        Self::check_bounds::<u64, _>(address, length, super::MemoryGovernanceError)?;
 
         self.readable_pages
             .modify_access(address, length, perms.can_read());
@@ -257,7 +371,7 @@ where
     where
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        Self::check_bounds::<u64, _>(address, length, super::MemoryGovernanceError)?;
 
         // See RV-561: Use `u64` for indices and lengths that come from the PVM
         let pages = (length as u64).div_ceil(super::PAGE_SIZE.get());
@@ -286,7 +400,7 @@ where
         match address_hint {
             // Caller wants to allocate at a specific address
             Some(address) => {
-                Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+                Self::check_bounds::<u64, _>(address, length, super::MemoryGovernanceError)?;
 
                 // Buddy memory manager works on page indices, not addresses
                 let idx = address >> super::OFFSET_BITS;
@@ -360,17 +474,17 @@ pub mod tests {
         type OwnedM4K = <M4K as MemoryConfig>::State<Owned>;
 
         // Zero-sized reads or writes are always valid
-        assert!(OwnedM0::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM0::check_bounds(1, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(4096, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 0, ()).is_ok());
+        assert!(OwnedM0::check_bounds::<u64, _>(0, 0, ()).is_ok());
+        assert!(OwnedM0::check_bounds::<u64, _>(1, 0, ()).is_ok());
+        assert!(OwnedM4K::check_bounds::<u64, _>(0, 0, ()).is_ok());
+        assert!(OwnedM4K::check_bounds::<u64, _>(4096, 0, ()).is_ok());
+        assert!(OwnedM4K::check_bounds::<u64, _>(2 * 4096, 0, ()).is_ok());
 
         // Bounds checks
-        assert!(OwnedM0::check_bounds(0, 1, ()).is_err());
-        assert!(OwnedM0::check_bounds(1, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(4096, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 1, ()).is_err());
+        assert!(OwnedM0::check_bounds::<u64, _>(0, 1, ()).is_err());
+        assert!(OwnedM0::check_bounds::<u64, _>(1, 1, ()).is_err());
+        assert!(OwnedM4K::check_bounds::<u64, _>(4096, 1, ()).is_err());
+        assert!(OwnedM4K::check_bounds::<u64, _>(2 * 4096, 1, ()).is_err());
     }
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the
