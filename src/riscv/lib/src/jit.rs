@@ -58,6 +58,7 @@ pub type JitFn<MC, M> = unsafe extern "C" fn(
     *const c_void,
     &mut MachineCoreState<MC, M>,
     u64,
+    usize,
     &mut Result<(), EnvironException>,
     // ignored
     *const c_void,
@@ -207,6 +208,7 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
         // params
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
         self.ctx.func.signature.params.push(AbiParam::new(I64));
+        self.ctx.func.signature.params.push(AbiParam::new(I64)); // usize
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
         // last param ignored
         self.ctx.func.signature.params.push(AbiParam::new(ptr));
@@ -305,8 +307,7 @@ mod tests {
     where
         M: ManagerRead,
     {
-        let instr = block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
+        block.instr().iter().map(|cell| cell.instr).collect()
     }
 
     type SetupHook<F> = dyn Fn(&mut MachineCoreState<M4K, <F as TestBackendFactory>::Manager>);
@@ -341,13 +342,13 @@ mod tests {
             // Create the states for the interpreted and jitted runs.
             let mut manager = F::manager();
             let mut interpreted = MachineCoreState::<M4K, _>::new(&mut manager);
-            interpreted.main_memory.set_all_readable_writeable();
+            interpreted.main_memory.set_all_readable_writeable::<M4K>();
 
             let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            jitted.main_memory.set_all_readable_writeable();
+            jitted.main_memory.set_all_readable_writeable::<M4K>();
 
             // Create the block of instructions.
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, _>::new();
             block.start_block();
             for instr in self.instructions.iter() {
                 block.push_instr(*instr);
@@ -372,14 +373,21 @@ mod tests {
             // Run the block in both interpreted and jitted mode.
             let interpreted_res = unsafe {
                 // SAFETY: interpreted blocks are always callable
-                block.run_block(&mut interpreted, initial_pc, interpreted_bb)
+                block.run_block(&mut interpreted, initial_pc, usize::MAX, interpreted_bb)
             };
 
             let mut jitted_res = Ok(());
             let jitted_steps = unsafe {
                 // # Safety - the block builder is alive for at least
                 //            the duration of the `run` function.
-                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
+                (fun)(
+                    null(),
+                    &mut jitted,
+                    initial_pc,
+                    usize::MAX,
+                    &mut jitted_res,
+                    null(),
+                )
             };
             let jitted_res = StepManyResult {
                 steps: jitted_steps,
@@ -1702,7 +1710,7 @@ mod tests {
             let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
 
             let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, F::Manager>::new();
 
             block.start_block();
             for instr in failure.iter() {
@@ -1735,7 +1743,14 @@ mod tests {
             let jitted_steps = unsafe {
                 // # Safety - the jit is not dropped until after we
                 //            exit the block.
-                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
+                (fun)(
+                    null(),
+                    &mut jitted,
+                    initial_pc,
+                    usize::MAX,
+                    &mut jitted_res,
+                    null(),
+                )
             };
 
             assert!(jitted_res.is_ok());
@@ -2983,7 +2998,7 @@ mod tests {
              -> Scenario<F> {
                 ScenarioBuilder::default()
                     .set_setup_hook(setup_hook!(core, F, {
-                        core.main_memory.set_all_readable_writeable();
+                        core.main_memory.set_all_readable_writeable::<M4K>();
                         core.main_memory.write(addr, expected_rd).unwrap();
                         core.hart.xregisters.write(x1, addr);
                         core.hart.xregisters.write(x3, val);

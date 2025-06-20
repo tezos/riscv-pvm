@@ -5,7 +5,6 @@
 
 mod array_utils;
 mod bits;
-mod cache_utils;
 mod default;
 mod instruction_context;
 mod interpreter;

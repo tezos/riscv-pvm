@@ -59,15 +59,10 @@
 //!
 //! ## Solution
 //!
-//! Instead, we introduce the notion of a [`state::PartialBlock`], that can
-//! remember that we were executing a _specific_ entry in the block cache
-//! - and indeed the progress made.
-//!
-//! Then, when insufficient steps are remaining to run a block in full,
+//! Instead, when insufficient steps are remaining to run a block in full,
 //! we proceed to run the block anyway, but step-by-step. Once we
-//! exhaust any remaining steps, we save progress in a partial block,
-//! and execute the remainder of it with [`BlockCache::complete_current_block`]
-//! on the next iteration.
+//! exhaust any remaining steps, execution continues from the current
+//! program counter position on the next iteration.
 //!
 //! Since we now guarantee that we always execute the _same_ set of instructions,
 //! no matter how many steps are remaining, we solve this possible divergence.
@@ -82,9 +77,8 @@
 pub mod block;
 mod config;
 pub mod metrics;
-mod state;
-
-use std::marker::PhantomData;
+pub(crate) mod ranged;
+pub(crate) mod state;
 
 use self::block::Block;
 pub use self::config::DefaultCacheConfig;
@@ -96,35 +90,15 @@ use super::instruction::Instruction;
 use super::instruction::RunInstr;
 use super::memory::Address;
 use super::memory::MemoryConfig;
+use crate::machine_state::block_cache::block::CachedInstruction;
 use crate::machine_state::instruction::Args;
-use crate::state_backend;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::EnrichedValue;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// The maximum number of instructions that may be contained in a block.
 pub const CACHE_INSTR: usize = 20;
-
-/// Bindings for deriving an [`ICall`] from an [`Instruction`] via the [`EnrichedCell`] mechanism.
-pub struct ICallPlaced<MC: MemoryConfig, M: ManagerBase> {
-    _pd0: PhantomData<MC>,
-    _pd1: PhantomData<M>,
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> EnrichedValue for ICallPlaced<MC, M> {
-    type E = Instruction;
-
-    type D = ICall<MC, M::ManagerRoot>;
-}
 
 /// A function derived from an [OpCode] that can be directly run over the [MachineCoreState].
 ///
@@ -167,13 +141,9 @@ impl<'a, MC: MemoryConfig, M: ManagerReadWrite> From<&'a Instruction> for ICall<
 /// A block that is available to be run.
 ///
 /// If there are sufficiently many steps remaining, the entire block is executed in one go.
-/// Otherwise, it will fall back to partial evaluation.
-///
-/// As a result, before starting to run blocks from the block cache, you must first ensure that
-/// any left-over partially-run block is cleared up with [`BlockCache::complete_current_block`].
+/// Otherwise, it will execute as many instructions as possible within the step limit.
 pub struct BlockCall<'a, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     entry: &'a mut state::Cached<MC, B, M>,
-    partial: &'a mut state::PartialBlock<M>,
 }
 
 impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC, M> {
@@ -186,103 +156,59 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<EnvironException> {
-        if self.entry.block.num_instr() <= max_steps {
-            // Safety: the same block builder is passed through every time.
-            unsafe { self.entry.block.run_block(core, instr_pc, block_builder) }
-        } else {
-            self.partial.run_block_partial(core, max_steps, self.entry)
+        // Safety: the same block builder is passed through every time.
+        unsafe {
+            self.entry
+                .block
+                .run_block(core, instr_pc, max_steps, block_builder)
         }
     }
 }
 
 #[inline(always)]
 fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
-    instr: &EnrichedCell<ICallPlaced<MC, M>, M>,
+    instr: &CachedInstruction<MC, M>,
     core: &mut MachineCoreState<MC, M>,
 ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-    let args = instr.read_ref_stored().args();
-    let icall = instr.read_derived();
-
     // SAFETY: This is safe, as the function we are calling is derived directly from the
     // same instruction as the `Args` we are calling with. Therefore `args` will be of the
     // required shape.
-    unsafe { icall.run(args, core) }
+    unsafe { instr.runner.run(instr.instr.args(), core) }
 }
 
 /// Block cache implementation
 pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     /// Instantiate a new block cache instance.
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
-        M: ManagerAlloc;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Clone the entire block cache.
     fn clone(&self) -> Self
     where
-        B: Clone,
-        M: ManagerClone;
+        B: Clone;
 
-    /// Invalidate the entire block cache. This is more efficient than [`BlockCache::reset`],
-    fn invalidate(&mut self)
-    where
-        M: ManagerReadWrite;
-
-    /// Reset the entire block cache to its initial state. This is less efficient than
-    /// [`BlockCache::invalidate`].
+    /// Reset the entire block cache to its initial state.
     fn reset(&mut self)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Retrieve a block at the given address with the purpose of executing it.
-    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>
-    where
-        M: ManagerRead;
+    fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>;
 
     /// Insert a compressed instruction into the block cache at the given address.
     fn push_instr_compressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 
     /// Insert an uncompressed instruction into the block cache at the given  address.
     fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
     where
-        M: ManagerReadWrite;
-
-    /// Mark the current block as complete, and reset the partial block state.
-    fn complete_current_block(
-        &mut self,
-        core: &mut MachineCoreState<MC, M>,
-        max_steps: usize,
-    ) -> StepManyResult<EnvironException>
-    where
-        M: ManagerReadWrite;
+        M::ManagerRoot: ManagerReadWrite;
 }
 
 /// Configuration for a block cache
 pub trait BlockCacheConfig {
-    /// Layout for the block cache instance's state
-    type Layout: state_backend::CommitmentLayout + state_backend::ProofLayout;
-
     /// Block cache instance
     type State<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>: BlockCache<MC, B, M>;
-
-    /// Bind the allocated regions to produce a memory instance.
-    fn bind<MC, B, M>(space: AllocatedOf<Self::Layout, M>) -> Self::State<MC, B, M>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        M::ManagerRoot: ManagerReadWrite;
-
-    /// Given a manager morphism `f : &M -> N`, return the block cache instance layout's allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    fn struct_ref<'a, MC, B, M, F>(
-        instance: &'a Self::State<MC, B, M>,
-    ) -> AllocatedOf<Self::Layout, F::Output>
-    where
-        MC: MemoryConfig,
-        B: Block<MC, M>,
-        M: ManagerBase,
-        F: FnManager<Ref<'a, M>>;
 }

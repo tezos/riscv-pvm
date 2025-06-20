@@ -5,29 +5,23 @@
 
 //! JIT-compiled blocks of instructions
 
-use super::ICallPlaced;
 use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
-use crate::machine_state::block_cache::block::BlockLayout;
+use crate::machine_state::block_cache::block::CachedInstruction;
+use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::block_cache::block::dispatch::DispatchCompiler;
 use crate::machine_state::block_cache::block::dispatch::DispatchTarget;
 use crate::machine_state::block_cache::block::interpreted;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::EnrichedCell;
-use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::traps::EnvironException;
 
 /// Blocks that are compiled to native code for execution, when possible.
@@ -57,27 +51,30 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut D,
     ) -> usize {
         if !block_builder.should_compile(&mut self.dispatch) {
-            return unsafe { self.run_block_not_compiled(core, instr_pc, result, block_builder) };
+            return unsafe {
+                self.run_block_not_compiled(core, instr_pc, max_steps, result, block_builder)
+            };
         }
 
         // trigger JIT compilation
         let instr = self
             .fallback
-            .instr
+            .instr()
             .iter()
             .take(<Self as Block<MC, M>>::num_instr(self))
-            .map(|i| i.read_stored())
+            .map(|i| i.instr)
             .collect::<Vec<_>>();
 
         let fun = block_builder.compile(&mut self.dispatch, instr);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
-        unsafe { (fun)(self, core, instr_pc, result, block_builder) }
+        unsafe { (fun)(self, core, instr_pc, max_steps, result, block_builder) }
     }
 
     /// Run a block where JIT-compilation has been attempted, but failed for any reason.
@@ -92,13 +89,18 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
         let block_result = unsafe {
             // Safety: this function is always safe to call
-            self.fallback
-                .run_block(core, instr_pc, &mut interpreted::InterpretedBlockBuilder)
+            self.fallback.run_block(
+                core,
+                instr_pc,
+                max_steps,
+                &mut interpreted::InterpretedBlockBuilder,
+            )
         };
 
         *result = match block_result.error {
@@ -107,20 +109,6 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
         };
 
         block_result.steps
-    }
-}
-
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M>
-    for Jitted<D, MC, M>
-{
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self {
-            fallback: interpreted::Interpreted::new(manager),
-            dispatch: DispatchTarget::default(),
-        }
     }
 }
 
@@ -161,22 +149,21 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         self.fallback.push_instr(instr)
     }
 
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
+    fn instr(&self) -> &[CachedInstruction<MC, M>]
     where
         M: ManagerRead,
     {
         self.fallback.instr()
     }
 
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self {
+    fn new() -> Self
+    where
+        M::ManagerRoot: ManagerReadWrite,
+    {
         Self {
-            fallback: interpreted::Interpreted::bind(allocated),
+            fallback: interpreted::Interpreted::new(),
             dispatch: DispatchTarget::default(),
         }
-    }
-
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
-        self.fallback.struct_ref::<F>()
     }
 
     /// Run a block, using the currently selected dispatch mechanism
@@ -191,18 +178,32 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
         M: ManagerReadWrite,
     {
+        // If this block is too large to run with a compiled function in one go, we must fall back
+        // to the interpreted version.
+        if self.fallback.num_instr() > max_steps {
+            unsafe {
+                return self.fallback.run_block(
+                    core,
+                    instr_pc,
+                    max_steps,
+                    &mut InterpretedBlockBuilder,
+                );
+            }
+        }
+
         let mut result = Ok(());
 
         let fun = self.dispatch.get();
 
         // SAFETY: The block builder is always the same instance, guaranteeing that any JIT-compiled
         // function is still alive.
-        let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
+        let steps = unsafe { (fun)(self, core, instr_pc, max_steps, &mut result, block_builder) };
 
         StepManyResult {
             steps,
