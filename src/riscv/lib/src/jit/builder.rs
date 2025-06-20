@@ -19,6 +19,8 @@ use cranelift::codegen::ir::condcodes::IntCC;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::MemFlags;
+use cranelift::prelude::types;
 use cranelift::prelude::types::I128;
 use errno::AtomicAccessGuard;
 
@@ -567,6 +569,24 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     ) -> Self::FValue {
         self.jsa_call
             .f64_from_x64_unsigned_static(&mut self.builder, self.core_ptr_val, xval, rm)
+    }
+
+    fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue {
+        let fval = self.builder.ins().bitcast(
+            types::F64,
+            MemFlags::new().with_endianness(ir::Endianness::Little),
+            value.0,
+        );
+        F64(fval)
+    }
+
+    fn fvalue_to_xvalue(&mut self, value: Self::FValue) -> Self::XValue {
+        let xval = self.builder.ins().bitcast(
+            types::I64,
+            MemFlags::new().with_endianness(ir::Endianness::Little),
+            value.0,
+        );
+        X64(xval)
     }
 }
 
