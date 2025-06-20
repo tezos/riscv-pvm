@@ -20,7 +20,6 @@ use self::addr::VirtAddr;
 use self::error::Error;
 use self::memory::STACK_SIZE;
 use super::Pvm;
-use super::PvmHooks;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
@@ -33,6 +32,7 @@ use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::registers;
 use crate::program::Program;
+use crate::pvm::PvmHooks;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -499,7 +499,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub fn handle_system_call<MC, BCC, B>(
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
-        hooks: &mut PvmHooks,
+        hooks: impl PvmHooks,
         on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> bool,
     ) -> bool
     where
@@ -1133,6 +1133,7 @@ mod tests {
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
+    use crate::pvm::StdoutDebugHooks;
     use crate::pvm::linux::error::Error;
     use crate::pvm::linux::parameters::NoFileDescriptor;
     use crate::pvm::linux::parameters::Zero;
@@ -1177,7 +1178,7 @@ mod tests {
 
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1240,7 +1241,7 @@ mod tests {
 
             let result = supervisor_state.handle_system_call(
                 &mut machine_state,
-                &mut PvmHooks::default(),
+                StdoutDebugHooks,
                 default_on_tezos_handler,
             );
             assert!(result);
@@ -1317,7 +1318,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1360,7 +1361,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1426,7 +1427,7 @@ mod tests {
             // Perform the system call
             let result = supervisor_state.handle_system_call(
                 &mut machine_state,
-                &mut PvmHooks::default(),
+                StdoutDebugHooks,
                 default_on_tezos_handler,
             );
 
@@ -1495,7 +1496,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
 
@@ -1567,7 +1568,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
 
@@ -1627,7 +1628,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1681,7 +1682,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1741,7 +1742,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);
@@ -1822,7 +1823,7 @@ mod tests {
         // Perform the system call
         let result = supervisor_state.handle_system_call(
             &mut machine_state,
-            &mut PvmHooks::default(),
+            StdoutDebugHooks,
             default_on_tezos_handler,
         );
         assert!(result);

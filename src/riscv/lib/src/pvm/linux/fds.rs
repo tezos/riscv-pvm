@@ -23,7 +23,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     fn write_to_fd(
         &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        hooks: &mut PvmHooks,
+        mut hooks: impl PvmHooks,
         fd: parameters::FileDescriptorWriteable,
         addr: VirtAddr,
         length: u64,
@@ -40,9 +40,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         match fd {
             FileDescriptorWriteable::StandardOutput | FileDescriptorWriteable::StandardError => {
-                for &byte in data.as_slice() {
-                    (hooks.putchar_hook)(byte);
-                }
+                hooks.write_debug_bytes(data.as_slice());
             }
         };
 
@@ -57,7 +55,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_write(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        hooks: &mut PvmHooks,
+        hooks: impl PvmHooks,
         fd: parameters::FileDescriptorWriteable,
         addr: VirtAddr,
         length: u64,
@@ -76,7 +74,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_writev(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        hooks: &mut PvmHooks,
+        hooks: impl PvmHooks,
         fd: parameters::FileDescriptorWriteable,
         iovec: VirtAddr,
         len: u64,
