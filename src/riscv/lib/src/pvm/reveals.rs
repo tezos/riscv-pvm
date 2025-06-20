@@ -23,7 +23,7 @@ pub type RevealRequestLayout = (DynArray<REVEAL_REQUEST_MAX_SIZE>, Atom<u64>);
 /// Request content of reveal
 pub struct RevealRequest<M: ManagerBase> {
     /// Reveal request payload
-    pub bytes: DynCells<REVEAL_REQUEST_MAX_SIZE, M>,
+    pub bytes: DynCells<M>,
     /// Size of reveal request payload
     pub size: Cell<u64, M>,
 }
@@ -65,7 +65,7 @@ impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
         M: ManagerAlloc,
     {
         Self {
-            bytes: DynCells::new(manager),
+            bytes: DynCells::new(manager, REVEAL_REQUEST_MAX_SIZE),
             size: Cell::new(manager),
         }
     }
