@@ -132,7 +132,7 @@ impl ManagerRead for Owned {
                 .as_ptr()
                 .add(address)
                 .cast::<E>()
-                .copy_to(values.as_mut_ptr(), values.len());
+                .copy_to_nonoverlapping(values.as_mut_ptr(), values.len());
         }
 
         for elem in values.iter_mut() {
