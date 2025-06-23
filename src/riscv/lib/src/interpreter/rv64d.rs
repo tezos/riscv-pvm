@@ -387,45 +387,6 @@ where
         )
     }
 
-    /// `FSGNJ.D` R-type instruction.
-    ///
-    /// See [Self::run_fsgnj].
-    pub fn run_fsgnj_d(
-        &mut self,
-        rs1: FRegister,
-        rs2: FRegister,
-        rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.run_fsgnj::<Double>(rs1, rs2, rd);
-        Ok(())
-    }
-
-    /// `FSGNJN.D` R-type instruction.
-    ///
-    /// See [Self::run_fsgnjn].
-    pub fn run_fsgnjn_d(
-        &mut self,
-        rs1: FRegister,
-        rs2: FRegister,
-        rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.run_fsgnjn::<Double>(rs1, rs2, rd);
-        Ok(())
-    }
-
-    /// `FSGNJX.D` R-type instruction.
-    ///
-    /// See [Self::run_fsgnjx].
-    pub fn run_fsgnjx_d(
-        &mut self,
-        rs1: FRegister,
-        rs2: FRegister,
-        rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.run_fsgnjx::<Double>(rs1, rs2, rd);
-        Ok(())
-    }
-
     /// `FMV.D.X` D-type instruction
     ///
     /// Moves the single-precision value encoded in IEEE 754-2008 standard

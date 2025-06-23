@@ -3177,4 +3177,130 @@ mod tests {
             scenario.run(&mut jit, &mut interpreted_bb);
         }
     });
+
+    backend_test!(test_f64_sign_inject, F, {
+        use Instruction as I;
+
+        use crate::machine_state::registers::FRegister;
+        use crate::machine_state::registers::f0;
+        use crate::machine_state::registers::f1;
+        use crate::machine_state::registers::f2;
+
+        let test_sign_inject =
+            |constructor: fn(FRegister, FRegister, FRegister, InstrWidth) -> I,
+             rs1_bits: u64,
+             rs2_bits: u64,
+             expected_bits: u64,
+             instruction_width: InstrWidth|
+             -> Scenario<F> {
+                ScenarioBuilder::default()
+                    .set_setup_hook(setup_hook!(core, F, {
+                        // Set up floating point registers with the test bit patterns
+                        core.hart.fregisters.write(f0, rs1_bits.into());
+                        core.hart.fregisters.write(f1, rs2_bits.into());
+                    }))
+                    .set_instructions(&[constructor(f2, f0, f1, instruction_width)])
+                    .set_assert_hook(assert_hook!(core, F, {
+                        let result_bits: u64 = core.hart.fregisters.read(f2).into();
+                        assert_eq!(
+                            result_bits, expected_bits,
+                            "Expected 0x{:x}, got 0x{:x}",
+                            expected_bits, result_bits
+                        );
+                    }))
+                    .build()
+            };
+
+        // Test fsgnj.d - copies sign bit from rs2 to rs1
+        test_sign_inject(
+            I::new_fsgnj_d,
+            0x3ff0000000000000, // rs1: +1.0
+            0xbff0000000000000, // rs2: -1.0
+            0xbff0000000000000, // expected: -1.0 (sign copied from rs2)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnj_d,
+            0xbff0000000000000, // rs1: -1.0
+            0x3ff0000000000000, // rs2: +1.0
+            0x3ff0000000000000, // expected: +1.0 (sign copied from rs2)
+            InstrWidth::Uncompressed,
+        );
+
+        // Test fsgnjn.d - copies negated sign bit from rs2 to rs1
+        test_sign_inject(
+            I::new_fsgnjn_d,
+            0x3ff0000000000000, // rs1: +1.0
+            0xbff0000000000000, // rs2: -1.0
+            0x3ff0000000000000, // expected: +1.0 (negated sign from rs2)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnjn_d,
+            0xbff0000000000000, // rs1: -1.0
+            0x3ff0000000000000, // rs2: +1.0
+            0xbff0000000000000, // expected: -1.0 (negated sign from rs2)
+            InstrWidth::Uncompressed,
+        );
+
+        // Test fsgnjx.d - XORs sign bit from rs2 with rs1
+        test_sign_inject(
+            I::new_fsgnjx_d,
+            0x3ff0000000000000, // rs1: +1.0
+            0x3ff0000000000000, // rs2: +1.0
+            0x3ff0000000000000, // expected: +1.0 (sign XOR: 0 ^ 0 = 0)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnjx_d,
+            0x3ff0000000000000, // rs1: +1.0
+            0xbff0000000000000, // rs2: -1.0
+            0xbff0000000000000, // expected: -1.0 (sign XOR: 0 ^ 1 = 1)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnjx_d,
+            0xbff0000000000000, // rs1: -1.0
+            0x3ff0000000000000, // rs2: +1.0
+            0x3ff0000000000000, // expected: +1.0 (sign XOR: 1 ^ 0 = 1)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnjx_d,
+            0xbff0000000000000, // rs1: -1.0
+            0xbff0000000000000, // rs2: -1.0
+            0xbff0000000000000, // expected: -1.0 (sign XOR: 1 ^ 1 = 0)
+            InstrWidth::Uncompressed,
+        );
+
+        // Test with special values
+        test_sign_inject(
+            I::new_fsgnj_d,
+            0x7ff8000000000000, // rs1: NaN
+            0x3ff0000000000000, // rs2: +1.0
+            0x7ff8000000000000, // expected: NaN with positive sign
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnj_d,
+            0x7ff0000000000000, // rs1: +infinity
+            0xfff0000000000000, // rs2: -infinity
+            0xfff0000000000000, // expected: -infinity (sign copied)
+            InstrWidth::Uncompressed,
+        );
+
+        test_sign_inject(
+            I::new_fsgnjn_d,
+            0x7ff0000000000000, // rs1: +infinity
+            0xfff0000000000000, // rs2: -infinity
+            0x7ff0000000000000, // expected: +infinity (negated sign)
+            InstrWidth::Uncompressed,
+        );
+    });
 }

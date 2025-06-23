@@ -6,6 +6,7 @@ use super::Args;
 use super::Instruction;
 use super::OpCode;
 use crate::default::ConstDefault;
+use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::nz;
@@ -1949,6 +1950,60 @@ impl Instruction {
                 rs2: rs2.into(),
                 aq,
                 rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_fsgnj_d(
+        rd: FRegister,
+        rs1: FRegister,
+        rs2: FRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Fsgnjd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_fsgnjn_d(
+        rd: FRegister,
+        rs1: FRegister,
+        rs2: FRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Fsgnjnd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    pub(crate) fn new_fsgnjx_d(
+        rd: FRegister,
+        rs1: FRegister,
+        rs2: FRegister,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::Fsgnjxd,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rs2: rs2.into(),
                 width,
                 ..Args::DEFAULT
             },
