@@ -34,7 +34,6 @@ use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics::ReservationSetOption;
-use crate::jit::builder::arithmetic::Alignment;
 use crate::jit::builder::block_state::PCUpdate;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
@@ -43,17 +42,9 @@ use crate::machine_state::registers::NonZeroXRegister;
 use crate::parser::instruction::InstrWidth;
 use crate::state_backend::ManagerBase;
 
-/// Known bounds of addresses which have values that aren't known at runtime
-#[derive(Copy, Clone, Debug, Default)]
-pub enum Bounded {
-    #[default]
-    Unbound,
-    Bounded,
-}
-
 /// A newtype for wrapping [`Value`], representing a 64-bit value in the JIT context.
 #[derive(Copy, Clone, Debug)]
-pub struct X64(pub Value, pub Alignment, pub Bounded);
+pub struct X64(pub Value);
 
 /// A newtype for wrapping [`Value`], representing a 32-bit value in the JIT context.
 #[derive(Copy, Clone, Debug)]
@@ -107,8 +98,6 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         let core_ptr_val = builder.block_params(entry_block)[1];
         let pc_val = X64(
             builder.block_params(entry_block)[2],
-            Alignment::Eight,
-            Bounded::Bounded,
         );
         let result_ptr_val = builder.block_params(entry_block)[3];
         // last param ignored
@@ -142,7 +131,7 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         self.jsa_call.pc_write(
             &mut self.builder,
             self.core_ptr_val,
-            X64(pc_val, Alignment::Two, Bounded::Bounded),
+            X64(pc_val),
         );
 
         self.builder.ins().return_(&[steps_val]);
@@ -287,16 +276,12 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn extend_signed(&mut self, value: Self::XValue32) -> Self::XValue {
         X64(
             self.builder.ins().sextend(I64, value.0),
-            Default::default(),
-            Default::default(),
         )
     }
 
     fn extend_unsigned(&mut self, value: Self::XValue32) -> Self::XValue {
         X64(
             self.builder.ins().uextend(I64, value.0),
-            Default::default(),
-            Default::default(),
         )
     }
 
@@ -323,13 +308,13 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         let result = self.builder.ins().imul(lhs, rhs);
         let (_low, high) = self.builder.ins().isplit(result);
 
-        X64(high, Default::default(), Default::default())
+        X64(high)
     }
 
     fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
         // check the xregister cache first, to avoid unnecessary reads.
         if let Some(value) = self.dynamic.get_cached_xreg_val(reg) {
-            return X64(value, Default::default(), Default::default());
+            return X64(value);
         }
         let val = JSA::ir_xreg_read(
             &mut self.jsa_call,
@@ -376,8 +361,6 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         X64(
             self.builder.ins().iconst(I64, imm),
-            Default::default(),
-            Default::default(),
         )
     }
 
@@ -389,8 +372,6 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
         // unsigned extension works as boolean can never be negative (only 0 or 1)
         X64(
             self.builder.ins().uextend(I64, value),
-            Default::default(),
-            Default::default(),
         )
     }
 

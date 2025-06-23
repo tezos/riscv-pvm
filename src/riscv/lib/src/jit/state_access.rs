@@ -48,8 +48,6 @@ use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::StoreLoadInt;
-use crate::jit::builder::Bounded;
-use crate::jit::builder::arithmetic::Alignment;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
@@ -120,46 +118,10 @@ register_jsa_functions!(
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
     ecall_from_mode => (ecall::<MC, JSA>, AbiCall<2>::args),
-    memory_store_u8_aligned_bounded => (memory_store::<u8, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_store_u16_aligned_bounded => (memory_store::<u16, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_store_u32_aligned_bounded => (memory_store::<u32, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_store_u64_aligned_bounded => (memory_store::<u64, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_store_u8_aligned => (memory_store::<u8, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_store_u16_aligned => (memory_store::<u16, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_store_u32_aligned => (memory_store::<u32, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_store_u64_aligned => (memory_store::<u64, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_store_u8_bounded => (memory_store::<u8, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_store_u16_bounded => (memory_store::<u16, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_store_u32_bounded => (memory_store::<u32, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_store_u64_bounded => (memory_store::<u64, MC, JSA, false, true>, AbiCall<4>::args),
     memory_store_u8 => (memory_store::<u8, MC, JSA, false, false>, AbiCall<4>::args),
     memory_store_u16 => (memory_store::<u16, MC, JSA, false, false>, AbiCall<4>::args),
     memory_store_u32 => (memory_store::<u32, MC, JSA, false, false>, AbiCall<4>::args),
     memory_store_u64 => (memory_store::<u64, MC, JSA, false, false>, AbiCall<4>::args),
-    memory_load_i8_aligned_bounded => (memory_load::<i8, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_u8_aligned_bounded => (memory_load::<u8, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_i16_aligned_bounded => (memory_load::<i16, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_u16_aligned_bounded => (memory_load::<u16, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_i32_aligned_bounded => (memory_load::<i32, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_u32_aligned_bounded => (memory_load::<u32, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_i64_aligned_bounded => (memory_load::<i64, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_u64_aligned_bounded => (memory_load::<u64, MC, JSA, true, true>, AbiCall<4>::args),
-    memory_load_i8_aligned => (memory_load::<i8, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_u8_aligned => (memory_load::<u8, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_i16_aligned => (memory_load::<i16, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_u16_aligned => (memory_load::<u16, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_i32_aligned => (memory_load::<i32, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_u32_aligned => (memory_load::<u32, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_i64_aligned => (memory_load::<i64, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_u64_aligned => (memory_load::<u64, MC, JSA, true, false>, AbiCall<4>::args),
-    memory_load_i8_bounded => (memory_load::<i8, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_u8_bounded => (memory_load::<u8, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_i16_bounded => (memory_load::<i16, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_u16_bounded => (memory_load::<u16, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_i32_bounded => (memory_load::<i32, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_u32_bounded => (memory_load::<u32, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_i64_bounded => (memory_load::<i64, MC, JSA, false, true>, AbiCall<4>::args),
-    memory_load_u64_bounded => (memory_load::<u64, MC, JSA, false, true>, AbiCall<4>::args),
     memory_load_i8 => (memory_load::<i8, MC, JSA, false, false>, AbiCall<4>::args),
     memory_load_u8 => (memory_load::<u8, MC, JSA, false, false>, AbiCall<4>::args),
     memory_load_i16 => (memory_load::<i16, MC, JSA, false, false>, AbiCall<4>::args),
@@ -463,8 +425,6 @@ pub trait JitStateAccess: ManagerReadWrite {
         let call = builder.ins().call(*xreg_read, &[core_ptr, reg]);
         X64(
             builder.inst_results(call)[0],
-            Default::default(),
-            Default::default(),
         )
     }
 
@@ -536,7 +496,7 @@ impl JitStateAccess for Owned {
             .ins()
             .load(ir::types::I64, MemFlags::trusted(), core_ptr, offset as i32);
 
-        X64(val, Default::default(), Default::default())
+        X64(val)
     }
 
     fn ir_xreg_write<MC: MemoryConfig>(
@@ -574,46 +534,10 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
     raise_illegal_instruction_exception: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
-    memory_store_u8_aligned: Option<FuncRef>,
-    memory_store_u16_aligned: Option<FuncRef>,
-    memory_store_u32_aligned: Option<FuncRef>,
-    memory_store_u64_aligned: Option<FuncRef>,
-    memory_store_u8_aligned_bounded: Option<FuncRef>,
-    memory_store_u16_aligned_bounded: Option<FuncRef>,
-    memory_store_u32_aligned_bounded: Option<FuncRef>,
-    memory_store_u64_aligned_bounded: Option<FuncRef>,
-    memory_store_u8_bounded: Option<FuncRef>,
-    memory_store_u16_bounded: Option<FuncRef>,
-    memory_store_u32_bounded: Option<FuncRef>,
-    memory_store_u64_bounded: Option<FuncRef>,
     memory_store_u8: Option<FuncRef>,
     memory_store_u16: Option<FuncRef>,
     memory_store_u32: Option<FuncRef>,
     memory_store_u64: Option<FuncRef>,
-    memory_load_i8_aligned_bounded: Option<FuncRef>,
-    memory_load_u8_aligned_bounded: Option<FuncRef>,
-    memory_load_i16_aligned_bounded: Option<FuncRef>,
-    memory_load_u16_aligned_bounded: Option<FuncRef>,
-    memory_load_i32_aligned_bounded: Option<FuncRef>,
-    memory_load_u32_aligned_bounded: Option<FuncRef>,
-    memory_load_i64_aligned_bounded: Option<FuncRef>,
-    memory_load_u64_aligned_bounded: Option<FuncRef>,
-    memory_load_i8_aligned: Option<FuncRef>,
-    memory_load_u8_aligned: Option<FuncRef>,
-    memory_load_i16_aligned: Option<FuncRef>,
-    memory_load_u16_aligned: Option<FuncRef>,
-    memory_load_i32_aligned: Option<FuncRef>,
-    memory_load_u32_aligned: Option<FuncRef>,
-    memory_load_i64_aligned: Option<FuncRef>,
-    memory_load_u64_aligned: Option<FuncRef>,
-    memory_load_i8_bounded: Option<FuncRef>,
-    memory_load_u8_bounded: Option<FuncRef>,
-    memory_load_i16_bounded: Option<FuncRef>,
-    memory_load_u16_bounded: Option<FuncRef>,
-    memory_load_i32_bounded: Option<FuncRef>,
-    memory_load_u32_bounded: Option<FuncRef>,
-    memory_load_i64_bounded: Option<FuncRef>,
-    memory_load_u64_bounded: Option<FuncRef>,
     memory_load_i8: Option<FuncRef>,
     memory_load_u8: Option<FuncRef>,
     memory_load_i16: Option<FuncRef>,
@@ -668,46 +592,10 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             raise_illegal_instruction_exception: None,
             raise_store_amo_access_fault_exception: None,
             ecall_from_mode: None,
-            memory_store_u8_aligned_bounded: None,
-            memory_store_u16_aligned_bounded: None,
-            memory_store_u32_aligned_bounded: None,
-            memory_store_u64_aligned_bounded: None,
-            memory_store_u8_bounded: None,
-            memory_store_u16_bounded: None,
-            memory_store_u32_bounded: None,
-            memory_store_u64_bounded: None,
-            memory_store_u8_aligned: None,
-            memory_store_u16_aligned: None,
-            memory_store_u32_aligned: None,
-            memory_store_u64_aligned: None,
             memory_store_u8: None,
             memory_store_u16: None,
             memory_store_u32: None,
             memory_store_u64: None,
-            memory_load_i8_aligned_bounded: None,
-            memory_load_u8_aligned_bounded: None,
-            memory_load_i16_aligned_bounded: None,
-            memory_load_u16_aligned_bounded: None,
-            memory_load_i32_aligned_bounded: None,
-            memory_load_u32_aligned_bounded: None,
-            memory_load_i64_aligned_bounded: None,
-            memory_load_u64_aligned_bounded: None,
-            memory_load_i8_bounded: None,
-            memory_load_u8_bounded: None,
-            memory_load_i16_bounded: None,
-            memory_load_u16_bounded: None,
-            memory_load_i32_bounded: None,
-            memory_load_u32_bounded: None,
-            memory_load_i64_bounded: None,
-            memory_load_u64_bounded: None,
-            memory_load_i8_aligned: None,
-            memory_load_u8_aligned: None,
-            memory_load_i16_aligned: None,
-            memory_load_u16_aligned: None,
-            memory_load_i32_aligned: None,
-            memory_load_u32_aligned: None,
-            memory_load_i64_aligned: None,
-            memory_load_u64_aligned: None,
             memory_load_i8: None,
             memory_load_u8: None,
             memory_load_i16: None,
@@ -776,7 +664,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         ExceptionHandledOutcome {
             handled,
-            new_pc: X64(new_pc, Alignment::Two, Bounded::Bounded),
+            new_pc: X64(new_pc),
         }
     }
 
@@ -864,106 +752,26 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let memory_store = match (V::WIDTH, phys_address.1, phys_address.2) {
-            (LoadStoreWidth::Byte, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_store_u8_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_store_u8_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Half, Alignment::Eight, Bounded::Bounded) => self
-                .memory_store_u16_aligned_bounded
-                .get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_store_u16_aligned_bounded,
-                        builder.func,
-                    )
-                }),
-            (LoadStoreWidth::Word, Alignment::Eight, Bounded::Bounded) => self
-                .memory_store_u32_aligned_bounded
-                .get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_store_u32_aligned_bounded,
-                        builder.func,
-                    )
-                }),
-            (LoadStoreWidth::Double, Alignment::Eight, Bounded::Bounded) => self
-                .memory_store_u64_aligned_bounded
-                .get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_store_u64_aligned_bounded,
-                        builder.func,
-                    )
-                }),
-            (LoadStoreWidth::Byte, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_store_u8_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u8_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_store_u16_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u16_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_store_u32_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u32_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_store_u64_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u64_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, _, Bounded::Bounded) => {
-                self.memory_store_u8_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u8_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, _, Bounded::Bounded) => {
-                self.memory_store_u16_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u16_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, _, Bounded::Bounded) => {
-                self.memory_store_u32_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u32_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, _, Bounded::Bounded) => {
-                self.memory_store_u64_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_store_u64_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, _, Bounded::Unbound) => {
+        let memory_store = match V::WIDTH {
+            LoadStoreWidth::Byte => {
                 self.memory_store_u8.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_store_u8, builder.func)
                 })
             }
-            (LoadStoreWidth::Half, _, Bounded::Unbound) => {
+            LoadStoreWidth::Half => {
                 self.memory_store_u16.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_store_u16, builder.func)
                 })
             }
-            (LoadStoreWidth::Word, _, Bounded::Unbound) => {
+            LoadStoreWidth::Word => {
                 self.memory_store_u32.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_store_u32, builder.func)
                 })
             }
-            (LoadStoreWidth::Double, _, Bounded::Unbound) => {
+            LoadStoreWidth::Double => {
                 self.memory_store_u64.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_store_u64, builder.func)
@@ -1004,210 +812,50 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         let xval_ptr = stack::Slot::<V>::new(self.ptr_type, builder).ptr(builder);
 
-        let memory_load = match (V::WIDTH, V::SIGNED, phys_address.1, phys_address.2) {
-            (LoadStoreWidth::Byte, true, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_i8_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_i8_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Byte, false, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_u8_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_u8_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Half, true, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_i16_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_i16_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Half, false, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_u16_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_u16_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Word, true, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_i32_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_i32_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Word, false, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_u32_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_u32_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Double, true, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_i64_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_i64_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Double, false, Alignment::Eight, Bounded::Bounded) => {
-                self.memory_load_u64_aligned_bounded.get_or_insert_with(|| {
-                    self.module.declare_func_in_func(
-                        self.imports.memory_load_u64_aligned_bounded,
-                        builder.func,
-                    )
-                })
-            }
-            (LoadStoreWidth::Byte, true, _, Bounded::Bounded) => {
-                self.memory_load_i8_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i8_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, false, _, Bounded::Bounded) => {
-                self.memory_load_u8_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u8_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, true, _, Bounded::Bounded) => {
-                self.memory_load_i16_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i16_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, false, _, Bounded::Bounded) => {
-                self.memory_load_u16_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u16_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, true, _, Bounded::Bounded) => {
-                self.memory_load_i32_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i32_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, false, _, Bounded::Bounded) => {
-                self.memory_load_u32_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u32_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, true, _, Bounded::Bounded) => {
-                self.memory_load_i64_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i64_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, false, _, Bounded::Bounded) => {
-                self.memory_load_u64_bounded.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u64_bounded, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, true, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_i8_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i8_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, false, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_u8_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u8_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, true, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_i16_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i16_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Half, false, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_u16_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u16_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, true, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_i32_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i32_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Word, false, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_u32_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u32_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, true, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_i64_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_i64_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Double, false, Alignment::Eight, Bounded::Unbound) => {
-                self.memory_load_u64_aligned.get_or_insert_with(|| {
-                    self.module
-                        .declare_func_in_func(self.imports.memory_load_u64_aligned, builder.func)
-                })
-            }
-            (LoadStoreWidth::Byte, true, _, Bounded::Unbound) => {
+        let memory_load = match (V::WIDTH, V::SIGNED) {
+            (LoadStoreWidth::Byte, true) => {
                 self.memory_load_i8.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_i8, builder.func)
                 })
             }
-            (LoadStoreWidth::Byte, false, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Byte, false) => {
                 self.memory_load_u8.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_u8, builder.func)
                 })
             }
-            (LoadStoreWidth::Half, true, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Half, true) => {
                 self.memory_load_i16.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_i16, builder.func)
                 })
             }
-            (LoadStoreWidth::Half, false, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Half, false) => {
                 self.memory_load_u16.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_u16, builder.func)
                 })
             }
-            (LoadStoreWidth::Word, true, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Word, true) => {
                 self.memory_load_i32.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_i32, builder.func)
                 })
             }
-            (LoadStoreWidth::Word, false, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Word, false) => {
                 self.memory_load_u32.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_u32, builder.func)
                 })
             }
-            (LoadStoreWidth::Double, true, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Double, true) => {
                 self.memory_load_i64.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_i64, builder.func)
                 })
             }
-            (LoadStoreWidth::Double, false, _, Bounded::Unbound) => {
+            (LoadStoreWidth::Double, false) => {
                 self.memory_load_u64.get_or_insert_with(|| {
                     self.module
                         .declare_func_in_func(self.imports.memory_load_u64, builder.func)
@@ -1237,7 +885,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
                 builder.ins().uextend(ir::types::I64, xval)
             };
 
-            X64(xval, phys_address.1, Default::default())
+            X64(xval)
         })
     }
 
@@ -1276,8 +924,6 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
         X64(
             builder.inst_results(call)[0],
-            Alignment::Eight,
-            Bounded::Bounded,
         )
     }
 }
