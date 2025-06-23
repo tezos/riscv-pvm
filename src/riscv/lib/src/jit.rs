@@ -3064,10 +3064,10 @@ mod tests {
             width: InstrWidth,
         ) -> I;
 
-        let valid_x32_atomic_unsigned = |constructor: ConstructAtomicFn,
-                                         val1: u64,
-                                         val2: u64,
-                                         fun: fn(u64, u64) -> u64|
+        let valid_x32_atomic = |constructor: ConstructAtomicFn,
+                                val1: u32,
+                                val2: u32,
+                                fun: fn(u32, u32) -> u32|
          -> Scenario<F> {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(core, F, {
@@ -3085,17 +3085,17 @@ mod tests {
                 .set_assert_hook(assert_hook!(core, F, {
                     let value = core.hart.xregisters.read(x3);
                     assert_eq!(value, val1 as i32 as u64);
-                    let expected = fun(val1, val2) as u32;
+                    let expected = fun(val1, val2);
                     let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS).unwrap();
                     assert_eq!(res, expected);
                 }))
                 .build()
         };
 
-        let invalid_x32_atomic_unsigned = |constructor: ConstructAtomicFn,
-                                           val1: u64,
-                                           val2: u64,
-                                           fun: fn(u64, u64) -> u64|
+        let invalid_x32_atomic = |constructor: ConstructAtomicFn,
+                                  val1: u32,
+                                  val2: u32,
+                                  fun: fn(u32, u32) -> u32|
          -> Scenario<F> {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(core, F, {
@@ -3117,63 +3117,57 @@ mod tests {
                 .set_assert_hook(assert_hook!(core, F, {
                     let value = core.hart.xregisters.read(x3);
                     assert_eq!(value, 0);
-                    let expected = fun(val1, val2) as u32;
+                    let expected = fun(val1, val2);
                     let res: u32 = core.main_memory.read(ADDRESS_BASE_ATOMICS + 2).unwrap();
-                    assert_eq!(res, val1 as u32, "Found {value:x}, expected {expected:x}");
+                    assert_eq!(res, val1, "Found {value:x}, expected {expected:x}");
                 }))
                 .build()
         };
 
-        let bitwise_xor = |x: u64, y: u64| x ^ y;
-        let bitwise_and = |x: u64, y: u64| x & y;
-        let bitwise_or = |x: u64, y: u64| x | y;
+        let bitwise_xor = |x: u32, y: u32| x ^ y;
+        let bitwise_and = |x: u32, y: u32| x & y;
+        let bitwise_or = |x: u32, y: u32| x | y;
+        let signed_min = |x: u32, y: u32| (x as i32).min(y as i32) as u32;
+        let signed_max = |x: u32, y: u32| (x as i32).max(y as i32) as u32;
+        let unsigned_min = |x: u32, y: u32| x.min(y);
+        let unsigned_max = |x: u32, y: u32| x.max(y);
 
         let scenarios: &[Scenario<F>] = &[
-            valid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_add, 10, 20, u64::wrapping_add),
-            valid_x32_atomic_unsigned(
+            valid_x32_atomic(I::new_x32_atomic_add, 10, 20, u32::wrapping_add),
+            invalid_x32_atomic(I::new_x32_atomic_add, 10, 20, u32::wrapping_add),
+            valid_x32_atomic(
                 I::new_x32_atomic_add,
                 0xFFFF_FFFF,
                 0xFFFF_FFFF,
-                u64::wrapping_add,
+                u32::wrapping_add,
             ),
-            invalid_x32_atomic_unsigned(
+            invalid_x32_atomic(
                 I::new_x32_atomic_add,
                 0xFFFF_FFFF,
                 0xFFFF_FFFF,
-                u64::wrapping_add,
+                u32::wrapping_add,
             ),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 0xFF00_00FF, 0x00FF_FF00, bitwise_xor),
-            invalid_x32_atomic_unsigned(
-                I::new_x32_atomic_xor,
-                0xFFFF_FFFF,
-                0xFFFF_FFFF,
-                bitwise_xor,
-            ),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_xor, 0xFF00_00FF, 0x00FF_FF00, bitwise_xor),
-            invalid_x32_atomic_unsigned(
-                I::new_x32_atomic_xor,
-                0xFFFF_FFFF,
-                0xFFFF_FFFF,
-                bitwise_xor,
-            ),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_and, 10, 20, bitwise_and),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_and, 10, 20, bitwise_and),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_and, 0xFF00_00FF, 0x00FF_FF00, bitwise_and),
-            invalid_x32_atomic_unsigned(
-                I::new_x32_atomic_and,
-                0xFFFF_FFFF,
-                0xFFFF_FFFF,
-                bitwise_and,
-            ),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_or, 10, 20, bitwise_or),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_or, 10, 20, bitwise_or),
-            valid_x32_atomic_unsigned(I::new_x32_atomic_or, 0xFF00_00FF, 0x00FF_FF00, bitwise_or),
-            invalid_x32_atomic_unsigned(I::new_x32_atomic_or, 0xFFFF_FFFF, 0xFFFF_FFFF, bitwise_or),
+            valid_x32_atomic(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            invalid_x32_atomic(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            valid_x32_atomic(I::new_x32_atomic_xor, 0xFF00_00FF, 0x00FF_FF00, bitwise_xor),
+            invalid_x32_atomic(I::new_x32_atomic_xor, 0xFFFF_FFFF, 0xFFFF_FFFF, bitwise_xor),
+            valid_x32_atomic(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            invalid_x32_atomic(I::new_x32_atomic_xor, 10, 20, bitwise_xor),
+            valid_x32_atomic(I::new_x32_atomic_xor, 0xFFFF_FFFF, 0xFFFF_FFFF, bitwise_xor),
+            valid_x32_atomic(I::new_x32_atomic_and, 10, 20, bitwise_and),
+            invalid_x32_atomic(I::new_x32_atomic_and, 10, 20, bitwise_and),
+            valid_x32_atomic(I::new_x32_atomic_and, 0xFF00_00FF, 0x00FF_FF00, bitwise_and),
+            invalid_x32_atomic(I::new_x32_atomic_and, 0xFFFF_FFFF, 0xFFFF_FFFF, bitwise_and),
+            valid_x32_atomic(I::new_x32_atomic_or, 10, 20, bitwise_or),
+            invalid_x32_atomic(I::new_x32_atomic_or, 10, 20, bitwise_or),
+            valid_x32_atomic(I::new_x32_atomic_min_unsigned, 10, 20, unsigned_min),
+            invalid_x32_atomic(I::new_x32_atomic_min_unsigned, 10, 20, unsigned_min),
+            valid_x32_atomic(I::new_x32_atomic_min_signed, 10, 20, signed_min),
+            invalid_x32_atomic(I::new_x32_atomic_min_signed, 10, 20, signed_min),
+            valid_x32_atomic(I::new_x32_atomic_max_unsigned, 10, 20, unsigned_max),
+            invalid_x32_atomic(I::new_x32_atomic_max_unsigned, 10, 20, unsigned_max),
+            valid_x32_atomic(I::new_x32_atomic_max_signed, 10, 20, signed_max),
+            invalid_x32_atomic(I::new_x32_atomic_max_signed, 10, 20, signed_max),
         ];
 
         let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
