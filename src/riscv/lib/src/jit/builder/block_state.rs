@@ -9,10 +9,15 @@ use std::collections::HashMap;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::{self};
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::EntityRef;
+use cranelift::prelude::Variable;
 
 use super::X64;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::registers::NonZeroXRegister;
+
+/// Entity ID for the variable that holds the number of steps taken in the block
+const STEPS_VAR_ID: usize = 0;
 
 /// Program Counter update, within the context of JIT-compilation.
 ///
@@ -53,8 +58,11 @@ impl From<ProgramCounterUpdate<X64>> for PCUpdate {
 /// a branching instruction--the branch is not taken.
 #[derive(Debug, Clone)]
 pub struct DynamicValues {
-    /// The number of steps taken within the current compilation context.
-    steps: usize,
+    /// Variable that holds the number of steps in the block
+    steps_var: Variable,
+
+    /// Number of steps since the last time the `steps_var` was updated.
+    steps_offset: usize,
 
     /// Value representing the last-updated value of `instr_pc`.
     ///
@@ -75,10 +83,17 @@ pub struct DynamicValues {
 
 impl DynamicValues {
     /// Create a new set of values, given an initial program counter.
-    pub fn new(pc_val: X64) -> Self {
+    pub fn new(pc_val: X64, builder: &mut FunctionBuilder<'_>) -> Self {
+        let steps_var = Variable::new(STEPS_VAR_ID);
+        builder.declare_var(steps_var, ir::types::I64);
+
+        let init_steps = builder.ins().iconst(ir::types::I64, 0);
+        builder.def_var(steps_var, init_steps);
+
         Self {
+            steps_var,
+            steps_offset: 0,
             pc_val,
-            steps: 0,
             pc_offset: 0,
             xregs: HashMap::with_capacity(16),
         }
@@ -104,26 +119,48 @@ impl DynamicValues {
     /// Returns `true` if compilation should continue with the next instructions.
     /// If `false` is returned, this indicates an unconditional exit from the instruction
     /// block and compilation can be finalised.
-    pub fn complete_step<U: Into<PCUpdate>>(&mut self, pc_update: U) -> bool {
-        self.steps += 1;
+    pub fn complete_step<U: Into<PCUpdate>>(
+        &mut self,
+        pc_update: U,
+        builder: &mut FunctionBuilder<'_>,
+    ) -> bool {
+        self.steps_offset += 1;
 
         match pc_update.into() {
             PCUpdate::Offset(offset) => {
                 self.pc_offset = self.pc_offset.wrapping_add(offset);
                 true
             }
+
             PCUpdate::Absolute(address) => {
                 self.pc_offset = 0;
                 self.pc_val = address;
+
+                self.flush_steps(builder);
+
                 false
             }
         }
     }
 
+    /// Update the variable holding the number of steps taken in the block.
+    pub fn flush_steps(&mut self, builder: &mut FunctionBuilder<'_>) {
+        if self.steps_offset == 0 {
+            return;
+        }
+
+        let steps = builder.use_var(self.steps_var);
+        let new_steps = builder.ins().iadd_imm(steps, self.steps_offset as i64);
+        builder.def_var(self.steps_var, new_steps);
+
+        self.steps_offset = 0;
+    }
+
     /// The number of steps that have been taken thus far in the compilation process,
     /// where 'step' maps to the lowering of an instruction.
-    pub fn steps(&self) -> usize {
-        self.steps
+    pub fn steps(&self, builder: &mut FunctionBuilder<'_>) -> ir::Value {
+        let steps = builder.use_var(self.steps_var);
+        builder.ins().iadd_imm(steps, self.steps_offset as i64)
     }
 
     /// Get a value for the given XRegister, if it exists.

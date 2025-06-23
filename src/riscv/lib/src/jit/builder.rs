@@ -100,12 +100,14 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
         let result_ptr_val = builder.block_params(entry_block)[3];
         // last param ignored
 
+        let dynamic = DynamicValues::new(pc_val, &mut builder);
+
         Self {
             builder,
             jsa_call,
             core_ptr_val,
             result_ptr_val,
-            dynamic: DynamicValues::new(pc_val),
+            dynamic,
             end_block: None,
         }
     }
@@ -171,13 +173,13 @@ impl<'a, MC: MemoryConfig, JSA: JitStateAccess> Builder<'a, MC, JSA> {
     /// Returns `false` if an unconditional exit from the block occurs, in which case compilation
     /// should be finalised without proceeding to the following instruction.
     pub(super) fn complete_step<U: Into<block_state::PCUpdate>>(&mut self, pc_update: U) -> bool {
-        self.dynamic.complete_step(pc_update)
+        self.dynamic.complete_step(pc_update, &mut self.builder)
     }
 
     /// Jump from the current block to the end block, exiting the function.
     fn jump_to_end(&mut self) {
         // compute steps taken so far
-        let steps_val = self.builder.ins().iconst(I64, self.dynamic.steps() as i64);
+        let steps_val = self.dynamic.steps(&mut self.builder);
 
         // get the new value of the pc to write back to the state
         let pc_val = self.dynamic.read_pc(&mut self.builder);
