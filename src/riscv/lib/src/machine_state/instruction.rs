@@ -382,9 +382,7 @@ pub enum OpCode {
     Jalr,
 
     // RV64DC compressed instructions
-    CFld,
     CFldsp,
-    CFsd,
     CFsdsp,
 
     // Internal OpCodes
@@ -595,9 +593,7 @@ impl OpCode {
             Self::Li => Args::run_li,
             Self::Mv => Args::run_mv,
             Self::Nop => Args::run_nop,
-            Self::CFld => Args::run_cfld,
             Self::CFldsp => Args::run_cfldsp,
-            Self::CFsd => Args::run_cfsd,
             Self::CFsdsp => Args::run_cfsdsp,
             Self::Unknown => Args::run_illegal,
             Self::ECall => Args::run_ecall,
@@ -1722,9 +1718,7 @@ impl Args {
     }
 
     // RV64C compressed instructions
-    impl_fload_type!(run_cfld);
     impl_cfload_sp_type!(run_cfldsp);
-    impl_fstore_type!(run_cfsd);
     impl_fcss_type!(run_cfsdsp);
 
     // Unknown
@@ -2468,18 +2462,19 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::CSubw(args) => Instruction::from_ic_csubw(args),
 
             // RV64DC compressed instructions
-            InstrCacheable::CFld(args) => Instruction {
-                opcode: OpCode::CFld,
-                args: args.to_args(InstrWidth::Compressed),
-            },
+            InstrCacheable::CFld(args) => {
+                debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
+                Instruction::new_f64_load(args.rd, args.rs1, args.imm, InstrWidth::Compressed)
+            }
             InstrCacheable::CFldsp(args) => Instruction {
                 opcode: OpCode::CFldsp,
                 args: args.into(),
             },
-            InstrCacheable::CFsd(args) => Instruction {
-                opcode: OpCode::CFsd,
-                args: args.to_args(InstrWidth::Compressed),
-            },
+            InstrCacheable::CFsd(args) => {
+                debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
+                Instruction::new_f64_store(args.rs1, args.rs2, args.imm, InstrWidth::Compressed)
+            }
+
             InstrCacheable::CFsdsp(args) => Instruction {
                 opcode: OpCode::CFsdsp,
                 args: args.into(),

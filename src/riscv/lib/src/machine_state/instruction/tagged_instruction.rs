@@ -354,12 +354,12 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | Fnmaddd => ArgsShape::FSrcFDest,
 
         Flw | F64Load | FmvWX | Fcvtsw | Fcvtswu | Fcvtsl | Fcvtslu | FmvDX | Fcvtdw | Fcvtdwu
-        | Fcvtdl | F64FromX64Unsigned | CFld | CFldsp => ArgsShape::XSrcFDest,
+        | Fcvtdl | F64FromX64Unsigned | CFldsp => ArgsShape::XSrcFDest,
 
         Feqs | Fles | Flts | Feqd | Fled | Fltd | FclassS | FmvXW | Fcvtws | Fcvtwus | Fcvtls
         | Fcvtlus | FclassD | FmvXD | Fcvtwd | Fcvtwud | Fcvtld | Fcvtlud => ArgsShape::FSrcXDest,
 
-        Fsw | F64Store | CFsd | CFsdsp => ArgsShape::XSrcFSrc,
+        Fsw | F64Store | CFsdsp => ArgsShape::XSrcFSrc,
 
         Addi
         | Andi

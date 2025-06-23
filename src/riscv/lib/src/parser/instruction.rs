@@ -813,8 +813,20 @@ pub enum InstrCacheable {
     CAddiw(CIBNZTypeArgs),
 
     // RV64DC compressed instructions
+    /// `C.FLD` - Loads a double-precision floating-point value from memory into
+    /// floating-point register `rd`. It computes an effective address by
+    /// adding the immediate to the base address in register `rs1`.
+    ///
+    /// The immediate is obtained by zero-extending and scaling by 8 the
+    /// offset encoded in the instruction (see U:C-16.3).
     CFld(FLoadArgs),
     CFldsp(CIBDTypeArgs),
+    /// `C.FSD` - Stores a double-precision floating-point value in floating-point
+    /// register `rs2` to memory. It computes an effective address by adding
+    /// the immediate to the base address in register `rs1`.
+    ///
+    /// The immediate is obtained by zero-extending and scaling by 8 the
+    /// offset encoded in the instruction (see U:C-16.3).
     CFsd(FStoreArgs),
     CFsdsp(CSSDTypeArgs),
 
