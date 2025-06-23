@@ -1,0 +1,29 @@
+name: Clean GitHub Action caches
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  cleanup:
+    name: Clean GitHub Action caches 
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: write
+
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Cleanup
+        run: |
+          # Retrieve the caches associated with the PR merge branch
+          keys=$(gh cache list --ref 'refs/pull/${{ github.event.pull_request.number }}/merge' --limit 100 --json id --jq '.[].id')
+
+          # Make sure that failing to delete one cache does not impact the attempt to delete all
+          set +e
+          for key in $keys; do
+            gh cache delete $key
+          done
