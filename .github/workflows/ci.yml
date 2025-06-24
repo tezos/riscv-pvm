@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Nix setup
-        uses: nixbuild/nix-quick-install-action@v30
+        uses: nixbuild/nix-quick-install-action@v31
         with:
           nix_conf: |
             keep-env-derivations = true
