@@ -93,8 +93,8 @@ pub struct LoweredInstruction {
     /// Location of the instruction
     program_counter: Value,
 
-    /// Block that starts the instruction
-    entry_block: Block,
+    /// Block that runs the instruction
+    run_block: Block,
 
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
@@ -106,14 +106,14 @@ impl LoweredInstruction {
         self.program_counter
     }
 
-    /// Access the entry block of the instruction.
-    pub fn entry_block(&self) -> Block {
-        self.entry_block
-    }
-
     /// Access the outcomes of the instruction.
     pub fn outcomes(&self) -> &[Outcome] {
         &self.outcomes
+    }
+
+    /// Build a jump that effectively runs the instruction.
+    pub fn build_run(&self, builder: &mut FunctionBuilder) {
+        builder.ins().jump(self.run_block, []);
     }
 }
 
@@ -240,7 +240,7 @@ impl<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> InstructionBuilder<'seq, 'jit
     ) -> LoweredInstruction {
         let mut lowered = LoweredInstruction {
             program_counter: self.instruction_pc,
-            entry_block: self.entry_block,
+            run_block: self.entry_block,
             outcomes: self.outcomes,
         };
 
