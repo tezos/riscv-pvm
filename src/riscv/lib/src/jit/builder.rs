@@ -10,6 +10,7 @@ pub(super) mod arithmetic;
 pub(super) mod block_state;
 pub(super) mod comparable;
 pub(super) mod errno;
+pub(crate) mod instruction;
 
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::BlockArg;
