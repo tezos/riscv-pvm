@@ -381,10 +381,6 @@ pub enum OpCode {
     /// Effects are to store the next instruction address in rd and jump to val(rs1).
     Jalr,
 
-    // RV64DC compressed instructions
-    CFldsp,
-    CFsdsp,
-
     // Internal OpCodes
     BranchEqualZero,
     BranchNotEqualZero,
@@ -593,8 +589,6 @@ impl OpCode {
             Self::Li => Args::run_li,
             Self::Mv => Args::run_mv,
             Self::Nop => Args::run_nop,
-            Self::CFldsp => Args::run_cfldsp,
-            Self::CFsdsp => Args::run_cfsdsp,
             Self::Unknown => Args::run_illegal,
             Self::ECall => Args::run_ecall,
         }
@@ -1059,20 +1053,6 @@ macro_rules! impl_load_type {
     };
 }
 
-macro_rules! impl_cfload_sp_type {
-    ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rd.f })
-                .map(|_| Next(self.width))
-        }
-    };
-}
-
 macro_rules! impl_store_type {
     ($fn: ident, $value: ty) => {
         /// SAFETY: This function must only be called on an `Args` belonging
@@ -1206,20 +1186,6 @@ macro_rules! impl_cr_nz_type {
             $impl(icb, unsafe { self.rd.nzx }, unsafe { self.rs2.nzx });
             let pcu = ProgramCounterUpdate::Next(self.width);
             icb.ok(pcu)
-        }
-    };
-}
-
-macro_rules! impl_fcss_type {
-    ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs2.f })
-                .map(|_| Next(self.width))
         }
     };
 }
@@ -1716,10 +1682,6 @@ impl Args {
     fn run_ecall<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         icb.ecall()
     }
-
-    // RV64C compressed instructions
-    impl_cfload_sp_type!(run_cfldsp);
-    impl_fcss_type!(run_cfsdsp);
 
     // Unknown
     fn run_illegal<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
@@ -2466,20 +2428,19 @@ impl From<&InstrCacheable> for Instruction {
                 debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
                 Instruction::new_f64_load(args.rd, args.rs1, args.imm, InstrWidth::Compressed)
             }
-            InstrCacheable::CFldsp(args) => Instruction {
-                opcode: OpCode::CFldsp,
-                args: args.into(),
-            },
+            InstrCacheable::CFldsp(args) => {
+                debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
+                Instruction::new_f64_load(args.rd_rs1, sp, args.imm, InstrWidth::Compressed)
+            }
             InstrCacheable::CFsd(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
                 Instruction::new_f64_store(args.rs1, args.rs2, args.imm, InstrWidth::Compressed)
             }
 
-            InstrCacheable::CFsdsp(args) => Instruction {
-                opcode: OpCode::CFsdsp,
-                args: args.into(),
-            },
-
+            InstrCacheable::CFsdsp(args) => {
+                debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
+                Instruction::new_f64_store(sp, args.rs2, args.imm, InstrWidth::Compressed)
+            }
             InstrCacheable::Unknown { instr: _ } => {
                 Instruction::new_unknown(InstrWidth::Uncompressed)
             }
