@@ -52,7 +52,7 @@ pub(crate) trait ICB {
     /// A 64-bit value stored in [`XRegisters`].
     ///
     /// [`XRegisters`]: crate::machine_state::registers::XRegisters
-    type XValue: Arithmetic<Self> + Comparable<Self>;
+    type XValue: Arithmetic<Self> + Comparable<Self, Result = Self::Bool>;
 
     /// A 64-bit floating-point value stored in [`FRegisters`].
     ///
@@ -91,7 +91,7 @@ pub(crate) trait ICB {
     fn bool_and(&mut self, lhs: Self::Bool, rhs: Self::Bool) -> Self::Bool;
 
     /// A 32-bit value to be used only in word-width operations.
-    type XValue32: Arithmetic<Self> + Comparable<Self>;
+    type XValue32: Arithmetic<Self> + Comparable<Self, Result = Self::Bool>;
 
     /// Convert an [`XValue`] to a [`XValue32`].
     fn narrow(&mut self, value: Self::XValue) -> Self::XValue32;

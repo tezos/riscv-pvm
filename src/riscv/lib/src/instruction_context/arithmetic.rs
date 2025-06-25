@@ -10,7 +10,7 @@ use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 
 /// Trait for arithmetic operations on **XValues** used in the [`ICB`].
-pub trait Arithmetic<I: ICB + ?Sized>: Copy {
+pub trait Arithmetic<I: ?Sized>: Copy {
     /// Perform a wrapping add of two **XValues**, returning the new value.
     ///
     /// This behaves identically for both signed & unsigned values.
@@ -51,7 +51,7 @@ pub trait Arithmetic<I: ICB + ?Sized>: Copy {
     /// Perform a shift of the **XValue** as determined by the given [`Shift`].
     fn shift(self, shift: Shift, amount: Self, icb: &mut I) -> Self;
 
-    /// Find the signed remainder of the division of **self** by **other**.
+    /// Find the unsigned remainder of the division of **self** by **other**.
     /// Panics if **other** is zero.
     fn modulus_unsigned(self, other: Self, icb: &mut I) -> Self;
 

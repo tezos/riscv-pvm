@@ -11,6 +11,7 @@ use cranelift::prelude::types::I32;
 use super::LoadStoreWidth;
 use crate::instruction_context::ICB;
 use crate::jit;
+use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::state_access::JitStateAccess;
 use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
@@ -89,14 +90,14 @@ pub(crate) trait PhiValue {
 
     /// In JIT, convert the value to an iterator of [`ir::Value`]s.
     fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+        icb_repr: Self::IcbValue<InstructionBuilder<'_, '_, MC, JSA>>,
     ) -> impl IntoIterator<Item = ir::Value>;
 
     /// Convert [`ir::Value`]s back to itself.
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+    fn from_ir_vals<'a, 'b, MC: MemoryConfig, JSA: JitStateAccess>(
         params: &[ir::Value],
-        icb: &mut jit::builder::Builder<'_, MC, JSA>,
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>>;
+        builder: &mut InstructionBuilder<'a, 'b, MC, JSA>,
+    ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC, JSA>>;
 
     /// The cranelift primitive types of the IR values representing this value in JIT.
     const IR_TYPES: &'static [ir::Type];
@@ -106,15 +107,15 @@ impl PhiValue for () {
     type IcbValue<I: ICB + ?Sized> = ();
 
     fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        _: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+        _: Self::IcbValue<InstructionBuilder<'_, '_, MC, JSA>>,
     ) -> impl IntoIterator<Item = ir::Value> {
         []
     }
 
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+    fn from_ir_vals<'a, 'b, MC: MemoryConfig, JSA: JitStateAccess>(
         _: &[ir::Value],
-        _: &mut jit::builder::Builder<'_, MC, JSA>,
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        _: &mut InstructionBuilder<'a, 'b, MC, JSA>,
+    ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC, JSA>> {
     }
 
     const IR_TYPES: &'static [ir::Type] = &[];
@@ -124,15 +125,15 @@ impl PhiValue for XValue {
     type IcbValue<I: ICB + ?Sized> = I::XValue;
 
     fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+        icb_repr: Self::IcbValue<InstructionBuilder<'_, '_, MC, JSA>>,
     ) -> impl IntoIterator<Item = ir::Value> {
         [icb_repr.0]
     }
 
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+    fn from_ir_vals<'a, 'b, MC: MemoryConfig, JSA: JitStateAccess>(
         params: &[ir::Value],
-        _: &mut jit::builder::Builder<'_, MC, JSA>,
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        _: &mut InstructionBuilder<'a, 'b, MC, JSA>,
+    ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC, JSA>> {
         jit::builder::X64(params[0])
     }
 
@@ -143,15 +144,15 @@ impl PhiValue for XValue32 {
     type IcbValue<I: ICB + ?Sized> = I::XValue32;
 
     fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        icb_repr: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+        icb_repr: Self::IcbValue<InstructionBuilder<'_, '_, MC, JSA>>,
     ) -> impl IntoIterator<Item = ir::Value> {
         [icb_repr.0 as ir::Value]
     }
 
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+    fn from_ir_vals<'a, 'b, MC: MemoryConfig, JSA: JitStateAccess>(
         params: &[ir::Value],
-        _: &mut jit::builder::Builder<'_, MC, JSA>,
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        _: &mut InstructionBuilder<'a, 'b, MC, JSA>,
+    ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC, JSA>> {
         jit::builder::X32(params[0])
     }
 
@@ -165,15 +166,15 @@ impl<E> PhiValue for Result<(), E> {
     /// for the `Ok` case. `Err` is handled within the block, whilst we are continuing
     /// building IR for the `Ok` case.
     fn to_ir_vals<MC: MemoryConfig, JSA: JitStateAccess>(
-        _: Self::IcbValue<jit::builder::Builder<'_, MC, JSA>>,
+        _: Self::IcbValue<InstructionBuilder<'_, '_, MC, JSA>>,
     ) -> impl IntoIterator<Item = ir::Value> {
         []
     }
 
-    fn from_ir_vals<'a, MC: MemoryConfig, JSA: JitStateAccess>(
+    fn from_ir_vals<'a, 'b, MC: MemoryConfig, JSA: JitStateAccess>(
         _: &[ir::Value],
-        icb: &mut jit::builder::Builder<'_, MC, JSA>,
-    ) -> Self::IcbValue<jit::builder::Builder<'a, MC, JSA>> {
+        icb: &mut InstructionBuilder<'a, 'b, MC, JSA>,
+    ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC, JSA>> {
         icb.ok(())
     }
 
