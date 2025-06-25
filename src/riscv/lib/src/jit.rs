@@ -26,6 +26,7 @@ use thiserror::Error;
 use self::state_access::JsaImports;
 use self::state_access::register_jsa_symbols;
 use crate::jit::builder::sequence::SequenceBuilder;
+use crate::log;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::block_cache::metrics::block_metrics;
 use crate::machine_state::instruction::Instruction;
@@ -181,8 +182,12 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
 
         builder.finish(&lowered_instrs);
 
-        let jcall = self.produce_function(&hash);
-        Some(jcall)
+        self.produce_function(&hash)
+            .inspect_err(|error| {
+                let opcodes = instr.iter().map(|i| i.opcode).collect::<Vec<_>>();
+                log::warning!("Failed to compile {:?}: {:?}", opcodes, error);
+            })
+            .ok()
     }
 
     /// Start building a new sequence of instructions.
@@ -196,30 +201,30 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
     }
 
     /// Finalise and cache the function under construction.
-    fn produce_function(&mut self, hash: &Hash) -> JitFn<MC, M> {
+    fn produce_function(&mut self, hash: &Hash) -> cranelift_module::ModuleResult<JitFn<MC, M>> {
         let name = hex::encode(hash);
 
-        let fun = self.finalise(&name);
+        let fun = self.finalise(&name)?;
 
         self.cache.insert(*hash, Some(fun));
         block_metrics!(hash = hash, record_jitted);
 
-        fun
+        Ok(fun)
     }
 
     /// Finalise the function currently under construction.
-    fn finalise(&mut self, name: &str) -> JitFn<MC, M> {
-        let id = self
-            .module
-            .declare_function(name.as_ref(), Linkage::Export, &self.ctx.func.signature)
-            .map_err(|e| e.to_string())
-            .unwrap();
+    fn finalise(&mut self, name: &str) -> cranelift_module::ModuleResult<JitFn<MC, M>> {
+        let id = self.module.declare_function(
+            name.as_ref(),
+            Linkage::Export,
+            &self.ctx.func.signature,
+        )?;
 
         // define the function to jit
-        self.module.define_function(id, &mut self.ctx).unwrap();
+        self.module.define_function(id, &mut self.ctx)?;
 
         // finalise the function
-        self.module.finalize_definitions().unwrap();
+        self.module.finalize_definitions()?;
         let code = self.module.get_finalized_function(id);
 
         self.clear();
@@ -227,7 +232,7 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
         // SAFETY: the signature of a JitFn matches exactly the abi we specified in the
         //         entry block. Compilation has succeeded & therefore this produced code
         //         is safe to call.
-        unsafe { std::mem::transmute(code) }
+        Ok(unsafe { std::mem::transmute::<*const u8, JitFn<MC, M>>(code) })
     }
 
     /// Clear the current context to allow a new function to be compiled
