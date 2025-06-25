@@ -625,20 +625,26 @@ fn f64_sign_inject(
     rs1: FRegister,
     rs2: FRegister,
     rd: FRegister,
-    manip: SignInjection,
+    sign_injection: SignInjection,
 ) {
+    // Read the values in rs1 and rs2 as FValues
     let rval1_fvalue = icb.fregister_read(rs1);
     let rval2_fvalue = icb.fregister_read(rs2);
 
+    // Reinterpret the FValues for rs1 and rs2 as XValues
     let rval1_xvalue = icb.xvalue_from_fvalue(rval1_fvalue);
     let rval2_xvalue = icb.xvalue_from_fvalue(rval2_fvalue);
 
-    let bit_mask_rs1 = icb.xvalue_of_imm(F64_SIGNLESS_VALUE_MASK);
+    // mask to extract the value without the sign bit from an XValue
+    let bitmask_rs1 = icb.xvalue_of_imm(F64_SIGNLESS_VALUE_MASK);
+
+    // mask to extract the sign bit from an XValue
     let bitmask_rs2 = icb.xvalue_of_imm(F64_SIGN_BIT_MASK);
 
     let rval2_xvalue_sign = rval2_xvalue.and(bitmask_rs2, icb);
 
-    let rval2_xvalue_sign = match manip {
+    // Compute the sign bit of the result based on the sign injection mode
+    let rval2_xvalue_sign = match sign_injection {
         SignInjection::Identity => rval2_xvalue_sign,
         SignInjection::Negate => rval2_xvalue_sign.xor(bitmask_rs2, icb),
         SignInjection::Xor => {
@@ -647,10 +653,13 @@ fn f64_sign_inject(
         }
     };
 
-    let rval1_xvalue_signless = rval1_xvalue.and(bit_mask_rs1, icb);
+    // mask to extract the value without the sign bit from an rs1
+    let rval1_xvalue_signless = rval1_xvalue.and(bitmask_rs1, icb);
 
+    // Combine the sign bit from rs2 with the value from rs1
     let rval1_xvalue = rval1_xvalue_signless.or(rval2_xvalue_sign, icb);
 
+    // Reinterpret the XValue back to an FValue
     let rval1_fvalue = icb.fvalue_from_xvalue(rval1_xvalue);
 
     icb.fregister_write(rd, rval1_fvalue);

@@ -16,6 +16,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::condcodes::IntCC;
+use cranelift::codegen::ir::types::F64 as IrF64;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
@@ -368,11 +369,7 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     }
 
     fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue {
-        F64(self.builder.ins().bitcast(
-            cranelift::codegen::ir::types::F64,
-            MemFlags::new(),
-            value.0,
-        ))
+        F64(self.builder.ins().bitcast(IrF64, MemFlags::new(), value.0))
     }
 
     /// Read the effective current program counter by adding `self.pc_offset` (due to instructions

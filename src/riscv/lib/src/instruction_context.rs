@@ -75,7 +75,7 @@ pub(crate) trait ICB {
     /// Construct an [`ICB::XValue32`] from an `imm: i32`.
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32;
 
-    /// Construct an [`ICB::FValue`] from a [`FRegister`].
+    /// Perform a read to a given [`FRegister`].
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
     /// Perform a write to a [`FRegister`], with the given value.
@@ -119,8 +119,10 @@ pub(crate) trait ICB {
     /// - `false -> 0`
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue;
 
+    /// Convert a [`FValue`] to an [`XValue`].
     fn xvalue_from_fvalue(&mut self, value: Self::FValue) -> Self::XValue;
 
+    /// Convert an [`XValue`] to a [`FValue`].
     fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue;
 
     /// Branching instruction.

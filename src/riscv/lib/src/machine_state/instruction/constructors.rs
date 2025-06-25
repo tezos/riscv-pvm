@@ -1956,6 +1956,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64SignInject`].
     pub(crate) fn new_fsgnj_d(
         rd: FRegister,
         rs1: FRegister,
@@ -1963,7 +1964,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Fsgnjd,
+            opcode: OpCode::F64SignInject,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1974,6 +1975,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64SignInjectByNegation`].
     pub(crate) fn new_fsgnjn_d(
         rd: FRegister,
         rs1: FRegister,
@@ -1981,7 +1983,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Fsgnjnd,
+            opcode: OpCode::F64SignInjectByNegation,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1992,6 +1994,7 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64SignInjectByXor`].
     pub(crate) fn new_fsgnjx_d(
         rd: FRegister,
         rs1: FRegister,
@@ -1999,7 +2002,7 @@ impl Instruction {
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Fsgnjxd,
+            opcode: OpCode::F64SignInjectByXor,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),

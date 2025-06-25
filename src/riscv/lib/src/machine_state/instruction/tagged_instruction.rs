@@ -348,9 +348,35 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | X64AtomicMinSigned | X64AtomicMaxSigned | X64AtomicMinUnsigned | X64AtomicMaxUnsigned
         | X32Mul | Csrrw | Csrrs | Csrrc | Csrrwi | Csrrsi | Csrrci => ArgsShape::XSrcXDest,
 
-        Fadds | Fsubs | Fmuls | Fdivs | Fsqrts | Fmins | Fmaxs | Fsgnjs | Fsgnjns | Fsgnjxs
-        | Fmadds | Fmsubs | Fnmsubs | Fnmadds | Faddd | Fsubd | Fmuld | Fdivd | Fsqrtd | Fmind
-        | Fmaxd | Fsgnjd | Fsgnjnd | Fsgnjxd | Fcvtsd | Fcvtds | Fmaddd | Fmsubd | Fnmsubd
+        Fadds
+        | Fsubs
+        | Fmuls
+        | Fdivs
+        | Fsqrts
+        | Fmins
+        | Fmaxs
+        | Fsgnjs
+        | Fsgnjns
+        | Fsgnjxs
+        | Fmadds
+        | Fmsubs
+        | Fnmsubs
+        | Fnmadds
+        | Faddd
+        | Fsubd
+        | Fmuld
+        | Fdivd
+        | Fsqrtd
+        | Fmind
+        | Fmaxd
+        | F64SignInject
+        | F64SignInjectByNegation
+        | F64SignInjectByXor
+        | Fcvtsd
+        | Fcvtds
+        | Fmaddd
+        | Fmsubd
+        | Fnmsubd
         | Fnmaddd => ArgsShape::FSrcFDest,
 
         Flw | Fld | FmvWX | Fcvtsw | Fcvtswu | Fcvtsl | Fcvtslu | FmvDX | Fcvtdw | Fcvtdwu
