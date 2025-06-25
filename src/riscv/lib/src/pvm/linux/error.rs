@@ -54,6 +54,11 @@ pub enum Error {
     /// See [`EINVAL`](https://github.com/torvalds/linux/blob/0ad2507d5d93f39619fc42372c347d6006b64319/include/uapi/asm-generic/errno-base.h#L26)
     InvalidArgument = 22,
 
+    /// Not a typewriter - the specified operation does not apply to this kind of object
+    ///
+    /// See [`ENOTTY`](https://github.com/torvalds/linux/blob/0ad2507d5d93f39619fc42372c347d6006b64319/include/uapi/asm-generic/errno-base.h#L29)
+    NoTty = 25,
+
     /// Out of range
     ///
     /// See [`ERANGE`](https://github.com/torvalds/linux/blob/0ad2507d5d93f39619fc42372c347d6006b64319/include/uapi/asm-generic/errno-base.h#L38)

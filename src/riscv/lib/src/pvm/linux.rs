@@ -53,6 +53,9 @@ const MAIN_THREAD_ID: u64 = 1;
 /// System call number for `getcwd` on RISC-V
 const GETCWD: u64 = 17;
 
+/// System call number for `ioctl` on RISC-V
+const IOCTL: u64 = 29;
+
 /// System call number for `facessat` on RISC-V
 const FACCESSAT: u64 = 48;
 
@@ -727,6 +730,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         let result = match system_call_no {
             GETCWD => dispatch2!(getcwd, &mut machine.core),
+            IOCTL => dispatch2!(ioctl),
             FACCESSAT => dispatch0!(faccessat),
             OPENAT => dispatch0!(openat),
             CLOSE => dispatch0!(close),
