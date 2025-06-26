@@ -261,8 +261,10 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
         // We want to just slightly modify the state without interfering with normal execution.
         // Increasing the number of instructions executed is a good candidate.
         let csregs = &mut self.machine_state.core.hart.csregisters;
-        let instrs_retired = csregs.read::<u64>(CSRegister::instret);
-        csregs.write(CSRegister::instret, instrs_retired + 1);
+
+        // `fflags` is a writable CSR
+        let fflags = csregs.read::<u64>(CSRegister::fflags);
+        csregs.write(CSRegister::fflags, fflags + 1);
     }
 
     /// Handle an exception using the defined Execution Environment.
