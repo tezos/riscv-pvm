@@ -7,6 +7,7 @@
 use crate::instruction_context::ICB;
 use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
+use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 
@@ -82,9 +83,50 @@ pub fn run_load<V: StoreLoadInt, I: ICB>(
     })
 }
 
+/// Stores a double-precision floating point value `val(rs2)` to the address
+/// starting at `val(rs1) + imm`.
+pub fn run_f64_store<I: ICB>(
+    icb: &mut I,
+    imm: i64,
+    rs1: XRegister,
+    rs2: FRegister,
+) -> I::IResult<()> {
+    let rs1val = icb.xregister_read(rs1);
+    let imm = icb.xvalue_of_imm(imm);
+
+    let address = rs1val.add(imm, icb);
+
+    let fval = icb.fregister_read(rs2);
+    let xval = icb.fvalue_to_xvalue(fval);
+
+    icb.main_memory_store::<u64>(address, xval)
+}
+
+/// Loads a double-precision floating point value from the address
+/// starting at `val(rs1) + imm` and writes it to `rd`.
+pub fn run_f64_load<I: ICB>(
+    icb: &mut I,
+    imm: i64,
+    rs1: XRegister,
+    rd: FRegister,
+) -> I::IResult<()> {
+    let rs1val = icb.xregister_read(rs1);
+    let imm = icb.xvalue_of_imm(imm);
+
+    let address = rs1val.add(imm, icb);
+
+    let res = icb.main_memory_load::<u64>(address);
+    I::and_then(res, |xval| {
+        let fval = icb.fvalue_from_xvalue(xval);
+        icb.fregister_write(rd, fval);
+        icb.ok(())
+    })
+}
+
 #[cfg(test)]
 mod test {
     use proptest::arbitrary::any;
+    use proptest::prelude::Strategy;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -97,6 +139,8 @@ mod test {
     use crate::machine_state::registers::a2;
     use crate::machine_state::registers::a3;
     use crate::machine_state::registers::a4;
+    use crate::machine_state::registers::fa2;
+    use crate::machine_state::registers::fa3;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
@@ -217,6 +261,56 @@ mod test {
             prop_assert!(perform_test(aligned_offset, false).is_ok());
             // Unaligned loads / stores
             prop_assert!(perform_test(misaligned_offset, false).is_ok());
+        });
+    });
+
+    backend_test!(test_fp_load_store, F, {
+        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state_cell = std::cell::RefCell::new(state);
+
+        proptest!(|(
+            val in any::<f64>().prop_map(f64::to_bits),
+        )| {
+            let mut state = state_cell.borrow_mut();
+            state.reset();
+            state.main_memory.set_all_readable_writeable();
+
+            let mut perform_test = |offset: u64| -> Result<(), Exception> {
+                // Save test values v_i in registers ai
+                state.hart.fregisters.write(fa2, val.into());
+
+                // t0 will hold the "global" offset of all loads / stores we are going to make
+                state.hart.xregisters.write(t0, offset);
+
+                // Perform the stores
+                run_f64_store(&mut *state, -4, t0, fa2)?;
+                run_f64_load(&mut *state, -4, t0, fa3)?;
+
+                assert_eq!(state.hart.fregisters.read(fa3), val.into());
+                Ok(())
+            };
+
+            let invalid_offset = 0u64.wrapping_sub(1024);
+            let aligned_offset = 512;
+            let misaligned_offset = 513;
+
+            // Out of bounds loads / stores
+            prop_assert!(perform_test(invalid_offset).is_err_and(|e|
+                matches!(e, Exception::StoreAMOAccessFault(_))
+            ));
+            // Aligned loads / stores
+            prop_assert!(perform_test(aligned_offset).is_ok());
+            // Unaligned loads / stores
+            prop_assert!(perform_test(misaligned_offset).is_ok());
+
+            // Out of bounds loads / stores
+            prop_assert!(perform_test(invalid_offset).is_err_and(|e|
+                matches!(e, Exception::StoreAMOAccessFault(_))
+            ));
+            // Aligned loads / stores
+            prop_assert!(perform_test(aligned_offset).is_ok());
+            // Unaligned loads / stores
+            prop_assert!(perform_test(misaligned_offset).is_ok());
         });
     });
 }
