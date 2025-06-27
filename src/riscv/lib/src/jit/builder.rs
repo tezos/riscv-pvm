@@ -16,9 +16,11 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::condcodes::IntCC;
+use cranelift::codegen::ir::types::F64 as IrF64;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::MemFlags;
 use cranelift::prelude::types::I128;
 use errno::AtomicAccessGuard;
 
@@ -362,6 +364,14 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue {
         // unsigned extension works as boolean can never be negative (only 0 or 1)
         X64(self.builder.ins().uextend(I64, value))
+    }
+
+    fn xvalue_from_fvalue(&mut self, value: Self::FValue) -> Self::XValue {
+        X64(self.builder.ins().bitcast(I64, MemFlags::new(), value.0))
+    }
+
+    fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue {
+        F64(self.builder.ins().bitcast(IrF64, MemFlags::new(), value.0))
     }
 
     /// Read the effective current program counter by adding `self.pc_offset` (due to instructions

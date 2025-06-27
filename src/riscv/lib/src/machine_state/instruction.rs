@@ -44,6 +44,7 @@ use crate::instruction_context::Predicate;
 use crate::instruction_context::Shift;
 use crate::interpreter::atomics;
 use crate::interpreter::branching;
+use crate::interpreter::float;
 use crate::interpreter::integer;
 use crate::interpreter::load_store;
 use crate::machine_state::ProgramCounterUpdate::Next;
@@ -361,9 +362,9 @@ pub enum OpCode {
     Fcvtwud,
     Fcvtld,
     Fcvtlud,
-    Fsgnjd,
-    Fsgnjnd,
-    Fsgnjxd,
+    F64SignInject,
+    F64SignInjectByNegation,
+    F64SignInjectByXor,
     FmvXD,
     FmvDX,
 
@@ -574,9 +575,9 @@ impl OpCode {
             Self::Fcvtwud => Args::run_fcvt_wu_d,
             Self::Fcvtld => Args::run_fcvt_l_d,
             Self::Fcvtlud => Args::run_fcvt_lu_d,
-            Self::Fsgnjd => Args::run_fsgnj_d,
-            Self::Fsgnjnd => Args::run_fsgnjn_d,
-            Self::Fsgnjxd => Args::run_fsgnjx_d,
+            Self::F64SignInject => Args::run_f64_sign_inject,
+            Self::F64SignInjectByNegation => Args::run_f64_sign_inject_by_negation,
+            Self::F64SignInjectByXor => Args::run_f64_sign_inject_by_xor,
             Self::FmvXD => Args::run_fmv_x_d,
             Self::FmvDX => Args::run_fmv_d_x,
             Self::Csrrw => Args::run_csrrw,
@@ -644,6 +645,9 @@ impl OpCode {
             Self::X64RemUnsigned => Some(Args::run_x64_rem_unsigned),
             Self::X32RemSigned => Some(Args::run_x32_rem_signed),
             Self::X32RemUnsigned => Some(Args::run_x32_rem_unsigned),
+            Self::F64SignInject => Some(Args::run_f64_sign_inject),
+            Self::F64SignInjectByNegation => Some(Args::run_f64_sign_inject_by_negation),
+            Self::F64SignInjectByXor => Some(Args::run_f64_sign_inject_by_xor),
             Self::Li => Some(Args::run_li),
             Self::AddImmediateToPC => Some(Args::run_add_immediate_to_pc),
             Self::J => Some(Args::run_j),
@@ -1368,6 +1372,19 @@ macro_rules! impl_f_r_type {
     };
 }
 
+macro_rules! impl_float_sign_inject {
+    ($impl: path, $fn: ident) => {
+        /// SAFETY: This function must only be called on an `Args` belonging
+        /// to the same OpCode as the OpCode used to derive this function.
+        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, unsafe { self.rs1.f }, unsafe { self.rs2.f }, unsafe {
+                self.rd.f
+            });
+            icb.ok(Next(self.width))
+        }
+    };
+}
+
 impl Args {
     // RV64I R-type instructions
     impl_r_type!(integer::run_add, run_add, non_zero);
@@ -1600,9 +1617,15 @@ impl Args {
     impl_f_r_type!(run_fsqrt_d, rm);
     impl_f_r_type!(run_fmin_d);
     impl_f_r_type!(run_fmax_d);
-    impl_f_r_type!(run_fsgnj_d);
-    impl_f_r_type!(run_fsgnjn_d);
-    impl_f_r_type!(run_fsgnjx_d);
+    impl_float_sign_inject!(float::run_f64_sign_inject, run_f64_sign_inject);
+    impl_float_sign_inject!(
+        float::run_f64_sign_inject_by_negation,
+        run_f64_sign_inject_by_negation
+    );
+    impl_float_sign_inject!(
+        float::run_f64_sign_inject_by_xor,
+        run_f64_sign_inject_by_xor
+    );
     impl_f_r_type!(run_fcvt_d_s, rm);
     impl_f_r_type!(run_fcvt_s_d, rm);
     impl_f_r_type!(run_fmadd_d, (rs2, f), rs3f, rm);
@@ -2234,18 +2257,15 @@ impl From<&InstrCacheable> for Instruction {
                 opcode: OpCode::Fmaxd,
                 args: args.into(),
             },
-            InstrCacheable::Fsgnjd(args) => Instruction {
-                opcode: OpCode::Fsgnjd,
-                args: args.into(),
-            },
-            InstrCacheable::Fsgnjnd(args) => Instruction {
-                opcode: OpCode::Fsgnjnd,
-                args: args.into(),
-            },
-            InstrCacheable::Fsgnjxd(args) => Instruction {
-                opcode: OpCode::Fsgnjxd,
-                args: args.into(),
-            },
+            InstrCacheable::Fsgnjd(args) => {
+                Instruction::new_fsgnj_d(args.rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+            InstrCacheable::Fsgnjnd(args) => {
+                Instruction::new_fsgnjn_d(args.rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
+            InstrCacheable::Fsgnjxd(args) => {
+                Instruction::new_fsgnjx_d(args.rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
+            }
             InstrCacheable::Fcvtds(args) => Instruction {
                 opcode: OpCode::Fcvtds,
                 args: args.into(),

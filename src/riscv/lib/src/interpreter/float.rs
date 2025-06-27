@@ -14,6 +14,8 @@ use rustc_apfloat::Round;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
 
+use crate::instruction_context::ICB;
+use crate::instruction_context::arithmetic::Arithmetic;
 use crate::machine_state::csregisters::CSRRepr;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::csregisters::CSRegisters;
@@ -24,6 +26,9 @@ use crate::machine_state::registers::XRegister;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend as backend;
 use crate::traps::Exception;
+
+const F64_SIGN_BIT_MASK: i64 = 1 << 63;
+const F64_SIGNLESS_VALUE_MASK: i64 = !F64_SIGN_BIT_MASK;
 
 pub trait FloatExt: Float + Into<FValue> + Copy + Neg + From<FValue> {
     /// The canonical NaN has a positive sign and all
@@ -607,6 +612,86 @@ impl<M: backend::ManagerReadWrite> CSRegisters<M> {
 
 const fn status_to_bits(status: Status) -> u8 {
     status.bits().reverse_bits() >> 3
+}
+
+enum SignInjection {
+    Identity,
+    Negate,
+    Xor,
+}
+
+fn f64_sign_inject(
+    icb: &mut impl ICB,
+    rs1: FRegister,
+    rs2: FRegister,
+    rd: FRegister,
+    sign_injection: SignInjection,
+) {
+    // Read the values in rs1 and rs2 as FValues
+    let rval1_fvalue = icb.fregister_read(rs1);
+    let rval2_fvalue = icb.fregister_read(rs2);
+
+    // Reinterpret the FValues for rs1 and rs2 as XValues
+    let rval1_xvalue = icb.xvalue_from_fvalue(rval1_fvalue);
+    let rval2_xvalue = icb.xvalue_from_fvalue(rval2_fvalue);
+
+    // mask to extract the value without the sign bit from an XValue
+    let bitmask_rs1 = icb.xvalue_of_imm(F64_SIGNLESS_VALUE_MASK);
+
+    // mask to extract the sign bit from an XValue
+    let bitmask_rs2 = icb.xvalue_of_imm(F64_SIGN_BIT_MASK);
+
+    let rval2_xvalue_sign = rval2_xvalue.and(bitmask_rs2, icb);
+
+    // Compute the sign bit of the result based on the sign injection mode
+    let rval2_xvalue_sign = match sign_injection {
+        SignInjection::Identity => rval2_xvalue_sign,
+        SignInjection::Negate => rval2_xvalue_sign.xor(bitmask_rs2, icb),
+        SignInjection::Xor => {
+            let rs1_sign = rval1_xvalue.and(bitmask_rs2, icb);
+            rval2_xvalue_sign.xor(rs1_sign, icb)
+        }
+    };
+
+    // mask to extract the value without the sign bit from an rs1
+    let rval1_xvalue_signless = rval1_xvalue.and(bitmask_rs1, icb);
+
+    // Combine the sign bit from rs2 with the value from rs1
+    let rval1_xvalue = rval1_xvalue_signless.or(rval2_xvalue_sign, icb);
+
+    // Reinterpret the XValue back to an FValue
+    let rval1_fvalue = icb.fvalue_from_xvalue(rval1_xvalue);
+
+    icb.fregister_write(rd, rval1_fvalue);
+}
+
+/// Loads the sign bit from `rs2` into `rs1` and writes the result to `rd`.
+/// Both `rs1` and `rs2` are double precision floating point values.
+pub fn run_f64_sign_inject(icb: &mut impl ICB, rs1: FRegister, rs2: FRegister, rd: FRegister) {
+    f64_sign_inject(icb, rs1, rs2, rd, SignInjection::Identity)
+}
+
+/// Loads the inverted sign bit from `rs2` into `rs1` and writes the result to `rd`.
+/// Both `rs1` and `rs2` are double precision floating point values.
+pub fn run_f64_sign_inject_by_negation(
+    icb: &mut impl ICB,
+    rs1: FRegister,
+    rs2: FRegister,
+    rd: FRegister,
+) {
+    f64_sign_inject(icb, rs1, rs2, rd, SignInjection::Negate)
+}
+
+/// Loads the sign bit from `rs1` and `rs2` and writes the result to `rd`.
+/// The sign bit is taken from the bitwise XOR of the sign bits from `rs1` & `rs2`.
+/// Both `rs1` and `rs2` are double precision floating point values.
+pub fn run_f64_sign_inject_by_xor(
+    icb: &mut impl ICB,
+    rs1: FRegister,
+    rs2: FRegister,
+    rd: FRegister,
+) {
+    f64_sign_inject(icb, rs1, rs2, rd, SignInjection::Xor)
 }
 
 #[cfg(test)]
