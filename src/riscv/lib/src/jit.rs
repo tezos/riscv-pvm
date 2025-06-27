@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use cranelift::codegen::CodegenError;
-use cranelift::codegen::ir::types::I64;
 use cranelift::codegen::settings::SetError;
 use cranelift::frontend::FunctionBuilderContext;
 use cranelift::prelude::*;
@@ -24,10 +23,9 @@ use cranelift_module::ModuleError;
 use state_access::JitStateAccess;
 use thiserror::Error;
 
-use self::builder::Builder;
-use self::state_access::JsaCalls;
 use self::state_access::JsaImports;
 use self::state_access::register_jsa_symbols;
+use crate::jit::builder::sequence::SequenceBuilder;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::block_cache::metrics::block_metrics;
 use crate::machine_state::instruction::Instruction;
@@ -152,72 +150,49 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
         }
 
         let mut builder = self.start();
+        let mut lowered_instrs = Vec::with_capacity(instr.len());
 
         // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
         for i in instr {
             let Some(lower) = i.opcode.to_lowering() else {
-                builder.fail();
+                builder.abandon();
                 self.clear();
                 self.cache.insert(hash, None);
                 return None;
             };
 
-            let pc_update = unsafe {
+            let mut instr_builder = builder.build_next_instruction(i.width());
+
+            let instr_result = unsafe {
                 // # SAFETY: lower is called with args from the same instruction that it
                 // was derived
-                (lower)(i.args(), &mut builder)
+                (lower)(i.args(), &mut instr_builder)
             };
 
-            // `pc_update == None` indicates an exception was raised.
-            let Some(pc_update) = pc_update else {
-                builder.end_unconditional_exception();
-
-                let jcall = self.produce_function(&hash);
-
-                return Some(jcall);
-            };
-
-            if !builder.complete_step(pc_update) {
-                // We have encountered an unconditional jump, exit the block.
-                break;
-            }
+            let lowered_instr = instr_builder.finish(instr_result);
+            lowered_instrs.push(lowered_instr);
         }
 
-        builder.end();
-        let jcall = self.produce_function(&hash);
+        if lowered_instrs.is_empty() {
+            builder.abandon();
+            self.clear();
+            return None;
+        }
 
+        builder.finish(&lowered_instrs);
+
+        let jcall = self.produce_function(&hash);
         Some(jcall)
     }
 
-    /// Setup the builder, ensuring the entry block of the function is correct.
-    ///
-    /// # Input Args
-    ///
-    /// | `core: &mut MachineCoreState` | `int (ptr) -> MachineCoreState` |
-    /// | `pc: Address`                 | `I64`                           |
-    ///
-    /// # Return
-    ///
-    /// | `steps: usize`                | `int`                           |
-    fn start(&mut self) -> Builder<'_, MC, M> {
-        let ptr = self.module.target_config().pointer_type();
-
-        // first param ignored
-        self.ctx.func.signature.params.push(AbiParam::new(ptr));
-        // params
-        self.ctx.func.signature.params.push(AbiParam::new(ptr));
-        self.ctx.func.signature.params.push(AbiParam::new(I64));
-        self.ctx.func.signature.params.push(AbiParam::new(ptr));
-        // last param ignored
-        self.ctx.func.signature.params.push(AbiParam::new(ptr));
-
-        // return steps
-        self.ctx.func.signature.returns.push(AbiParam::new(I64));
-
-        let builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
-        let jsa_call = JsaCalls::func_calls(&mut self.module, &self.jsa_imports, ptr);
-
-        Builder::<'_, MC, M>::new(builder, jsa_call)
+    /// Start building a new sequence of instructions.
+    fn start(&mut self) -> SequenceBuilder<'_, MC, M> {
+        SequenceBuilder::new(
+            &mut self.module,
+            &self.jsa_imports,
+            &mut self.ctx,
+            &mut self.builder_context,
+        )
     }
 
     /// Finalise and cache the function under construction.

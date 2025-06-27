@@ -43,7 +43,6 @@ use cranelift_module::ModuleResult;
 
 use super::builder::F64;
 use super::builder::X64;
-use super::builder::errno::Errno;
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
@@ -76,7 +75,7 @@ macro_rules! register_jsa_functions {
         }
 
         /// Identifications of globally imported [`JitStateAccess`] methods.
-        pub(super) struct JsaImports<MC: MemoryConfig, M: $crate::state_backend::ManagerBase> {
+        pub(crate) struct JsaImports<MC: MemoryConfig, M: $crate::state_backend::ManagerBase> {
             $(
                 pub $name: FuncId,
             )*
@@ -653,7 +652,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         core_ptr: Value,
         phys_address: X64,
         value: X64,
-    ) -> impl Errno<(), MC, M> + 'static {
+    ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder<'_>) + 'static> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -703,7 +702,7 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
         builder: &mut FunctionBuilder<'_>,
         core_ptr: Value,
         phys_address: X64,
-    ) -> impl Errno<X64, MC, M> + 'static {
+    ) -> ErrnoImpl<X64, impl FnOnce(&mut FunctionBuilder<'_>) -> X64 + 'static> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 

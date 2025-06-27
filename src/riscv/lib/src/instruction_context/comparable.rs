@@ -2,30 +2,30 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Comparison operations required in the [`ICB`], including implementations for interpreted mode.
+//! Comparison operations required for a given instruction builder context, including
+//! implementations for interpreted mode.
 
-use super::ICB;
 use super::Predicate;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::XValue;
+use crate::machine_state::registers::XValue32;
 use crate::state_backend::ManagerReadWrite;
 
-/// Trait for comparison operations on **XValues** used in the [`ICB`].
-pub trait Comparable<I: ICB + ?Sized> {
+/// Trait for comparison operations on **XValues** used in the instruction builder context `I`.
+pub trait Comparable<I: ?Sized> {
+    /// Result of the comparison operation
+    type Result;
+
     /// Compare two values, given the operation to compare them with.
-    fn compare(self, other: Self, predicate: Predicate, icb: &mut I) -> I::Bool;
+    fn compare(self, other: Self, predicate: Predicate, icb: &mut I) -> Self::Result;
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>>
-    for <MachineCoreState<MC, M> as ICB>::XValue
-{
+impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>> for XValue {
+    type Result = bool;
+
     #[inline(always)]
-    fn compare(
-        self,
-        other: Self,
-        predicate: Predicate,
-        _: &mut MachineCoreState<MC, M>,
-    ) -> <MachineCoreState<MC, M> as ICB>::Bool {
+    fn compare(self, other: Self, predicate: Predicate, _: &mut MachineCoreState<MC, M>) -> bool {
         match predicate {
             Predicate::Equal => self == other,
             Predicate::NotEqual => self != other,
@@ -39,16 +39,11 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>>
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>>
-    for <MachineCoreState<MC, M> as ICB>::XValue32
-{
+impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>> for XValue32 {
+    type Result = bool;
+
     #[inline(always)]
-    fn compare(
-        self,
-        other: Self,
-        predicate: Predicate,
-        _: &mut MachineCoreState<MC, M>,
-    ) -> <MachineCoreState<MC, M> as ICB>::Bool {
+    fn compare(self, other: Self, predicate: Predicate, _: &mut MachineCoreState<MC, M>) -> bool {
         match predicate {
             Predicate::Equal => self == other,
             Predicate::NotEqual => self != other,
