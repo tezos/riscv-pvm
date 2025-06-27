@@ -34,6 +34,7 @@ use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics::ReservationSetOption;
+use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::block_state::PCUpdate;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
@@ -549,6 +550,23 @@ impl<MC: MemoryConfig, JSA: JitStateAccess> ICB for Builder<'_, MC, JSA> {
     fn reservation_set_read(&mut self) -> Self::XValue {
         self.jsa_call
             .reservation_set_read(&mut self.builder, self.core_ptr_val)
+    }
+
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
+        let errno =
+            self.jsa_call
+                .f64_from_x64_unsigned_dynamic(&mut self.builder, self.core_ptr_val, xval);
+        let res = errno.handle(self);
+        Some(res)
+    }
+
+    fn f64_from_x64_unsigned_static(
+        &mut self,
+        xval: Self::XValue,
+        rm: RoundingMode,
+    ) -> Self::FValue {
+        self.jsa_call
+            .f64_from_x64_unsigned_static(&mut self.builder, self.core_ptr_val, xval, rm)
     }
 }
 

@@ -354,7 +354,7 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | Fnmaddd => ArgsShape::FSrcFDest,
 
         Flw | Fld | FmvWX | Fcvtsw | Fcvtswu | Fcvtsl | Fcvtslu | FmvDX | Fcvtdw | Fcvtdwu
-        | Fcvtdl | Fcvtdlu | CFld | CFldsp => ArgsShape::XSrcFDest,
+        | Fcvtdl | F64FromX64Unsigned | CFld | CFldsp => ArgsShape::XSrcFDest,
 
         Feqs | Fles | Flts | Feqd | Fled | Fltd | FclassS | FmvXW | Fcvtws | Fcvtwus | Fcvtls
         | Fcvtlus | FclassD | FmvXD | Fcvtwd | Fcvtwud | Fcvtld | Fcvtlud => ArgsShape::FSrcXDest,

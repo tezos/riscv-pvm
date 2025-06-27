@@ -573,6 +573,12 @@ impl ConstDefault for FValue {
     const DEFAULT: Self = Self(0);
 }
 
+impl FValue {
+    pub(crate) fn bits(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
 impl backend::Elem for FValue {
     #[inline(always)]
     fn store(&mut self, source: &Self) {

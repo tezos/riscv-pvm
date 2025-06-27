@@ -6,6 +6,7 @@ use super::Args;
 use super::Instruction;
 use super::OpCode;
 use crate::default::ConstDefault;
+use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::nz;
@@ -13,6 +14,7 @@ use crate::parser::XRegisterParsed;
 use crate::parser::instruction::CIBTypeArgs;
 use crate::parser::instruction::CRTypeArgs;
 use crate::parser::instruction::ITypeArgs;
+use crate::parser::instruction::InstrRoundingMode;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::instruction::NonZeroRdITypeArgs;
 use crate::parser::instruction::NonZeroRdRTypeArgs;
@@ -1949,6 +1951,25 @@ impl Instruction {
                 rs2: rs2.into(),
                 aq,
                 rl,
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64FromX64Unsigned`].
+    pub(crate) fn new_f64_from_x64_unsigned(
+        rd: FRegister,
+        rs1: XRegister,
+        rm: InstrRoundingMode,
+        width: InstrWidth,
+    ) -> Self {
+        Self {
+            opcode: OpCode::F64FromX64Unsigned,
+            args: Args {
+                rd: rd.into(),
+                rs1: rs1.into(),
+                rm,
                 width,
                 ..Args::DEFAULT
             },
