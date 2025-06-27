@@ -13,6 +13,20 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
+    /// Handle the `fstatat` system call. All access to the file system is denied.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/fstatat.2.html>
+    pub(super) fn handle_fstatat(&self) -> Result<u64, Error> {
+        Err(Error::Access)
+    }
+
+    /// Handle the `fstat` system call. All access to the file system is denied.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/fstat.2.html>
+    pub(super) fn handle_fstat(&self) -> Result<u64, Error> {
+        Err(Error::BadFileDescriptor)
+    }
+
     /// Handle the `faccessat` system call. All access to the file system is denied.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man3/faccessat.3p.html>

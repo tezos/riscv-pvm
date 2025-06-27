@@ -56,6 +56,9 @@ const GETCWD: u64 = 17;
 /// System call number for `ioctl` on RISC-V
 const IOCTL: u64 = 29;
 
+/// System call number for `fstat` on RISC-V
+const FSTAT: u64 = 44;
+
 /// System call number for `facessat` on RISC-V
 const FACCESSAT: u64 = 48;
 
@@ -79,6 +82,12 @@ const PPOLL: u64 = 73;
 
 /// System call number for `readlinkat` on RISC-V
 const READLINKAT: u64 = 78;
+
+/// System call number for `fstatat`/`newfstatat` on RISC-V
+const NEWFSTATAT: u64 = 79;
+
+/// System call number for `newfstat` on RISC-V
+const NEWFSTAT: u64 = 80;
 
 /// System call number for `exit` on RISC-V
 const EXIT: u64 = 93;
@@ -731,6 +740,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         let result = match system_call_no {
             GETCWD => dispatch2!(getcwd, &mut machine.core),
             IOCTL => dispatch2!(ioctl),
+            NEWFSTATAT => dispatch0!(fstatat),
+            FSTAT | NEWFSTAT => dispatch0!(fstat),
             FACCESSAT => dispatch0!(faccessat),
             OPENAT => dispatch0!(openat),
             CLOSE => dispatch0!(close),
