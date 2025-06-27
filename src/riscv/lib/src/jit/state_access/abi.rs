@@ -103,27 +103,6 @@ pub(super) enum CraneliftRepr {
     Value(Type),
 }
 
-/// Match the size of the type to a cranelift IR type.
-const fn get_repr<T>() -> CraneliftRepr {
-    struct SupportedSize<T>(T);
-    impl<T> SupportedSize<T> {
-        const SIZE: usize = std::mem::size_of::<T>();
-
-        const IS_SUPPORTED: () =
-            assert!(Self::SIZE == 1 || Self::SIZE == 2 || Self::SIZE == 4 || Self::SIZE == 8);
-    }
-
-    let () = SupportedSize::<T>::IS_SUPPORTED;
-
-    match SupportedSize::<T>::SIZE {
-        1 => CraneliftRepr::Value(I8),
-        2 => CraneliftRepr::Value(I16),
-        4 => CraneliftRepr::Value(I32),
-        8 => CraneliftRepr::Value(I64),
-        _ => unreachable!(),
-    }
-}
-
 /// This Type can be transformed into a cranelift IR Type.
 pub(super) trait ToCraneliftRepr {
     /// Associated constant to determine the Cranelift type at compile time.
@@ -131,43 +110,43 @@ pub(super) trait ToCraneliftRepr {
 }
 
 impl ToCraneliftRepr for u64 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I64);
 }
 
 impl ToCraneliftRepr for i64 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I64);
 }
 
 impl ToCraneliftRepr for bool {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
 impl ToCraneliftRepr for NonZeroXRegister {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
 impl ToCraneliftRepr for u8 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
 impl ToCraneliftRepr for i8 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
 impl ToCraneliftRepr for i16 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I16);
 }
 
 impl ToCraneliftRepr for u16 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I16);
 }
 
 impl ToCraneliftRepr for i32 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I32);
 }
 
 impl ToCraneliftRepr for u32 {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I32);
 }
 
 impl<T> ToCraneliftRepr for &T {
@@ -179,7 +158,7 @@ impl<T> ToCraneliftRepr for &mut T {
 }
 
 impl ToCraneliftRepr for FRegister {
-    const CRANELIFT_TYPE: CraneliftRepr = get_repr::<Self>();
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
 impl ToCraneliftRepr for f64 {
