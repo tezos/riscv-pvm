@@ -139,7 +139,7 @@ macro_rules! struct_layout {
                 #[inline]
                 fn state_hash<M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerSerialise>(
                     state: $crate::state_backend::AllocatedOf<Self, M>
-                ) -> Result<$crate::storage::Hash, $crate::storage::HashError> {
+                ) -> std::result::Result<$crate::storage::Hash, $crate::storage::HashError> {
                     $crate::storage::Hash::combine(&[
                         $(
                             [<$field_name:camel>]::state_hash(state.$field_name)?
@@ -165,7 +165,7 @@ macro_rules! struct_layout {
                 #[inline]
                 fn to_merkle_tree(
                     state: $crate::state_backend::RefProofGenOwnedAlloc<Self>,
-                ) -> Result<$crate::state_backend::proof_backend::merkle::MerkleTree, $crate::storage::HashError> {
+                ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, $crate::storage::HashError> {
                     $crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
                         vec![
                             $(
@@ -202,7 +202,7 @@ macro_rules! struct_layout {
                 fn partial_state_hash(
                     state: $crate::state_backend::RefVerifierAlloc<Self>,
                     proof: $crate::state_backend::ProofTree,
-                ) -> Result<$crate::storage::Hash, $crate::state_backend::PartialHashError> {
+                ) -> std::result::Result<$crate::storage::Hash, $crate::state_backend::PartialHashError> {
                     let (branches, proof_hash) = proof.into_branches_with_hash()?;
                     let [ $($field_name),+ ] = *branches;
 
