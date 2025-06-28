@@ -10,6 +10,7 @@ use common::*;
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::M64M;
+use octez_riscv::pvm::PvmHooks;
 use octez_riscv::pvm::PvmLayout;
 use octez_riscv::state_backend::RefOwnedAlloc;
 use octez_riscv::state_backend::hash;
@@ -45,13 +46,14 @@ fn test_jstz_determinism() {
     run_steps_ladder(&make_stepper, &ladder, &base_refs, base_hash);
 }
 
-fn run_steps_ladder<F>(
+fn run_steps_ladder<F, H>(
     make_stepper: F,
     ladder: &[usize],
     expected_refs: &RefOwnedAlloc<PvmLayout<M64M, DefaultCacheConfig>>,
     expected_hash: hash::Hash,
 ) where
-    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
+    F: Fn() -> PvmStepper<H, M64M, DefaultCacheConfig>,
+    H: PvmHooks,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper_lhs = make_stepper();
