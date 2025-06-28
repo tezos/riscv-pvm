@@ -220,12 +220,53 @@ impl<MC: MemoryConfig, M: JitStateAccess> JIT<MC, M> {
             &self.ctx.func.signature,
         )?;
 
-        // define the function to jit
+        // The context is currently in the state where we left it. That means it contains the IR
+        // that we produced without any modifications or optimisations.
+        let unoptimised_ir = if cfg!(feature = "log") {
+            self.ctx.func.display().to_string()
+        } else {
+            "".to_owned()
+        };
+
+        if cfg!(feature = "log") {
+            // Request a textual representation of the host assembly.
+            self.ctx.set_disasm(true);
+        }
+
+        // Populate the function in the JIT module.
         self.module.define_function(id, &mut self.ctx)?;
 
-        // finalise the function
+        // Finalise the definitions, ensuring that everything is ready to be called.
         self.module.finalize_definitions()?;
         let code = self.module.get_finalized_function(id);
+
+        // The `define_function` will indirectly call `Context::optimize` to optimise the IR
+        // representation. This allows us to extract the optimised IR. The native assembly is also
+        // produced as part of the definition process as that triggers a compilation.
+        //
+        // We keep the expressions scoped to the macro to avoid evaluating them when logging is
+        // turned off.
+        log::trace!(
+            func_name = name,
+            func_addr = code as usize,
+            unoptimised_ir,
+            optimised_ir = self.ctx.func.display().to_string(),
+            vcode = {
+                self.ctx
+                    .compiled_code()
+                    .and_then(|code| code.vcode.as_deref())
+                    .unwrap_or("<no vcode>")
+            },
+            machine_code = {
+                let data = self
+                    .ctx
+                    .compiled_code()
+                    .map(|code| code.buffer.data())
+                    .unwrap_or(&[]);
+                hex::encode(data)
+            },
+            "Defined function"
+        );
 
         self.clear();
 
