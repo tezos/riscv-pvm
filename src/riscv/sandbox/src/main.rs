@@ -38,7 +38,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let subscriber_builder = tracing_subscriber::fmt()
             .without_time()
-            .with_max_level(cli.log_level);
+            .with_max_level(cli.log_level)
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env());
 
         match cli.log_json_file {
             Some(log_json_file) => {
