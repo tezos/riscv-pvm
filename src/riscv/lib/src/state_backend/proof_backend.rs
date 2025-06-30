@@ -41,6 +41,65 @@ pub struct ProofGen<M: ManagerBase> {
     _pd: std::marker::PhantomData<M>,
 }
 
+impl<M: crate::state_backend::ManagerAlloc> crate::state_backend::ManagerAlloc for ProofGen<M> {
+    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
+        ProofRegion::bind(M::allocate_region::<E, LEN>(init_value))
+    }
+
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
+        ProofDynRegion::bind(M::allocate_dyn_region::<LEN>())
+    }
+}
+
+impl<M: crate::state_backend::ManagerClone> crate::state_backend::ManagerClone for ProofGen<M> {
+    fn clone_region<E: 'static + Clone, const LEN: usize>(
+        region: &Self::Region<E, LEN>,
+    ) -> Self::Region<E, LEN> {
+        ProofRegion::bind(M::clone_region(region.inner_region_ref()))
+    }
+
+    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
+        ProofDynRegion::bind(M::clone_dyn_region(&region.source))
+    }
+
+    fn clone_enriched_cell<V>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
+    where
+        V: EnrichedValue,
+        V::E: Clone,
+        V::D: Clone,
+    {
+        ProofEnrichedCell {
+            underlying: Self::clone_region(&cell.underlying),
+        }
+    }
+}
+
+// TODO: RV-709 Remove this impl when `TestBackendFactory` bounds are relaxed.
+impl<M: crate::state_backend::ManagerDeserialise> crate::state_backend::ManagerDeserialise
+    for ProofGen<M>
+{
+    fn deserialise_region<
+        'de,
+        E: serde::Deserialize<'de>,
+        const LEN: usize,
+        D: serde::Deserializer<'de>,
+    >(
+        deserializer: D,
+    ) -> Result<Self::Region<E, LEN>, D::Error> {
+        Ok(ProofRegion::bind(M::deserialise_region::<E, LEN, D>(
+            deserializer,
+        )?))
+    }
+
+    fn deserialise_dyn_region<'de, const LEN: usize, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self::DynRegion<LEN>, D::Error> {
+        Ok(ProofDynRegion::bind(M::deserialise_dyn_region::<LEN, D>(
+            deserializer,
+        )?))
+    }
+}
+
 impl<M: ManagerBase> ManagerBase for ProofGen<M> {
     type Region<E: 'static, const LEN: usize> = ProofRegion<E, LEN, M>;
 
@@ -415,6 +474,19 @@ impl<M: ManagerBase> FnManager<M> for ProofWrapper {
         input: <M as ManagerBase>::DynRegion<LEN>,
     ) -> <ProofGen<M> as ManagerBase>::DynRegion<LEN> {
         ProofDynRegion::bind(input)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_helpers {
+    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::proof_backend::ProofGen;
+    use crate::state_backend::test_helpers::TestBackendFactory;
+
+    pub struct ProofGenTestBackendFactory;
+
+    impl TestBackendFactory for ProofGenTestBackendFactory {
+        type Manager = ProofGen<Owned>;
     }
 }
 
