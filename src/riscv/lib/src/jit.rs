@@ -7,7 +7,6 @@
 
 pub(crate) mod builder;
 pub(crate) mod state_access;
-
 use std::collections::HashMap;
 use std::ffi::c_void;
 
@@ -258,10 +257,14 @@ mod tests {
     use std::ptr::null;
 
     use Instruction as I;
+    use rustc_apfloat::Float;
+    use rustc_apfloat::Round;
+    use rustc_apfloat::ieee::Double;
 
     use super::*;
     use crate::backend_test;
     use crate::instruction_context::LoadStoreWidth;
+    use crate::interpreter::float::RoundingMode;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::StepManyResult;
     use crate::machine_state::block_cache::block::Block;
@@ -270,9 +273,11 @@ mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::machine_state::registers::XRegister;
     use crate::machine_state::registers::nz;
+    use crate::parser::instruction::InstrRoundingMode;
     use crate::parser::instruction::InstrWidth;
     use crate::parser::instruction::InstrWidth::*;
     use crate::state::NewState;
@@ -373,6 +378,7 @@ mod tests {
                 "Interpreted mode ran for {}, compared to jit-mode of {jitted_steps}",
                 interpreted_res.steps
             );
+
             assert_eq_struct(
                 &interpreted.struct_ref::<FnManagerIdent>(),
                 &jitted.struct_ref::<FnManagerIdent>(),
@@ -3156,5 +3162,65 @@ mod tests {
         for scenario in scenarios {
             scenario.run(&mut jit, &mut interpreted_bb);
         }
+    });
+
+    backend_test!(test_f64_from_x64_unsigned_jit, F, {
+        use Instruction as I;
+
+        use crate::machine_state::registers::FRegister::*;
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
+        use crate::machine_state::registers::XRegister::*;
+
+        let scenarios: &[Scenario<F>] = &[
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(NZ::x1, 13872, Uncompressed),
+                    I::new_f64_from_x64_unsigned(
+                        f2,
+                        x1,
+                        InstrRoundingMode::Static(RoundingMode::RTZ),
+                        Compressed,
+                    ),
+                    I::new_nop(InstrWidth::Uncompressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let res = core.hart.fregisters.read(f2);
+                    let expected: FValue = (Double::from_u128_r(13872u128, Round::TowardZero))
+                        .value
+                        .into();
+                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                }))
+                .build(),
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(core, F, {
+                    // resets the rounding mode in `frm` of `fcsr` register to NTE.
+                    core.hart.csregisters.reset();
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, 13872, Uncompressed),
+                    I::new_f64_from_x64_unsigned(f2, x1, InstrRoundingMode::Dynamic, Compressed),
+                    I::new_nop(InstrWidth::Uncompressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(core, F, {
+                    let res = core.hart.fregisters.read(f2);
+                    let expected: FValue =
+                        (Double::from_u128_r(13872u128, Round::NearestTiesToEven))
+                            .value
+                            .into();
+                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                }))
+                .build(),
+        ];
+
+        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut interpreted_bb = InterpretedBlockBuilder;
+
+        for scenario in scenarios {
+            scenario.run(&mut jit, &mut interpreted_bb);
+        }
+
+        //invalid csr repr
     });
 }
