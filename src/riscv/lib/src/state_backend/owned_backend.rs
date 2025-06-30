@@ -361,10 +361,6 @@ pub(crate) mod test_helpers {
 
     impl TestBackendFactory for OwnedTestBackendFactory {
         type Manager = Owned;
-
-        fn manager() -> Self::Manager {
-            Owned
-        }
     }
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.

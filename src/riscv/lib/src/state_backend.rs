@@ -441,9 +441,6 @@ pub(crate) mod test_helpers {
             + ManagerClone
             + ManagerAlloc
             + JitStateAccess;
-
-        /// Construct a manager.
-        fn manager() -> Self::Manager;
     }
 
     /// Copy the allocated space by serialising and deserialising it.
