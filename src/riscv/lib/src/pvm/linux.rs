@@ -1073,7 +1073,7 @@ mod tests {
     use super::parameters::Visibility;
     use super::*;
     use crate::backend_test;
-    use crate::machine_state::block_cache::DefaultCacheConfig;
+    use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
@@ -1100,7 +1100,7 @@ mod tests {
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1133,7 +1133,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         machine_state.reset();
@@ -1203,7 +1203,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         machine_state.reset();
@@ -1275,7 +1275,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1308,7 +1308,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1393,7 +1393,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::new();
@@ -1445,7 +1445,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::new();
@@ -1515,7 +1515,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::new();
@@ -1567,7 +1567,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         let mut supervisor_state = SupervisorState::new();
@@ -1619,7 +1619,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         machine_state.reset();
@@ -1689,7 +1689,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         machine_state.reset();
@@ -1776,7 +1776,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, F>, F>::new(
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
                 InterpretedBlockBuilder,
             );
         machine_state.reset();

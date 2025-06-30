@@ -617,7 +617,6 @@ mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::machine_state::block_cache::BlockCache;
-    use crate::machine_state::block_cache::DefaultCacheConfig;
     use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::instruction::Args;
     use crate::machine_state::memory;
@@ -642,7 +641,7 @@ mod tests {
     use crate::traps::EnvironException;
 
     backend_test!(test_step, F, {
-        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, F>, F>::new(
+        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
@@ -689,7 +688,7 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, F>, F>::new(
+        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
@@ -714,7 +713,7 @@ mod tests {
     });
 
     backend_test!(test_step_exc_us, F, {
-        let state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, F>, F>::new(
+        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
@@ -867,7 +866,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, DefaultCacheConfig, Interpreted<M1M, F>, F>::new(
+        let state = MachineState::<M1M, TestCacheConfig, Interpreted<M1M, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
@@ -880,7 +879,7 @@ mod tests {
     });
 
     backend_test!(test_block_cache_crossing_pages_creates_new_block, F, {
-        let mut state = MachineState::<M8K, DefaultCacheConfig, Interpreted<M8K, F>, F>::new(
+        let mut state = MachineState::<M8K, TestCacheConfig, Interpreted<M8K, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
@@ -1028,7 +1027,7 @@ mod tests {
             },
         ];
 
-        let mut state = MachineState::<M4K, DefaultCacheConfig, Interpreted<M4K, F>, F>::new(
+        let mut state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
             InterpretedBlockBuilder,
         );
 
