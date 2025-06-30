@@ -602,6 +602,7 @@ pub enum MachineError {
 mod tests {
     use std::ops::Bound;
 
+    use proptest::prelude::ProptestConfig;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
@@ -647,7 +648,8 @@ mod tests {
 
         let state_cell = std::cell::RefCell::new(state);
 
-        proptest!(|(
+        // Lower the number of iterations because a single one takes around 7 seconds.
+        proptest!(ProptestConfig::with_cases(10), |(
             pc_addr_offset in 0..250_u64,
             jump_addr in 0..250_u64,
         )| {
@@ -694,7 +696,9 @@ mod tests {
 
         let state_cell = std::cell::RefCell::new(state);
 
-        proptest!(|(pc_addr_offset in 0..200_u64)| {
+        // Lower the number of iterations because a single one takes around 7 seconds.
+        proptest!(ProptestConfig::with_cases(10), |(
+            pc_addr_offset in 0..200_u64)| {
             let mut state = state_cell.borrow_mut();
             state.reset();
 
@@ -719,7 +723,8 @@ mod tests {
 
         let state_cell = std::cell::RefCell::new(state);
 
-        proptest!(|(
+        // Lower the number of iterations because a single one takes around 7 seconds.
+        proptest!(ProptestConfig::with_cases(10), |(
             pc_addr_offset in 0..200_u64,
         )| {
             // Raise exception, take trap from U-mode to S-mode (test delegation takes place)
