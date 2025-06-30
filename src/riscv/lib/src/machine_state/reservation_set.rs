@@ -106,12 +106,12 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
 }
 
 impl<M: backend::ManagerBase> NewState<M> for ReservationSet<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: backend::ManagerAlloc,
     {
         ReservationSet {
-            start_addr: Cell::new(manager),
+            start_addr: Cell::new(),
         }
     }
 }

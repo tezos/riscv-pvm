@@ -497,10 +497,9 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut manager = F::manager();
-        let mut instance = Example {
-            first: Cell::new(&mut manager),
-            second: Cells::new(&mut manager),
+        let mut instance: Example<F::Manager> = Example {
+            first: Cell::new(),
+            second: Cells::new(),
         };
 
         instance.first.write(first_value);

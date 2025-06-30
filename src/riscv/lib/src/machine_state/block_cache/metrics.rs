@@ -281,12 +281,12 @@ pub struct BlockMetrics<B> {
 }
 
 impl<B: NewState<M>, M: ManagerBase> NewState<M> for BlockMetrics<B> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            block: B::new(manager),
+            block: B::new(),
             block_hash: BlockHash::Dirty,
         }
     }

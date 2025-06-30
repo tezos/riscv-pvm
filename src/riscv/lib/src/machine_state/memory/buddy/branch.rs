@@ -109,12 +109,12 @@ where
     B: Buddy<M>,
     M: ManagerBase,
 {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            free_info: Cell::new_with(manager, FreeInfo {
+            free_info: Cell::new_with(FreeInfo {
                 left_longest_free_sequence: B::PAGES,
                 left_free_start: B::PAGES,
                 left_free_end: B::PAGES,
@@ -122,8 +122,8 @@ where
                 right_free_start: B::PAGES,
                 right_free_end: B::PAGES,
             }),
-            left: Box::new(B::new(manager)),
-            right: Box::new(B::new(manager)),
+            left: Box::new(B::new()),
+            right: Box::new(B::new()),
         }
     }
 }

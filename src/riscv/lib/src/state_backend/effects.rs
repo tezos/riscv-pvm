@@ -81,12 +81,12 @@ impl<T: Copy, EG: EffectGetter, M: ManagerBase> EffectCell<T, EG, M> {
 }
 
 impl<T: ConstDefault, EG, M: ManagerBase> NewState<M> for EffectCell<T, EG, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            inner: Cell::new(manager),
+            inner: Cell::new(),
             _pd: PhantomData,
         }
     }

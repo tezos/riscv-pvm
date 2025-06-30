@@ -468,17 +468,17 @@ pub struct SupervisorState<M: ManagerBase> {
 
 impl<M: ManagerBase> SupervisorState<M> {
     /// Allocate a new supervisor state.
-    pub fn new(manager: &mut M) -> Self
+    pub fn new() -> Self
     where
         M: ManagerAlloc,
     {
         SupervisorState {
-            tid_address: Cell::new(manager),
+            tid_address: Cell::new(),
             exited: false,
             exit_code: 0,
-            program: Cell::new(manager),
-            heap: Cell::new(manager),
-            stack_guard: Cell::new(manager),
+            program: Cell::new(),
+            heap: Cell::new(),
+            stack_guard: Cell::new(),
         }
     }
 
@@ -1169,13 +1169,13 @@ mod tests {
         type MemLayout = M4K;
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::<F::Manager>::new();
 
         machine_state
             .core
@@ -1204,12 +1204,12 @@ mod tests {
     backend_test!(ppoll_init_fds, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1220,7 +1220,7 @@ mod tests {
             .unwrap();
 
         for fd in [0i32, 1, 2] {
-            let mut supervisor_state = SupervisorState::new(&mut manager);
+            let mut supervisor_state = SupervisorState::<F::Manager>::new();
 
             let base_address = 0x10;
             machine_state
@@ -1276,12 +1276,12 @@ mod tests {
     backend_test!(rt_sigaction_no_handler, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1291,7 +1291,7 @@ mod tests {
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut supervisor_state = SupervisorState::<F::Manager>::new();
 
         // System call number
         machine_state
@@ -1350,13 +1350,13 @@ mod tests {
     backend_test!(sigaltstack_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::<F::Manager>::new();
 
         // System call number
         machine_state
@@ -1385,13 +1385,13 @@ mod tests {
     backend_test!(sched_getaffinity_set_sizes, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::<F::Manager>::new();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state
@@ -1472,13 +1472,13 @@ mod tests {
     backend_test!(sched_getaffinity_zero_set_size, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
         let mask_address = VirtAddr::new(0x100);
@@ -1526,13 +1526,13 @@ mod tests {
     backend_test!(sched_getaffinity_unreasonable_set_size, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
         let mask_address = VirtAddr::new(0x100);
@@ -1598,13 +1598,13 @@ mod tests {
     backend_test!(rt_sigaction_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::new();
 
         // System call number
         machine_state
@@ -1652,13 +1652,13 @@ mod tests {
     backend_test!(rt_sigprocmask_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
+        let mut supervisor_state = SupervisorState::new();
 
         // System call number
         machine_state
@@ -1706,12 +1706,12 @@ mod tests {
     backend_test!(clock_gettime_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1721,7 +1721,7 @@ mod tests {
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new();
 
         // System call number
         machine_state
@@ -1778,12 +1778,12 @@ mod tests {
     backend_test!(gettimeofday_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1793,7 +1793,7 @@ mod tests {
             .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new();
 
         // System call number
         machine_state
@@ -1867,12 +1867,12 @@ mod tests {
     backend_test!(mmap_returns_enomem_when_allocation_fails, F, {
         type MemLayout = M4K;
 
-        let mut manager = F::manager();
-        let mut machine_state =
-            MachineState::<MemLayout, DefaultCacheConfig, Interpreted<MemLayout, _>, _>::new(
-                &mut manager,
-                InterpretedBlockBuilder,
-            );
+        let mut machine_state = MachineState::<
+            MemLayout,
+            DefaultCacheConfig,
+            Interpreted<MemLayout, F::Manager>,
+            F::Manager,
+        >::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail
@@ -1887,7 +1887,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new(&mut manager);
+        let mut supervisor_state = SupervisorState::new();
 
         // Set up necessary registers for mmap
         machine_state

@@ -363,15 +363,14 @@ mod tests {
             interpreted_bb: &mut InterpretedBlockBuilder,
         ) {
             // Create the states for the interpreted and jitted runs.
-            let mut manager = F::manager();
-            let mut interpreted = MachineCoreState::<M4K, _>::new(&mut manager);
+            let mut interpreted = MachineCoreState::<M4K, F::Manager>::new();
             interpreted.main_memory.set_all_readable_writeable();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
+            let mut jitted = MachineCoreState::<M4K, F::Manager>::new();
             jitted.main_memory.set_all_readable_writeable();
 
             // Create the block of instructions.
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, F::Manager>::new();
             block.start_block();
             for instr in self.instructions.iter() {
                 block.push_instr(*instr);
@@ -1721,13 +1720,11 @@ mod tests {
 
         let success: &[I] = &[I::new_nop(Compressed)];
 
-        let mut manager = F::manager();
-
         for failure in failure_scenarios.iter() {
             let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut jitted = MachineCoreState::<M4K, F::Manager>::new();
+            let mut block = Interpreted::<M4K, F::Manager>::new();
 
             block.start_block();
             for instr in failure.iter() {

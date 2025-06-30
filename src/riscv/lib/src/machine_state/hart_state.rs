@@ -80,16 +80,16 @@ impl<M: backend::ManagerBase> HartState<M> {
 }
 
 impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: backend::ManagerAlloc,
     {
         Self {
-            xregisters: registers::XRegisters::new(manager),
-            fregisters: registers::FRegisters::new(manager),
-            csregisters: csregisters::CSRegisters::new(manager),
-            pc: Cell::new(manager),
-            reservation_set: ReservationSet::new(manager),
+            xregisters: registers::XRegisters::new(),
+            fregisters: registers::FRegisters::new(),
+            csregisters: csregisters::CSRegisters::new(),
+            pc: Cell::new(),
+            reservation_set: ReservationSet::new(),
         }
     }
 }

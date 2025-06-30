@@ -83,13 +83,13 @@ impl<M: ManagerBase> PosixState<M> {
 }
 
 impl<M: ManagerBase> NewState<M> for PosixState<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         PosixState {
-            code: Cell::new(manager),
-            exited: Cell::new(manager),
+            code: Cell::new(),
+            exited: Cell::new(),
         }
     }
 }

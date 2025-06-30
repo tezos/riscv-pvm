@@ -113,12 +113,12 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
 impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M>
     for Jitted<D, MC, M>
 {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            fallback: interpreted::Interpreted::new(manager),
+            fallback: interpreted::Interpreted::new(),
             dispatch: DispatchTarget::default(),
         }
     }

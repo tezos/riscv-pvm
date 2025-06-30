@@ -95,13 +95,11 @@ pub struct BuddyLeaf<const PAGES: u64, M: ManagerBase> {
 }
 
 impl<const PAGES: u64, M: ManagerBase> NewState<M> for BuddyLeaf<PAGES, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        Self {
-            set: Cell::new(manager),
-        }
+        Self { set: Cell::new() }
     }
 }
 

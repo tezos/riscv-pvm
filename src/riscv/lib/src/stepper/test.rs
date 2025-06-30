@@ -117,8 +117,8 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
         block_builder: B::BlockBuilder,
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
-            posix_state: PosixState::new(&mut Owned),
-            machine_state: MachineState::new(&mut Owned, block_builder),
+            posix_state: PosixState::<Owned>::new(),
+            machine_state: MachineState::new(block_builder),
         };
 
         // The interpreter needs a program to run.
