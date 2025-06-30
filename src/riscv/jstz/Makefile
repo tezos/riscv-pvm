@@ -40,9 +40,9 @@ build-kernel-native:
 .PHONY: test
 test:
 	@cargo test --no-default-features $(NATIVE_OPT)
-	@../scripts/jstz-bench.sh -t 1
-	@../scripts/jstz-bench.sh -t 1 -s
-	@../scripts/jstz-bench.sh -t 1 -sn
+	@../../../scripts/jstz-bench.sh -t 1
+	@../../../scripts/jstz-bench.sh -t 1 -s
+	@../../../scripts/jstz-bench.sh -t 1 -sn
 
 .PHONY: run
 run:
@@ -50,7 +50,7 @@ run:
 
 .PHONY: check
 check:
-	@exec ../scripts/format.sh --check
+	@exec ../../../scripts/format.sh --check
 	@INBOX_FILE=$(INBOX_FILE) cargo check --all-features --workspace --locked
 	@INBOX_FILE=$(INBOX_FILE) cargo clippy --all-features -- --deny warnings
 	@INBOX_FILE=$(INBOX_FILE) cargo doc --all-features --document-private-items --no-deps

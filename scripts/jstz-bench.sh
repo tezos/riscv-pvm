@@ -25,7 +25,7 @@ JSTZ_SANDBOX_PARAMS=("--input" "jstz/target/riscv64gc-unknown-linux-musl/release
 
 CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
-cd "$RISCV_DIR"
+cd "$RISCV_DIR/src/riscv"
 
 while getopts "i:t:m:spnj:" OPTION; do
   case "$OPTION" in

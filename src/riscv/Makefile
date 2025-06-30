@@ -83,7 +83,7 @@ endif
 .PHONY: build-deps
 build-deps: build-deps-slim
 	# Coverage deps
-	@./scripts/isa-suite-coverage.sh -d
+	@../../scripts/isa-suite-coverage.sh -d
 
 .PHONY: test
 test: build
@@ -101,11 +101,11 @@ test-miri:
 
 .PHONY: coverage
 coverage:
-	@./scripts/isa-suite-coverage.sh
+	@../../scripts/isa-suite-coverage.sh
 
 .PHONY: check
 check:
-	@exec scripts/format.sh --check
+	@exec ../../scripts/format.sh --check
 	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
