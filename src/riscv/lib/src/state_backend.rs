@@ -156,13 +156,10 @@ pub trait ManagerBase: Sized {
 /// since the manager creates the values on the first allocation.
 pub trait ManagerAlloc: 'static + ManagerReadWrite {
     /// Allocate a region in the state storage.
-    fn allocate_region<E, const LEN: usize>(
-        &mut self,
-        init_value: [E; LEN],
-    ) -> Self::Region<E, LEN>;
+    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN>;
 
     /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region<const LEN: usize>(&mut self) -> Self::DynRegion<LEN>;
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN>;
 }
 
 /// Manager with read capabilities

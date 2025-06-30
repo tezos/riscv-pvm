@@ -35,12 +35,12 @@ pub struct EnrichedCell<V: EnrichedValue, M: ManagerBase> {
 
 impl<V: EnrichedValue, M: ManagerBase> EnrichedCell<V, M> {
     /// Allocate a new enriched cell with the given value.
-    pub fn new_with(manager: &mut M, value: V::E) -> Self
+    pub fn new_with(_manager: &mut M, value: V::E) -> Self
     where
         M: ManagerAlloc,
         V: EnrichedValueLinked,
     {
-        let region = manager.allocate_region([value]);
+        let region = M::allocate_region([value]);
         let cell = M::enrich_cell(region);
         Self { cell }
     }
@@ -151,11 +151,11 @@ pub struct Cell<E: 'static, M: ManagerBase> {
 
 impl<E: 'static, M: ManagerBase> Cell<E, M> {
     /// Allocate a new cell with the given value.
-    pub fn new_with(manager: &mut M, value: E) -> Self
+    pub fn new_with(_manager: &mut M, value: E) -> Self
     where
         M: ManagerAlloc,
     {
-        let region = manager.allocate_region([value]);
+        let region = M::allocate_region([value]);
         Self {
             region: Cells::bind(region),
         }
@@ -295,11 +295,11 @@ pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
 
 impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     /// Allocate new cells with the given values.
-    pub fn new_with(manager: &mut M, values: [E; LEN]) -> Self
+    pub fn new_with(_manager: &mut M, values: [E; LEN]) -> Self
     where
         M: ManagerAlloc,
     {
-        let region = manager.allocate_region(values);
+        let region = M::allocate_region(values);
         Self { region }
     }
 
@@ -541,11 +541,11 @@ impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
 }
 
 impl<const LEN: usize, M: ManagerBase> NewState<M> for DynCells<LEN, M> {
-    fn new(manager: &mut M) -> Self
+    fn new(_manager: &mut M) -> Self
     where
         M: ManagerAlloc,
     {
-        let region = manager.allocate_dyn_region();
+        let region = M::allocate_dyn_region();
         Self { region }
     }
 }
