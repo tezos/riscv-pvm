@@ -479,11 +479,16 @@ pub(crate) mod test_helpers {
             $(#[$m])*
             #[test]
             fn $name() {
-                fn inner<$fac_name: $crate::state_backend::test_helpers::TestBackendFactory>() {
+                use $crate::state_backend::owned_backend::Owned;
+                use $crate::state_backend::proof_backend::ProofGen;
+                use $crate::state_backend::test_helpers::TestBackendFactory;
+
+                fn inner<$fac_name: TestBackendFactory>() {
                     $expr
                 }
 
-                inner::<$crate::state_backend::owned_backend::Owned>();
+                inner::<Owned>();
+                inner::<ProofGen<Owned>>();
             }
         };
     }
