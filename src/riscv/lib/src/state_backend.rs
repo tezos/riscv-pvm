@@ -471,6 +471,7 @@ pub(crate) mod test_helpers {
     use super::ManagerAlloc;
     use super::ManagerClone;
     use super::ManagerReadWrite;
+    use crate::machine_state::test_helpers::ManagerTestInit;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -499,7 +500,9 @@ pub(crate) mod test_helpers {
         /// Used for testing.
         pub trait TestBackendFactory = ManagerReadWrite
             + ManagerClone
-            + ManagerAlloc;
+            + ManagerAlloc
+            + ManagerTestInit
+            ;
     }
 }
 

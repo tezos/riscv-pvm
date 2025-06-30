@@ -602,6 +602,98 @@ pub enum MachineError {
 }
 
 #[cfg(test)]
+pub(crate) mod test_helpers {
+    use std::cell::RefMut;
+    use std::ops::Deref;
+    use std::ops::DerefMut;
+
+    use super::MachineState;
+    use crate::machine_state::block_cache::TestCacheConfig;
+    use crate::machine_state::block_cache::block::Interpreted;
+    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
+    use crate::machine_state::memory::M4K;
+    use crate::state_backend::ManagerBase;
+    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::proof_backend::ProofGen;
+
+    /// A wrapper to use a type `T` from either a mutable reference or an owned value.
+    pub enum RefMutOrOwned<'a, T> {
+        RefMut(RefMut<'a, T>),
+        Owned(T),
+    }
+
+    impl<T> Deref for RefMutOrOwned<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            match self {
+                RefMutOrOwned::RefMut(r) => r,
+                RefMutOrOwned::Owned(t) => t,
+            }
+        }
+    }
+
+    impl<T> DerefMut for RefMutOrOwned<'_, T> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            match self {
+                RefMutOrOwned::RefMut(r) => r,
+                RefMutOrOwned::Owned(t) => t,
+            }
+        }
+    }
+
+    /// Type alias for the machine state used in some tests.
+    pub type TestMachineOf<M> = MachineState<M4K, TestCacheConfig, Interpreted<M4K, M>, M>;
+
+    /// Trait used to initialise a specific object - [`TestMachineStateOf<M>`] - with respect to a
+    /// backend type.
+    pub trait ReinitMachine<M: ManagerBase>: Sized {
+        /// Provided a dirty state, reinitialize the machine state as if it was just created.
+        fn reinit_machine_state(
+            dirty_state: RefMut<TestMachineOf<M>>,
+        ) -> RefMutOrOwned<TestMachineOf<M>>;
+    }
+
+    /// Trait used to obtain initial values for testing purposes.
+    ///
+    /// It is useful to choose how objects are reinitialised in tests to improve performance, for
+    /// example the [`ProofGen`] would rather be newly created than be reset or cloned.
+    pub trait ManagerTestInit: ManagerBase {
+        /// This type is used to downcast the initialisation function to the actual type that is the
+        /// subject of initialisation.
+        type TestMachine: ReinitMachine<Self>;
+
+        /// Passthrough function to reinitialize the machine state.
+        fn reinit_machine_state(
+            dirty_state: RefMut<TestMachineOf<Self>>,
+        ) -> RefMutOrOwned<TestMachineOf<Self>> {
+            Self::TestMachine::reinit_machine_state(dirty_state)
+        }
+    }
+
+    // This is the place where we choose _what_ we are interested in initialising.
+    impl<M: ManagerBase> ManagerTestInit for M
+    where
+        TestMachineOf<M>: ReinitMachine<M>,
+    {
+        type TestMachine = TestMachineOf<Self>;
+    }
+
+    impl ReinitMachine<Owned> for TestMachineOf<Owned> {
+        fn reinit_machine_state(mut dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
+            dirty_state.reset();
+            RefMutOrOwned::RefMut(dirty_state)
+        }
+    }
+    impl ReinitMachine<ProofGen<Owned>> for TestMachineOf<ProofGen<Owned>> {
+        fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
+            let new_state = MachineState::new(InterpretedBlockBuilder);
+            RefMutOrOwned::Owned(new_state)
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::ops::Bound;
 
@@ -630,6 +722,8 @@ mod tests {
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
     use crate::machine_state::registers::t2;
+    use crate::machine_state::test_helpers::ManagerTestInit;
+    use crate::machine_state::test_helpers::TestMachineOf;
     use crate::parser::XRegisterParsed::*;
     use crate::parser::instruction::Instr;
     use crate::parser::instruction::InstrCacheable;
@@ -641,9 +735,7 @@ mod tests {
     use crate::traps::EnvironException;
 
     backend_test!(test_step, F, {
-        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
-            InterpretedBlockBuilder,
-        );
+        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -651,8 +743,9 @@ mod tests {
             pc_addr_offset in 0..250_u64,
             jump_addr in 0..250_u64,
         )| {
-            let mut state = state_cell.borrow_mut();
-            state.reset();
+            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+                state_cell.borrow_mut(),
+            );
 
             let init_pc_addr = memory::FIRST_ADDRESS + pc_addr_offset * 4;
             let jump_addr = memory::FIRST_ADDRESS + jump_addr * 4;
@@ -688,15 +781,16 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
-            InterpretedBlockBuilder,
-        );
+        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
 
         let state_cell = std::cell::RefCell::new(state);
 
-        proptest!(|(pc_addr_offset in 0..200_u64)| {
-            let mut state = state_cell.borrow_mut();
-            state.reset();
+        proptest!(|(
+            pc_addr_offset in 0..200_u64
+        )| {
+            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+                state_cell.borrow_mut(),
+            );
 
             let init_pc_addr = memory::FIRST_ADDRESS + pc_addr_offset * 4;
 
@@ -713,9 +807,7 @@ mod tests {
     });
 
     backend_test!(test_step_exc_us, F, {
-        let state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
-            InterpretedBlockBuilder,
-        );
+        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -723,8 +815,9 @@ mod tests {
             pc_addr_offset in 0..200_u64,
         )| {
             // Raise exception, take trap from U-mode to S-mode (test delegation takes place)
-            let mut state = state_cell.borrow_mut();
-            state.reset();
+            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+                state_cell.borrow_mut(),
+            );
 
             let bad_address = memory::FIRST_ADDRESS.wrapping_sub((pc_addr_offset + 10) * 4);
             state.core.hart.pc.write(bad_address);
