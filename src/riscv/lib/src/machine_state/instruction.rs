@@ -390,7 +390,7 @@ pub enum OpCode {
     // Internal OpCodes
     BranchEqualZero,
     BranchNotEqualZero,
-    J,
+    JumpPC,
     Mv,
     Li,
     Nop,
@@ -586,7 +586,7 @@ impl OpCode {
             Self::Csrrwi => Args::run_csrrwi,
             Self::Csrrsi => Args::run_csrrsi,
             Self::Csrrci => Args::run_csrrci,
-            Self::J => Args::run_j,
+            Self::JumpPC => Args::run_jump_pc,
             Self::JAbsolute => Args::run_j_absolute,
             Self::Jr => Args::run_jr,
             Self::Jalr => Args::run_jalr,
@@ -647,7 +647,7 @@ impl OpCode {
             Self::X32RemUnsigned => Some(Args::run_x32_rem_unsigned),
             Self::Li => Some(Args::run_li),
             Self::AddImmediateToPC => Some(Args::run_add_immediate_to_pc),
-            Self::J => Some(Args::run_j),
+            Self::JumpPC => Some(Args::run_jump_pc),
             Self::Jr => Some(Args::run_jr),
             Self::JrImm => Some(Args::run_jr_imm),
             Self::JAbsolute => Some(Args::run_j_absolute),
@@ -1647,8 +1647,8 @@ impl Args {
     impl_cr_nz_type!(integer::run_neg, run_neg);
     impl_ci_type!(load_store::run_li, run_li, non_zero);
 
-    fn run_j<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let addr = branching::run_j(icb, self.imm);
+    fn run_jump_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let addr = branching::run_jump_pc(icb, self.imm);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }
@@ -2388,7 +2388,7 @@ impl From<&InstrCacheable> for Instruction {
                 debug_assert!(args.imm >= 0 && args.imm % 4 == 0);
                 Instruction::new_x32_store(sp, args.rs2, args.imm, InstrWidth::Compressed)
             }
-            InstrCacheable::CJ(args) => Instruction::new_j(args.imm, InstrWidth::Compressed),
+            InstrCacheable::CJ(args) => Instruction::new_jump_pc(args.imm, InstrWidth::Compressed),
             InstrCacheable::CJr(args) => Instruction::new_jr(args.rs1, InstrWidth::Compressed),
             InstrCacheable::CJalr(args) => {
                 Instruction::new_jalr(nz::ra, args.rs1, InstrWidth::Compressed)
