@@ -73,7 +73,7 @@ where
             self.csregisters.set_bits(csr, value)
         };
 
-        self.xregisters.write(rd, old.repr());
+        self.xregisters.write(rd, old);
         Ok(())
     }
 
@@ -96,7 +96,7 @@ where
             self.csregisters.set_bits(csr, imm)
         };
 
-        self.xregisters.write(rd, old.repr());
+        self.xregisters.write(rd, old);
         Ok(())
     }
 
@@ -118,7 +118,7 @@ where
             self.csregisters.clear_bits(csr, value)
         };
 
-        self.xregisters.write(rd, old.repr());
+        self.xregisters.write(rd, old);
         Ok(())
     }
 
@@ -141,7 +141,7 @@ where
             self.csregisters.clear_bits(csr, imm)
         };
 
-        self.xregisters.write(rd, old.repr());
+        self.xregisters.write(rd, old);
         Ok(())
     }
 }

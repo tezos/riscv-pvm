@@ -8,7 +8,6 @@ pub(crate) mod csregisters;
 pub(crate) mod hart_state;
 pub mod instruction;
 pub mod memory;
-pub(crate) mod mode;
 pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
