@@ -969,7 +969,7 @@ mod tests {
                 },
             },
             TaggedInstruction {
-                opcode: OpCode::J,
+                opcode: OpCode::JumpPC,
                 args: TaggedArgs {
                     imm: -12,
                     ..TaggedArgs::DEFAULT
@@ -1014,7 +1014,7 @@ mod tests {
                 },
             },
             TaggedInstruction {
-                opcode: OpCode::J,
+                opcode: OpCode::JumpPC,
                 args: TaggedArgs {
                     imm: -12,
                     ..TaggedArgs::DEFAULT

@@ -16,13 +16,7 @@ use crate::parser::instruction::InstrWidth;
 
 /// Performs an unconditional control transfer. The immediate is added to
 /// the pc to form the jump target address.
-///
-/// Relevant RISC-V opcodes:
-/// - C.J
-/// - JAL
-/// - BEQ
-/// - C.BEQZ
-pub fn run_j<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
+pub fn run_jump_pc<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
     let imm = icb.xvalue_of_imm(imm);
     let current_pc = icb.pc_read();
     current_pc.add(imm, icb)

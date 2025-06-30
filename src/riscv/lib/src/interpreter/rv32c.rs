@@ -26,14 +26,14 @@ where
 #[cfg(test)]
 mod tests {
     use crate::backend_test;
-    use crate::interpreter::branching::run_j;
     use crate::interpreter::branching::run_jr;
+    use crate::interpreter::branching::run_jump_pc;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::nz;
     use crate::state::NewState;
 
-    backend_test!(test_run_j, F, {
+    backend_test!(test_run_jump_pc, F, {
         let test_case = [
             (42, 42, 84),
             (0, 1000, 1000),
@@ -45,7 +45,7 @@ mod tests {
             let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.pc.write(init_pc);
-            let new_pc = run_j(&mut state, imm);
+            let new_pc = run_jump_pc(&mut state, imm);
 
             assert_eq!(state.hart.pc.read(), init_pc);
             assert_eq!(new_pc, res_pc);
