@@ -92,7 +92,7 @@ mod test {
     const OUT_OF_BOUNDS_OFFSET: i64 = MC::TOTAL_BYTES as i64;
 
     backend_test!(test_cfsd_cfld, F, {
-        let state = MachineCoreState::<MC, _>::new(&mut F::manager());
+        let state = MachineCoreState::<MC, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -128,7 +128,7 @@ mod test {
     });
 
     backend_test!(test_cfsdsp_cfldsp, F, {
-        let state = MachineCoreState::<MC, _>::new(&mut F::manager());
+        let state = MachineCoreState::<MC, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(

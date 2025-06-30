@@ -333,8 +333,8 @@ mod tests {
         instr.iter().map(|cell| cell.read_stored()).collect()
     }
 
-    type SetupHook<F> = dyn Fn(&mut MachineCoreState<M4K, <F as TestBackendFactory>::Manager>);
-    type AssertHook<F> = dyn Fn(&MachineCoreState<M4K, <F as TestBackendFactory>::Manager>);
+    type SetupHook<F> = dyn Fn(&mut MachineCoreState<M4K, F>);
+    type AssertHook<F> = dyn Fn(&MachineCoreState<M4K, F>);
 
     struct Scenario<F: TestBackendFactory> {
         initial_pc: Option<u64>,
@@ -357,21 +357,16 @@ mod tests {
 
         /// Run a test scenario over both the Interpreted & JIT modes of compilation,
         /// to ensure they behave identically.
-        fn run(
-            &self,
-            jit: &mut JIT<M4K, F::Manager>,
-            interpreted_bb: &mut InterpretedBlockBuilder,
-        ) {
+        fn run(&self, jit: &mut JIT<M4K, F>, interpreted_bb: &mut InterpretedBlockBuilder) {
             // Create the states for the interpreted and jitted runs.
-            let mut manager = F::manager();
-            let mut interpreted = MachineCoreState::<M4K, _>::new(&mut manager);
+            let mut interpreted = MachineCoreState::<M4K, F>::new();
             interpreted.main_memory.set_all_readable_writeable();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
+            let mut jitted = MachineCoreState::<M4K, F>::new();
             jitted.main_memory.set_all_readable_writeable();
 
             // Create the block of instructions.
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut block = Interpreted::<M4K, F>::new();
             block.start_block();
             for instr in self.instructions.iter() {
                 block.push_instr(*instr);
@@ -499,13 +494,13 @@ mod tests {
 
     macro_rules! setup_hook {
         ($core:ident, $F:ident, $block:expr) => {
-            Box::new(move |$core: &mut MachineCoreState<M4K, $F::Manager>| $block)
+            Box::new(move |$core: &mut MachineCoreState<M4K, $F>| $block)
         };
     }
 
     macro_rules! assert_hook {
         ($core:ident, $F:ident, $block:expr) => {
-            Box::new(move |$core: &MachineCoreState<M4K, $F::Manager>| $block)
+            Box::new(move |$core: &MachineCoreState<M4K, $F>| $block)
         };
     }
 
@@ -520,7 +515,7 @@ mod tests {
             ]),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -558,7 +553,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -606,7 +601,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -632,7 +627,7 @@ mod tests {
             .set_assert_hook(assert_x1_is_five)
             .build();
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         scenario.run(&mut jit, &mut interpreted_bb);
@@ -675,7 +670,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -717,7 +712,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -762,7 +757,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -804,7 +799,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -851,7 +846,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -916,7 +911,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -962,7 +957,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1010,7 +1005,7 @@ mod tests {
             test_x32_mul(0x80000000, 0x80000000, 0, Compressed),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1055,7 +1050,7 @@ mod tests {
             test_division(40, -80, 0),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1128,7 +1123,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1292,7 +1287,7 @@ mod tests {
             test_jal(1000, 1000, 2000, 1004, Uncompressed),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1334,7 +1329,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1381,7 +1376,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1496,7 +1491,7 @@ mod tests {
             test_slt_imm(I::new_set_less_than_immediate_unsigned, (x3, -7), -6, TRUE),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1586,7 +1581,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1661,7 +1656,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1679,7 +1674,7 @@ mod tests {
             ])
             .build()];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1697,7 +1692,7 @@ mod tests {
             ])
             .build();
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         scenario.run(&mut jit, &mut interpreted_bb);
@@ -1721,13 +1716,11 @@ mod tests {
 
         let success: &[I] = &[I::new_nop(Compressed)];
 
-        let mut manager = F::manager();
-
         for failure in failure_scenarios.iter() {
-            let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+            let mut jit = JIT::<M4K, F>::new().unwrap();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new(&mut manager);
-            let mut block = Interpreted::<M4K, _>::new(&mut manager);
+            let mut jitted = MachineCoreState::<M4K, F>::new();
+            let mut block = Interpreted::<M4K, F>::new();
 
             block.start_block();
             for instr in failure.iter() {
@@ -1801,7 +1794,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -1968,7 +1961,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2072,7 +2065,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2154,7 +2147,7 @@ mod tests {
             invalid_store(I::new_x8_store, LoadStoreWidth::Byte),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2240,7 +2233,7 @@ mod tests {
             invalid_load(I::new_x8_load_unsigned, LoadStoreWidth::Byte),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2293,7 +2286,7 @@ mod tests {
             bitwise_test_xor(x1, 0xFFF0, x3, 0x0FFF, 0xF00F),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2462,7 +2455,7 @@ mod tests {
             invalid_x64_atomic_unsigned(I::new_x64_atomic_max_unsigned, 10, 30, u64::max),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2568,7 +2561,7 @@ mod tests {
             test_mul_high(I::new_x64_mul_high_unsigned, x1, 0u64, x3, u64::MAX, 0u64),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2714,7 +2707,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2882,7 +2875,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -2982,7 +2975,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -3062,7 +3055,7 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -3195,7 +3188,7 @@ mod tests {
             invalid_x32_atomic(I::new_x32_atomic_max_signed, 10, 20, signed_max),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {
@@ -3253,7 +3246,7 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K, F::Manager>::new().unwrap();
+        let mut jit = JIT::<M4K, F>::new().unwrap();
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         for scenario in scenarios {

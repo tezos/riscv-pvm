@@ -379,8 +379,7 @@ pub mod tests {
         use crate::machine_state::memory::PAGE_SIZE;
         use crate::machine_state::memory::Permissions;
 
-        let mut manager = F::manager();
-        let mut memory = <<M4K as MemoryConfig>::State<_>>::new(&mut manager);
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
 
         // Write a pattern to ensure memory contains non-zero values
         for i in 0..PAGE_SIZE.get() {
@@ -409,8 +408,7 @@ pub mod tests {
     });
 
     backend_test!(test_endianess, F, {
-        let mut manager = F::manager();
-        let mut memory = <<M4K as MemoryConfig>::State<_>>::new(&mut manager);
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
 
         memory
             .write_instruction_unchecked(0, 0x1122334455667788u64)

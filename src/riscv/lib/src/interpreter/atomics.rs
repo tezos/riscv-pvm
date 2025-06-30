@@ -653,7 +653,7 @@ pub(crate) mod test {
                 use $crate::machine_state::memory::M4K;
                 use $crate::state::NewState;
 
-                let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+                let state = MachineCoreState::<M4K, F>::new();
                 let state_cell = std::cell::RefCell::new(state);
 
                 proptest!(|(
@@ -699,7 +699,7 @@ pub(crate) mod test {
                 use $crate::machine_state::memory::M4K;
                 use $crate::state::NewState;
 
-                let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+                let state = MachineCoreState::<M4K, F>::new();
                 let state_cell = std::cell::RefCell::new(state);
 
                 proptest!(|(
@@ -909,7 +909,7 @@ pub(crate) mod test {
     );
 
     backend_test!(test_alignment, F, {
-        let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let mut state = MachineCoreState::<M4K, F>::new();
         state.main_memory.set_all_readable_writeable();
         state.hart.xregisters.write(a0, 80); // LR.D starting address.
         state.hart.xregisters.write(a1, 84); // SC.W starting address.

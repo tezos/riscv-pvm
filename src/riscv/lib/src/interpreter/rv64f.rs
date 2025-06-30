@@ -519,7 +519,7 @@ mod tests {
             rs1_f in (1_u8..31).prop_map(u5::new).prop_map(parse_fregister),
             rs2 in (1_u8..31).prop_map(u5::new).prop_map(parse_xregister),
         )| {
-            let mut state = HartState::new(&mut F::manager());
+            let mut state = HartState::<F>::new();
 
             state.xregisters.write(rs1, f as u64);
 
@@ -546,7 +546,7 @@ mod tests {
     });
 
     backend_test!(test_load_store, F, {
-        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state = MachineCoreState::<M4K, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(

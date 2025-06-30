@@ -47,13 +47,13 @@ pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
 }
 
 impl<MC: MemoryConfig, M: ManagerBase> NewState<M> for Interpreted<MC, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            len_instr: Cell::new(manager),
-            instr: NewState::new(manager),
+            len_instr: Cell::new(),
+            instr: NewState::new(),
         }
     }
 }

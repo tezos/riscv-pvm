@@ -47,7 +47,7 @@ mod tests {
             imm in any::<i64>(),
             reg_val in any::<i64>())|
         {
-            let mut state = HartState::new(&mut F::manager());
+            let mut state = HartState::<F>::new();
 
             state.xregisters.write_nz(nz::a0, reg_val as u64);
             state.xregisters.run_caddiw(imm, nz::a0);

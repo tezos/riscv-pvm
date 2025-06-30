@@ -328,16 +328,13 @@ mod tests {
 
     // Test that the Atom layout initialises the underlying Cell correctly.
     backend_test!(test_cell_init, F, {
-        assert_eq!(
-            Cell::<MyFoo, _>::new(&mut F::manager()).read(),
-            MyFoo::DEFAULT
-        );
+        assert_eq!(Cell::<MyFoo, F>::new().read(), MyFoo::DEFAULT);
     });
 
     // Test that the Array layout initialises the underlying Cells correctly.
     backend_test!(test_cells_init, F, {
         assert_eq!(
-            Cells::<MyFoo, 1337, _>::new(&mut F::manager()).read_all(),
+            Cells::<MyFoo, 1337, F>::new().read_all(),
             [MyFoo::DEFAULT; 1337]
         );
     });
@@ -353,8 +350,8 @@ mod tests {
 
         fn inner(bar: u64, qux: [u8; 64]) {
             let mut foo = AllocatedOf::<Foo, Owned> {
-                bar: Cell::new(&mut Owned),
-                qux: Cells::new(&mut Owned),
+                bar: Cell::new(),
+                qux: Cells::new(),
             };
 
             foo.bar.write(bar);

@@ -35,7 +35,7 @@ pub struct EnrichedCell<V: EnrichedValue, M: ManagerBase> {
 
 impl<V: EnrichedValue, M: ManagerBase> EnrichedCell<V, M> {
     /// Allocate a new enriched cell with the given value.
-    pub fn new_with(_manager: &mut M, value: V::E) -> Self
+    pub fn new_with(value: V::E) -> Self
     where
         M: ManagerAlloc,
         V: EnrichedValueLinked,
@@ -113,11 +113,11 @@ where
     V: EnrichedValueLinked,
     V::E: ConstDefault,
 {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        Self::new_with(manager, <V::E as ConstDefault>::DEFAULT)
+        Self::new_with(<V::E as ConstDefault>::DEFAULT)
     }
 }
 
@@ -151,7 +151,7 @@ pub struct Cell<E: 'static, M: ManagerBase> {
 
 impl<E: 'static, M: ManagerBase> Cell<E, M> {
     /// Allocate a new cell with the given value.
-    pub fn new_with(_manager: &mut M, value: E) -> Self
+    pub fn new_with(value: E) -> Self
     where
         M: ManagerAlloc,
     {
@@ -212,11 +212,11 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
 }
 
 impl<E: ConstDefault, M: ManagerBase> NewState<M> for Cell<E, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        Self::new_with(manager, E::DEFAULT)
+        Self::new_with(E::DEFAULT)
     }
 }
 
@@ -295,7 +295,7 @@ pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
 
 impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     /// Allocate new cells with the given values.
-    pub fn new_with(_manager: &mut M, values: [E; LEN]) -> Self
+    pub fn new_with(values: [E; LEN]) -> Self
     where
         M: ManagerAlloc,
     {
@@ -385,11 +385,11 @@ impl<E: 'static, const LEN: usize> Cells<E, LEN, Owned> {
 }
 
 impl<E: ConstDefault + 'static, const LEN: usize, M: ManagerBase> NewState<M> for Cells<E, LEN, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        Self::new_with(manager, [E::DEFAULT; LEN])
+        Self::new_with([E::DEFAULT; LEN])
     }
 }
 
@@ -541,7 +541,7 @@ impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
 }
 
 impl<const LEN: usize, M: ManagerBase> NewState<M> for DynCells<LEN, M> {
-    fn new(_manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
@@ -656,9 +656,8 @@ pub(crate) mod tests {
     backend_test!(test_region_overlap, F, {
         const LEN: usize = 64;
 
-        let mut manager = F::manager();
-        let mut array1: Cells<u64, LEN, _> = Cells::new(&mut manager);
-        let mut array2: Cells<u64, LEN, _> = Cells::new(&mut manager);
+        let mut array1: Cells<u64, LEN, F> = Cells::new();
+        let mut array2: Cells<u64, LEN, F> = Cells::new();
 
         // Allocate two consecutive arrays
         // let mut array1 = manager.allocate_region(array1_place);
@@ -699,9 +698,8 @@ pub(crate) mod tests {
     });
 
     backend_test!(test_cell_overlap, F, {
-        let mut manager = F::manager();
-        let mut cell1: Cell<[u64; 4], _> = Cell::new(&mut manager);
-        let mut cell2: Cell<[u64; 4], _> = Cell::new(&mut manager);
+        let mut cell1: Cell<[u64; 4], F> = Cell::new();
+        let mut cell2: Cell<[u64; 4], F> = Cell::new();
 
         // Cell should be zero-initialised.
         assert_eq!(cell1.read(), [0; 4]);
@@ -731,8 +729,7 @@ pub(crate) mod tests {
         {
             const LEN: usize = 8;
 
-            let mut manager = F::manager();
-            let mut state = DynCells::<LEN, _>::new(&mut manager);
+            let mut state = DynCells::<LEN, F>::new();
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
@@ -742,8 +739,7 @@ pub(crate) mod tests {
 
     backend_test!(test_dynregion_stored_format, F, {
         // Writing to one item of the region must convert to stored format.
-        let mut manager = F::manager();
-        let mut region = DynCells::<1024, _>::new(&mut manager);
+        let mut region = DynCells::<1024, F>::new();
 
         region.write(0, Flipper { a: 13, b: 37 });
         assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });
@@ -774,8 +770,7 @@ pub(crate) mod tests {
 
     backend_test!(test_region_stored_format, F, {
         // Writing to one item of the region must convert to stored format.
-        let mut manager = F::manager();
-        let mut region = Cells::<Flipper, 4, _>::new(&mut manager);
+        let mut region = Cells::<Flipper, 4, F>::new();
 
         region.write(0, Flipper { a: 13, b: 37 });
         assert_eq!(region.read(0), Flipper { a: 13, b: 37 });

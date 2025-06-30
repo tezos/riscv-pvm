@@ -486,7 +486,7 @@ mod tests {
     use crate::traps::Exception;
 
     backend_test!(test_fmv_d, F, {
-        let state = HartState::new(&mut F::manager());
+        let state = HartState::<F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -510,7 +510,7 @@ mod tests {
     });
 
     backend_test!(test_load_store, F, {
-        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state = MachineCoreState::<M4K, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(

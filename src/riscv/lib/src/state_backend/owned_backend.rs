@@ -351,18 +351,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::state_backend::test_helpers::TestBackendFactory;
-
-    /// Test backend factory for the owned state manager
-    pub struct OwnedTestBackendFactory;
-
-    impl TestBackendFactory for OwnedTestBackendFactory {
-        type Manager = Owned;
-
-        fn manager() -> Self::Manager {
-            Owned
-        }
-    }
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
     #[test]

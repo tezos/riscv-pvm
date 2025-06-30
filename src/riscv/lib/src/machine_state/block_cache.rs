@@ -212,7 +212,7 @@ fn run_instr<MC: MemoryConfig, M: ManagerReadWrite>(
 /// Block cache implementation
 pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     /// Instantiate a new block cache instance.
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc;
 

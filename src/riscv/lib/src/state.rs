@@ -11,17 +11,17 @@ use crate::state_backend::ManagerBase;
 /// Methods for creating a new state without additional information
 pub trait NewState<M: ManagerBase> {
     /// Create a new state.
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc;
 }
 
 impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for [T; LEN] {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        array::from_fn(|_| T::new(manager))
+        array::from_fn(|_| T::new())
     }
 }
 
@@ -36,10 +36,10 @@ impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for [T; LEN] 
 // This comes with a small trade-off, we loose out on the `Box<_>` implementation of `NewState`.
 // However, this is not a problem since we can always use `Box::new` independently.
 impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for Box<[T; LEN]> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
-        boxed_from_fn(|| T::new(manager))
+        boxed_from_fn(|| T::new())
     }
 }

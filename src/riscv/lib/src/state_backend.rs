@@ -404,6 +404,8 @@ pub type RefVerifierAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verifi
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use trait_set::trait_set;
+
     use super::AllocatedOf;
     use super::Layout;
     use super::ManagerAlloc;
@@ -424,23 +426,21 @@ pub(crate) mod test_helpers {
                     $expr
                 }
 
-                inner::<$crate::state_backend::owned_backend::test_helpers::OwnedTestBackendFactory>();
+                inner::<$crate::state_backend::owned_backend::Owned>();
             }
         };
     }
 
-    /// This lets you construct backends for any layout.
-    pub trait TestBackendFactory {
-        /// Manager used in testing
-        type Manager: ManagerReadWrite
-            + ManagerSerialise
-            + ManagerDeserialise
-            + ManagerClone
-            + ManagerAlloc
-            + JitStateAccess;
-
-        /// Construct a manager.
-        fn manager() -> Self::Manager;
+    trait_set! {
+        /// This lets you construct backends for any layout.
+        ///
+        /// Used for testing.
+        pub trait TestBackendFactory = ManagerReadWrite
+        + ManagerSerialise
+        + ManagerDeserialise
+        + ManagerClone
+        + ManagerAlloc
+        + JitStateAccess;
     }
 
     /// Copy the allocated space by serialising and deserialising it.
@@ -494,10 +494,9 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut manager = F::manager();
-        let mut instance = Example {
-            first: Cell::new(&mut manager),
-            second: Cells::new(&mut manager),
+        let mut instance: Example<F> = Example {
+            first: Cell::new(),
+            second: Cells::new(),
         };
 
         instance.first.write(first_value);

@@ -114,7 +114,7 @@ mod test {
         ];
 
         for (imm, rd_rs1, res) in imm_rdrs1_res {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
             super::run_li(&mut state, imm, rd_rs1);
             assert_eq!(state.hart.xregisters.read_nz(rd_rs1), res);
         }
@@ -122,7 +122,7 @@ mod test {
 
     backend_test!(test_lui, F, {
         proptest!(|(imm in any::<i64>())| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
             state.hart.xregisters.write(a2, 0);
             state.hart.xregisters.write(a4, 0);
 
@@ -138,7 +138,7 @@ mod test {
     });
 
     backend_test!(test_load_store, F, {
-        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state = MachineCoreState::<M4K, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
