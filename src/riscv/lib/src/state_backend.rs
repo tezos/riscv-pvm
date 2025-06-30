@@ -157,12 +157,12 @@ pub trait ManagerBase: Sized {
 pub trait ManagerAlloc: 'static + ManagerReadWrite {
     /// Allocate a region in the state storage.
     fn allocate_region<E, const LEN: usize>(
-        &mut self,
+        // &mut self,
         init_value: [E; LEN],
     ) -> Self::Region<E, LEN>;
 
     /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region<const LEN: usize>(&mut self) -> Self::DynRegion<LEN>;
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN>;
 }
 
 /// Manager with read capabilities
