@@ -1647,9 +1647,11 @@ impl Args {
     impl_cr_nz_type!(integer::run_neg, run_neg);
     impl_ci_type!(load_store::run_li, run_li, non_zero);
 
+    /// Performs an unconditional control transfer. The immediate value is used as a relative
+    /// offset from the current program counter.
     fn run_jump_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let addr = branching::run_jump_pc(icb, self.imm);
-        let pcu = ProgramCounterUpdate::Set(addr);
+        let offset = self.imm;
+        let pcu = ProgramCounterUpdate::Relative(offset);
         icb.ok(pcu)
     }
 
