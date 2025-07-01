@@ -1184,7 +1184,7 @@ mod tests {
             .xregisters
             .write(registers::a7, SET_TID_ADDRESS);
 
-        let tid_address = rand::thread_rng().gen_range(0..MEM_BYTES as Address);
+        let tid_address = rand::rng().random_range(0..MEM_BYTES as Address);
         machine_state
             .core
             .hart

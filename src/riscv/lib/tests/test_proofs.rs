@@ -89,8 +89,8 @@ fn test_jstz_proofs(full: bool, verify_fn: StepperVerifyFn<M64M, DefaultCacheCon
         run_steps_ladder(&make_stepper, &ladder, Some(base_hash), verify_fn);
     } else {
         // Run a number of steps `s` and produce a proof
-        let mut rng = rand::thread_rng();
-        let step = [rng.gen_range(1..steps)];
+        let mut rng = rand::rng();
+        let step = [rng.random_range(1..steps)];
         run_steps_ladder(&make_stepper, &step, None, verify_fn)
     }
 }
