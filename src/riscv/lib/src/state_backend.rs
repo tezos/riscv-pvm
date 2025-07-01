@@ -428,6 +428,7 @@ pub(crate) mod test_helpers {
                 }
 
                 inner::<$crate::state_backend::owned_backend::test_helpers::OwnedTestBackendFactory>();
+                inner::<$crate::state_backend::proof_backend::test_helpers::ProofGenTestBackendFactory>();
             }
         };
     }
