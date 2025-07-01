@@ -100,14 +100,14 @@ mod tests {
     use crate::backend_test;
 
     fn distribute(mut total: u64, min: u64) -> Vec<u64> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut steps: Vec<u64> = std::iter::from_fn(|| {
             if total == 0 {
                 return None;
             }
 
             let steps = total.div_euclid(2).max(min + 1);
-            let steps = rng.gen_range(min..=steps).min(total);
+            let steps = rng.random_range(min..=steps).min(total);
 
             total = total.saturating_sub(steps);
 
@@ -152,7 +152,7 @@ mod tests {
 
         let total_pages = state.longest_free_sequence();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..100 {
             // Create a distribution of allocation sizes that when used together would allocate all
             // available memory
@@ -164,7 +164,7 @@ mod tests {
                 // When we accumulated at least 3 allocations, we randomly free one of them. This
                 // is to cause fragmentation and test the allocator's ability to reuse freed memory.
                 if occupied.len() >= 3 {
-                    let index = rng.gen_range(0..occupied.len());
+                    let index = rng.random_range(0..occupied.len());
                     let (idx, length) = occupied.remove(index);
                     state.deallocate(idx, length);
                 }

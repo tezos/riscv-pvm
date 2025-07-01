@@ -560,7 +560,7 @@ mod tests {
 
     use proptest::proptest;
     use rand::Fill;
-    use rand::thread_rng;
+    use rand::rng;
     use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
     use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
     use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
@@ -645,7 +645,7 @@ mod tests {
         let level = rand::random();
         let counter = rand::random();
         let mut payload = [0u8; BUFFER_LEN + 10];
-        payload.try_fill(&mut thread_rng()).unwrap();
+        payload.fill(&mut rng());
         assert!(pvm.provide_inbox_message(level, counter, &payload));
 
         // The status should switch from WaitingForInput to Evaluating
