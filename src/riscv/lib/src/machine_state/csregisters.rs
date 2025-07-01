@@ -177,6 +177,7 @@ pub struct CSRegisters<M: backend::ManagerBase> {
 
 impl<M: backend::ManagerBase> CSRegisters<M> {
     /// Write to a CSR.
+    #[inline]
     pub fn write<V: Bits64>(&mut self, reg: CSRegister, value: V)
     where
         M: backend::ManagerWrite,
@@ -238,6 +239,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
     }
 
     /// Read from a CSR.
+    #[inline]
     pub fn read<V: Bits64>(&self, reg: CSRegister) -> V
     where
         M: backend::ManagerRead,
