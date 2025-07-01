@@ -137,8 +137,15 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
 
             Ok(ProgramCounterUpdate::Set(instr_pc)) => {
                 // Setting the instr_pc implies execution continuing
-                // elsewhere - and no longer within the current block.
+                // elsewhere and no longer within the current block, so the
+                // current block instr_pc does not need updating.
                 core.hart.pc.write(instr_pc);
+                result.steps += 1;
+                break;
+            }
+
+            Ok(ProgramCounterUpdate::Relative(offset)) => {
+                core.hart.pc.write(instr_pc.wrapping_add_signed(offset));
                 result.steps += 1;
                 break;
             }

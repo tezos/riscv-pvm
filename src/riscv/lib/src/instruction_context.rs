@@ -288,7 +288,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     ) -> ProgramCounterUpdate<Self::XValue> {
         if predicate {
             let pc = self.pc_read();
-            let address = pc.wrapping_add(offset as u64);
+            let address = pc.wrapping_add_signed(offset);
             ProgramCounterUpdate::Set(address)
         } else {
             ProgramCounterUpdate::Next(instr_width)

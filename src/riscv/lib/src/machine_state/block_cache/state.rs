@@ -150,7 +150,16 @@ impl<M: ManagerBase> PartialBlock<M> {
 
                 Ok(ProgramCounterUpdate::Set(instr_pc)) => {
                     // Setting the instr_pc implies execution continuing
-                    // elsewhere - and no longer within the current block.
+                    // elsewhere and no longer within the current block, so the
+                    // current block instr_pc does not need updating.
+                    core.hart.pc.write(instr_pc);
+                    result.steps += 1;
+                    self.reset();
+                    return result;
+                }
+
+                Ok(ProgramCounterUpdate::Relative(offset)) => {
+                    instr_pc = instr_pc.wrapping_add_signed(offset);
                     core.hart.pc.write(instr_pc);
                     result.steps += 1;
                     self.reset();

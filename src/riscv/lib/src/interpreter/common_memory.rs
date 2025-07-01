@@ -32,7 +32,7 @@ where
         imm: i64,
         rs1: XRegister,
     ) -> Result<T, Exception> {
-        let address = self.hart.xregisters.read(rs1).wrapping_add(imm as u64);
+        let address = self.hart.xregisters.read(rs1).wrapping_add_signed(imm);
         self.read_from_address(address)
     }
 
@@ -54,7 +54,7 @@ where
         rs1: XRegister,
         value: T,
     ) -> Result<(), Exception> {
-        let address = self.hart.xregisters.read(rs1).wrapping_add(imm as u64);
+        let address = self.hart.xregisters.read(rs1).wrapping_add_signed(imm);
         self.write_to_address(address, value)
     }
 }

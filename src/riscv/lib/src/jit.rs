@@ -1513,7 +1513,7 @@ mod tests {
              -> Scenario {
                 let initial_pc: u64 = 0x1000;
                 let imm: i64 = -0x2000;
-                let expected_pc_branch = initial_pc.wrapping_add(imm as u64).wrapping_add(8);
+                let expected_pc_branch = initial_pc.wrapping_add_signed(imm).wrapping_add(8);
 
                 ScenarioBuilder::default()
                     .set_initial_pc(initial_pc)
