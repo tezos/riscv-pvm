@@ -5,7 +5,6 @@
 
 use std::ops::Deref;
 
-use super::Elem;
 use super::EnrichedValue;
 use super::EnrichedValueLinked;
 use super::FnManager;
@@ -23,6 +22,7 @@ use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
 use crate::state::NewState;
+use crate::state_backend::Elem;
 
 /// Link a stored value directly with a derived value -
 /// that would either be expensive to compute each time, or cannot
@@ -532,7 +532,7 @@ impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
 
     /// Update multiple elements in the region. `address` is in bytes.
     #[inline]
-    pub fn write_all<E: Elem>(&mut self, address: usize, values: &[E])
+    pub fn write_all<E: Elem + Copy>(&mut self, address: usize, values: &[E])
     where
         M: ManagerWrite,
     {
@@ -594,6 +594,8 @@ impl<const LEN: usize, M: ManagerClone> Clone for DynCells<LEN, M> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::num::NonZeroUsize;
+
     use serde::ser::SerializeTuple;
 
     use crate::backend_test;
@@ -605,7 +607,7 @@ pub(crate) mod tests {
     use crate::state_backend::Elem;
     use crate::state_backend::FnManagerIdent;
 
-    /// Dummy type that helps us implement custom normalisation via [Elem]
+    /// Dummy type that helps us implement custom normalisation via [`Elem`]
     #[repr(C, packed)]
     #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Default)]
     struct Flipper {
@@ -630,28 +632,24 @@ pub(crate) mod tests {
     }
 
     impl Elem for Flipper {
-        fn store(&mut self, source: &Self) {
-            self.a = source.b;
-            self.b = source.a;
+        const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+
+        unsafe fn read_unaligned(source: *const u8) -> Self {
+            unsafe {
+                Self {
+                    a: source.add(1).read(),
+                    b: source.read(),
+                }
+            }
         }
 
-        fn to_stored_in_place(&mut self) {
-            std::mem::swap(&mut self.a, &mut self.b);
-        }
-
-        fn from_stored_in_place(&mut self) {
-            std::mem::swap(&mut self.b, &mut self.a);
-        }
-
-        fn from_stored(source: &Self) -> Self {
-            Self {
-                a: source.b,
-                b: source.a,
+        unsafe fn write_unaligned(self, dest: *mut u8) {
+            unsafe {
+                dest.add(1).write(self.a);
+                dest.write(self.b);
             }
         }
     }
-
-    const FLIPPER_SIZE: usize = std::mem::size_of::<Flipper>();
 
     backend_test!(test_region_overlap, F, {
         const LEN: usize = 64;
@@ -736,7 +734,7 @@ pub(crate) mod tests {
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
-            state.write(LEN * FLIPPER_SIZE, Flipper { a: 1, b: 2 });
+            state.write(LEN * Flipper::STORED_SIZE.get(), Flipper { a: 1, b: 2 });
         }
     );
 

@@ -18,8 +18,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::mem;
-use std::slice;
 
 use serde::ser::SerializeTuple;
 
@@ -31,6 +29,8 @@ use super::ManagerRead;
 use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
+use crate::state_backend::Elem;
+use crate::state_backend::elem_bytes;
 
 pub mod merkle;
 pub mod proof;
@@ -77,7 +77,7 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         (0..LEN).map(|i| Self::region_read(region, i)).collect()
     }
 
-    fn dyn_region_read<E: super::Elem, const LEN: usize>(
+    fn dyn_region_read<E: Elem, const LEN: usize>(
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
@@ -85,15 +85,19 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         region.unrecorded_read(address)
     }
 
-    fn dyn_region_read_all<E: super::Elem, const LEN: usize>(
+    fn dyn_region_read_all<E: Elem, const LEN: usize>(
         region: &Self::DynRegion<LEN>,
         address: usize,
         values: &mut [E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
-
         for (offset, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read(region, address + offset * mem::size_of::<E>());
+            *value = Self::dyn_region_read(
+                region,
+                E::STORED_SIZE
+                    .get()
+                    .wrapping_mul(offset)
+                    .wrapping_add(address),
+            );
         }
     }
 
@@ -142,38 +146,32 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         }
     }
 
-    fn dyn_region_write<E: super::Elem, const LEN: usize>(
+    fn dyn_region_write<E: Elem, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
-        mut value: E,
+        value: E,
     ) {
-        assert!(address + mem::size_of_val(&value) <= LEN);
+        assert!(address + E::STORED_SIZE.get() <= LEN);
 
-        value.to_stored_in_place();
-
-        // Get a mutable slice of bytes over the value to be written and iterate over it
-        // in order to record every byte to the write log. The wrapped region is not modified.
-        let value_bytes = unsafe {
-            // SAFETY: Obtaining a slice of `mem::size_of::<E>()` bytes from a reference
-            // to one value of type `E` should be safe, assuming `value` is not the result of
-            // multiple allocations.
-            // Cannot use `mem::transmute` because `E` does not have a constant size.
-            slice::from_raw_parts((&value as *const E) as *const u8, mem::size_of::<E>())
-        };
-        for (offset, byte) in value_bytes.iter().enumerate() {
-            region.writes.insert(address + offset, *byte);
+        for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
+            region.writes.insert(address + offset, byte);
         }
     }
 
-    fn dyn_region_write_all<E: super::Elem, const LEN: usize>(
+    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
         values: &[E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
-
-        for (offset, value) in values.iter().enumerate() {
-            Self::dyn_region_write(region, address + offset * mem::size_of::<E>(), *value)
+        for (offset, &value) in values.iter().enumerate() {
+            Self::dyn_region_write(
+                region,
+                E::STORED_SIZE
+                    .get()
+                    .wrapping_mul(offset)
+                    .wrapping_add(address),
+                value,
+            )
         }
     }
 
@@ -316,44 +314,38 @@ impl<M: ManagerBase, const LEN: usize> ProofDynRegion<LEN, M> {
 
 impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
     /// Read from the wrapped dynamic region.
-    pub fn inner_dyn_region_read<E: super::Elem>(&self, address: usize) -> E {
+    pub fn inner_dyn_region_read<E: Elem>(&self, address: usize) -> E {
         M::dyn_region_read(&self.source, address)
     }
 
     /// Version of [`ManagerRead::dyn_region_read`] which does not record
     /// the access as a read.
-    fn unrecorded_read<E: super::Elem>(&self, address: usize) -> E {
-        let elem_size = mem::size_of::<E>();
+    fn unrecorded_read<E: Elem>(&self, address: usize) -> E {
+        assert!(address + E::STORED_SIZE.get() <= LEN);
 
-        // Read a value from the wrapped region and convert it to the stored representation.
-        let mut value: E = M::dyn_region_read(&self.source, address);
-        value.to_stored_in_place();
+        // Read the underlying bytes of the value.
+        let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
+        M::dyn_region_read_all(&self.source, address, &mut value_bytes);
 
-        // Get a mutable slice of bytes over the value and overwrite any byte that has been written
-        // during the proof step.
-        let value_bytes: &mut [u8] = unsafe {
-            // SAFETY: Obtaining a mutable slice of `mem::size_of::<E>()` bytes from a mutable reference
-            // to one value of type `E` should be safe, assuming `value` is not the result of
-            // multiple allocations.
-            // Cannot use `mem::transmute` because `E` does not have a constant size.
-            slice::from_raw_parts_mut((&mut value as *mut E) as *mut u8, elem_size)
-        };
-        for (i, byte) in self.writes.range(address..address + elem_size) {
-            value_bytes[*i - address] = *byte;
+        // Overwrite any byte that has been written during the proof step.
+        for (&i, &byte) in self.writes.range(address..address + E::STORED_SIZE.get()) {
+            value_bytes[i - address] = byte;
         }
 
-        // Convert back from the stored representation and return.
-        value.from_stored_in_place();
-        value
+        // SAFETY: The vector has been allocated with sufficient space.
+        unsafe { E::read_unaligned(value_bytes.as_ptr()) }
     }
 
     /// Version of [`ManagerRead::dyn_region_read_all`] which does not record
     /// the access as a read.
-    fn unrecorded_read_all<E: super::Elem>(&self, address: usize, values: &mut [E]) {
-        assert!(address + mem::size_of_val(values) <= LEN);
-
+    fn unrecorded_read_all<E: Elem>(&self, address: usize, values: &mut [E]) {
         for (offset, value) in values.iter_mut().enumerate() {
-            *value = self.unrecorded_read(address + offset * mem::size_of::<E>());
+            *value = self.unrecorded_read(
+                E::STORED_SIZE
+                    .get()
+                    .wrapping_mul(offset)
+                    .wrapping_add(address),
+            );
         }
     }
 }
@@ -388,8 +380,8 @@ pub struct DynAccess(BTreeSet<usize>);
 
 impl DynAccess {
     /// Insert all addresses touched while accessing an element of a given size.
-    pub fn insert<E>(&mut self, address: usize) {
-        self.0.extend(address..address + mem::size_of::<E>())
+    pub fn insert<E: Elem>(&mut self, address: usize) {
+        self.0.extend(address..address + E::STORED_SIZE.get())
     }
 
     /// Check whether any address within a given range of addresses
@@ -528,7 +520,7 @@ mod tests {
 
     const LEAVES: usize = 8;
     const DYN_REGION_SIZE: usize = MERKLE_LEAF_SIZE.get() * LEAVES;
-    const ELEM_SIZE: usize = mem::size_of::<u64>();
+    const ELEM_SIZE: usize = u64::STORED_SIZE.get();
 
     #[test]
     fn test_proof_gen_dyn_region() {

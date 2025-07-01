@@ -96,14 +96,11 @@ impl ManagerRead for Owned {
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
-        {
-            assert!(address + mem::size_of::<E>() <= LEN);
+        assert!(address + E::STORED_SIZE.get() <= LEN);
 
-            let mut result = unsafe { region.as_ptr().add(address).cast::<E>().read_unaligned() };
-            result.from_stored_in_place();
-
-            result
-        }
+        // SAFETY: The assertion above ensures that the address can be read for at least
+        // `E::STORED_SIZE` bytes.
+        unsafe { E::read_unaligned(region.as_ptr().add(address)) }
     }
 
     fn dyn_region_read_all<E: Elem, const LEN: usize>(
@@ -111,18 +108,11 @@ impl ManagerRead for Owned {
         address: usize,
         values: &mut [E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
-
-        unsafe {
-            region
-                .as_ptr()
-                .add(address)
-                .cast::<E>()
-                .copy_to(values.as_mut_ptr(), values.len());
-        }
-
-        for elem in values.iter_mut() {
-            elem.from_stored_in_place();
+        for (i, value) in values.iter_mut().enumerate() {
+            *value = Self::dyn_region_read(
+                region,
+                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+            );
         }
     }
 
@@ -169,35 +159,26 @@ impl ManagerWrite for Owned {
     fn dyn_region_write<E: Elem, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
-        mut value: E,
+        value: E,
     ) {
-        assert!(address + mem::size_of_val(&value) <= LEN);
+        assert!(address + E::STORED_SIZE.get() <= LEN);
 
-        value.to_stored_in_place();
-
-        unsafe {
-            region
-                .as_mut_ptr()
-                .add(address)
-                .cast::<E>()
-                .write_unaligned(value);
-        }
+        // SAFETY: The assertion above ensures that the address can be written for at least
+        // `E::STORED_SIZE` bytes.
+        unsafe { value.write_unaligned(region.as_mut_ptr().add(address)) }
     }
 
-    fn dyn_region_write_all<E: Elem, const LEN: usize>(
+    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
         values: &[E],
     ) {
-        assert!(address + mem::size_of_val(values) <= LEN);
-
-        unsafe {
-            let ptr = region.as_mut_ptr().add(address).cast::<E>();
-
-            for (i, mut value) in values.iter().copied().enumerate() {
-                value.to_stored_in_place();
-                ptr.add(i).write_unaligned(value)
-            }
+        for (i, value) in values.iter().enumerate() {
+            Self::dyn_region_write(
+                region,
+                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                *value,
+            );
         }
     }
 
