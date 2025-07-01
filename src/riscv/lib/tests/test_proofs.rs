@@ -16,6 +16,7 @@ use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
+use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::owned_backend::Owned;
@@ -71,10 +72,7 @@ fn test_jstz_initial_proof_regression() {
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_jstz_proofs(
-    full: bool,
-    verify_fn: StepperVerifyFn<'static, M64M, DefaultCacheConfig, Owned>,
-) {
+fn test_jstz_proofs(full: bool, verify_fn: StepperVerifyFn<M64M, DefaultCacheConfig, Owned>) {
     let make_stepper = make_stepper_factory::<DefaultCacheConfig>();
 
     let mut base_stepper = make_stepper();
@@ -101,9 +99,9 @@ fn run_steps_ladder<F>(
     make_stepper: F,
     ladder: &[usize],
     expected_hash: Option<hash::Hash>,
-    verify_fn: StepperVerifyFn<'static, M64M, DefaultCacheConfig, Owned>,
+    verify_fn: StepperVerifyFn<M64M, DefaultCacheConfig, Owned>,
 ) where
-    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
+    F: Fn() -> PvmStepper<NoHooks, M64M, DefaultCacheConfig>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper = make_stepper();
@@ -167,16 +165,16 @@ fn run_steps_ladder<F>(
     }
 }
 
-type StepperVerifyFn<'hooks, MC, BCC, M> = fn(
-    &PvmStepper<'hooks, MC, BCC, M, Interpreted<MC, M>>,
+type StepperVerifyFn<MC, BCC, M> = fn(
+    &PvmStepper<NoHooks, MC, BCC, M, Interpreted<MC, M>>,
     proof: Proof,
 ) -> Result<(), ProofVerificationFailure>;
 
 fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
-    stepper: &PvmStepper<'static, MC, BCC>,
+    stepper: &PvmStepper<NoHooks, MC, BCC>,
     proof: &Proof,
     state_hash: hash::Hash,
-    verify_fn: StepperVerifyFn<'static, MC, BCC, Owned>,
+    verify_fn: StepperVerifyFn<MC, BCC, Owned>,
 ) where
     AllocatedOf<BCC::Layout, Verifier>: 'static,
 {

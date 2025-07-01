@@ -15,17 +15,32 @@ use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::block_cache::block::Jitted;
 use octez_riscv::machine_state::block_cache::block::OutlineCompiler;
 use octez_riscv::machine_state::memory::M64M;
-use octez_riscv::pvm::PvmHooks;
+use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
-fn capture_debug_log(mint: &mut goldenfile::Mint) -> PvmHooks<'_> {
-    let mut log_capture = mint.new_goldenfile("log").unwrap();
-    let hooks = PvmHooks::new(move |c| log_capture.write_all(&[c]).unwrap());
-    hooks
+/// [`PvmHooks`] that direct the debug log of the PVM into a golden file
+struct MintCaptureHooks {
+    log_file: fs::File,
+}
+
+impl MintCaptureHooks {
+    /// Create a new instance of these PVM hooks that will direct the debug log into a golden file
+    /// called `log` managed by the given [`goldenfile::Mint`].
+    fn new(mint: &mut goldenfile::Mint) -> Self {
+        Self {
+            log_file: mint.new_goldenfile("log").unwrap(),
+        }
+    }
+}
+
+impl PvmHooks for MintCaptureHooks {
+    fn write_debug_bytes(&mut self, bytes: &[u8]) {
+        self.log_file.write_all(bytes).unwrap();
+    }
 }
 
 #[test]
@@ -103,7 +118,7 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
             inbox.build()
         };
 
-        let hooks = capture_debug_log(&mut mint);
+        let hooks = MintCaptureHooks::new(&mut mint);
 
         const ROLLUP_ADDRESS: [u8; 20] = [
             244, 228, 124, 179, 196, 58, 104, 176, 212, 142, 48, 148, 9, 44, 164, 45, 113, 58, 221,
@@ -111,7 +126,7 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<'_, M64M, DefaultCacheConfig, Owned, B>::new(
+        let mut stepper = PvmStepper::<_, M64M, DefaultCacheConfig, Owned, B>::new(
             &program,
             inbox,
             hooks,

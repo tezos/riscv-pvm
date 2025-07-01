@@ -11,6 +11,7 @@ use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::pvm::PvmLayout;
+use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::RefOwnedAlloc;
 use octez_riscv::state_backend::hash;
 use octez_riscv::stepper::Stepper;
@@ -51,7 +52,7 @@ fn run_steps_ladder<F>(
     expected_refs: &RefOwnedAlloc<PvmLayout<M64M, DefaultCacheConfig>>,
     expected_hash: hash::Hash,
 ) where
-    F: Fn() -> PvmStepper<'static, M64M, DefaultCacheConfig>,
+    F: Fn() -> PvmStepper<NoHooks, M64M, DefaultCacheConfig>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper_lhs = make_stepper();
