@@ -209,7 +209,10 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cell<E, F::Output> {
+    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cell<E, F::Output>
+    where
+        E: Clone,
+    {
         Cell {
             region: self.region.struct_ref::<F>(),
         }
@@ -349,7 +352,10 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cells<E, LEN, F::Output> {
+    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cells<E, LEN, F::Output>
+    where
+        E: Clone,
+    {
         Cells {
             region: F::map_region(&self.region),
         }

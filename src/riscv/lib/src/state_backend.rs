@@ -98,7 +98,7 @@ pub use trans::*;
 /// This derived value does not form part of any stored state/commitments.
 pub trait EnrichedValue {
     /// Type of the stored value which we want to enrich
-    type E: 'static;
+    type E: 'static + Clone;
 
     /// Type of the derived value that enriches the stored value
     type D;
@@ -406,11 +406,8 @@ pub type RefVerifierAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verifi
 pub(crate) mod test_helpers {
     use trait_set::trait_set;
 
-    use super::AllocatedOf;
-    use super::Layout;
     use super::ManagerAlloc;
     use super::ManagerClone;
-    use super::ManagerDeserialise;
     use super::ManagerReadWrite;
     use super::ManagerSerialise;
 
@@ -436,22 +433,8 @@ pub(crate) mod test_helpers {
         /// Used for testing.
         pub trait TestBackendFactory = ManagerReadWrite
             + ManagerSerialise
-            + ManagerDeserialise
             + ManagerClone
             + ManagerAlloc;
-    }
-
-    /// Copy the allocated space by serialising and deserialising it.
-    pub fn copy_via_serde<L, N, M>(refs: &AllocatedOf<L, N>) -> AllocatedOf<L, M>
-    where
-        L: Layout,
-        N: ManagerSerialise,
-        AllocatedOf<L, N>: serde::Serialize,
-        M: ManagerDeserialise,
-        AllocatedOf<L, M>: serde::de::DeserializeOwned,
-    {
-        let data = crate::storage::binary::serialise(refs).unwrap();
-        crate::storage::binary::deserialise(&data).unwrap()
     }
 
     /// Assert that two values are different. If they differ, offer a command to run that shows the
