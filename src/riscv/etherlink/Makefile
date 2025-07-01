@@ -12,7 +12,7 @@ build:
 
 .PHONY: check
 check:
-	@exec ../scripts/format.sh --check
+	@exec ../../../scripts/format.sh --check
 	@cargo check --workspace --locked
 	@cargo clippy -- --deny warnings
 	@cargo doc --all-features --document-private-items --no-deps

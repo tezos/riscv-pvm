@@ -40,7 +40,7 @@ jobs:
 
       - name: Benchmark
         run: |
-          scp src/riscv/scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
+          scp scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
 
           ssh ${{ secrets.BENCH_HOST }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
 
