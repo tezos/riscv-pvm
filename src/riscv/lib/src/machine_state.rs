@@ -102,6 +102,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
             Ok(update) => match update {
                 ProgramCounterUpdate::Set(address) => address,
                 ProgramCounterUpdate::Next(width) => instr_pc + width as u64,
+                ProgramCounterUpdate::Relative(offset) => instr_pc.wrapping_add(offset as u64),
             },
         };
 
@@ -215,6 +216,8 @@ pub enum ProgramCounterUpdate<AddressRepr> {
     Set(AddressRepr),
     /// Offset to the next instruction by current instruction width
     Next(InstrWidth),
+    /// Jump to an address relative to the current program counter
+    Relative(i64),
 }
 
 /// Result type when running multiple steps at a time with [`MachineState::step_max`]
