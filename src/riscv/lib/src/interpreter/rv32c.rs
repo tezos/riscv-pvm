@@ -27,30 +27,10 @@ where
 mod tests {
     use crate::backend_test;
     use crate::interpreter::branching::run_jr;
-    use crate::interpreter::branching::run_jump_pc;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::nz;
     use crate::state::NewState;
-
-    backend_test!(test_run_jump_pc, F, {
-        let test_case = [
-            (42, 42, 84),
-            (0, 1000, 1000),
-            (100, -50, 50),
-            (50, -100, -50_i64 as u64),
-            (u64::MAX - 1, 100, 98_i64 as u64),
-        ];
-        for (init_pc, imm, res_pc) in test_case {
-            let mut state = MachineCoreState::<M4K, F>::new();
-
-            state.hart.pc.write(init_pc);
-            let new_pc = run_jump_pc(&mut state, imm);
-
-            assert_eq!(state.hart.pc.read(), init_pc);
-            assert_eq!(new_pc, res_pc);
-        }
-    });
 
     backend_test!(test_cjr, F, {
         let scenarios = [

@@ -14,14 +14,6 @@ use crate::machine_state::registers::read_xregister_nz;
 use crate::machine_state::registers::write_xregister_nz;
 use crate::parser::instruction::InstrWidth;
 
-/// Performs an unconditional control transfer. The immediate is added to
-/// the pc to form the jump target address.
-pub fn run_jump_pc<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
-    let imm = icb.xvalue_of_imm(imm);
-    let current_pc = icb.pc_read();
-    current_pc.add(imm, icb)
-}
-
 /// Performs an unconditional control transfer to the address in register `rs1`.
 pub fn run_jr<I: ICB>(icb: &mut I, rs1: NonZeroXRegister) -> <I as ICB>::XValue {
     // The target address is obtained by setting the
@@ -187,7 +179,7 @@ pub fn run_branch<I: ICB>(
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
     width: InstrWidth,
-) -> ProgramCounterUpdate<<I as ICB>::XValue> {
+) -> ProgramCounterUpdate<I::XValue> {
     let lhs = read_xregister_nz(icb, rs1);
     let rhs = read_xregister_nz(icb, rs2);
     let cond = lhs.compare(rhs, predicate, icb);
@@ -215,7 +207,7 @@ pub fn run_branch_compare_zero<I: ICB>(
     imm: i64,
     rs1: NonZeroXRegister,
     width: InstrWidth,
-) -> ProgramCounterUpdate<<I as ICB>::XValue> {
+) -> ProgramCounterUpdate<I::XValue> {
     let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(0);
     let cond = lhs.compare(rhs, predicate, icb);

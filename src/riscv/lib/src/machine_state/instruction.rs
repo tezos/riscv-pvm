@@ -1647,9 +1647,10 @@ impl Args {
     impl_cr_nz_type!(integer::run_neg, run_neg);
     impl_ci_type!(load_store::run_li, run_li, non_zero);
 
+    /// Performs an unconditional control transfer. The immediate value is used as a relative
+    /// offset from the current program counter.
     fn run_jump_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let addr = branching::run_jump_pc(icb, self.imm);
-        let pcu = ProgramCounterUpdate::Set(addr);
+        let pcu = ProgramCounterUpdate::Relative(self.imm);
         icb.ok(pcu)
     }
 
@@ -2829,10 +2830,17 @@ impl From<&FCmpArgs> for Args {
 #[cfg(test)]
 mod test {
     use super::Register;
+    use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::machine_state::MachineCoreState;
+    use crate::machine_state::ProgramCounterUpdate;
+    use crate::machine_state::instruction::Instruction;
+    use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::FRegister;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::machine_state::registers::XRegister;
+    use crate::parser::instruction::InstrWidth;
+    use crate::state::NewState;
 
     // Ensure no undefined behaviour when reading any field from `Register::DEFAULT`
     #[test]
@@ -2861,4 +2869,27 @@ mod test {
         // FRegisters are not offset by one as f0 is stored in state, unlike x0
         assert!(default == Register { f: FRegister::f0 });
     }
+
+    // Test that the run_jump_pc function produces a ProgramCounterUpdate::Relative
+    // with the correct value, and that the PC does not change in the state.
+    backend_test!(test_run_jump_pc, F, {
+        let test_case = [
+            (42, 42),
+            (0, 1000),
+            (100, -50),
+            (50, -100),
+            (u64::MAX - 1, 100),
+        ];
+        for (init_pc, imm) in test_case {
+            let mut state = MachineCoreState::<M4K, F>::new();
+            let res_pcupdate = Ok(ProgramCounterUpdate::Relative(imm));
+
+            state.hart.pc.write(init_pc);
+            let jump = Instruction::new_jump_pc(imm, InstrWidth::Uncompressed);
+            let pcupdate = jump.args.run_jump_pc(&mut state);
+
+            assert_eq!(state.hart.pc.read(), init_pc);
+            assert_eq!(pcupdate, res_pcupdate);
+        }
+    });
 }
