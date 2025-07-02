@@ -414,7 +414,6 @@ pub(crate) mod test_helpers {
     use super::ManagerDeserialise;
     use super::ManagerReadWrite;
     use super::ManagerSerialise;
-    use crate::jit::state_access::JitStateAccess;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -439,8 +438,7 @@ pub(crate) mod test_helpers {
             + ManagerSerialise
             + ManagerDeserialise
             + ManagerClone
-            + ManagerAlloc
-            + JitStateAccess;
+            + ManagerAlloc;
 
         /// Construct a manager.
         fn manager() -> Self::Manager;

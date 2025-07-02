@@ -10,21 +10,18 @@
 //! See for example [`handle_exception`]:
 //!
 //! ```ignore
-//! use crate::state_backend::ManagerBase;
 //! use crate::machine_state::MachineCoreState;
 //! use crate::machine_state::memory::Address;
 //! use crate::machine_state::memory::MemoryConfig;
 //! use crate::traps::EnvironException;
 //! use crate::traps::Exception;
 //!
-//! trait JitStateAccess: ManagerBase {
-//!     extern "C" fn handle_exception<MC: MemoryConfig>(
-//!         core: &mut MachineCoreState<MC, Self>,
-//!         current_pc: &mut Address,
-//!         exception: &Option<Exception>,
-//!         result: &mut Result<(), EnvironException>,
-//!     ) -> bool;
-//! }
+//! extern "C" fn handle_exception<MC: MemoryConfig>(
+//!     core: &mut MachineCoreState<MC, Owned>,
+//!     current_pc: &mut Address,
+//!     exception: &Option<Exception>,
+//!     result: &mut Result<(), EnvironException>,
+//! ) -> bool;
 //! ```
 //!
 //! The boolean return indicates whether the function has failed. If it has, then an exception will
