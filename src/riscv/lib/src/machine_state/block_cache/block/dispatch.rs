@@ -19,12 +19,11 @@ use std::sync::mpsc::Sender;
 use super::Jitted;
 use crate::jit::JIT;
 use crate::jit::JitFn;
-use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerBase;
+use crate::state_backend::owned_backend::Owned;
 use crate::traps::EnvironException;
 
 /// The function signature for dispatching a block run.
@@ -37,9 +36,9 @@ use crate::traps::EnvironException;
     improper_ctypes_definitions,
     reason = "The receiving functions know the layout of the referenced types"
 )]
-pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
-    &mut Jitted<D, MC, M>,
-    &mut MachineCoreState<MC, M>,
+pub type DispatchFn<D, MC> = unsafe extern "C" fn(
+    &mut Jitted<D, MC>,
+    &mut MachineCoreState<MC, Owned>,
     Address,
     &mut Result<(), EnvironException>,
     &mut D,
@@ -48,7 +47,7 @@ pub type DispatchFn<D, MC, M> = unsafe extern "C" fn(
 /// Dispatch target that wraps a [`DispatchFn`].
 ///
 /// This is the target used for compilation - see [`DispatchCompiler::compile`].
-pub struct DispatchTarget<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: ManagerBase> {
+pub struct DispatchTarget<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// Function pointer stored as an atomic usize.
     ///
     /// This will allow the `fun` to be updated from a background thread.
@@ -56,10 +55,10 @@ pub struct DispatchTarget<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: Manag
     /// considerations taken whilst converting pointer <--> usize.
     fun: Arc<AtomicUsize>,
     remaining_calls: usize,
-    _pd: PhantomData<(D, MC, M)>,
+    _pd: PhantomData<(D, MC)>,
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> DispatchTarget<D, MC, M> {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
     /// Reset the dispatch target to the interpreted dispatch mechanism.
     pub fn reset(&mut self) {
         // in resetting the block, we must allocated a new Arc<AtomicUsize>.
@@ -68,14 +67,14 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> DispatchTa
         // after reset it - meaning a reset/under construction block could now have a jitted function for
         // a completely different set of instructions.
         self.fun = Arc::new(AtomicUsize::new(
-            Jitted::<D, MC, M>::run_block_interpreted as usize,
+            Jitted::<D, MC>::run_block_interpreted as usize,
         ));
 
         self.remaining_calls = 1000;
     }
 
     /// Set the dispatch target to use the given `block_run` function.
-    pub fn set(&self, fun: DispatchFn<D, MC, M>) {
+    pub fn set(&self, fun: DispatchFn<D, MC>) {
         // casting a function pointer as usize is ok to do.
         let fun = fun as usize;
 
@@ -84,7 +83,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> DispatchTa
     }
 
     /// Get the dispatch target's current `block_run` function.
-    pub fn get(&self) -> DispatchFn<D, MC, M> {
+    pub fn get(&self) -> DispatchFn<D, MC> {
         // load using Acquire ordering - so that it will see the previous store which was with
         // Release.
         let fun = self.fun.load(Ordering::Acquire);
@@ -93,17 +92,15 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> DispatchTa
         let fun = fun as *const ();
 
         // Safety: the pointer is indeed a function pointer with an ABI matching `DispatchFn`.
-        unsafe { std::mem::transmute::<*const (), DispatchFn<D, MC, M>>(fun) }
+        unsafe { std::mem::transmute::<*const (), DispatchFn<D, MC>>(fun) }
     }
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Default
-    for DispatchTarget<D, MC, M>
-{
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
     fn default() -> Self {
         Self {
             fun: Arc::new(AtomicUsize::new(
-                Jitted::<D, MC, M>::run_block_interpreted as usize,
+                Jitted::<D, MC>::run_block_interpreted as usize,
             )),
             remaining_calls: 1000,
             _pd: PhantomData,
@@ -113,9 +110,9 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Default
 
 /// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
 /// said block in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
+pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// Whether compilation should be attempted for the block.
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool;
+    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool;
 
     /// Compile a block, hot-swapping the `run_block` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
@@ -126,22 +123,17 @@ pub trait DispatchCompiler<MC: MemoryConfig, M: ManagerBase>: Default + Sized {
     /// outline jit, especially).
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC, M>,
+        target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
-    ) -> DispatchFn<Self, MC, M>
-    where
-        M: JitStateAccess;
+    ) -> DispatchFn<Self, MC>;
 }
 
 /// JIT compiler for blocks that performs compilation inline, in the same thread as execution.
-pub struct InlineCompiler<MC: MemoryConfig, M: ManagerBase> {
-    jit: JIT<MC, M::ManagerRoot>,
+pub struct InlineCompiler<MC: MemoryConfig> {
+    jit: JIT<MC>,
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> Default for InlineCompiler<MC, M>
-where
-    M::ManagerRoot: JitStateAccess,
-{
+impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
     fn default() -> Self {
         Self {
             jit: JIT::default(),
@@ -149,12 +141,9 @@ where
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> DispatchCompiler<MC, M> for InlineCompiler<MC, M>
-where
-    M::ManagerRoot: JitStateAccess,
-{
+impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
     #[inline]
-    fn should_compile(&self, _target: &mut DispatchTarget<Self, MC, M>) -> bool {
+    fn should_compile(&self, _target: &mut DispatchTarget<Self, MC>) -> bool {
         // every block must be compiled immediately for inline jit, as it's used for testing
         // jit compatibility with interpreted mode.
         true
@@ -162,12 +151,9 @@ where
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC, M>,
+        target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
-    ) -> DispatchFn<Self, MC, M>
-    where
-        M: JitStateAccess,
-    {
+    ) -> DispatchFn<Self, MC> {
         let fun = match self.jit.compile(&instr) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
@@ -179,7 +165,7 @@ where
                 //
                 // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
                 // information on ABI compatability.
-                unsafe { std::mem::transmute::<JitFn<MC, M>, DispatchFn<Self, MC, M>>(jitfn) }
+                unsafe { std::mem::transmute::<JitFn<MC>, DispatchFn<Self, MC>>(jitfn) }
             }
             None => Jitted::run_block_not_compiled,
         };
@@ -218,18 +204,18 @@ mod internal_corro {
 
 /// JIT compiler for blocks that performs compilation in a
 /// background thread.
-pub struct OutlineCompiler<MC: MemoryConfig, M: ManagerBase> {
+pub struct OutlineCompiler<MC: MemoryConfig> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
-    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC, M>>>>,
+    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
     sender: Sender<CompilationRequest>,
 }
 
-impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompiler<MC, M> {
+impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
-        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT<MC, M>>>> = Default::default();
+        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>> = Default::default();
 
         let compiler = Self {
             _do_not_use_this_is_for_drop_only: jit.clone(),
@@ -247,7 +233,7 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompile
                     if let Some(jitfn) = jit.compile(&msg.instr) {
                         debug_assert_eq!(
                             msg.fun.load(Ordering::Acquire),
-                            Jitted::<Self, MC, M>::run_block_not_compiled as usize,
+                            Jitted::<Self, MC>::run_block_not_compiled as usize,
                             "Unexpected function pointer in dispatch target"
                         );
 
@@ -276,18 +262,14 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> OutlineCompile
     }
 }
 
-impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> Default
-    for OutlineCompiler<MC, M>
-{
+impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompiler<MC, M>
-    for OutlineCompiler<MC, M>
-{
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC, M>) -> bool {
+impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
+    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool {
         unsafe {
             match target.remaining_calls {
                 0 => true,
@@ -302,9 +284,9 @@ impl<MC: MemoryConfig + Send, M: JitStateAccess + Send + 'static> DispatchCompil
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC, M>,
+        target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
-    ) -> DispatchFn<Self, MC, M> {
+    ) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_block_not_compiled;
         target.set(fun);
 

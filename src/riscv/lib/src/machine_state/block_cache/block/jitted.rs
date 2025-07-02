@@ -6,7 +6,6 @@
 //! JIT-compiled blocks of instructions
 
 use super::ICallPlaced;
-use crate::jit::state_access::JitStateAccess;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
@@ -21,13 +20,8 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::EnrichedCell;
 use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
-use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
+use crate::state_backend::owned_backend::Owned;
 use crate::traps::EnvironException;
 
 /// Blocks that are compiled to native code for execution, when possible.
@@ -36,12 +30,12 @@ use crate::traps::EnvironException;
 /// unsupported instructions, a fallback to [`super::Interpreted`] mode occurs.
 ///
 /// Blocks are compiled upon calling [`Block::run_block`], in a *stop the world* fashion.
-pub struct Jitted<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: ManagerBase> {
-    fallback: interpreted::Interpreted<MC, M>,
-    dispatch: DispatchTarget<D, MC, M>,
+pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
+    fallback: interpreted::Interpreted<MC, Owned>,
+    dispatch: DispatchTarget<D, MC>,
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, MC, M> {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// The default initial dispatcher for inline jit.
     ///
     /// This will run the block in interpreted mode by default, but will attempt to JIT-compile
@@ -55,7 +49,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
     /// as this block may be run via [`Block::run_block`].
     pub(super) unsafe extern "C" fn run_block_interpreted(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut D,
@@ -69,7 +63,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
             .fallback
             .instr
             .iter()
-            .take(<Self as Block<MC, M>>::num_instr(self))
+            .take(self.num_instr())
             .map(|i| i.read_stored())
             .collect::<Vec<_>>();
 
@@ -90,7 +84,7 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
     /// as this block may be run via [`Block::run_block`].
     pub(super) unsafe extern "C" fn run_block_not_compiled(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
@@ -110,13 +104,8 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Jitted<D, 
     }
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M>
-    for Jitted<D, MC, M>
-{
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> NewState<Owned> for Jitted<D, MC> {
+    fn new() -> Self {
         Self {
             fallback: interpreted::Interpreted::new(),
             dispatch: DispatchTarget::default(),
@@ -124,58 +113,43 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> NewState<M
     }
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, M>
-    for Jitted<D, MC, M>
-{
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, MC> {
     type BlockBuilder = D;
 
-    fn start_block(&mut self)
-    where
-        M: ManagerWrite,
-    {
+    fn start_block(&mut self) {
         self.dispatch.reset();
         self.fallback.start_block()
     }
 
-    fn invalidate(&mut self)
-    where
-        M: ManagerWrite,
-    {
+    fn invalidate(&mut self) {
         self.dispatch.reset();
         self.fallback.invalidate()
     }
 
-    fn reset(&mut self)
-    where
-        M: ManagerReadWrite,
-    {
+    fn reset(&mut self) {
         self.dispatch.reset();
         self.fallback.reset()
     }
 
-    fn push_instr(&mut self, instr: Instruction)
-    where
-        M: ManagerReadWrite,
-    {
+    fn push_instr(&mut self, instr: Instruction) {
         self.dispatch.reset();
         self.fallback.push_instr(instr)
     }
 
-    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, M>, M>]
-    where
-        M: ManagerRead,
-    {
+    fn instr(&self) -> &[EnrichedCell<ICallPlaced<MC, Owned>, Owned>] {
         self.fallback.instr()
     }
 
-    fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self {
+    fn bind(allocated: AllocatedOf<BlockLayout, Owned>) -> Self {
         Self {
             fallback: interpreted::Interpreted::bind(allocated),
             dispatch: DispatchTarget::default(),
         }
     }
 
-    fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> AllocatedOf<BlockLayout, F::Output> {
+    fn struct_ref<'a, F: FnManager<Ref<'a, Owned>>>(
+        &'a self,
+    ) -> AllocatedOf<BlockLayout, F::Output> {
         self.fallback.struct_ref::<F>()
     }
 
@@ -189,13 +163,10 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
     /// as this block may be run via [`Block::run_block`].
     unsafe fn run_block(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         block_builder: &mut Self::BlockBuilder,
-    ) -> StepManyResult<EnvironException>
-    where
-        M: ManagerReadWrite,
-    {
+    ) -> StepManyResult<EnvironException> {
         let mut result = Ok(());
 
         let fun = self.dispatch.get();
@@ -210,17 +181,12 @@ impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess> Block<MC, 
         }
     }
 
-    fn num_instr(&self) -> usize
-    where
-        M: ManagerRead,
-    {
+    fn num_instr(&self) -> usize {
         self.fallback.num_instr()
     }
 }
 
-impl<D: DispatchCompiler<MC, M>, MC: MemoryConfig, M: JitStateAccess + ManagerClone> Clone
-    for Jitted<D, MC, M>
-{
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Clone for Jitted<D, MC> {
     fn clone(&self) -> Self {
         Self {
             fallback: self.fallback.clone(),

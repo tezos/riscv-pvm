@@ -89,8 +89,8 @@ fn test_regression(
 
     // This needs to run *after* the previous *interpreted* test. Otherwise, we run into trouble when
     // checking and updating the golden files.
-    test_regression_for_block::<Jitted<_, _, _>>(
-        OutlineCompiler::<M64M, Owned>::default(),
+    test_regression_for_block::<Jitted<_, _>>(
+        OutlineCompiler::<M64M>::default(),
         &golden_dir,
         &kernel_path,
         &inbox_path,
