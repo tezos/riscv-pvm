@@ -60,35 +60,30 @@ use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
-use crate::machine_state::registers::NonZeroXRegister;
-use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
-use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::owned_backend::Owned;
-use crate::state_backend::proof_backend::ProofGen;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 macro_rules! register_jsa_functions {
     ($($name:ident => ($field:path, $fn:path)),* $(,)?) => {
         /// Register state access symbols in the builder.
-        pub(super) fn register_jsa_symbols<MC: MemoryConfig, JSA: JitStateAccess>(
+        pub(super) fn register_jsa_symbols<MC: MemoryConfig>(
             builder: &mut JITBuilder,
         ) {
             $(builder.symbol(stringify!($field), $field as *const u8);)*
         }
 
-        /// Identifications of globally imported [`JitStateAccess`] methods.
-        pub(crate) struct JsaImports<MC: MemoryConfig, M: $crate::state_backend::ManagerBase> {
+        /// Identifications of globally imported state access methods.
+        pub(crate) struct JsaImports<MC: MemoryConfig> {
             $(
                 pub $name: FuncId,
             )*
-            _pd: PhantomData<(MC, M)>,
+            _pd: PhantomData<MC>,
         }
 
-        impl<MC: MemoryConfig, JSA: JitStateAccess> JsaImports<MC, JSA> {
+        impl<MC: MemoryConfig> JsaImports<MC> {
             /// Register external functions within the JIT Module.
             pub(super) fn declare_in_module(module: &mut JITModule) -> ModuleResult<Self> {
                 let ptr_type = module.target_config().pointer_type();
@@ -111,83 +106,61 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    pc_write => (pc_write::<MC, JSA>, AbiCall<2>::args),
-    xreg_read => (xregister_read::<MC, JSA>, AbiCall<2>::args),
-    xreg_write => (xregister_write::<MC, JSA>, AbiCall<3>::args),
-    freg_read => (fregister_read::<MC, JSA>, AbiCall<2>::args),
-    freg_write => (fregister_write::<MC, JSA>, AbiCall<3>::args),
-    handle_exception => (handle_exception::<MC, JSA>, AbiCall<4>::args),
+    pc_write => (pc_write::<MC>, AbiCall<2>::args),
+    freg_read => (fregister_read::<MC>, AbiCall<2>::args),
+    freg_write => (fregister_write::<MC>, AbiCall<3>::args),
+    handle_exception => (handle_exception::<MC>, AbiCall<4>::args),
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
-    ecall_from_mode => (ecall::<MC, JSA>, AbiCall<2>::args),
-    memory_store_u8 => (memory_store::<u8, MC, JSA>, AbiCall<4>::args),
-    memory_store_u16 => (memory_store::<u16, MC, JSA>, AbiCall<4>::args),
-    memory_store_u32 => (memory_store::<u32, MC, JSA>, AbiCall<4>::args),
-    memory_store_u64 => (memory_store::<u64, MC, JSA>, AbiCall<4>::args),
-    memory_load_i8 => (memory_load::<i8, MC, JSA>, AbiCall<4>::args),
-    memory_load_u8 => (memory_load::<u8, MC, JSA>, AbiCall<4>::args),
-    memory_load_i16 => (memory_load::<i16, MC, JSA>, AbiCall<4>::args),
-    memory_load_u16 => (memory_load::<u16, MC, JSA>, AbiCall<4>::args),
-    memory_load_i32 => (memory_load::<i32, MC, JSA>, AbiCall<4>::args),
-    memory_load_u32 => (memory_load::<u32, MC, JSA>, AbiCall<4>::args),
-    memory_load_i64 => (memory_load::<i64, MC, JSA>, AbiCall<4>::args),
-    memory_load_u64 => (memory_load::<u64, MC, JSA>, AbiCall<4>::args),
+    ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
+    memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
+    memory_store_u16 => (memory_store::<u16, MC>, AbiCall<4>::args),
+    memory_store_u32 => (memory_store::<u32, MC>, AbiCall<4>::args),
+    memory_store_u64 => (memory_store::<u64, MC>, AbiCall<4>::args),
+    memory_load_i8 => (memory_load::<i8, MC>, AbiCall<4>::args),
+    memory_load_u8 => (memory_load::<u8, MC>, AbiCall<4>::args),
+    memory_load_i16 => (memory_load::<i16, MC>, AbiCall<4>::args),
+    memory_load_u16 => (memory_load::<u16, MC>, AbiCall<4>::args),
+    memory_load_i32 => (memory_load::<i32, MC>, AbiCall<4>::args),
+    memory_load_u32 => (memory_load::<u32, MC>, AbiCall<4>::args),
+    memory_load_i64 => (memory_load::<i64, MC>, AbiCall<4>::args),
+    memory_load_u64 => (memory_load::<u64, MC>, AbiCall<4>::args),
     f64_from_x64_unsigned_dynamic => (
-        f64_from_x64_unsigned_dynamic::<MC, JSA>,
+        f64_from_x64_unsigned_dynamic::<MC>,
         AbiCall<4>::args
     ),
     f64_from_x64_unsigned_static_rne => (
-        f64_from_x64_unsigned_static::<RoundRNE, MC, JSA>,
+        f64_from_x64_unsigned_static::<RoundRNE, MC>,
         AbiCall<2>::args
     ),
     f64_from_x64_unsigned_static_rtz => (
-        f64_from_x64_unsigned_static::<RoundRTZ, MC, JSA>,
+        f64_from_x64_unsigned_static::<RoundRTZ, MC>,
         AbiCall<2>::args
     ),
     f64_from_x64_unsigned_static_rup => (
-        f64_from_x64_unsigned_static::<RoundRUP, MC, JSA>,
+        f64_from_x64_unsigned_static::<RoundRUP, MC>,
         AbiCall<2>::args
     ),
     f64_from_x64_unsigned_static_rdn => (
-        f64_from_x64_unsigned_static::<RoundRDN, MC, JSA>,
+        f64_from_x64_unsigned_static::<RoundRDN, MC>,
         AbiCall<2>::args
     ),
     f64_from_x64_unsigned_static_rmm => (
-        f64_from_x64_unsigned_static::<RoundRMM, MC, JSA>,
+        f64_from_x64_unsigned_static::<RoundRMM, MC>,
         AbiCall<2>::args
     ),
-    reservation_set_write => (reservation_set_write::<MC, JSA>, AbiCall<2>::args),
-    reservation_set_read => (reservation_set_read::<MC, JSA>, AbiCall<1>::args),
+    reservation_set_write => (reservation_set_write::<MC>, AbiCall<2>::args),
+    reservation_set_read => (reservation_set_read::<MC>, AbiCall<1>::args),
 );
 
 /// Update the instruction pc in the state.
-extern "C" fn pc_write<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
-    pc: u64,
-) {
+extern "C" fn pc_write<MC: MemoryConfig>(core: &mut MachineCoreState<MC, Owned>, pc: u64) {
     core.hart.pc.write(pc)
 }
 
-/// Read the value of the given [`NonZeroXRegister`].
-extern "C" fn xregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
-    reg: NonZeroXRegister,
-) -> XValue {
-    core.hart.xregisters.read_nz(reg)
-}
-
-/// Write the given value to the given [`NonZeroXRegister`].
-extern "C" fn xregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
-    reg: NonZeroXRegister,
-    val: XValue,
-) {
-    core.hart.xregisters.write_nz(reg, val)
-}
-
 /// Read the value of the given [`FRegister`].
-extern "C" fn fregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn fregister_read<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     reg: FRegister,
 ) -> f64 {
     let fval = core.hart.fregisters.read(reg);
@@ -195,8 +168,8 @@ extern "C" fn fregister_read<MC: MemoryConfig, M: ManagerReadWrite>(
 }
 
 /// Write the given value to the given [`FRegister`].
-extern "C" fn fregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn fregister_write<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     reg: FRegister,
     val: f64,
 ) {
@@ -219,8 +192,8 @@ extern "C" fn fregister_write<MC: MemoryConfig, M: ManagerReadWrite>(
 /// Panics if the exception does not have `Some(_)` value.
 ///
 /// See [`MachineCoreState::address_on_exception`].
-extern "C" fn handle_exception<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn handle_exception<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     current_pc: &mut Address,
     exception: &Exception,
     result: &mut Result<(), EnvironException>,
@@ -262,8 +235,8 @@ extern "C" fn raise_store_amo_access_fault_exception(
 ///
 /// Writes the exception to the given exception memory, after which it would be safe to
 /// assume it is initialised.
-extern "C" fn ecall<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn ecall<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     exception_out: &mut MaybeUninit<Exception>,
 ) {
     exception_out.write(core.hart.run_ecall());
@@ -279,8 +252,8 @@ extern "C" fn ecall<MC: MemoryConfig, M: ManagerReadWrite>(
 /// # Panics
 ///
 /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-extern "C" fn memory_store<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     address: u64,
     value: E,
     exception_out: &mut MaybeUninit<Exception>,
@@ -306,8 +279,8 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
 /// # Panics
 ///
 /// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
-extern "C" fn memory_load<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     address: u64,
     xval_out: &mut MaybeUninit<E>,
     exception_out: &mut MaybeUninit<Exception>,
@@ -325,22 +298,22 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig, M: ManagerReadWrite>(
 }
 
 /// Set the reservation set to the given starting address.
-extern "C" fn reservation_set_write<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn reservation_set_write<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     address: u64,
 ) {
     MachineCoreState::reservation_set_write(core, address);
 }
 
 /// Read the reservation set starting address.
-extern "C" fn reservation_set_read<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn reservation_set_read<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
 ) -> u64 {
     MachineCoreState::reservation_set_read(core)
 }
 
-extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig, M: ManagerReadWrite>(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     exception_out: &mut MaybeUninit<Exception>,
     xval: XValue,
     f64_out: &mut MaybeUninit<f64>,
@@ -359,143 +332,21 @@ extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig, M: ManagerReadWrit
 }
 
 /// Convert an unsigned 64-bit `XValue` to a 64-bit `FValue` using the given static rounding mode.
-extern "C" fn f64_from_x64_unsigned_static<
-    RM: StaticRoundingMode,
-    MC: MemoryConfig,
-    M: ManagerReadWrite,
->(
-    core: &mut MachineCoreState<MC, M>,
+extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
     xval: XValue,
 ) -> f64 {
     let fval = MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND);
     fval.bits()
 }
 
-/// State Access that a JIT-compiled block may use
-///
-/// Methods in this trait are used to provide access to parts of the state. It can be specialised by
-/// state backend managers (e.g. [`Owned`]) to generate more efficient Cranelift IR.
-///
-/// Do not include `extern "C"` functions in this trait. Those functions are usually parametrically
-/// polymorphic. Hence they don't need to be included in this trait.
-pub trait JitStateAccess: ManagerReadWrite {
-    /// Emit the required IR to read the value from the given xregister.
-    fn ir_xreg_read<MC: MemoryConfig>(
-        jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: NonZeroXRegister,
-    ) -> X64 {
-        let xreg_read = jsa_calls.xreg_read.get_or_insert_with(|| {
-            jsa_calls
-                .module
-                .declare_func_in_func(jsa_calls.imports.xreg_read, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        let call = builder.ins().call(*xreg_read, &[core_ptr, reg]);
-        X64(builder.inst_results(call)[0])
-    }
-
-    /// Emit the required IR to write the value to the given xregister.
-    fn ir_xreg_write<MC: MemoryConfig>(
-        jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: NonZeroXRegister,
-        value: X64,
-    ) {
-        let xreg_write = jsa_calls.xreg_write.get_or_insert_with(|| {
-            jsa_calls
-                .module
-                .declare_func_in_func(jsa_calls.imports.xreg_write, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        builder.ins().call(*xreg_write, &[core_ptr, reg, value.0]);
-    }
-
-    /// Emit the required IR to read the value from the given fregister.
-    fn ir_freg_read<MC: MemoryConfig>(
-        jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: FRegister,
-    ) -> F64 {
-        let freg_read = jsa_calls.freg_read.get_or_insert_with(|| {
-            jsa_calls
-                .module
-                .declare_func_in_func(jsa_calls.imports.freg_read, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        let call = builder.ins().call(*freg_read, &[core_ptr, reg]);
-        F64(builder.inst_results(call)[0])
-    }
-
-    /// Emit the required IR to write the value to the given fregister.
-    fn ir_freg_write<MC: MemoryConfig>(
-        jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: FRegister,
-        value: F64,
-    ) {
-        let freg_write = jsa_calls.freg_write.get_or_insert_with(|| {
-            jsa_calls
-                .module
-                .declare_func_in_func(jsa_calls.imports.freg_write, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        builder.ins().call(*freg_write, &[core_ptr, reg, value.0]);
-    }
-}
-
-impl JitStateAccess for Owned {
-    fn ir_xreg_read<MC: MemoryConfig>(
-        _jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: NonZeroXRegister,
-    ) -> X64 {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Self>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        let val = builder
-            .ins()
-            .load(ir::types::I64, MemFlags::trusted(), core_ptr, offset as i32);
-
-        X64(val)
-    }
-
-    fn ir_xreg_write<MC: MemoryConfig>(
-        _jsa_calls: &mut JsaCalls<'_, MC, Self>,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        reg: NonZeroXRegister,
-        value: X64,
-    ) {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Self>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        builder
-            .ins()
-            .store(MemFlags::trusted(), value.0, core_ptr, offset as i32);
-    }
-}
-
-impl<M: ManagerReadWrite> JitStateAccess for ProofGen<M> {}
-
-/// References to locally imported [`JitStateAccess`] methods, used to directly call
-/// these accessor methods in the JIT-compilation context.
-pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
+/// References to locally imported state access methods, used to directly call these accessor
+/// methods in the JIT-compilation context.
+pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
-    imports: &'a JsaImports<MC, M>,
+    imports: &'a JsaImports<MC>,
     ptr_type: Type,
     pc_write: Option<FuncRef>,
-    xreg_read: Option<FuncRef>,
-    xreg_write: Option<FuncRef>,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     handle_exception: Option<FuncRef>,
@@ -527,10 +378,10 @@ pub struct JsaCalls<'a, MC: MemoryConfig, M: ManagerBase> {
 
     // Reusable stack slot for an FValue.
     f64_ptr_slot: Option<stack::Slot<f64>>,
-    _pd: PhantomData<(MC, M)>,
+    _pd: PhantomData<MC>,
 }
 
-impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
+impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Get the stack slot for the exception pointer.
     fn exception_ptr_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<Exception> {
         self.exception_ptr_slot
@@ -552,10 +403,10 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             .clone()
     }
 
-    /// Wrapper to simplify calling JSA methods from within the function under construction.
+    /// Wrapper to simplify calling state access functions from within the function under construction.
     pub(super) fn func_calls(
         module: &'a mut JITModule,
-        imports: &'a JsaImports<MC, M>,
+        imports: &'a JsaImports<MC>,
         ptr_type: Type,
     ) -> Self {
         Self {
@@ -563,8 +414,6 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
             imports,
             ptr_type,
             pc_write: None,
-            xreg_read: None,
-            xreg_write: None,
             freg_read: None,
             freg_write: None,
             handle_exception: None,
@@ -947,6 +796,38 @@ impl<'a, MC: MemoryConfig, M: JitStateAccess> JsaCalls<'a, MC, M> {
 
         let fval = builder.inst_results(call)[0];
         F64(fval)
+    }
+
+    /// Emit the required IR to read the value from the given fregister.
+    pub(super) fn ir_freg_read(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        reg: FRegister,
+    ) -> F64 {
+        let freg_read = self.freg_read.get_or_insert_with(|| {
+            self.module
+                .declare_func_in_func(self.imports.freg_read, builder.func)
+        });
+        let reg = builder.ins().iconst(I8, reg as i64);
+        let call = builder.ins().call(*freg_read, &[core_ptr, reg]);
+        F64(builder.inst_results(call)[0])
+    }
+
+    /// Emit the required IR to write the value to the given fregister.
+    pub(super) fn ir_freg_write(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        core_ptr: Value,
+        reg: FRegister,
+        value: F64,
+    ) {
+        let freg_write = self.freg_write.get_or_insert_with(|| {
+            self.module
+                .declare_func_in_func(self.imports.freg_write, builder.func)
+        });
+        let reg = builder.ins().iconst(I8, reg as i64);
+        builder.ins().call(*freg_write, &[core_ptr, reg, value.0]);
     }
 }
 

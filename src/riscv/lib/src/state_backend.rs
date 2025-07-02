@@ -413,7 +413,6 @@ pub(crate) mod test_helpers {
     use super::ManagerDeserialise;
     use super::ManagerReadWrite;
     use super::ManagerSerialise;
-    use crate::jit::state_access::JitStateAccess;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -436,11 +435,10 @@ pub(crate) mod test_helpers {
         ///
         /// Used for testing.
         pub trait TestBackendFactory = ManagerReadWrite
-        + ManagerSerialise
-        + ManagerDeserialise
-        + ManagerClone
-        + ManagerAlloc
-        + JitStateAccess;
+            + ManagerSerialise
+            + ManagerDeserialise
+            + ManagerClone
+            + ManagerAlloc;
     }
 
     /// Copy the allocated space by serialising and deserialising it.

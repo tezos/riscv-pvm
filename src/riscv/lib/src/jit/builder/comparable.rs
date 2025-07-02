@@ -13,9 +13,8 @@ use crate::jit::builder::X32;
 use crate::jit::builder::X64;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerBase;
 
-impl<MC: MemoryConfig, M: ManagerBase> Comparable<InstructionBuilder<'_, '_, MC, M>> for X64 {
+impl<MC: MemoryConfig> Comparable<InstructionBuilder<'_, '_, MC>> for X64 {
     type Result = Value;
 
     // icmp returns 1 if the condition holds, 0 if it does not.
@@ -30,13 +29,13 @@ impl<MC: MemoryConfig, M: ManagerBase> Comparable<InstructionBuilder<'_, '_, MC,
         self,
         other: Self,
         comparison: Predicate,
-        builder: &mut InstructionBuilder<'_, '_, MC, M>,
+        builder: &mut InstructionBuilder<'_, '_, MC>,
     ) -> Value {
         builder.ins().icmp(comparison, self.0, other.0)
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> Comparable<InstructionBuilder<'_, '_, MC, M>> for X32 {
+impl<MC: MemoryConfig> Comparable<InstructionBuilder<'_, '_, MC>> for X32 {
     type Result = Value;
 
     // icmp returns 1 if the condition holds, 0 if it does not.
@@ -51,7 +50,7 @@ impl<MC: MemoryConfig, M: ManagerBase> Comparable<InstructionBuilder<'_, '_, MC,
         self,
         other: Self,
         comparison: Predicate,
-        builder: &mut InstructionBuilder<'_, '_, MC, M>,
+        builder: &mut InstructionBuilder<'_, '_, MC>,
     ) -> Value {
         builder.ins().icmp(comparison, self.0, other.0)
     }
