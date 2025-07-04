@@ -26,7 +26,9 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::MemFlags;
 use cranelift::prelude::Value;
+use cranelift::prelude::types;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
@@ -632,5 +634,33 @@ impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC,
     ) -> Self::FValue {
         self.ext_calls
             .f64_from_x64_unsigned_static(self.builder, self.core_param, xval, rm)
+    }
+
+    fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue {
+        // Reinterpret the bits of the X64 value as an F64 value. Must only be used for converting
+        // an integer X64 value to a floating-point F64 value. In this case, the size, and number
+        // of lanes, are equal between the input and output types, so we can use a bitcast without
+        // specifying the endianness of our memory and passing empty memory flags is safe.
+        //
+        // See <https://docs.rs/cranelift-codegen/latest/cranelift_codegen/ir/trait.InstBuilder.html#method.bitcast>
+        let fval = self
+            .builder
+            .ins()
+            .bitcast(types::F64, MemFlags::new(), value.0);
+        F64(fval)
+    }
+
+    fn fvalue_to_xvalue(&mut self, value: Self::FValue) -> Self::XValue {
+        // Reinterpret the bits of the F64 value as an X64 value. Must only be used for converting
+        // an floating-point F64 value to an integer X64 value. In this case, the size, and number
+        // of lanes, are equal between the input and output types, so we can use a bitcast without
+        // specifying the endianness of our memory and passing empty memory flags is safe.
+        //
+        // See <https://docs.rs/cranelift-codegen/latest/cranelift_codegen/ir/trait.InstBuilder.html#method.bitcast>
+        let xval = self
+            .builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), value.0);
+        X64(xval)
     }
 }
