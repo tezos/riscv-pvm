@@ -1070,7 +1070,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_nop(Compressed),
                     I::new_nop(Compressed),
-                    I::new_j(2, Compressed),
+                    I::new_jump_pc(2, Compressed),
                 ])
                 .set_assert_hook(assert_hook!(core, F, {
                     assert_eq!(core.hart.pc.read(), 6);
@@ -1079,7 +1079,7 @@ mod tests {
                 .build(),
             ScenarioBuilder::default()
                 // Jump past 0 - in both worlds we should wrap around.
-                .set_instructions(&[I::new_j(-4, Compressed)])
+                .set_instructions(&[I::new_jump_pc(-4, Compressed)])
                 .set_assert_hook(assert_hook!(core, F, {
                     assert_eq!(core.hart.pc.read(), u64::MAX - 3);
                 }))
@@ -1091,7 +1091,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_nop(Uncompressed),
                     I::new_nop(Uncompressed),
-                    I::new_j(i64::MAX, Uncompressed),
+                    I::new_jump_pc(i64::MAX, Uncompressed),
                     I::new_nop(Compressed),
                     I::new_nop(Uncompressed),
                 ])
@@ -1105,7 +1105,7 @@ mod tests {
                 // jump by nothing
                 .set_instructions(&[
                     I::new_nop(Compressed),
-                    I::new_j(0, Compressed),
+                    I::new_jump_pc(0, Compressed),
                     I::new_nop(Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(core, F, {
@@ -1118,7 +1118,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_nop(Compressed),
                     I::new_nop(Compressed),
-                    I::new_j(-4, Compressed),
+                    I::new_jump_pc(-4, Compressed),
                     I::new_nop(Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(core, F, {

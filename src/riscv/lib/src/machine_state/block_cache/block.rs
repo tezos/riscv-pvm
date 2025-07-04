@@ -143,6 +143,13 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
                 break;
             }
 
+            Ok(ProgramCounterUpdate::Relative(offset)) => {
+                *instr_pc = instr_pc.wrapping_add(offset as u64);
+                core.hart.pc.write(*instr_pc);
+                result.steps += 1;
+                break;
+            }
+
             Err(e) => {
                 // Exceptions lead to a new address being set to handle it,
                 // with no guarantee of it being the next instruction.
