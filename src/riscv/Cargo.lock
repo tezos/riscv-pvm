@@ -1399,7 +1399,7 @@ dependencies = [
  "num_enum",
  "paste",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.1",
  "range-collections",
  "rustc_apfloat",
  "serde",
