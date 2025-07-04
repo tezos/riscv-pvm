@@ -136,20 +136,20 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     Pvm<MC, BCC, B, M>
 {
     /// Allocate a new PVM.
-    pub fn new(manager: &mut M, block_builder: B::BlockBuilder) -> Self
+    pub fn new(block_builder: B::BlockBuilder) -> Self
     where
         M: state_backend::ManagerAlloc,
     {
         Self {
-            machine_state: machine_state::MachineState::new(manager, block_builder),
-            reveal_request: RevealRequest::new(manager),
-            system_state: linux::SupervisorState::new(manager),
-            version: Cell::new_with(manager, INITIAL_VERSION),
-            status: Cell::new(manager),
-            tick: Cell::new(manager),
-            message_counter: Cell::new(manager),
-            level: Cell::new(manager),
-            level_is_set: Cell::new(manager),
+            machine_state: machine_state::MachineState::new(block_builder),
+            reveal_request: RevealRequest::new(),
+            system_state: linux::SupervisorState::new(),
+            version: Cell::new_with(INITIAL_VERSION),
+            status: Cell::new(),
+            tick: Cell::new(),
+            message_counter: Cell::new(),
+            level: Cell::new(),
+            level_is_set: Cell::new(),
         }
     }
 
@@ -420,7 +420,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, B, Owned> {
     pub(crate) fn empty(block_builder: B::BlockBuilder) -> Self {
-        Self::new(&mut Owned, block_builder)
+        Self::new(block_builder)
     }
 
     pub(crate) fn hash(&self) -> Result<Hash, HashError> {
@@ -553,7 +553,7 @@ mod tests {
         type B = block::Interpreted<MC, Owned>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, TestCacheConfig, B, _>::new(&mut Owned, InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core
@@ -662,7 +662,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, TestCacheConfig, B, _>::new(&mut Owned, InterpretedBlockBuilder);
+            let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
             pvm.reset();
             pvm.machine_state
                 .core
@@ -709,8 +709,7 @@ mod tests {
         type B<F> = block::Interpreted<MC, <F as TestBackendFactory>::Manager>;
 
         // Setup PVM
-        let mut pvm =
-            Pvm::<MC, TestCacheConfig, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F::Manager>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core
@@ -783,8 +782,7 @@ mod tests {
         type B<F> = block::Interpreted<MC, <F as TestBackendFactory>::Manager>;
 
         // Setup PVM
-        let mut pvm =
-            Pvm::<MC, TestCacheConfig, B<F>, _>::new(&mut F::manager(), InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F::Manager>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state
             .core

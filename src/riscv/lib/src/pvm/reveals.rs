@@ -60,13 +60,13 @@ impl<M: ManagerBase> RevealRequest<M> {
 }
 
 impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         Self {
-            bytes: DynCells::new(manager),
-            size: Cell::new(manager),
+            bytes: DynCells::new(),
+            size: Cell::new(),
         }
     }
 }

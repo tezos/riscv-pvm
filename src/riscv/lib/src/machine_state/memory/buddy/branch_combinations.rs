@@ -188,11 +188,11 @@ macro_rules! combined_buddy_branch {
             B: Buddy<M>,
             M: ManagerBase,
         {
-            fn new(manager: &mut M) -> Self
+            fn new() -> Self
             where
                 M: ManagerAlloc,
             {
-                Self(NewState::new(manager))
+                Self(NewState::new())
             }
         }
 

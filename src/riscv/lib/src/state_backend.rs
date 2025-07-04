@@ -157,12 +157,12 @@ pub trait ManagerBase: Sized {
 pub trait ManagerAlloc: 'static + ManagerReadWrite {
     /// Allocate a region in the state storage.
     fn allocate_region<E, const LEN: usize>(
-        &mut self,
+        // &mut self,
         init_value: [E; LEN],
     ) -> Self::Region<E, LEN>;
 
     /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region<const LEN: usize>(&mut self) -> Self::DynRegion<LEN>;
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN>;
 }
 
 /// Manager with read capabilities
@@ -441,9 +441,6 @@ pub(crate) mod test_helpers {
             + ManagerClone
             + ManagerAlloc
             + JitStateAccess;
-
-        /// Construct a manager.
-        fn manager() -> Self::Manager;
     }
 
     /// Copy the allocated space by serialising and deserialising it.
@@ -497,10 +494,9 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut manager = F::manager();
-        let mut instance = Example {
-            first: Cell::new(&mut manager),
-            second: Cells::new(&mut manager),
+        let mut instance: Example<F::Manager> = Example {
+            first: Cell::new(),
+            second: Cells::new(),
         };
 
         instance.first.write(first_value);
