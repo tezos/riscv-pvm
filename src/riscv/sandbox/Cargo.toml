@@ -2,6 +2,7 @@
 name = "riscv-sandbox"
 version = "0.0.0"
 edition = "2024"
+default-run = "riscv-sandbox"
 
 [[bin]]
 name = "riscv-sandbox"
