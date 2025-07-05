@@ -34,13 +34,9 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
-use crate::machine_state::registers::NonZeroXRegister;
-use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
-use crate::parser::XRegisterParsed;
 use crate::parser::instruction::InstrWidth;
-use crate::parser::split_x0;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_context::StateContext;
 use crate::traps::Exception;
@@ -66,16 +62,6 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
     ///
     /// [`FRegisters`]: crate::machine_state::registers::FRegisters
     type FValue;
-
-    /// Perform a read to a [`NonZeroXRegister`], with the given value.
-    /// This is a specialized version of `xregister_read` that is only used for
-    /// registers that are guaranteed not to be x0.
-    fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue;
-
-    /// Perform a write to a [`NonZeroXRegister`], with the given value.
-    /// This is a specialized version of `xregister_write` that is only used for
-    /// registers that are guaranteed not to be x0.
-    fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue);
 
     /// Construct an [`ICB::XValue`] from an `imm: i64`.
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue;
@@ -224,55 +210,12 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
         xval: Self::XValue,
         rm: RoundingMode,
     ) -> Self::FValue;
-
-    // ----------------
-    // Provided Methods
-    // ----------------
-
-    /// Read a value from an [`XRegister`].
-    ///
-    /// If the register is `x0`, the value read is always zero.
-    fn xregister_read(&mut self, reg: XRegister) -> Self::XValue {
-        match split_x0(reg) {
-            XRegisterParsed::X0 => self.xvalue_of_imm(0),
-            XRegisterParsed::NonZero(reg) => self.xregister_read_nz(reg),
-        }
-    }
-
-    /// Write a value to an [`XRegister`].
-    ///
-    /// If the register is `x0`, this is a no-op.
-    fn xregister_write(&mut self, reg: XRegister, value: Self::XValue) {
-        if let XRegisterParsed::NonZero(reg) = split_x0(reg) {
-            self.xregister_write_nz(reg, value)
-        }
-    }
 }
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     type XValue = XValue;
 
     type FValue = FValue;
-
-    #[inline(always)]
-    fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        self.hart.xregisters.read_nz(reg)
-    }
-
-    #[inline(always)]
-    fn xregister_read(&mut self, reg: XRegister) -> Self::XValue {
-        self.hart.xregisters.read(reg)
-    }
-
-    #[inline(always)]
-    fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
-        self.hart.xregisters.write_nz(reg, value)
-    }
-
-    #[inline(always)]
-    fn xregister_write(&mut self, reg: XRegister, value: Self::XValue) {
-        self.hart.xregisters.write(reg, value)
-    }
 
     #[inline(always)]
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
