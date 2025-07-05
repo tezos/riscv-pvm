@@ -32,6 +32,9 @@ use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
+use crate::state_context::StateContext;
+use crate::state_context::projection::MachineCoreProjection;
+use crate::state_context::projection::RegionCons;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
@@ -293,5 +296,23 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
         self.builder.seal_all_blocks();
         self.builder.finalize();
+    }
+}
+
+impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
+    type X64 = X64;
+
+    fn read_machine_region<L, const LEN: usize>(&mut self, index: usize) -> Self::X64
+    where
+        L: MachineCoreProjection<Target = RegionCons<u64, LEN>>,
+    {
+        super::read_machine_region::<MC, L, LEN>(&mut self.builder, self.core_param, index)
+    }
+
+    fn write_machine_region<L, const LEN: usize>(&mut self, index: usize, value: Self::X64)
+    where
+        L: MachineCoreProjection<Target = RegionCons<u64, LEN>>,
+    {
+        super::write_machine_region::<MC, L, LEN>(&mut self.builder, self.core_param, index, value)
     }
 }

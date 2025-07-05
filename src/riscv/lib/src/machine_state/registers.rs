@@ -19,6 +19,7 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
+use crate::instruction_context::lens;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
@@ -665,6 +666,10 @@ impl<M: backend::ManagerClone> Clone for FRegisters<M> {
             registers: self.registers.clone(),
         }
     }
+}
+
+lens::impl_projection! {
+    XRegisterProj (lens::MachineCoreCons => lens::CellsCons<XValue, 31>) = hart.xregisters.registers
 }
 
 #[cfg(test)]

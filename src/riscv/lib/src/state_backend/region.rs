@@ -3,6 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use super::EnrichedValue;
@@ -21,8 +22,17 @@ use super::owned_backend::Owned;
 use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
+use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::XValue;
 use crate::state::NewState;
 use crate::state_backend::Elem;
+use crate::state_context::StateContext;
+use crate::state_context::projection::CellCons;
+use crate::state_context::projection::CellsCons;
+use crate::state_context::projection::MachineCoreProjection;
+use crate::state_context::projection::Projection;
+use crate::state_context::projection::RegionCons;
+use crate::state_context::projection::TypeCons;
 
 /// Link a stored value directly with a derived value -
 /// that would either be expensive to compute each time, or cannot
@@ -287,6 +297,57 @@ impl<E, M: ManagerRead> Deref for Cell<E, M> {
     }
 }
 
+/// Projection from [`Cell`] to [`ManagerBase::Region`]
+pub struct CellRegionProj<T>(PhantomData<T>);
+
+impl<E, L> Projection for CellRegionProj<L>
+where
+    E: 'static,
+    L: Projection<Target = CellCons<E>>,
+{
+    type Subject = L::Subject;
+
+    type Target = RegionCons<E, 1>;
+
+    #[inline]
+    fn project<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a <Self::Subject as TypeCons>::Applied<MC, M>,
+    ) -> &'a <Self::Target as TypeCons>::Applied<MC, M> {
+        &L::project(state).region.region
+    }
+
+    #[inline]
+    fn project_mut<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a mut <Self::Subject as TypeCons>::Applied<MC, M>,
+    ) -> &'a mut <Self::Target as TypeCons>::Applied<MC, M> {
+        &mut L::project_mut(state).region.region
+    }
+
+    fn pointer_offset<MC: MemoryConfig, M: ManagerBase>() -> usize {
+        L::pointer_offset::<MC, M>() + std::mem::offset_of!(Cell<E, M>, region.region)
+    }
+}
+
+/// Read from a [`Cell`].
+#[inline]
+pub(crate) fn read_machine_cell<L, I>(icb: &mut I) -> I::X64
+where
+    L: MachineCoreProjection<Target = CellCons<XValue>>,
+    I: StateContext + ?Sized,
+{
+    icb.read_machine_region::<CellRegionProj<L>, 1>(0)
+}
+
+/// Write to a [`Cell`].
+#[inline]
+pub(crate) fn write_machine_cell<L, I>(icb: &mut I, value: I::X64)
+where
+    L: MachineCoreProjection<Target = CellCons<XValue>>,
+    I: StateContext + ?Sized,
+{
+    icb.write_machine_region::<CellRegionProj<L>, 1>(0, value);
+}
+
 /// Multiple elements of type `E`
 #[repr(transparent)]
 pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
@@ -477,6 +538,57 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
             region: M::clone_region(&self.region),
         }
     }
+}
+
+/// Projection from [`Cells`] to [`ManagerBase::Region`]
+pub struct CellsRegionProj<T>(PhantomData<T>);
+
+impl<E, const LEN: usize, L> Projection for CellsRegionProj<L>
+where
+    E: 'static,
+    L: Projection<Target = CellsCons<E, LEN>>,
+{
+    type Subject = L::Subject;
+
+    type Target = RegionCons<E, LEN>;
+
+    #[inline]
+    fn project<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a <Self::Subject as TypeCons>::Applied<MC, M>,
+    ) -> &'a <Self::Target as TypeCons>::Applied<MC, M> {
+        &L::project(state).region
+    }
+
+    #[inline]
+    fn project_mut<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a mut <Self::Subject as TypeCons>::Applied<MC, M>,
+    ) -> &'a mut <Self::Target as TypeCons>::Applied<MC, M> {
+        &mut L::project_mut(state).region
+    }
+
+    fn pointer_offset<MC: MemoryConfig, M: ManagerBase>() -> usize {
+        L::pointer_offset::<MC, M>() + std::mem::offset_of!(Cells<E, LEN, M>, region)
+    }
+}
+
+/// Read from an index of [`Cells`].
+#[inline]
+pub(crate) fn read_machine_cells<L, const LEN: usize, I>(icb: &mut I, index: usize) -> I::X64
+where
+    L: MachineCoreProjection<Target = CellsCons<XValue, LEN>>,
+    I: StateContext + ?Sized,
+{
+    icb.read_machine_region::<CellsRegionProj<L>, LEN>(index)
+}
+
+/// Write to an index of [`Cells`].
+#[inline]
+pub(crate) fn write_machine_cells<L, const LEN: usize, I>(icb: &mut I, index: usize, value: I::X64)
+where
+    L: MachineCoreProjection<Target = CellsCons<XValue, LEN>>,
+    I: StateContext + ?Sized,
+{
+    icb.write_machine_region::<CellsRegionProj<L>, LEN>(index, value);
 }
 
 /// Multiple elements of an unspecified type
