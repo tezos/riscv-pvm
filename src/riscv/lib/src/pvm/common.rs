@@ -13,7 +13,6 @@ use super::linux;
 use super::reveals::RevealRequest;
 use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
-use crate::instruction_context::ICB;
 use crate::machine_state;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block;
@@ -381,7 +380,9 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     {
         self.machine_state
             .core
-            .xregister_write(a0, SbiError::InvalidParam as u64);
+            .hart
+            .xregisters
+            .write(a0, SbiError::InvalidParam as u64);
         self.tick.write(self.tick.read().wrapping_add(1u64));
         self.status.write(PvmStatus::Evaluating);
     }

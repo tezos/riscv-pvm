@@ -3,6 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use super::Elem;
@@ -22,6 +23,11 @@ use super::owned_backend::Owned;
 use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
+use crate::instruction_context::ICB;
+use crate::instruction_context::lens::Lens;
+use crate::instruction_context::lens::LensFocus;
+use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::XValue;
 use crate::state::NewState;
 
 /// Link a stored value directly with a derived value -
@@ -513,6 +519,25 @@ where
     fn pointer_offset<MC: MemoryConfig, M: ManagerBase>() -> usize {
         T::pointer_offset::<MC, M>() + std::mem::offset_of!(Cells<E, LEN, M>, region)
     }
+}
+
+pub(crate) fn read_machine_cells<L, const LEN: usize, I>(icb: &mut I, index: usize) -> I::XValue
+where
+    L: Lens<Subject = crate::machine_state::MachineCoreFocus, Target = CellsFocus<XValue, LEN>>,
+    I: ICB + ?Sized,
+{
+    icb.read_region::<CellsInnerRegionL<L>, LEN>(index)
+}
+
+pub(crate) fn write_machine_cells<L, const LEN: usize, I>(
+    icb: &mut I,
+    index: usize,
+    value: I::XValue,
+) where
+    L: Lens<Subject = crate::machine_state::MachineCoreFocus, Target = CellsFocus<XValue, LEN>>,
+    I: ICB + ?Sized,
+{
+    icb.write_region::<CellsInnerRegionL<L>, LEN>(index, value);
 }
 
 /// Multiple elements of an unspecified type

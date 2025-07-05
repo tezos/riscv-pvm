@@ -10,6 +10,8 @@ use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::registers::NonZeroXRegister;
+use crate::machine_state::registers::read_xregister_nz;
+use crate::machine_state::registers::write_xregister_nz;
 use crate::parser::instruction::InstrWidth;
 
 /// Performs an unconditional control transfer. The immediate is added to
@@ -30,14 +32,14 @@ pub fn run_j<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
 pub fn run_jr<I: ICB>(icb: &mut I, rs1: NonZeroXRegister) -> <I as ICB>::XValue {
     // The target address is obtained by setting the
     // least-significant bit of the address in rs1 to zero
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(!1);
     lhs.and(rhs, icb)
 }
 
 /// Performs an unconditional control transfer to the target address,
 pub fn run_jr_imm<I: ICB>(icb: &mut I, imm: i64, rs1: NonZeroXRegister) -> <I as ICB>::XValue {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
     let lhs = lhs.add(rhs, icb);
 
@@ -74,7 +76,7 @@ pub fn run_jal<I: ICB>(
     let target_address = current_pc.add(imm, icb);
 
     // Store the return address in rd
-    icb.xregister_write_nz(rd, return_address);
+    write_xregister_nz(icb, rd, return_address);
 
     target_address
 }
@@ -94,12 +96,12 @@ pub fn run_jalr<I: ICB>(
 
     // The target address is obtained by setting the
     // least-significant bit of the address in rs1 to zero
-    let target_address = icb.xregister_read_nz(rs1);
+    let target_address = read_xregister_nz(icb, rs1);
     let mask = icb.xvalue_of_imm(!1);
     let target_address = target_address.and(mask, icb);
 
     // Store the return address in rd
-    icb.xregister_write_nz(rd, return_address);
+    write_xregister_nz(icb, rd, return_address);
 
     target_address
 }
@@ -122,14 +124,14 @@ pub fn run_jalr_imm<I: ICB>(
     // The target address is obtained by adding the sign-extended
     // 12-bit I-immediate to the register rs1, then setting
     // the least-significant bit of the result to zero
-    let target_address = icb.xregister_read_nz(rs1);
+    let target_address = read_xregister_nz(icb, rs1);
     let imm = icb.xvalue_of_imm(imm);
     let target_address = target_address.add(imm, icb);
     let mask = icb.xvalue_of_imm(!1);
     let target_address = target_address.and(mask, icb);
 
     // Store the return address in rd
-    icb.xregister_write_nz(rd, return_address);
+    write_xregister_nz(icb, rd, return_address);
 
     target_address
 }
@@ -156,7 +158,7 @@ pub fn run_jalr_absolute<I: ICB>(
     let target_address = target_address.and(mask, icb);
 
     // Store the return address in rd
-    icb.xregister_write_nz(rd, return_address);
+    write_xregister_nz(icb, rd, return_address);
 
     target_address
 }
@@ -169,7 +171,7 @@ pub fn run_add_immediate_to_pc(icb: &mut impl ICB, imm: i64, rd: NonZeroXRegiste
     let lhs = icb.pc_read();
     let rhs = icb.xvalue_of_imm(imm);
     let lhs = lhs.add(rhs, icb);
-    icb.xregister_write_nz(rd, lhs);
+    write_xregister_nz(icb, rd, lhs);
 }
 
 /// Performs a conditional ( `predicate(val(rs1), val(rs2))` ) control transfer.
@@ -192,8 +194,8 @@ pub fn run_branch<I: ICB>(
     rs2: NonZeroXRegister,
     width: InstrWidth,
 ) -> ProgramCounterUpdate<<I as ICB>::XValue> {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
     let cond = lhs.compare(rhs, predicate, icb);
 
     icb.branch(cond, imm, width)
@@ -220,7 +222,7 @@ pub fn run_branch_compare_zero<I: ICB>(
     rs1: NonZeroXRegister,
     width: InstrWidth,
 ) -> ProgramCounterUpdate<<I as ICB>::XValue> {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(0);
     let cond = lhs.compare(rhs, predicate, icb);
 

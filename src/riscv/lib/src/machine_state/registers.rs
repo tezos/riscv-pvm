@@ -18,6 +18,7 @@ use std::fmt;
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
+use crate::instruction_context::ICB;
 use crate::instruction_context::lens::LensFocus;
 use crate::instruction_context::lens::impl_lens;
 use crate::machine_state::backend;
@@ -678,6 +679,34 @@ impl LensFocus for XRegistersFocus {
 
 impl_lens! {
     XRegisterLens (super::MachineCoreFocus => backend::CellsFocus<XValue, 31>) = hart.xregisters.registers
+}
+
+#[inline]
+pub fn read_xregister_nz<I: ICB + ?Sized>(icb: &mut I, reg: NonZeroXRegister) -> I::XValue {
+    backend::read_machine_cells::<XRegisterLens, 31, _>(icb, reg as usize)
+}
+
+#[inline]
+pub fn write_xregister_nz<I: ICB + ?Sized>(icb: &mut I, reg: NonZeroXRegister, value: I::XValue) {
+    backend::write_machine_cells::<XRegisterLens, 31, _>(icb, reg as usize, value);
+}
+
+#[inline]
+pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue {
+    if reg.is_zero() {
+        return icb.xvalue_of_imm(0);
+    }
+
+    backend::read_machine_cells::<XRegisterLens, 31, _>(icb, reg as usize)
+}
+
+#[inline]
+pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::XValue) {
+    if reg.is_zero() {
+        return;
+    }
+
+    backend::write_machine_cells::<XRegisterLens, 31, _>(icb, reg as usize, value);
 }
 
 #[cfg(test)]

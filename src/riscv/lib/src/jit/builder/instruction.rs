@@ -38,6 +38,7 @@ use crate::instruction_context::Predicate;
 use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
+use crate::instruction_context::lens::Lens;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics;
 use crate::interpreter::atomics::ReservationSetOption;
@@ -46,13 +47,13 @@ use crate::jit::builder::F64;
 use crate::jit::builder::X32;
 use crate::jit::builder::X64;
 use crate::jit::state_access::JsaCalls;
-use crate::machine_state::MachineCoreState;
+use crate::machine_state::MachineCoreFocus;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
-use crate::machine_state::registers::NonZeroXRegister;
-use crate::machine_state::registers::XRegisters;
+use crate::machine_state::registers::XValue;
 use crate::parser::instruction::InstrWidth;
+use crate::state_backend::RegionFocus;
 use crate::state_backend::owned_backend::Owned;
 
 /// Instruction execution outcome
@@ -282,31 +283,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     type Bool = Value;
 
     type IResult<T> = InstructionResult<T>;
-
-    fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        let val = self
-            .builder
-            .ins()
-            .load(I64, MemFlags::trusted(), self.core_param, offset as i32);
-
-        X64(val)
-    }
-
-    fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        self.builder
-            .ins()
-            .store(MemFlags::trusted(), value.0, self.core_param, offset as i32);
-    }
 
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         X64(self.ins().iconst(I64, imm))
@@ -647,5 +623,35 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     ) -> Self::FValue {
         self.ext_calls
             .f64_from_x64_unsigned_static(self.builder, self.core_param, xval, rm)
+    }
+
+    fn read_region<L, const LEN: usize>(&mut self, index: usize) -> Self::XValue
+    where
+        L: Lens<Subject = MachineCoreFocus, Target = RegionFocus<XValue, LEN>>,
+    {
+        assert!(index < LEN);
+
+        let region_offset = L::pointer_offset::<MC, Owned>();
+        let offset = 8 * index + region_offset;
+
+        let val = self
+            .builder
+            .ins()
+            .load(I64, MemFlags::trusted(), self.core_param, offset as i32);
+        X64(val)
+    }
+
+    fn write_region<L, const LEN: usize>(&mut self, index: usize, value: Self::XValue)
+    where
+        L: Lens<Subject = MachineCoreFocus, Target = RegionFocus<XValue, LEN>>,
+    {
+        assert!(index < LEN);
+
+        let region_offset = L::pointer_offset::<MC, Owned>();
+        let offset = 8 * index + region_offset;
+
+        self.builder
+            .ins()
+            .store(MemFlags::trusted(), value.0, self.core_param, offset as i32);
     }
 }

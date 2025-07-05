@@ -22,6 +22,7 @@ use crate::machine_state::hart_state::HartState;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XRegister;
+use crate::machine_state::registers::read_xregister;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend as backend;
 use crate::traps::Exception;
@@ -662,7 +663,7 @@ pub fn run_f64_from_x64_unsigned<I: ICB>(
     rm: InstrRoundingMode,
     rd: FRegister,
 ) -> I::IResult<()> {
-    let xval = icb.xregister_read(rs1);
+    let xval = read_xregister(icb, rs1);
 
     let res = match rm {
         InstrRoundingMode::Static(rm) => {

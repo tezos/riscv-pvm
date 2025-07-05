@@ -9,6 +9,9 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
+use crate::machine_state::registers::read_xregister;
+use crate::machine_state::registers::write_xregister;
+use crate::machine_state::registers::write_xregister_nz;
 
 /// Loads the immediate `imm` into register `rd_rs1`.
 ///
@@ -33,7 +36,7 @@ use crate::machine_state::registers::XRegister;
 /// - SUB
 pub fn run_li(icb: &mut impl ICB, imm: i64, rd_rs1: NonZeroXRegister) {
     let imm = icb.xvalue_of_imm(imm);
-    icb.xregister_write_nz(rd_rs1, imm)
+    write_xregister_nz(icb, rd_rs1, imm)
 }
 
 /// Stores a value to the address starting at `val(rs1) + imm`.
@@ -47,12 +50,12 @@ pub fn run_store<V: StoreLoadInt, I: ICB>(
     rs1: XRegister,
     rs2: XRegister,
 ) -> I::IResult<()> {
-    let base_address = icb.xregister_read(rs1);
+    let base_address = read_xregister(icb, rs1);
     let offset = icb.xvalue_of_imm(imm);
 
     let address = base_address.add(offset, icb);
 
-    let value = icb.xregister_read(rs2);
+    let value = read_xregister(icb, rs2);
 
     icb.main_memory_store::<V>(address, value)
 }
@@ -70,14 +73,14 @@ pub fn run_load<V: StoreLoadInt, I: ICB>(
     rs1: XRegister,
     rd: XRegister,
 ) -> I::IResult<()> {
-    let base_address = icb.xregister_read(rs1);
+    let base_address = read_xregister(icb, rs1);
     let offset = icb.xvalue_of_imm(imm);
 
     let address = base_address.add(offset, icb);
 
     let value = icb.main_memory_load::<V>(address);
     I::and_then(value, |value| {
-        icb.xregister_write(rd, value);
+        write_xregister(icb, rd, value);
         icb.ok(())
     })
 }
