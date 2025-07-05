@@ -14,6 +14,7 @@
 )]
 
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use arbitrary_int::u5;
 
@@ -581,20 +582,18 @@ impl FValue {
 }
 
 impl backend::Elem for FValue {
+    const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
     #[inline(always)]
-    fn store(&mut self, source: &Self) {
-        *self = *source;
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        let bits = unsafe { source.cast::<u64>().read_unaligned() };
+        let bits = u64::from_le(bits);
+        Self(bits)
     }
 
     #[inline(always)]
-    fn to_stored_in_place(&mut self) {}
-
-    #[inline(always)]
-    fn from_stored_in_place(&mut self) {}
-
-    #[inline(always)]
-    fn from_stored(source: &Self) -> Self {
-        *source
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        unsafe { dest.cast::<u64>().write_unaligned(self.0.to_le()) }
     }
 }
 

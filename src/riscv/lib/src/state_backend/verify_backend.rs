@@ -5,11 +5,8 @@
 
 use std::array;
 use std::collections::BTreeMap;
-use std::mem;
-use std::mem::MaybeUninit;
 use std::ops::Index;
 use std::panic::resume_unwind;
-use std::slice;
 
 use range_collections::RangeSet2;
 use serde::ser::SerializeTuple;
@@ -23,6 +20,8 @@ use super::ManagerReadWrite;
 use super::ManagerWrite;
 use super::PartialHashError;
 use super::Ref;
+use crate::state_backend::Elem;
+use crate::state_backend::elem_bytes;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
@@ -110,48 +109,27 @@ impl ManagerRead for Verifier {
         (0..LEN).map(|index| region[index]).collect()
     }
 
-    fn dyn_region_read<E: super::Elem, const LEN: usize>(
+    fn dyn_region_read<E: Elem, const LEN: usize>(
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
-        let mut value = MaybeUninit::<E>::uninit();
+        let mut raw_data = vec![0u8; E::STORED_SIZE.get()];
+        region.read_bytes(address, &mut raw_data);
 
-        // SAFETY: `raw_data` points to a byte slice which has same size as `E`.
-        let raw_data = unsafe {
-            slice::from_raw_parts_mut(value.as_mut_ptr().cast::<u8>(), mem::size_of::<E>())
-        };
-
-        region.read_bytes(address, raw_data);
-
-        // SAFETY: `read_bytes` fully populates the contents of `values`. Additionally, `E: Elem`
-        // lets us know that any byte combination is valid.
-        let mut value = unsafe { value.assume_init() };
-
-        value.from_stored_in_place();
-
-        value
+        // SAFETY: The byte vector has been allocated with sufficient space.
+        unsafe { E::read_unaligned(raw_data.as_ptr()) }
     }
 
-    fn dyn_region_read_all<E: super::Elem, const LEN: usize>(
+    fn dyn_region_read_all<E: Elem, const LEN: usize>(
         region: &Self::DynRegion<LEN>,
         address: usize,
         values: &mut [E],
     ) {
-        // SAFETY: `E: Elem` tells us that values of that type would be arranged contiguously in
-        // addition to values of `E` being valid for any raw byte combination.
-        // Hence, obtain a slice that points to the same underlying memory as `values` and populate
-        // it with the raw bytes.
-        let raw_values = unsafe {
-            let data = values.as_mut_ptr().cast::<u8>();
-            let len = mem::size_of_val(values);
-            slice::from_raw_parts_mut(data, len)
-        };
-
-        // `read_bytes` fills the entire slice.
-        region.read_bytes(address, raw_values);
-
-        for value in values {
-            value.from_stored_in_place();
+        for (i, value) in values.iter_mut().enumerate() {
+            *value = Self::dyn_region_read(
+                region,
+                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+            );
         }
     }
 
@@ -211,30 +189,26 @@ impl ManagerWrite for Verifier {
         }
     }
 
-    fn dyn_region_write<E: super::Elem, const LEN: usize>(
+    fn dyn_region_write<E: Elem, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
-        mut value: E,
+        value: E,
     ) {
-        value.to_stored_in_place();
-
-        let raw_data = unsafe {
-            let raw_ptr = (&value as *const E).cast::<u8>();
-            let len = mem::size_of::<E>();
-            slice::from_raw_parts(raw_ptr, len)
-        };
-
-        region.write_bytes(address, raw_data);
+        let raw_data = elem_bytes(value);
+        region.write_bytes(address, &raw_data);
     }
 
-    fn dyn_region_write_all<E: super::Elem, const LEN: usize>(
+    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
-        base_address: usize,
+        address: usize,
         values: &[E],
     ) {
-        for (i, &value) in values.iter().enumerate() {
-            let address = base_address + i * mem::size_of::<E>();
-            Self::dyn_region_write(region, address, value);
+        for (i, value) in values.iter().enumerate() {
+            Self::dyn_region_write(
+                region,
+                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                *value,
+            );
         }
     }
 

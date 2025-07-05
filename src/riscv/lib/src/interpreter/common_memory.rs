@@ -16,7 +16,7 @@ where
     MC: memory::MemoryConfig,
     M: backend::ManagerReadWrite,
 {
-    /// Generic read function for loading `mem::size_of<T>` bytes from `address`
+    /// Generic read function for loading `T::STORED_SIZE` bytes from `address`
     pub(super) fn read_from_address<T: backend::Elem>(
         &mut self,
         address: u64,
@@ -26,7 +26,7 @@ where
             .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
     }
 
-    /// Generic read function for loading `mem::size_of<T>` bytes from address val(rs1) + imm
+    /// Generic read function for loading `T::STORED_SIZE` bytes from address val(rs1) + imm
     pub(super) fn read_from_bus<T: backend::Elem>(
         &mut self,
         imm: i64,
@@ -36,7 +36,7 @@ where
         self.read_from_address(address)
     }
 
-    /// Generic store-operation for writing `mem::size_of<T>` bytes starting at `address`
+    /// Generic store-operation for writing `T::STORED_SIZE` bytes starting at `address`
     pub(super) fn write_to_address<T: backend::Elem>(
         &mut self,
         address: u64,
@@ -47,7 +47,7 @@ where
             .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault(address))
     }
 
-    /// Generic store operation for writing `mem::size_of<T>` bytes starting at address val(rs1) + imm
+    /// Generic store operation for writing `T::STORED_SIZE` bytes starting at address val(rs1) + imm
     pub(super) fn write_to_bus<T: backend::Elem>(
         &mut self,
         imm: i64,
