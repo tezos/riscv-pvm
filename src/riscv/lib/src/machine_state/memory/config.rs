@@ -7,36 +7,21 @@ use super::buddy::BuddyLayoutProxy;
 use super::protection::PagePermissions;
 use super::protection::PagePermissionsLayout;
 use super::state::MemoryImpl;
-use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::DynArray;
-use crate::state_backend::DynCells;
 use crate::state_backend::FnManager;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::Ref;
 
 /// State layout for the memory component
 pub struct MemoryConfig<const PAGES: usize, const TOTAL_BYTES: usize>;
 
-impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> NewState<M>
-    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
-where
-    B: NewState<M>,
-    M: ManagerBase,
-{
-    fn new(manager: &mut M) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        MemoryImpl {
-            data: DynCells::new(manager),
-            readable_pages: PagePermissions::new(manager),
-            writable_pages: PagePermissions::new(manager),
-            executable_pages: PagePermissions::new(manager),
-            allocated_pages: B::new(manager),
-        }
-    }
+impl<const PAGES: usize, const TOTAL_BYTES: usize> MemoryConfig<PAGES, TOTAL_BYTES> {
+    /// The number of pages in the memory configuration.
+    pub const PAGES: usize = PAGES;
+
+    /// The total number of bytes in the memory configuration.
+    pub const TOTAL_BYTES: usize = TOTAL_BYTES;
 }
 
 impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
@@ -44,8 +29,6 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
 where
     BuddyLayoutProxy<PAGES>: BuddyLayout + 'static,
 {
-    const TOTAL_BYTES: usize = TOTAL_BYTES;
-
     type Layout = (
         DynArray<TOTAL_BYTES>,
         PagePermissionsLayout<PAGES>,

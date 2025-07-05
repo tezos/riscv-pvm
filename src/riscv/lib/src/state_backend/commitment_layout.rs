@@ -53,7 +53,7 @@ where
 impl<const LEN: usize> CommitmentLayout for DynArray<LEN> {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
         let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
-        chunks_to_writer::<LEN, _, _>(&mut writer, |address| {
+        chunks_to_writer::<_, _>(LEN, &mut writer, |address| {
             state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address)
         })?;
         let hashes = writer.finalise()?;

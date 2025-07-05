@@ -192,7 +192,14 @@ impl From<BadMemoryAccess> for SbiError {
 pub struct MemoryGovernanceError;
 
 /// Instance of memory
+#[expect(
+    clippy::len_without_is_empty,
+    reason = "is_empty is not useful in this context"
+)]
 pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
+    /// Length in bytes
+    fn len(&self) -> usize;
+
     /// Read an element in the region. `address` is in bytes.
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
@@ -241,7 +248,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         perms: Permissions,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerWrite;
+        M: ManagerReadWrite;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(
@@ -289,9 +296,6 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 
 /// Memory configuration
 pub trait MemoryConfig: 'static {
-    /// Number of bytes in the memory
-    const TOTAL_BYTES: usize;
-
     /// Layout for memory instance's state
     type Layout: CommitmentLayout + ProofLayout;
 
