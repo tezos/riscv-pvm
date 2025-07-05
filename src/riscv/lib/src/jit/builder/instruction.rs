@@ -26,6 +26,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::MemFlags;
 use cranelift::prelude::Value;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
@@ -44,14 +45,15 @@ use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::F64;
 use crate::jit::builder::X32;
 use crate::jit::builder::X64;
-use crate::jit::state_access::JitStateAccess;
 use crate::jit::state_access::JsaCalls;
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
+use crate::machine_state::registers::XRegisters;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::ManagerBase;
+use crate::state_backend::owned_backend::Owned;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -128,12 +130,12 @@ pub enum InstructionResult<T> {
 }
 
 /// Builder for a single RISC-V instruction
-pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> {
+pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     /// IR builder
     builder: &'seq mut FunctionBuilder<'jit>,
 
     /// External function call manager
-    ext_calls: &'seq mut JsaCalls<'jit, MC, M>,
+    ext_calls: &'seq mut JsaCalls<'jit, MC>,
 
     /// Block that starts the instruction
     entry_block: Block,
@@ -151,19 +153,16 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> {
     outcomes: Vec<Outcome>,
 }
 
-impl<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> InstructionBuilder<'seq, 'jit, MC, M> {
+impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
     pub(super) fn new(
         builder: &'seq mut FunctionBuilder<'jit>,
-        ext_calls: &'seq mut JsaCalls<'jit, MC, M>,
+        ext_calls: &'seq mut JsaCalls<'jit, MC>,
         entry_block: Block,
         instruction_pc: Value,
         core_param: Value,
         result_param: Value,
-    ) -> Self
-    where
-        M: JitStateAccess,
-    {
+    ) -> Self {
         Self {
             builder,
             ext_calls,
@@ -203,10 +202,7 @@ impl<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> InstructionBuilder<'seq, 'jit
     }
 
     /// Handle an exception raised by the instruction.
-    fn handle_exception<Any>(&mut self, exception_ptr: Value) -> InstructionResult<Any>
-    where
-        M: JitStateAccess,
-    {
+    fn handle_exception<Any>(&mut self, exception_ptr: Value) -> InstructionResult<Any> {
         let current_pc = self.pc_read();
         let outcome = self.ext_calls.handle_exception(
             self.builder,
@@ -276,7 +272,7 @@ impl<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> InstructionBuilder<'seq, 'jit
     }
 }
 
-impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC, M> {
+impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     type XValue = X64;
 
     type XValue32 = X32;
@@ -288,11 +284,28 @@ impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC,
     type IResult<T> = InstructionResult<T>;
 
     fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        M::ir_xreg_read(self.ext_calls, self.builder, self.core_param, reg)
+        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
+            + XRegisters::<Owned>::xregister_offset(reg);
+
+        // memory access corresponds directly to the xregister value
+        // - known to be aligned and non-trapping
+        let val = self
+            .builder
+            .ins()
+            .load(I64, MemFlags::trusted(), self.core_param, offset as i32);
+
+        X64(val)
     }
 
     fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
-        M::ir_xreg_write(self.ext_calls, self.builder, self.core_param, reg, value)
+        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
+            + XRegisters::<Owned>::xregister_offset(reg);
+
+        // memory access corresponds directly to the xregister value
+        // - known to be aligned and non-trapping
+        self.builder
+            .ins()
+            .store(MemFlags::trusted(), value.0, self.core_param, offset as i32);
     }
 
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
@@ -309,12 +322,14 @@ impl<MC: MemoryConfig, M: JitStateAccess> ICB for InstructionBuilder<'_, '_, MC,
     }
 
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
-        M::ir_freg_read(self.ext_calls, self.builder, self.core_param, reg)
+        self.ext_calls
+            .ir_freg_read(self.builder, self.core_param, reg)
     }
 
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
         // The value contained must be a floating-point type.
-        M::ir_freg_write(self.ext_calls, self.builder, self.core_param, reg, value)
+        self.ext_calls
+            .ir_freg_write(self.builder, self.core_param, reg, value)
     }
 
     fn pc_read(&mut self) -> Self::XValue {
