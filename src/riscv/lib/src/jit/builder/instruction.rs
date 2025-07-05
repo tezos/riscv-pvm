@@ -45,12 +45,9 @@ use crate::jit::builder::F64;
 use crate::jit::builder::X32;
 use crate::jit::builder::X64;
 use crate::jit::state_access::JsaCalls;
-use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
-use crate::machine_state::registers::NonZeroXRegister;
-use crate::machine_state::registers::XRegisters;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
@@ -283,31 +280,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     type Bool = Value;
 
     type IResult<T> = InstructionResult<T>;
-
-    fn xregister_read_nz(&mut self, reg: NonZeroXRegister) -> Self::XValue {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        let val = self
-            .builder
-            .ins()
-            .load(I64, MemFlags::trusted(), self.core_param, offset as i32);
-
-        X64(val)
-    }
-
-    fn xregister_write_nz(&mut self, reg: NonZeroXRegister, value: Self::XValue) {
-        let offset = std::mem::offset_of!(MachineCoreState<MC, Owned>, hart.xregisters)
-            + XRegisters::<Owned>::xregister_offset(reg);
-
-        // memory access corresponds directly to the xregister value
-        // - known to be aligned and non-trapping
-        self.builder
-            .ins()
-            .store(MemFlags::trusted(), value.0, self.core_param, offset as i32);
-    }
 
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         X64(self.ins().iconst(I64, imm))

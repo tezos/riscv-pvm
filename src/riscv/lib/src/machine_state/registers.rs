@@ -19,10 +19,14 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
-use crate::instruction_context::lens;
+use crate::instruction_context::ICB;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
+use crate::state_context::StateContext;
+use crate::state_context::projection::CellsCons;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 
 /// Integer register index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -668,8 +672,40 @@ impl<M: backend::ManagerClone> Clone for FRegisters<M> {
     }
 }
 
-lens::impl_projection! {
-    XRegisterProj (lens::MachineCoreCons => lens::CellsCons<XValue, 31>) = hart.xregisters.registers
+impl_projection! {
+    XRegisterProj (MachineCoreCons => CellsCons<XValue, 31>) = hart.xregisters.registers
+}
+
+#[inline]
+pub fn read_xregister_nz<I: StateContext + ?Sized>(icb: &mut I, reg: NonZeroXRegister) -> I::X64 {
+    backend::read_machine_cells::<XRegisterProj, 31, _>(icb, reg as usize)
+}
+
+#[inline]
+pub fn write_xregister_nz<I: StateContext + ?Sized>(
+    icb: &mut I,
+    reg: NonZeroXRegister,
+    value: I::X64,
+) {
+    backend::write_machine_cells::<XRegisterProj, 31, _>(icb, reg as usize, value);
+}
+
+#[inline]
+pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue {
+    if reg.is_zero() {
+        return icb.xvalue_of_imm(0);
+    }
+
+    backend::read_machine_cells::<XRegisterProj, 31, _>(icb, reg as usize)
+}
+
+#[inline]
+pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::XValue) {
+    if reg.is_zero() {
+        return;
+    }
+
+    backend::write_machine_cells::<XRegisterProj, 31, _>(icb, reg as usize, value);
 }
 
 #[cfg(test)]
