@@ -42,6 +42,7 @@ use crate::parser::XRegisterParsed;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::split_x0;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_context::StateContext;
 use crate::traps::Exception;
 
 /// Type of function that may be used to lower [`Instructions`] to IR.
@@ -55,7 +56,7 @@ pub type IcbFnResult<I> = <I as ICB>::IResult<ProgramCounterUpdate<<I as ICB>::X
 /// Instruction Context Builder contains operations required to
 /// execute RISC-V instructions.
 #[expect(clippy::upper_case_acronyms, reason = "ICB looks cooler than Icb")]
-pub(crate) trait ICB {
+pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
     /// A 64-bit value stored in [`XRegisters`].
     ///
     /// [`XRegisters`]: crate::machine_state::registers::XRegisters

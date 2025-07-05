@@ -32,6 +32,8 @@ use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
+use crate::state_context::StateContext;
+use crate::state_context::projection::MachineCoreProjection;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
@@ -293,5 +295,23 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
         self.builder.seal_all_blocks();
         self.builder.finalize();
+    }
+}
+
+impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
+    type X64 = X64;
+
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    where
+        P: MachineCoreProjection<Target = u64>,
+    {
+        super::read_proj::<MC, P>(&mut self.builder, self.core_param, param)
+    }
+
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    where
+        P: MachineCoreProjection<Target = u64>,
+    {
+        super::write_proj::<MC, P>(&mut self.builder, self.core_param, param, value)
     }
 }

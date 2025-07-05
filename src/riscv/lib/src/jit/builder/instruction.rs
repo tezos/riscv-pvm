@@ -26,7 +26,6 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
-use cranelift::prelude::MemFlags;
 use cranelift::prelude::Value;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
@@ -53,7 +52,8 @@ use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_context::StateContext;
+use crate::state_context::projection::MachineCoreProjection;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -647,5 +647,23 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     ) -> Self::FValue {
         self.ext_calls
             .f64_from_x64_unsigned_static(self.builder, self.core_param, xval, rm)
+    }
+}
+
+impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
+    type X64 = X64;
+
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    where
+        P: MachineCoreProjection<Target = u64>,
+    {
+        super::read_proj::<MC, P>(self.builder, self.core_param, param)
+    }
+
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    where
+        P: MachineCoreProjection<Target = u64>,
+    {
+        super::write_proj::<MC, P>(self.builder, self.core_param, param, value)
     }
 }

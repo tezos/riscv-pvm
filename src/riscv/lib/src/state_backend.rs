@@ -82,6 +82,8 @@ mod region;
 mod trans;
 pub mod verify_backend;
 
+use std::marker::PhantomData;
+
 pub use commitment_layout::*;
 pub use effects::*;
 pub use elems::*;
@@ -89,6 +91,11 @@ pub use layout::*;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
+
+use crate::machine_state::memory::MemoryConfig;
+use crate::state_context::projection::ApplyCons;
+use crate::state_context::projection::Projection;
+use crate::state_context::projection::RegionCons;
 
 /// An enriched value may be stored in a [`ManagerBase::EnrichedCell`].
 ///
@@ -401,6 +408,59 @@ pub type RefProofGenOwnedAlloc<'a, 'b, L> =
 ///
 /// [Verifier]: verify_backend::Verifier
 pub type RefVerifierAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verifier>>;
+
+/// Projection from [`ManagerBase::Region`] to the element type `E`
+pub struct RegionProj<E, const LEN: usize>(PhantomData<E>);
+
+impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
+    type Subject = RegionCons<E, LEN>;
+
+    type Target = E;
+
+    // The parameter needs to be a tuple to allow better composition via the `tuples` crate.
+    type Parameter = (usize,);
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        M::region_ref(state, param.0)
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        M::region_read(state, param.0)
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        M::region_write(state, param.0, value);
+    }
+
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> i32 {
+        assert!(
+            param.0 < LEN,
+            "Region index out of bounds: {} >= {}",
+            param.0,
+            LEN
+        );
+        std::mem::size_of::<E>()
+            .wrapping_mul(param.0)
+            .try_into()
+            .expect("Region offset exceeds i32 range")
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
