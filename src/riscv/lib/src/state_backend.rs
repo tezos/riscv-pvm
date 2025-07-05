@@ -82,6 +82,8 @@ mod region;
 mod trans;
 pub mod verify_backend;
 
+use std::marker::PhantomData;
+
 pub use commitment_layout::*;
 pub use effects::*;
 pub use elems::*;
@@ -89,6 +91,9 @@ pub use layout::*;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
+
+use crate::instruction_context::lens::LensFocus;
+use crate::machine_state::memory::MemoryConfig;
 
 /// An enriched value may be stored in a [`ManagerBase::EnrichedCell`].
 ///
@@ -404,6 +409,12 @@ pub type RefProofGenOwnedAlloc<'a, 'b, L> =
 ///
 /// [Verifier]: verify_backend::Verifier
 pub type RefVerifierAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verifier>>;
+
+pub struct RegionFocus<E, const LEN: usize>(PhantomData<E>);
+
+impl<E: 'static, const LEN: usize> LensFocus for RegionFocus<E, LEN> {
+    type Instance<MC: MemoryConfig, M: ManagerBase> = M::Region<E, LEN>;
+}
 
 #[cfg(test)]
 pub(crate) mod test_helpers {

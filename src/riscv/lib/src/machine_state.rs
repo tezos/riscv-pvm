@@ -25,6 +25,7 @@ use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
+use crate::instruction_context::lens::LensFocus;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::Instr;
 use crate::parser::instruction::InstrCacheable;
@@ -596,6 +597,12 @@ pub enum MachineError {
 
     #[error("Memory too small to properly configure the machine")]
     MemoryTooSmall,
+}
+
+pub struct MachineCoreFocus;
+
+impl LensFocus for MachineCoreFocus {
+    type Instance<MC: MemoryConfig, M: backend::ManagerBase> = MachineCoreState<MC, M>;
 }
 
 #[cfg(test)]

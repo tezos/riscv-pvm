@@ -9,6 +9,7 @@
 
 pub(super) mod arithmetic;
 pub(super) mod comparable;
+pub(crate) mod lens;
 pub(crate) mod value;
 
 use arithmetic::Arithmetic;

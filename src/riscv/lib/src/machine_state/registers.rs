@@ -18,7 +18,10 @@ use std::fmt;
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
+use crate::instruction_context::lens::LensFocus;
+use crate::instruction_context::lens::impl_lens;
 use crate::machine_state::backend;
+use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
 
@@ -665,6 +668,16 @@ impl<M: backend::ManagerClone> Clone for FRegisters<M> {
             registers: self.registers.clone(),
         }
     }
+}
+
+pub struct XRegistersFocus;
+
+impl LensFocus for XRegistersFocus {
+    type Instance<MC: MemoryConfig, M: backend::ManagerBase> = XRegisters<M>;
+}
+
+impl_lens! {
+    XRegisterLens (super::MachineCoreFocus => backend::CellsFocus<XValue, 31>) = hart.xregisters.registers
 }
 
 #[cfg(test)]

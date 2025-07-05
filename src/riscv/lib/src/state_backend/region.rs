@@ -479,6 +479,42 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
     }
 }
 
+pub struct CellsFocus<E, const LEN: usize>(PhantomData<E>);
+
+impl<E: 'static, const LEN: usize> LensFocus for CellsFocus<E, LEN> {
+    type Instance<MC: MemoryConfig, M: ManagerBase> = Cells<E, LEN, M>;
+}
+
+pub struct CellsInnerRegionL<T>(PhantomData<T>);
+
+impl<E, const LEN: usize, T> Lens for CellsInnerRegionL<T>
+where
+    E: 'static,
+    T: Lens<Target = CellsFocus<E, LEN>>,
+{
+    type Subject = T::Subject;
+
+    type Target = super::RegionFocus<E, LEN>;
+
+    #[inline]
+    fn refer<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a <Self::Subject as LensFocus>::Instance<MC, M>,
+    ) -> &'a <Self::Target as LensFocus>::Instance<MC, M> {
+        &T::refer(state).region
+    }
+
+    #[inline]
+    fn refer_mut<'a, MC: MemoryConfig, M: ManagerBase + 'a>(
+        state: &'a mut <Self::Subject as LensFocus>::Instance<MC, M>,
+    ) -> &'a mut <Self::Target as LensFocus>::Instance<MC, M> {
+        &mut T::refer_mut(state).region
+    }
+
+    fn pointer_offset<MC: MemoryConfig, M: ManagerBase>() -> usize {
+        T::pointer_offset::<MC, M>() + std::mem::offset_of!(Cells<E, LEN, M>, region)
+    }
+}
+
 /// Multiple elements of an unspecified type
 pub struct DynCells<const LEN: usize, M: ManagerBase> {
     region: M::DynRegion<LEN>,
