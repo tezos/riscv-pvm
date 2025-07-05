@@ -143,6 +143,45 @@ where
     }
 }
 
+impl<V: EnrichedValue, M: ManagerSerialise> serde::Serialize for EnrichedCell<V, M>
+where
+    V::E: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let cell = self.cell_ref();
+        let region = M::as_devalued_cell(cell);
+        M::serialise_region(region, serializer)
+    }
+}
+
+impl<V: EnrichedValue, M: ManagerSerialise> AccessInfoAggregatable
+    for EnrichedCell<V, Ref<'_, ProofGen<M>>>
+where
+    V::E: serde::Serialize,
+{
+    fn aggregate_access_info(&self) -> bool {
+        self.cell.get_access_info()
+    }
+}
+
+impl<'de, V, M: ManagerDeserialise> serde::Deserialize<'de> for EnrichedCell<V, M>
+where
+    V: EnrichedValueLinked,
+    V::E: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let region = M::deserialise_region(deserializer)?;
+        let cell = M::enrich_cell(region);
+        Ok(Self { cell })
+    }
+}
+
 /// Single element of type `E`
 #[repr(transparent)]
 pub struct Cell<E: 'static, M: ManagerBase> {
@@ -404,30 +443,6 @@ impl<E: serde::Serialize, const LEN: usize, M: ManagerSerialise> serde::Serializ
     }
 }
 
-impl<V: EnrichedValue, M: ManagerSerialise> serde::Serialize for EnrichedCell<V, M>
-where
-    V::E: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let cell = self.cell_ref();
-        let region = M::as_devalued_cell(cell);
-        M::serialise_region(region, serializer)
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerSerialise> AccessInfoAggregatable
-    for EnrichedCell<V, Ref<'_, ProofGen<M>>>
-where
-    V::E: serde::Serialize,
-{
-    fn aggregate_access_info(&self) -> bool {
-        self.cell.get_access_info()
-    }
-}
-
 impl<'de, E: serde::Deserialize<'de>, const LEN: usize, M: ManagerDeserialise>
     serde::Deserialize<'de> for Cells<E, LEN, M>
 {
@@ -437,21 +452,6 @@ impl<'de, E: serde::Deserialize<'de>, const LEN: usize, M: ManagerDeserialise>
     {
         let region = M::deserialise_region(deserializer)?;
         Ok(Self { region })
-    }
-}
-
-impl<'de, V, M: ManagerDeserialise> serde::Deserialize<'de> for EnrichedCell<V, M>
-where
-    V: EnrichedValueLinked,
-    V::E: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let region = M::deserialise_region(deserializer)?;
-        let cell = M::enrich_cell(region);
-        Ok(Self { cell })
     }
 }
 
