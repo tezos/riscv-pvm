@@ -6,133 +6,106 @@ use std::num::NonZeroUsize;
 
 use crate::machine_state::memory::PAGE_SIZE;
 
-/// Types that have a non-zero size
-pub trait NonZeroSized: Sized {
-    /// Size of the type
-    const NON_ZERO_SIZE: NonZeroUsize = {
-        let size = NonZeroUsize::new(std::mem::size_of::<Self>());
-        if let Some(size) = size {
-            size
-        } else {
-            panic!("Type has zero size");
-        }
-    };
-}
-
-impl<T: Sized> NonZeroSized for T {}
-
 /// Types that are less than one page wide
-pub trait NarrowlySized: NonZeroSized {
+pub trait NarrowlySized: Elem {
     /// Size of the type
     const NARROW_SIZE: NonZeroUsize = {
-        if Self::NON_ZERO_SIZE.get() >= PAGE_SIZE.get() as usize {
+        if Self::STORED_SIZE.get() >= PAGE_SIZE.get() as usize {
             panic!("Type is too wide");
         }
 
-        Self::NON_ZERO_SIZE
+        Self::STORED_SIZE
     };
 }
 
-impl<T: NonZeroSized> NarrowlySized for T {}
+impl<T: Elem> NarrowlySized for T {}
 
 /// Types that can be copied and contain no non-static references
 pub trait StaticCopy: Copy + 'static {}
 
 impl<T: Copy + 'static> StaticCopy for T {}
 
-/// Elements that may be stored using a Backend - i.e. implementors of [super::ManagerBase]
-pub trait Elem: StaticCopy {
-    /// Copy from `source` and convert to stored representation.
-    fn store(&mut self, source: &Self);
-
-    /// Convert to stored representation in place.
-    fn to_stored_in_place(&mut self);
-
-    /// Convert from stored representation in place.
-    // The naming of this function trips Clippy.
-    #[expect(
-        clippy::wrong_self_convention,
-        reason = "It's an appropriate name when ignoring Rust's from/to naming convention"
-    )]
-    fn from_stored_in_place(&mut self);
+/// Values that can be stored in dynamic regions
+pub trait Elem {
+    /// Size of the stored representation in bytes
+    const STORED_SIZE: NonZeroUsize;
 
     /// Read a value from its stored representation.
-    fn from_stored(source: &Self) -> Self;
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that the source is valid for reads of `Self::STORED_SIZE` bytes.
+    unsafe fn read_unaligned(source: *const u8) -> Self;
+
+    /// Write a value as its stored representation.
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that the destination is valid for writes of `Self::STORED_SIZE` bytes.
+    unsafe fn write_unaligned(self, dest: *mut u8);
 }
 
-macro_rules! impl_elem_prim {
+/// Capture the stored representation of an element from a dynamic region.
+pub fn elem_bytes<E: Elem>(value: E) -> Box<[u8]> {
+    let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
+
+    // SAFETY: The vector has been allocated with sufficient space.
+    unsafe {
+        value.write_unaligned(value_bytes.as_mut_ptr());
+    }
+
+    value_bytes.into_boxed_slice()
+}
+
+macro_rules! impl_dyn_value_prim {
     ( $x:ty ) => {
         impl Elem for $x {
-            #[inline(always)]
-            fn store(&mut self, source: &Self) {
-                *self = source.to_le();
+            const STORED_SIZE: NonZeroUsize =
+                NonZeroUsize::new(std::mem::size_of::<$x>()).expect("Type has zero size");
+
+            #[inline]
+            unsafe fn read_unaligned(source: *const u8) -> Self {
+                Self::from_le(unsafe { source.cast::<Self>().read_unaligned() })
             }
 
-            #[inline(always)]
-            fn to_stored_in_place(&mut self) {
-                *self = self.to_le();
-            }
-
-            #[inline(always)]
-            fn from_stored_in_place(&mut self) {
-                *self = Self::from_le(*self);
-            }
-
-            #[inline(always)]
-            fn from_stored(source: &Self) -> Self {
-                Self::from_le(*source)
+            #[inline]
+            unsafe fn write_unaligned(self, dest: *mut u8) {
+                unsafe { dest.cast::<Self>().write_unaligned(self.to_le()) }
             }
         }
     };
 }
 
-impl_elem_prim!(u8);
-impl_elem_prim!(i8);
-impl_elem_prim!(u16);
-impl_elem_prim!(i16);
-impl_elem_prim!(u32);
-impl_elem_prim!(i32);
-impl_elem_prim!(u64);
-impl_elem_prim!(i64);
-impl_elem_prim!(u128);
-impl_elem_prim!(i128);
+impl_dyn_value_prim!(u8);
+impl_dyn_value_prim!(i8);
+impl_dyn_value_prim!(u16);
+impl_dyn_value_prim!(i16);
+impl_dyn_value_prim!(u32);
+impl_dyn_value_prim!(i32);
+impl_dyn_value_prim!(u64);
+impl_dyn_value_prim!(i64);
+impl_dyn_value_prim!(u128);
+impl_dyn_value_prim!(i128);
 
 impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
-    #[inline(always)]
-    fn store(&mut self, source: &Self) {
-        self.copy_from_slice(source);
+    const STORED_SIZE: NonZeroUsize = {
+        let len = NonZeroUsize::new(LEN).expect("Array length must be non-zero");
+        E::STORED_SIZE
+            .checked_mul(len)
+            .expect("Array size must not overflow")
+    };
 
-        // NOTE: This loop may be eliminated if [to_stored_in_place] is a no-op.
-        for elem in self {
-            elem.to_stored_in_place();
-        }
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        std::array::from_fn(|i| {
+            let offset = E::STORED_SIZE.get().wrapping_mul(i);
+            unsafe { E::read_unaligned(source.add(offset)) }
+        })
     }
 
-    #[inline(always)]
-    fn to_stored_in_place(&mut self) {
-        // NOTE: This loop may be eliminated if [to_stored_in_place] is a no-op.
-        for elem in self {
-            elem.to_stored_in_place();
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        for (i, elem) in self.into_iter().enumerate() {
+            let offset = E::STORED_SIZE.get().wrapping_mul(i);
+            unsafe { elem.write_unaligned(dest.add(offset)) };
         }
-    }
-
-    #[inline(always)]
-    fn from_stored_in_place(&mut self) {
-        // NOTE: This loop may be eliminated if [from_stored_in_place] is a no-op.
-        for elem in self {
-            elem.from_stored_in_place();
-        }
-    }
-
-    #[inline(always)]
-    fn from_stored(source: &Self) -> Self {
-        let mut new = *source;
-
-        // NOTE: This loop may be eliminated if [from_stored_in_place] is a no-op.
-        for elem in new.iter_mut() {
-            elem.from_stored_in_place();
-        }
-
-        new
     }
 }

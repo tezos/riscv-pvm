@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::mem;
-
 use super::Address;
 use super::BadMemoryAccess;
 use super::Memory;
@@ -72,7 +70,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         E: Elem,
         M: ManagerWrite,
     {
-        let length = mem::size_of::<E>();
+        let length = E::STORED_SIZE.get();
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         self.data.write(address as usize, value);
@@ -94,7 +92,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        Self::check_bounds(address, E::STORED_SIZE.get(), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -112,7 +110,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = mem::size_of::<E>();
+        let length = E::STORED_SIZE.get();
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
@@ -137,14 +135,12 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        let length = E::STORED_SIZE.get() * values.len();
+        Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self
-                .readable_pages
-                .can_access(address, mem::size_of_val(values))
-            {
+            if !self.readable_pages.can_access(address, length) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -159,7 +155,7 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of::<E>(), BadMemoryAccess)?;
+        Self::check_bounds(address, E::STORED_SIZE.get(), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -174,17 +170,15 @@ where
 
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
-        E: Elem,
+        E: Elem + Copy,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, mem::size_of_val(values), BadMemoryAccess)?;
+        let length = E::STORED_SIZE.get() * values.len();
+        Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self
-                .writable_pages
-                .can_access(address, mem::size_of_val(values))
-            {
+            if !self.writable_pages.can_access(address, length) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -210,7 +204,7 @@ where
     where
         M: ManagerWrite,
     {
-        const SIZE_OF_U64: usize = mem::size_of::<u64>();
+        const SIZE_OF_U64: usize = u64::STORED_SIZE.get();
 
         let mut address = 0;
         let mut outstanding = TOTAL_BYTES;

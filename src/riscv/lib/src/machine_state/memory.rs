@@ -220,7 +220,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     /// Update multiple elements in the region. `address` is in bytes.
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
-        E: Elem,
+        E: Elem + Copy,
         M: ManagerReadWrite;
 
     /// Clone all memory.

@@ -227,7 +227,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
     );
 
     /// Update multiple elements in the region. `address` is in bytes.
-    fn dyn_region_write_all<E: Elem, const LEN: usize>(
+    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
         region: &mut Self::DynRegion<LEN>,
         address: usize,
         values: &[E],
