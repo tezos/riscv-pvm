@@ -106,7 +106,6 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    pc_write => (pc_write::<MC>, AbiCall<2>::args),
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     handle_exception => (handle_exception::<MC>, AbiCall<4>::args),
@@ -152,11 +151,6 @@ register_jsa_functions!(
     reservation_set_write => (reservation_set_write::<MC>, AbiCall<2>::args),
     reservation_set_read => (reservation_set_read::<MC>, AbiCall<1>::args),
 );
-
-/// Update the instruction pc in the state.
-extern "C" fn pc_write<MC: MemoryConfig>(core: &mut MachineCoreState<MC, Owned>, pc: u64) {
-    core.hart.pc.write(pc)
-}
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig>(
@@ -346,7 +340,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
-    pc_write: Option<FuncRef>,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     handle_exception: Option<FuncRef>,
@@ -413,7 +406,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             module,
             imports,
             ptr_type,
-            pc_write: None,
             freg_read: None,
             freg_write: None,
             handle_exception: None,
@@ -441,20 +433,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             f64_ptr_slot: None,
             _pd: PhantomData,
         }
-    }
-
-    /// Emit the required IR to set the pc to the given value.
-    pub(super) fn pc_write(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        pc_val: X64,
-    ) {
-        let pc_write = self.pc_write.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.pc_write, builder.func)
-        });
-        builder.ins().call(*pc_write, &[core_ptr, pc_val.0]);
     }
 
     /// Emit the required IR to call `handle_exception`.
