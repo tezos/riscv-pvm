@@ -393,10 +393,10 @@ mod tests {
 
     fn generate_rand_leaf() -> MerkleProof {
         let is_leaf_read = rand::random::<bool>();
-        let length: usize = rand::random::<usize>() % 100 + 1;
+        let length: usize = rand::random::<u64>() as usize % 100 + 1;
 
         let mut raw_array = vec![0; length];
-        raw_array.try_fill(&mut rand::thread_rng()).unwrap();
+        Fill::fill(raw_array.as_mut_slice(), &mut rand::rng());
         let blind_hash: Hash = Hash::blake2b_hash_bytes(&raw_array).unwrap();
 
         match is_leaf_read {
@@ -536,7 +536,7 @@ mod tests {
                 while !nothing_taken {
                     // wanted number of children of a node is between 2 and 10.
                     // (Note, if only a node is left, then there will be only one child)
-                    let nr_children = rand::random::<usize>() % 8 + 2;
+                    let nr_children = rand::random::<u64>() % 8 + 2;
 
                     let mut new_children = vec![];
                     let mut new_bounds = vec![];
