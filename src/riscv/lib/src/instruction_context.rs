@@ -82,11 +82,19 @@ pub(crate) trait ICB {
     /// Construct an [`ICB::XValue32`] from an `imm: i32`.
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32;
 
-    #[expect(unused, reason = "Will Be Used Soon™")]
+    /// Perform a read to an [`FRegister`], returning the given value.
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
 
     /// Perform a write to a [`FRegister`], with the given value.
     fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
+
+    /// Perform a reinterpretation of an [`XValue`] to an [`FValue`]. The bitwise
+    /// value is preserved, but the type is changed.
+    fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue;
+
+    /// Perform a reinterpretation of an [`FValue`] to an [`XValue`]. The bitwise
+    /// value is preserved, but the type is changed.
+    fn fvalue_to_xvalue(&mut self, value: Self::FValue) -> Self::XValue;
 
     /// Perform a read of the program counter.
     fn pc_read(&mut self) -> Self::XValue;
@@ -492,6 +500,14 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         }
 
         Ok(value.into())
+    }
+
+    fn fvalue_from_xvalue(&mut self, value: Self::XValue) -> Self::FValue {
+        value.into()
+    }
+
+    fn fvalue_to_xvalue(&mut self, value: Self::FValue) -> Self::XValue {
+        value.into()
     }
 }
 
