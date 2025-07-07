@@ -191,14 +191,6 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
         phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue>;
 
-    /// Write the start address of the reservation set.
-    ///
-    /// The address must be aligned to the size of the reservation set.
-    fn reservation_set_write(&mut self, address: Self::XValue);
-
-    /// Read the reservation set start address.
-    fn reservation_set_read(&mut self) -> Self::XValue;
-
     /// Take an `XValue` and convert it to a 64-bit float with the dynamic rounding mode in the `frm` field of the
     /// `fcsr` register, returning the result as an `FValue`.
     fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue>;
@@ -393,16 +385,6 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
             .read(address)
             .map(V::to_xvalue)
             .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
-    }
-
-    #[inline(always)]
-    fn reservation_set_write(&mut self, address: Self::XValue) {
-        self.hart.reservation_set.start_addr.write(address);
-    }
-
-    #[inline(always)]
-    fn reservation_set_read(&mut self) -> Self::XValue {
-        self.hart.reservation_set.start_addr.read()
     }
 
     fn f64_from_x64_unsigned_static(

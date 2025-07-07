@@ -542,16 +542,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         }
     }
 
-    fn reservation_set_write(&mut self, address: Self::XValue) {
-        self.ext_calls
-            .reservation_set_write(self.builder, self.core_param, address);
-    }
-
-    fn reservation_set_read(&mut self) -> Self::XValue {
-        self.ext_calls
-            .reservation_set_read(self.builder, self.core_param)
-    }
-
     fn ok<Value>(&mut self, val: Value) -> Self::IResult<Value> {
         InstructionResult::HasNext(val)
     }

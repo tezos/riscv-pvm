@@ -10,10 +10,16 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::machine_state::registers::XRegister;
+use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::read_xregister;
 use crate::machine_state::registers::write_xregister;
 use crate::machine_state::reservation_set::RES_SET_BITMASK;
 use crate::machine_state::reservation_set::UNSET_VALUE;
+use crate::state_backend;
+use crate::state_context::StateContext;
+use crate::state_context::projection::CellCons;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 use crate::traps::Exception;
 
 pub const SC_SUCCESS: u64 = 0;
@@ -386,7 +392,7 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     I::and_then(val_rs1_result, |val_rs1| {
         let aligned_address_rs1 = reservation_set_align_address::<V, I>(icb, address_rs1);
 
-        icb.reservation_set_write(aligned_address_rs1);
+        write_reservation_set(icb, aligned_address_rs1);
         write_xregister(icb, rd, val_rs1);
 
         icb.ok(())
@@ -594,7 +600,7 @@ pub fn run_x64_atomic_store<I: ICB>(
 /// Reset the reservation set to an unset state.
 pub(crate) fn reset_reservation_set<I: ICB>(icb: &mut I) {
     let unset = icb.xvalue_of_imm(UNSET_VALUE as i64);
-    icb.reservation_set_write(unset);
+    write_reservation_set(icb, unset);
 }
 
 /// Align an address to the size of the reservation set.
@@ -613,7 +619,7 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
     icb: &mut I,
     address: I::XValue,
 ) -> I::Bool {
-    let start_addr = icb.reservation_set_read();
+    let start_addr = read_reservation_set(icb);
 
     // Regardless of success or failure, executing an SC.x instruction
     // invalidates any reservation held by this hart.
@@ -626,6 +632,20 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
     let in_reservation_set = aligned_address.compare(start_addr, Predicate::Equal, icb);
 
     icb.bool_and(is_set, in_reservation_set)
+}
+
+impl_projection! {
+    ReservationSetProj (MachineCoreCons => CellCons<XValue>) = hart.reservation_set.start_addr
+}
+
+/// Read the reservation set address from the machine state.
+pub(crate) fn read_reservation_set<I: StateContext>(icb: &mut I) -> I::X64 {
+    state_backend::read_machine_cell::<ReservationSetProj, _>(icb)
+}
+
+/// Write to the reservation set address in the machine state.
+pub(crate) fn write_reservation_set<I: StateContext>(icb: &mut I, value: I::X64) {
+    state_backend::write_machine_cell::<ReservationSetProj, _>(icb, value);
 }
 
 #[cfg(test)]
