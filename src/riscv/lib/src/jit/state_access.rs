@@ -31,18 +31,14 @@ use cranelift::codegen::ir;
 use cranelift::codegen::ir::FuncRef;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Type;
-use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::types::I8;
 use cranelift::frontend::FunctionBuilder;
-use cranelift::prelude::MemFlags;
 use cranelift_jit::JITBuilder;
 use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
 use cranelift_module::Module;
 use cranelift_module::ModuleResult;
 
-use super::builder::F64;
-use super::builder::X64;
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
 use crate::instruction_context::LoadStoreWidth;
@@ -54,6 +50,8 @@ use crate::interpreter::float::RoundRTZ;
 use crate::interpreter::float::RoundRUP;
 use crate::interpreter::float::RoundingMode;
 use crate::interpreter::float::StaticRoundingMode;
+use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
@@ -348,7 +346,7 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     exception_ptr_slot: Option<stack::Slot<Exception>>,
 
     /// Reusable stack slot for the PC value
-    pc_slot: Option<stack::Slot<stack::Address>>,
+    pc_slot: Option<stack::Slot<Address>>,
 
     // Reusable stack slot for an FValue.
     f64_ptr_slot: Option<stack::Slot<f64>>,
@@ -357,21 +355,21 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
 
 impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Get the stack slot for the exception pointer.
-    fn exception_ptr_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<Exception> {
+    fn exception_ptr_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<Exception> {
         self.exception_ptr_slot
             .get_or_insert_with(|| stack::Slot::<Exception>::new(self.ptr_type, builder))
             .clone()
     }
 
     /// Get the stack slot for the PC value.
-    fn pc_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<stack::Address> {
+    fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<Address> {
         self.pc_slot
-            .get_or_insert_with(|| stack::Slot::<stack::Address>::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
             .clone()
     }
 
     /// Get the stack slot for an FValue.
-    fn f64_ptr_slot(&mut self, builder: &mut FunctionBuilder<'_>) -> stack::Slot<f64> {
+    fn f64_ptr_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<f64> {
         self.f64_ptr_slot
             .get_or_insert_with(|| stack::Slot::<f64>::new(self.ptr_type, builder))
             .clone()
@@ -423,14 +421,14 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// code is triggerred.
     pub(super) fn handle_exception(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        exception_ptr: Value,
-        result_ptr: Value,
-        current_pc: X64,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        exception_ptr: Pointer<Exception>,
+        result_ptr: Pointer<Result<(), EnvironException>>,
+        current_pc: Value<Address>,
     ) -> ExceptionHandledOutcome {
         let pc_slot = self.pc_slot(builder);
-        pc_slot.store(builder, current_pc.0);
+        pc_slot.store(builder, current_pc);
         let pc_ptr = pc_slot.ptr(builder);
 
         let handle_exception = self.handle_exception.get_or_insert_with(|| {
@@ -439,21 +437,20 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         });
 
         let call = builder.ins().call(*handle_exception, &[
-            core_ptr,
-            pc_ptr,
-            exception_ptr,
-            result_ptr,
+            core_ptr.to_value(),
+            pc_ptr.to_value(),
+            exception_ptr.to_value(),
+            result_ptr.to_value(),
         ]);
 
-        let handled = builder.inst_results(call)[0];
+        // SAFETY: [`self::handle_exception`] returns a `bool`.
+        let handled = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+
         // SAFETY: the pc is initialised prior to the call, and is guaranteed to
         // remain initialised regardless of the result of external call.
         let new_pc = unsafe { pc_slot.load(builder) };
 
-        ExceptionHandledOutcome {
-            handled,
-            new_pc: X64(new_pc),
-        }
+        ExceptionHandledOutcome { handled, new_pc }
     }
 
     /// Emit the required IR to call `raise_illegal_exception`.
@@ -461,8 +458,8 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// This returns an initialised pointer to the exception.
     pub(super) fn raise_illegal_instruction_exception(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-    ) -> Value {
+        builder: &mut FunctionBuilder,
+    ) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -475,7 +472,9 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
                 )
             });
 
-        builder.ins().call(*raise_illegal, &[exception_ptr]);
+        builder
+            .ins()
+            .call(*raise_illegal, &[exception_ptr.to_value()]);
 
         exception_ptr
     }
@@ -485,9 +484,9 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// This returns an initialised pointer to the exception.
     pub(super) fn raise_store_amo_access_fault_exception(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        address: Value,
-    ) -> Value {
+        builder: &mut FunctionBuilder,
+        address: Value<Address>,
+    ) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -500,9 +499,10 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
                 )
             });
 
-        builder
-            .ins()
-            .call(*raise_store_amo_access_fault, &[exception_ptr, address]);
+        builder.ins().call(*raise_store_amo_access_fault, &[
+            exception_ptr.to_value(),
+            address.to_value(),
+        ]);
 
         exception_ptr
     }
@@ -511,7 +511,11 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     ///
     /// This returns an initialised pointer to the appropriate environment
     /// call exception for the current machine mode.
-    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder<'_>, core_ptr: Value) -> Value {
+    pub(super) fn ecall(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+    ) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -520,9 +524,10 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
                 .declare_func_in_func(self.imports.ecall_from_mode, builder.func)
         });
 
-        builder
-            .ins()
-            .call(*ecall_from_mode, &[core_ptr, exception_ptr]);
+        builder.ins().call(*ecall_from_mode, &[
+            core_ptr.to_value(),
+            exception_ptr.to_value(),
+        ]);
 
         exception_ptr
     }
@@ -532,11 +537,11 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Returns `errno` - on success, no additional values are returned.
     pub(super) fn memory_store<V: StoreLoadInt>(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        phys_address: X64,
-        value: X64,
-    ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder<'_>) + 'static> {
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        phys_address: Value<Address>,
+        value: Value<XValue>,
+    ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder) + 'static> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -561,21 +566,22 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
 
         let value = match V::WIDTH {
             LoadStoreWidth::Byte | LoadStoreWidth::Half | LoadStoreWidth::Word => {
-                builder.ins().ireduce(V::IR_TYPE, value.0)
+                builder.ins().ireduce(V::IR_TYPE, value.to_value())
             }
-            LoadStoreWidth::Double => value.0,
+            LoadStoreWidth::Double => value.to_value(),
         };
 
         let call = builder.ins().call(*memory_store, &[
-            core_ptr,
-            phys_address.0,
+            core_ptr.to_value(),
+            phys_address.to_value(),
             value,
-            exception_ptr,
+            exception_ptr.to_value(),
         ]);
 
-        let errno = builder.inst_results(call)[0];
+        // SAFETY: [`self::memory_store`] returns a `bool`.
+        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
 
-        ErrnoImpl::new(errno, exception_ptr, |_| {})
+        ErrnoImpl::new(is_exception, exception_ptr, |_| {})
     }
 
     /// Emit the required IR to call `memory_load`.
@@ -583,14 +589,16 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Returns `errno` - on success, the loaded value is returned.
     pub(super) fn memory_load<V: StoreLoadInt>(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        phys_address: X64,
-    ) -> ErrnoImpl<X64, impl FnOnce(&mut FunctionBuilder<'_>) -> X64 + 'static> {
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        phys_address: Value<Address>,
+    ) -> ErrnoImpl<Value<XValue>, impl FnOnce(&mut FunctionBuilder) -> Value<XValue> + 'static>
+    {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let xval_ptr = stack::Slot::<V>::new(self.ptr_type, builder).ptr(builder);
+        let xval = stack::Slot::<V>::new(self.ptr_type, builder);
+        let xval_ptr = xval.ptr(builder);
 
         let memory_load = match (V::WIDTH, V::SIGNED) {
             (LoadStoreWidth::Byte, true) => self.memory_load_i8.get_or_insert_with(|| {
@@ -628,28 +636,30 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         };
 
         let call = builder.ins().call(*memory_load, &[
-            core_ptr,
-            phys_address.0,
-            xval_ptr,
-            exception_ptr,
+            core_ptr.to_value(),
+            phys_address.to_value(),
+            xval_ptr.to_value(),
+            exception_ptr.to_value(),
         ]);
 
-        let errno = builder.inst_results(call)[0];
+        // SAFETY: [`self::memory_load`] returns a `bool`.
+        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
 
-        ErrnoImpl::new(errno, exception_ptr, move |builder| {
-            let xval = builder
-                .ins()
-                .load(V::IR_TYPE, MemFlags::trusted(), xval_ptr, 0);
+        ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
+            // SAFETY: The stack slot is guaranteed initialised at this point.
+            let xval = unsafe { xval.load(builder) };
 
             let xval = if V::IR_TYPE == ir::types::I64 {
-                xval
+                xval.to_value()
             } else if V::SIGNED {
-                builder.ins().sextend(ir::types::I64, xval)
+                builder.ins().sextend(ir::types::I64, xval.to_value())
             } else {
-                builder.ins().uextend(ir::types::I64, xval)
+                builder.ins().uextend(ir::types::I64, xval.to_value())
             };
 
-            X64(xval)
+            // SAFETY: The `xval` is guaranteed to be a valid `XValue` at this point, as it has
+            // been extended to a 64-bit integer in case it was not already.
+            unsafe { Value::<XValue>::from_raw(xval) }
         })
     }
 
@@ -658,10 +668,10 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Returns `errno` - on success, the new F64 value is returned.
     pub(super) fn f64_from_x64_unsigned_dynamic(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        xval: X64,
-    ) -> ErrnoImpl<F64, impl FnOnce(&mut FunctionBuilder<'_>) -> F64 + 'static> {
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        xval: Value<XValue>,
+    ) -> ErrnoImpl<Value<f64>, impl FnOnce(&mut FunctionBuilder) -> Value<f64> + 'static> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
@@ -675,18 +685,19 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             });
 
         let call = builder.ins().call(*new_f64_from_x64_unsigned_dynamic, &[
-            core_ptr,
-            exception_ptr,
-            xval.0,
-            f64_ptr,
+            core_ptr.to_value(),
+            exception_ptr.to_value(),
+            xval.to_value(),
+            f64_ptr.to_value(),
         ]);
 
-        let errno = builder.inst_results(call)[0];
-        ErrnoImpl::new(errno, exception_ptr, move |builder| {
+        // SAFETY: [`self::f64_from_x64_unsigned_dynamic`] returns a `bool`.
+        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+
+        ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
             // SAFETY: This closure runs after the success case of the call, where the f64_slot
             // is guaranteed to have been initialised with an f64 value.
-            let fval = unsafe { f64_slot.load(builder) };
-            F64(fval)
+            unsafe { f64_slot.load(builder) }
         })
     }
 
@@ -694,11 +705,11 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// The converted value is returned as `F64`.
     pub(super) fn f64_from_x64_unsigned_static(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        xval: X64,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        xval: Value<XValue>,
         rm: RoundingMode,
-    ) -> F64 {
+    ) -> Value<f64> {
         let new_f64_from_x64_unsigned_static =
             self.f64_from_x64_unsigned_static.get_or_insert_with(|| {
                 let rm_func_id = match rm {
@@ -711,44 +722,49 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
                 self.module.declare_func_in_func(rm_func_id, builder.func)
             });
 
-        let call = builder
-            .ins()
-            .call(*new_f64_from_x64_unsigned_static, &[core_ptr, xval.0]);
+        let call = builder.ins().call(*new_f64_from_x64_unsigned_static, &[
+            core_ptr.to_value(),
+            xval.to_value(),
+        ]);
 
-        let fval = builder.inst_results(call)[0];
-        F64(fval)
+        // SAFETY: [`self::f64_from_x64_unsigned_static`] returns a `f64`.
+        unsafe { Value::<f64>::from_raw(builder.inst_results(call)[0]) }
     }
 
     /// Emit the required IR to read the value from the given fregister.
     pub(super) fn ir_freg_read(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
         reg: FRegister,
-    ) -> F64 {
+    ) -> Value<f64> {
         let freg_read = self.freg_read.get_or_insert_with(|| {
             self.module
                 .declare_func_in_func(self.imports.freg_read, builder.func)
         });
         let reg = builder.ins().iconst(I8, reg as i64);
-        let call = builder.ins().call(*freg_read, &[core_ptr, reg]);
-        F64(builder.inst_results(call)[0])
+        let call = builder.ins().call(*freg_read, &[core_ptr.to_value(), reg]);
+
+        // SAFETY: [`self::fregister_read`] returns a `f64`.
+        unsafe { Value::<f64>::from_raw(builder.inst_results(call)[0]) }
     }
 
     /// Emit the required IR to write the value to the given fregister.
     pub(super) fn ir_freg_write(
         &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
         reg: FRegister,
-        value: F64,
+        value: Value<f64>,
     ) {
         let freg_write = self.freg_write.get_or_insert_with(|| {
             self.module
                 .declare_func_in_func(self.imports.freg_write, builder.func)
         });
         let reg = builder.ins().iconst(I8, reg as i64);
-        builder.ins().call(*freg_write, &[core_ptr, reg, value.0]);
+        builder
+            .ins()
+            .call(*freg_write, &[core_ptr.to_value(), reg, value.to_value()]);
     }
 }
 
@@ -759,7 +775,8 @@ pub(super) struct ExceptionHandledOutcome {
     /// - If true, the exception was handled and the step is completed.
     /// - If false, the exception must be instead handled by the environment.
     ///   The step is not complete.
-    pub handled: Value,
+    pub handled: Value<bool>,
+
     /// The new value of the instruction pc, after exception handling.
-    pub new_pc: X64,
+    pub new_pc: Value<Address>,
 }

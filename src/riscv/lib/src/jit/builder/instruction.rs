@@ -26,7 +26,6 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
-use cranelift::prelude::Value;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
@@ -41,16 +40,22 @@ use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics;
 use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::float::RoundingMode;
-use crate::jit::builder::F64;
-use crate::jit::builder::X32;
-use crate::jit::builder::X64;
+use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Value;
 use crate::jit::state_access::JsaCalls;
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::XValue;
+use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
+use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
+use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -81,7 +86,7 @@ pub enum Outcome {
     /// Branch to an unknown location
     UnknownBranch {
         /// Address of the branch destination
-        destination: Value,
+        destination: Value<Address>,
 
         /// The block that the instruction will jump to in case of a branch
         hook: Block,
@@ -91,7 +96,7 @@ pub enum Outcome {
 /// Lowered RISC-V instruction
 pub struct LoweredInstruction {
     /// Location of the instruction
-    program_counter: Value,
+    program_counter: Value<Address>,
 
     /// Block that runs the instruction
     run_block: Block,
@@ -102,7 +107,7 @@ pub struct LoweredInstruction {
 
 impl LoweredInstruction {
     /// Access the program counter for this instruction.
-    pub fn program_counter(&self) -> Value {
+    pub fn program_counter(&self) -> Value<Address> {
         self.program_counter
     }
 
@@ -138,13 +143,13 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     entry_block: Block,
 
     /// Program counter for the instruction being built
-    instruction_pc: Value,
+    instruction_pc: Value<Address>,
 
     /// Parameter pointing to the `MachineCoreState`
-    core_param: Value,
+    core_param: Pointer<MachineCoreState<MC, Owned>>,
 
     /// Parameter pointing to the sequence result
-    result_param: Value,
+    result_param: Pointer<Result<(), EnvironException>>,
 
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
@@ -156,9 +161,9 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         builder: &'seq mut FunctionBuilder<'jit>,
         ext_calls: &'seq mut JsaCalls<'jit, MC>,
         entry_block: Block,
-        instruction_pc: Value,
-        core_param: Value,
-        result_param: Value,
+        instruction_pc: Value<Address>,
+        core_param: Pointer<MachineCoreState<MC, Owned>>,
+        result_param: Pointer<Result<(), EnvironException>>,
     ) -> Self {
         Self {
             builder,
@@ -191,7 +196,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     }
 
     /// Allocate an outcome block for an unknown branch.
-    fn create_unknown_branch_outcome(&mut self, destination: Value) -> Block {
+    fn create_unknown_branch_outcome(&mut self, destination: Value<Address>) -> Block {
         let hook = self.builder.create_block();
         self.outcomes
             .push(Outcome::UnknownBranch { destination, hook });
@@ -199,7 +204,10 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     }
 
     /// Handle an exception raised by the instruction.
-    fn handle_exception<Any>(&mut self, exception_ptr: Value) -> InstructionResult<Any> {
+    fn handle_exception<Any>(
+        &mut self,
+        exception_ptr: Pointer<Exception>,
+    ) -> InstructionResult<Any> {
         let current_pc = self.pc_read();
         let outcome = self.ext_calls.handle_exception(
             self.builder,
@@ -210,10 +218,10 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         );
 
         let exception_block = self.create_exception_outcome();
-        let unknown_branch_block = self.create_unknown_branch_outcome(outcome.new_pc.0);
+        let unknown_branch_block = self.create_unknown_branch_outcome(outcome.new_pc);
 
         self.ins().brif(
-            outcome.handled,
+            outcome.handled.to_value(),
             unknown_branch_block,
             [],
             exception_block,
@@ -230,7 +238,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Finalise the instruction building and produce an instruction.
     pub fn finish(
         self,
-        result: InstructionResult<ProgramCounterUpdate<X64>>,
+        result: InstructionResult<ProgramCounterUpdate<Value<XValue>>>,
     ) -> LoweredInstruction {
         let mut lowered = LoweredInstruction {
             program_counter: self.instruction_pc,
@@ -256,7 +264,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
 
                 let outcome = match update {
                     ProgramCounterUpdate::Set(address) => Outcome::UnknownBranch {
-                        destination: address.0,
+                        destination: address,
                         hook,
                     },
                     ProgramCounterUpdate::Next(_width) => Outcome::Next { hook },
@@ -270,27 +278,39 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
 }
 
 impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
-    type XValue = X64;
+    type XValue = Value<XValue>;
 
-    type XValue32 = X32;
+    type XValue32 = Value<XValue32>;
 
-    type FValue = F64;
+    type FValue = Value<f64>;
 
-    type Bool = Value;
+    type Bool = Value<bool>;
 
     type IResult<T> = InstructionResult<T>;
 
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
-        X64(self.ins().iconst(I64, imm))
+        let raw = self.ins().iconst(I64, imm);
+
+        // SAFETY: The value returned by `iconst` is of type `I64` which matches the representation
+        // of `XValue`.
+        unsafe { Value::<XValue>::from_raw(raw) }
     }
 
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32 {
-        X32(self.ins().iconst(I32, imm as i64))
+        let raw = self.ins().iconst(I32, imm as i64);
+
+        // SAFETY: The value returned by `iconst` is of type `I32` which matches the representation
+        // of `XValue32`.
+        unsafe { Value::<XValue32>::from_raw(raw) }
     }
 
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue {
         // Unsigned extension works as boolean can never be negative (only 0 or 1)
-        X64(self.ins().uextend(I64, value))
+        let raw = self.ins().uextend(I64, value.to_value());
+
+        // SAFETY: The value returned by `uextend` is of type `I64` which matches the representation
+        // of `XValue`.
+        unsafe { Value::<XValue>::from_raw(raw) }
     }
 
     fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
@@ -305,50 +325,65 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     }
 
     fn pc_read(&mut self) -> Self::XValue {
-        X64(self.instruction_pc)
+        self.instruction_pc
     }
 
     fn bool_and(&mut self, lhs: Self::Bool, rhs: Self::Bool) -> Self::Bool {
-        self.ins().band(lhs, rhs)
+        // SAFETY: `band` preserves the type of the values, so the result is also a `bool`.
+        unsafe { lhs.lift_binary(|lhs, rhs| self.ins().band(lhs, rhs), rhs) }
     }
 
     fn narrow(&mut self, value: Self::XValue) -> Self::XValue32 {
-        X32(self.ins().ireduce(I32, value.0))
+        let raw = self.ins().ireduce(I32, value.to_value());
+
+        // SAFETY: The value returned by `ireduce` is of type `I32` which matches the representation
+        // of `XValue32`.
+        unsafe { Value::<XValue32>::from_raw(raw) }
     }
 
     fn extend_signed(&mut self, value: Self::XValue32) -> Self::XValue {
-        X64(self.ins().sextend(I64, value.0))
+        let raw = self.ins().sextend(I64, value.to_value());
+
+        // SAFETY: The value returned by `sextend` is of type `I64` which matches the representation
+        // of `XValue`.
+        unsafe { Value::<XValue>::from_raw(raw) }
     }
 
     fn extend_unsigned(&mut self, value: Self::XValue32) -> Self::XValue {
-        X64(self.ins().uextend(I64, value.0))
+        let raw = self.ins().uextend(I64, value.to_value());
+
+        // SAFETY: The value returned by `uextend` is of type `I64` which matches the representation
+        // of `XValue`.
+        unsafe { Value::<XValue>::from_raw(raw) }
     }
 
     fn mul_high(
         &mut self,
         lhs: Self::XValue,
         rhs: Self::XValue,
-        mul_high_type: crate::instruction_context::MulHighType,
+        mul_high_type: MulHighType,
     ) -> Self::XValue {
-        let (lhs, rhs) = match mul_high_type {
-            MulHighType::Signed => (
-                self.ins().sextend(I128, lhs.0),
-                self.ins().sextend(I128, rhs.0),
-            ),
-            MulHighType::Unsigned => (
-                self.ins().uextend(I128, lhs.0),
-                self.ins().uextend(I128, rhs.0),
-            ),
-            MulHighType::SignedUnsigned => (
-                self.ins().sextend(I128, lhs.0),
-                self.ins().uextend(I128, rhs.0),
-            ),
+        let mul_high_impl = |lhs, rhs| {
+            let (lhs, rhs) = match mul_high_type {
+                MulHighType::Signed => {
+                    (self.ins().sextend(I128, lhs), self.ins().sextend(I128, rhs))
+                }
+                MulHighType::Unsigned => {
+                    (self.ins().uextend(I128, lhs), self.ins().uextend(I128, rhs))
+                }
+                MulHighType::SignedUnsigned => {
+                    (self.ins().sextend(I128, lhs), self.ins().uextend(I128, rhs))
+                }
+            };
+
+            let result = self.ins().imul(lhs, rhs);
+            let (_low, high) = self.ins().isplit(result);
+            high
         };
 
-        let result = self.ins().imul(lhs, rhs);
-        let (_low, high) = self.ins().isplit(result);
-
-        X64(high)
+        // SAFETY: `mul_high_impl` takes two `I64` values and produces an `I64` value. This means
+        // the value types are preserved.
+        unsafe { lhs.lift_binary(mul_high_impl, rhs) }
     }
 
     fn branch(
@@ -361,7 +396,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let branch_block = self.create_known_branch_outcome(offset);
 
         self.ins()
-            .brif(condition, branch_block, [], continue_block, []);
+            .brif(condition.to_value(), branch_block, [], continue_block, []);
 
         self.builder.seal_block(branch_block);
         self.builder.seal_block(continue_block);
@@ -390,7 +425,8 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
             self.builder.append_block_param(continue_block, *v);
         });
 
-        self.ins().brif(cond, true_block, [], false_block, []);
+        self.ins()
+            .brif(cond.to_value(), true_block, [], false_block, []);
 
         self.builder.seal_block(true_block);
         self.builder.seal_block(false_block);
@@ -445,8 +481,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
-        self.ins()
-            .brif(not_aligned, exception_block, [], success_block, []);
+        self.ins().brif(
+            not_aligned.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
 
         self.builder.seal_block(exception_block);
         self.builder.seal_block(success_block);
@@ -462,7 +503,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 
             let exception_ptr = self
                 .ext_calls
-                .raise_store_amo_access_fault_exception(self.builder, address.0);
+                .raise_store_amo_access_fault_exception(self.builder, address);
             self.handle_exception::<()>(exception_ptr);
         }
 
@@ -488,8 +529,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
-        self.ins()
-            .brif(errno.is_exception, exception_block, [], success_block, []);
+        self.ins().brif(
+            errno.is_exception.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
 
         self.builder.seal_block(exception_block);
         self.builder.seal_block(success_block);
@@ -520,8 +566,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
-        self.ins()
-            .brif(errno.is_exception, exception_block, [], success_block, []);
+        self.ins().brif(
+            errno.is_exception.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
 
         self.builder.seal_block(exception_block);
         self.builder.seal_block(success_block);
@@ -580,8 +631,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
-        self.ins()
-            .brif(errno.is_exception, exception_block, [], success_block, []);
+        self.ins().brif(
+            errno.is_exception.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
 
         // All inputs to these blocks are already known, so we can seal them immediately.
         self.builder.seal_block(exception_block);
@@ -613,7 +669,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 }
 
 impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
-    type X64 = X64;
+    type X64 = Value<XValue>;
 
     fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
     where

@@ -6,56 +6,56 @@
 
 use cranelift::codegen::ir::InstBuilder;
 
-use super::X32;
-use super::X64;
 use crate::instruction_context::Shift;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::jit::builder::instruction::InstructionBuilder;
+use crate::jit::builder::typed::Value;
 use crate::machine_state::memory::MemoryConfig;
 
-impl<MC: MemoryConfig> Arithmetic<InstructionBuilder<'_, '_, MC>> for X64 {
+impl<T, MC: MemoryConfig> Arithmetic<InstructionBuilder<'_, '_, MC>> for Value<T> {
     fn add(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().iadd(self.0, other.0);
-        X64(res)
+        // SAFETY: `iadd` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().iadd(lhs, rhs), other) }
     }
 
     fn sub(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().isub(self.0, other.0);
-        X64(res)
+        // SAFETY: `isub` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().isub(lhs, rhs), other) }
     }
 
     fn and(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().band(self.0, other.0);
-        X64(res)
+        // SAFETY: `band` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().band(lhs, rhs), other) }
     }
 
     fn or(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().bor(self.0, other.0);
-        X64(res)
+        // SAFETY: `bor` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().bor(lhs, rhs), other) }
     }
 
     fn xor(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().bxor(self.0, other.0);
-        X64(res)
+        // SAFETY: `bxor` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().bxor(lhs, rhs), other) }
     }
 
     fn mul(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().imul(self.0, other.0);
-        X64(res)
+        // SAFETY: `imul` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().imul(lhs, rhs), other) }
     }
 
     fn div_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().udiv(self.0, other.0);
-        X64(res)
+        // SAFETY: `udiv` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().udiv(lhs, rhs), other) }
     }
 
     fn div_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().sdiv(self.0, other.0);
-        X64(res)
+        // SAFETY: `sdiv` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().sdiv(lhs, rhs), other) }
     }
 
     fn negate(self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().ineg(self.0))
+        // SAFETY: `ineg` operation preserves the value type.
+        unsafe { self.lift_unary(|value| builder.ins().ineg(value)) }
     }
 
     fn shift(
@@ -65,116 +65,47 @@ impl<MC: MemoryConfig> Arithmetic<InstructionBuilder<'_, '_, MC>> for X64 {
         builder: &mut InstructionBuilder<'_, '_, MC>,
     ) -> Self {
         match shift {
-            Shift::Left => X64(builder.ins().ishl(self.0, amount.0)),
-            Shift::RightUnsigned => X64(builder.ins().ushr(self.0, amount.0)),
-            Shift::RightSigned => X64(builder.ins().sshr(self.0, amount.0)),
+            Shift::Left =>
+            // SAFETY: `ishl` operation preserves the value type.
+            unsafe { self.lift_binary(|lhs, rhs| builder.ins().ishl(lhs, rhs), amount) },
+
+            Shift::RightUnsigned =>
+            // SAFETY: `ushr` operation preserves the value type.
+            unsafe { self.lift_binary(|lhs, rhs| builder.ins().ushr(lhs, rhs), amount) },
+
+            Shift::RightSigned =>
+            // SAFETY: `sshr` operation preserves the value type.
+            unsafe { self.lift_binary(|lhs, rhs| builder.ins().sshr(lhs, rhs), amount) },
         }
     }
 
     fn modulus_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().urem(self.0, other.0))
+        // SAFETY: `urem` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().urem(lhs, rhs), other) }
     }
 
     fn modulus_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().srem(self.0, other.0))
+        // SAFETY: `srem` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().srem(lhs, rhs), other) }
     }
 
     fn min_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().smin(self.0, other.0))
+        // SAFETY: `smin` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().smin(lhs, rhs), other) }
     }
 
     fn min_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().umin(self.0, other.0))
+        // SAFETY: `umin` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().umin(lhs, rhs), other) }
     }
 
     fn max_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().smax(self.0, other.0))
+        // SAFETY: `smax` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().smax(lhs, rhs), other) }
     }
 
     fn max_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X64(builder.ins().umax(self.0, other.0))
-    }
-}
-
-impl<MC: MemoryConfig> Arithmetic<InstructionBuilder<'_, '_, MC>> for X32 {
-    fn add(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().iadd(self.0, other.0);
-        X32(res)
-    }
-
-    fn sub(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().isub(self.0, other.0);
-        X32(res)
-    }
-
-    fn and(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().band(self.0, other.0);
-        X32(res)
-    }
-
-    fn or(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().bor(self.0, other.0);
-        X32(res)
-    }
-
-    fn xor(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().bxor(self.0, other.0);
-        X32(res)
-    }
-
-    fn mul(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().imul(self.0, other.0);
-        X32(res)
-    }
-
-    fn div_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().udiv(self.0, other.0);
-        X32(res)
-    }
-
-    fn div_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        let res = builder.ins().sdiv(self.0, other.0);
-        X32(res)
-    }
-
-    fn negate(self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().ineg(self.0))
-    }
-
-    fn shift(
-        self,
-        shift: Shift,
-        amount: Self,
-        builder: &mut InstructionBuilder<'_, '_, MC>,
-    ) -> Self {
-        match shift {
-            Shift::Left => X32(builder.ins().ishl(self.0, amount.0)),
-            Shift::RightUnsigned => X32(builder.ins().ushr(self.0, amount.0)),
-            Shift::RightSigned => X32(builder.ins().sshr(self.0, amount.0)),
-        }
-    }
-
-    fn modulus_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().urem(self.0, other.0))
-    }
-
-    fn modulus_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().srem(self.0, other.0))
-    }
-
-    fn min_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().smin(self.0, other.0))
-    }
-
-    fn min_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().umin(self.0, other.0))
-    }
-
-    fn max_signed(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().smax(self.0, other.0))
-    }
-
-    fn max_unsigned(self, other: Self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
-        X32(builder.ins().umax(self.0, other.0))
+        // SAFETY: `umax` operation preserves the value type.
+        unsafe { self.lift_binary(|lhs, rhs| builder.ins().umax(lhs, rhs), other) }
     }
 }

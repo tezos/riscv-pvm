@@ -38,13 +38,13 @@
 //! [`handle_exception`]: super::handle_exception
 
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::StackSlot;
 use cranelift::codegen::ir::StackSlotData;
 use cranelift::codegen::ir::StackSlotKind;
 use cranelift::codegen::ir::Type;
-use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
 use cranelift::prelude::types::F64;
@@ -52,6 +52,8 @@ use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 
+use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Value;
 use crate::traps::Exception;
 
 /// Any value of type `T: StackAddressable` may be placed on the stack, and
@@ -127,17 +129,6 @@ impl_stackable_int!(16);
 impl_stackable_int!(32);
 impl_stackable_int!(64);
 
-/// Helper definition for storing/loading an address to/from the stack.
-pub(super) struct Address;
-
-impl StackAddressable for Address {
-    type Underlying = u64;
-}
-
-impl Stackable for Address {
-    const IR_TYPE: Type = I64;
-}
-
 impl StackAddressable for f64 {
     type Underlying = f64;
 }
@@ -155,7 +146,7 @@ pub(super) struct Slot<T> {
 
 impl<T: StackAddressable> Slot<T> {
     /// Create a new slot on the stack, to hold a value of the underlying type of T.
-    pub(super) fn new(ptr_type: Type, builder: &mut FunctionBuilder<'_>) -> Self {
+    pub(super) fn new(ptr_type: Type, builder: &mut FunctionBuilder) -> Self {
         let slot = builder.create_sized_stack_slot(T::STACK_SLOT_DATA);
 
         Self {
@@ -165,16 +156,19 @@ impl<T: StackAddressable> Slot<T> {
         }
     }
 
-    /// Get a ptr to the (potentially uninitialised) memory of the slot.
-    pub(super) fn ptr(&self, builder: &mut FunctionBuilder<'_>) -> Value {
-        builder.ins().stack_addr(self.ptr_type, self.slot, 0)
+    /// Get a pointer to the (potentially uninitialised) memory of the slot.
+    pub(super) fn ptr(&self, builder: &mut FunctionBuilder) -> Pointer<T> {
+        let raw_value = builder.ins().stack_addr(self.ptr_type, self.slot, 0);
+
+        // SAFETY: If `T` is the type of the slot, then the pointer to that slot is `NonNull<T>`.
+        unsafe { Value::<NonNull<T>>::from_raw(raw_value) }
     }
 }
 
 impl<T: Stackable> Slot<T> {
     /// Emit IR to store a value to the current stack slot.
-    pub(super) fn store(&self, builder: &mut FunctionBuilder<'_>, value: Value) {
-        builder.ins().stack_store(value, self.slot, 0);
+    pub(super) fn store(&self, builder: &mut FunctionBuilder, value: Value<T>) {
+        builder.ins().stack_store(value.to_value(), self.slot, 0);
     }
 
     /// Emit IR to load a value from the current stack slot.
@@ -183,8 +177,11 @@ impl<T: Stackable> Slot<T> {
     ///
     /// The caller must ensure that the memory is initialised - otherwise arbitrary bytes
     /// (from uninitialised memory) will be returned.
-    pub(super) unsafe fn load(&self, builder: &mut FunctionBuilder<'_>) -> Value {
-        builder.ins().stack_load(T::IR_TYPE, self.slot, 0)
+    pub(super) unsafe fn load(&self, builder: &mut FunctionBuilder) -> Value<T> {
+        let raw_value = builder.ins().stack_load(T::IR_TYPE, self.slot, 0);
+
+        // SAFETY: `T` is the slot value type.
+        unsafe { Value::<T>::from_raw(raw_value) }
     }
 }
 

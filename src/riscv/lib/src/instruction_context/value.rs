@@ -10,8 +10,8 @@ use cranelift::prelude::types::I32;
 
 use super::LoadStoreWidth;
 use crate::instruction_context::ICB;
-use crate::jit;
 use crate::jit::builder::instruction::InstructionBuilder;
+use crate::jit::builder::typed::Value;
 use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XValue;
@@ -19,7 +19,7 @@ use crate::machine_state::registers::XValue32;
 use crate::state_backend::Elem;
 
 /// Types which can be loaded and stored using the [`super::ICB`]
-pub trait StoreLoadInt: Stackable + Elem {
+pub trait StoreLoadInt: Stackable + Elem + 'static {
     /// The width of the value in memory
     const WIDTH: LoadStoreWidth;
 
@@ -126,14 +126,15 @@ impl PhiValue for XValue {
     fn to_ir_vals<MC: MemoryConfig>(
         icb_repr: Self::IcbValue<InstructionBuilder<'_, '_, MC>>,
     ) -> impl IntoIterator<Item = ir::Value> {
-        [icb_repr.0]
+        [icb_repr.to_value()]
     }
 
     fn from_ir_vals<'a, 'b, MC: MemoryConfig>(
         params: &[ir::Value],
         _: &mut InstructionBuilder<'a, 'b, MC>,
     ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC>> {
-        jit::builder::X64(params[0])
+        // SAFETY: We know the value is an `XValue` as per [`Self::to_ir_vals`].
+        unsafe { Value::<XValue>::from_raw(params[0]) }
     }
 
     const IR_TYPES: &'static [ir::Type] = &[I64];
@@ -145,14 +146,15 @@ impl PhiValue for XValue32 {
     fn to_ir_vals<MC: MemoryConfig>(
         icb_repr: Self::IcbValue<InstructionBuilder<'_, '_, MC>>,
     ) -> impl IntoIterator<Item = ir::Value> {
-        [icb_repr.0 as ir::Value]
+        [icb_repr.to_value()]
     }
 
     fn from_ir_vals<'a, 'b, MC: MemoryConfig>(
         params: &[ir::Value],
         _: &mut InstructionBuilder<'a, 'b, MC>,
     ) -> Self::IcbValue<InstructionBuilder<'a, 'b, MC>> {
-        jit::builder::X32(params[0])
+        // SAFETY: We know the value is an `XValue32` as per [`Self::to_ir_vals`].
+        unsafe { Value::<XValue32>::from_raw(params[0]) }
     }
 
     const IR_TYPES: &'static [ir::Type] = &[I32];
