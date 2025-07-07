@@ -30,6 +30,7 @@ use crate::jit::builder::X64;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::state_access::JsaCalls;
+use crate::machine_state::hart_state;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
@@ -189,11 +190,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             let steps = self.builder.append_block_param(exit_block, I64);
             let final_program_counter = self.builder.append_block_param(exit_block, I64);
 
-            self.ext_calls.pc_write(
-                &mut self.builder,
-                self.core_param,
-                X64(final_program_counter),
-            );
+            hart_state::write_pc(&mut self, X64(final_program_counter));
 
             self.builder.ins().return_(&[steps]);
         }

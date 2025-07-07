@@ -6,12 +6,17 @@
 use crate::machine_state::csregisters;
 use crate::machine_state::memory::Address;
 use crate::machine_state::registers;
+use crate::machine_state::registers::XValue;
 use crate::machine_state::reservation_set;
 use crate::machine_state::reservation_set::ReservationSet;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
+use crate::state_context::StateContext;
+use crate::state_context::projection::CellCons;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 
 /// RISC-V hart state
 pub struct HartState<M: backend::ManagerBase> {
@@ -104,4 +109,20 @@ impl<M: backend::ManagerClone> Clone for HartState<M> {
             reservation_set: self.reservation_set.clone(),
         }
     }
+}
+
+impl_projection! {
+    ProgramCounterProj (MachineCoreCons => CellCons<XValue>) = hart.pc
+}
+
+/// TODO
+#[inline]
+pub(crate) fn read_pc<I: StateContext + ?Sized>(icb: &mut I) -> I::X64 {
+    backend::read_machine_cell::<ProgramCounterProj, _>(icb)
+}
+
+/// TODO
+#[inline]
+pub(crate) fn write_pc<I: StateContext + ?Sized>(icb: &mut I, value: I::X64) {
+    backend::write_machine_cell::<ProgramCounterProj, _>(icb, value)
 }
