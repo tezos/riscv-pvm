@@ -157,6 +157,14 @@ impl<M: ManagerBase> PartialBlock<M> {
                     return result;
                 }
 
+                Ok(ProgramCounterUpdate::Relative(offset)) => {
+                    instr_pc = instr_pc.wrapping_add(offset as u64);
+                    core.hart.pc.write(instr_pc);
+                    result.steps += 1;
+                    self.reset();
+                    return result;
+                }
+
                 Err(e) => {
                     self.reset();
 

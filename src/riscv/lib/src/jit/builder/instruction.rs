@@ -266,6 +266,7 @@ impl<'seq, 'jit, MC: MemoryConfig, M: ManagerBase> InstructionBuilder<'seq, 'jit
                         destination: address.0,
                         hook,
                     },
+                    ProgramCounterUpdate::Relative(offset) => Outcome::KnownBranch { offset, hook },
                     ProgramCounterUpdate::Next(_width) => Outcome::Next { hook },
                 };
                 lowered.outcomes.push(outcome);
