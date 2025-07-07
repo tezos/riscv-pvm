@@ -58,14 +58,11 @@ impl ManagerBase for Owned {
 }
 
 impl ManagerAlloc for Owned {
-    fn allocate_region<E: 'static, const LEN: usize>(
-        &mut self,
-        value: [E; LEN],
-    ) -> Self::Region<E, LEN> {
+    fn allocate_region<E: 'static, const LEN: usize>(value: [E; LEN]) -> Self::Region<E, LEN> {
         value
     }
 
-    fn allocate_dyn_region<const LEN: usize>(&mut self) -> Self::DynRegion<LEN> {
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
         unsafe {
             let layout = std::alloc::Layout::new::<[u8; LEN]>()
                 .align_to(4096)
@@ -335,18 +332,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::state_backend::test_helpers::TestBackendFactory;
-
-    /// Test backend factory for the owned state manager
-    pub struct OwnedTestBackendFactory;
-
-    impl TestBackendFactory for OwnedTestBackendFactory {
-        type Manager = Owned;
-
-        fn manager() -> Self::Manager {
-            Owned
-        }
-    }
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
     #[test]
@@ -514,7 +499,7 @@ pub(crate) mod test_helpers {
     #[test]
     fn region_init() {
         proptest::proptest!(|(init_value: [u64; 17])| {
-            let region = Owned.allocate_region(init_value);
+            let region = Owned::allocate_region(init_value);
             proptest::prop_assert_eq!(region, init_value);
         });
     }

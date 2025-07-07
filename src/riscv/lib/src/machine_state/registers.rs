@@ -284,12 +284,12 @@ impl XRegisters<Owned> {
 }
 
 impl<M: backend::ManagerBase> NewState<M> for XRegisters<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: backend::ManagerAlloc,
     {
         XRegisters {
-            registers: backend::Cells::new(manager),
+            registers: backend::Cells::new(),
         }
     }
 }
@@ -606,16 +606,6 @@ pub struct FRegisters<M: backend::ManagerBase> {
 }
 
 impl<M: backend::ManagerBase> FRegisters<M> {
-    /// Allocate a new floating-point registers state.
-    pub fn new(manager: &mut M) -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        Self {
-            registers: backend::Cells::new(manager),
-        }
-    }
-
     /// Bind the floating-point register space to the allocated space.
     pub fn bind(space: backend::AllocatedOf<FRegistersLayout, M>) -> Self {
         FRegisters { registers: space }
@@ -658,6 +648,17 @@ impl<M: backend::ManagerBase> FRegisters<M> {
     }
 }
 
+impl<M: backend::ManagerBase> NewState<M> for FRegisters<M> {
+    fn new() -> Self
+    where
+        M: backend::ManagerAlloc,
+    {
+        Self {
+            registers: backend::Cells::new(),
+        }
+    }
+}
+
 impl<M: backend::ManagerClone> Clone for FRegisters<M> {
     fn clone(&self) -> Self {
         Self {
@@ -676,7 +677,7 @@ mod tests {
     use crate::state_backend::ManagerRead;
 
     backend_test!(test_zero, F, {
-        let mut registers = XRegisters::new(&mut F::manager());
+        let mut registers = XRegisters::<F>::new();
 
         // x0 should always read 0.
         assert_eq!(registers.read(x0), 0);
@@ -692,7 +693,7 @@ mod tests {
     ];
 
     backend_test!(test_arbitrary_register, F, {
-        let mut registers = XRegisters::new(&mut F::manager());
+        let mut registers = XRegisters::<F>::new();
 
         // Initialise the registers with something.
         for reg in NONZERO_REGISTERS {
@@ -718,7 +719,7 @@ mod tests {
     });
 
     backend_test!(test_try_read_u32, F, {
-        let mut registers = XRegisters::new(&mut F::manager());
+        let mut registers = XRegisters::<F>::new();
 
         // Reading an integer that is too large should fail
         registers.write(x1, 1 << 32);
@@ -776,7 +777,7 @@ mod tests {
 
     #[test]
     fn test_xregister_offsets() {
-        let registers = XRegisters::new(&mut Owned);
+        let registers = XRegisters::<Owned>::new();
         let registers_ptr = (&registers) as *const XRegisters<Owned>;
 
         for reg in NonZeroXRegister::iter() {

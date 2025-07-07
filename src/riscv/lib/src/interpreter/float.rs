@@ -722,7 +722,7 @@ mod test {
             r1_val in any::<u64>(),
             rm in rounding_mode_strategy(),
         )| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             let fval = match rm {
                 InstrRoundingMode::Static(rm) => Double::from_u128_r(r1_val as u128, rm.into()),

@@ -25,16 +25,16 @@ where
     B: NewState<M>,
     M: ManagerBase,
 {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         MemoryImpl {
-            data: DynCells::new(manager),
-            readable_pages: PagePermissions::new(manager),
-            writable_pages: PagePermissions::new(manager),
-            executable_pages: PagePermissions::new(manager),
-            allocated_pages: B::new(manager),
+            data: DynCells::new(),
+            readable_pages: PagePermissions::new(),
+            writable_pages: PagePermissions::new(),
+            executable_pages: PagePermissions::new(),
+            allocated_pages: B::new(),
         }
     }
 }

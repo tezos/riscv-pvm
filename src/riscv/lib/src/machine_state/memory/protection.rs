@@ -128,12 +128,12 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
 }
 
 impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: ManagerAlloc,
     {
         PagePermissions {
-            pages: boxed_from_fn(|| Cell::new(manager)),
+            pages: boxed_from_fn(|| Cell::new()),
         }
     }
 }

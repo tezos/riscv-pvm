@@ -70,7 +70,7 @@ mod tests {
 
     backend_test!(test_bitwise, F, {
         proptest!(|(val in any::<u64>(), imm in any::<u64>())| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // The sign-extension of an immediate on 12 bits has bits 31:11 equal the sign-bit
             let prefix_mask = 0xFFFF_FFFF_FFFF_F800;
@@ -90,7 +90,7 @@ mod tests {
     backend_test!(test_bitwise_reg, F, {
         // TODO: RV-512: move to integer.rs once all are supported.
         proptest!(|(v1 in any::<u64>(), v2 in any::<u64>())| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write(a0, v1);
             state.hart.xregisters.write(t3, v2);
@@ -112,14 +112,14 @@ mod tests {
     });
 
     backend_test!(test_ebreak, F, {
-        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state = MachineCoreState::<M4K, F>::new();
 
         let ret_val = state.hart.run_ebreak();
         assert_eq!(ret_val, Exception::Breakpoint);
     });
 
     backend_test!(test_fence, F, {
-        let state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let state = MachineCoreState::<M4K, F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -141,7 +141,7 @@ mod tests {
     });
 
     backend_test!(test_ecall, F, {
-        let state = HartState::new(&mut F::manager());
+        let state = HartState::<F>::new();
 
         let instr_res = state.run_ecall();
         assert!(instr_res == Exception::EnvCall);

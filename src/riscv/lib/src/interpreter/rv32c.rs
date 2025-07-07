@@ -42,7 +42,7 @@ mod tests {
             (u64::MAX - 1, 100, 98_i64 as u64),
         ];
         for (init_pc, imm, res_pc) in test_case {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.pc.write(init_pc);
             let new_pc = run_j(&mut state, imm);
@@ -64,7 +64,7 @@ mod tests {
             ),
         ];
         for (init_pc, init_rs1, rs1, res_pc) in scenarios {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // Test C.JR
             // save program counter and value for rs1.

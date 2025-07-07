@@ -270,7 +270,7 @@ mod tests {
             ),
         ];
         for (init_pc, imm, init_rs1, rs1, rd, res_pc, res_rd) in ipc_imm_irs1_rs1_rd_fpc_frd {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // TEST JalrImm
             state.hart.pc.write(init_pc);
@@ -333,7 +333,7 @@ mod tests {
         ];
 
         for (init_pc, imm, res, rd) in pc_imm_res_rd {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.pc.write(init_pc);
             super::run_add_immediate_to_pc(&mut state, imm, rd);
@@ -389,7 +389,7 @@ mod tests {
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);
 
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // BEQ: different
             test_branch!(state, Predicate::Equal, imm, nz::t1, r1_val, nz::t2, r2_val, width, init_pc, &next_pcu);
@@ -435,7 +435,7 @@ mod tests {
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);
 
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // lhs < rhs
             test_branch!(state, Predicate::LessThanSigned, imm, nz::t1, 0, nz::t2, 1, width, init_pc, &branch_pcu);
@@ -475,7 +475,7 @@ mod tests {
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
 
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // lhs < 0
             test_branch_compare_zero!(state, Predicate::LessThanSigned, imm, nz::t1, -1_i64 as u64, width, init_pc, &branch_pcu);
@@ -512,7 +512,7 @@ mod tests {
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let pc_update_init_pcu = ProgramCounterUpdate::Set(init_pc);
 
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // lhs < rhs
             test_branch!(state, Predicate::LessThanUnsigned, imm, nz::t1, r1_val, nz::t2, r2_val, width, init_pc, &branch_pcu);
@@ -563,7 +563,7 @@ mod tests {
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);
 
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // BEQZ
             if r1_val == 0 {

@@ -165,7 +165,7 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
 impl NodePvm {
     /// Construct an empty PVM state.
     pub fn empty() -> Self {
-        Self::new(&mut Owned)
+        Self::new()
     }
 
     /// Compute the root hash of the PVM state.
@@ -261,12 +261,12 @@ impl PartialEq for NodePvm {
 impl Eq for NodePvm {}
 
 impl<M: state_backend::ManagerBase> NewState<M> for NodePvm<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: state_backend::ManagerAlloc,
     {
         Self {
-            state: Box::new(NodePvmState::<M>::new(manager, InterpretedBlockBuilder)),
+            state: Box::new(NodePvmState::<M>::new(InterpretedBlockBuilder)),
         }
     }
 }

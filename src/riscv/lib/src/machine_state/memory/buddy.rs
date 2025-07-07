@@ -122,8 +122,7 @@ mod tests {
     backend_test!(buddy_alloc_only, F, {
         type BuddyHeapLayout = BuddyLayoutProxy<{ 1024 * 1024 }>;
 
-        let mut manager = F::manager();
-        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::new(&mut manager);
+        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::<F>::new();
 
         let total_pages = state.longest_free_sequence();
 
@@ -147,8 +146,7 @@ mod tests {
     backend_test!(buddy_alloc_dealloc, F, {
         type BuddyHeapLayout = BuddyLayoutProxy<{ 1024 * 1024 }>;
 
-        let mut manager = F::manager();
-        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::new(&mut manager);
+        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::<F>::new();
 
         let total_pages = state.longest_free_sequence();
 
@@ -182,8 +180,7 @@ mod tests {
     backend_test!(buddy_alloc_fixed, F, {
         type BuddyHeapLayout = BuddyLayoutProxy<{ 1024 * 1024 }>;
 
-        let mut manager = F::manager();
-        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::new(&mut manager);
+        let mut state = <BuddyHeapLayout as BuddyLayout>::Buddy::<F>::new();
 
         // Create a distribution of allocation sizes that when used together would allocate all
         // available memory

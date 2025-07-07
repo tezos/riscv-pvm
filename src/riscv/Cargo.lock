@@ -1413,6 +1413,7 @@ dependencies = [
  "tezos_crypto_rs",
  "thiserror",
  "tracing",
+ "trait-set",
  "try-blocks",
  "tuples",
  "vm-fdt",
@@ -2631,6 +2632,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "trait-set"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b79e2e9c9ab44c6d7c20d5976961b47e8f49ac199154daa514b77cd1ab536625"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

@@ -779,7 +779,7 @@ mod tests {
         ];
 
         for (rs2, rd, res) in rs2val_rd_res {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write_nz(nz::a0, rs2);
             run_neg(&mut state, rd, nz::a0);
@@ -798,7 +798,7 @@ mod tests {
         ];
 
         for (imm, rs1, res) in imm_rs1_res {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write_nz(nz::a3, rs1);
             state.hart.xregisters.write_nz(nz::a4, imm as u64);
@@ -831,7 +831,7 @@ mod tests {
         ];
 
         for (imm, rs1, rd, res) in imm_rs1_rd_res {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write_nz(nz::a0, rs1);
             state.hart.xregisters.write_nz(nz::t0, imm as u64);
@@ -855,7 +855,7 @@ mod tests {
             v1 in any::<i64>(),
             v2 in any::<i64>())|
         {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
             state.hart.xregisters.write(t0, v1 as u64);
             state.hart.xregisters.write(a0, v2 as u64);
             run_sub_word(&mut state, t0, a0, nz::a1);
@@ -870,7 +870,7 @@ mod tests {
     });
 
     backend_test!(test_set_less_than, F, {
-        let mut core = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let mut core = MachineCoreState::<M4K, F>::new();
 
         let v1_v2_exp_expu = [
             (0, 0, 0, 0),
@@ -948,7 +948,7 @@ mod tests {
     }
 
     backend_test!(test_shift, F, {
-        let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let mut state = MachineCoreState::<M4K, F>::new();
 
         // imm = 0
         test_both_shift_instr!(state, Shift::Left, t0, 0, a0, 0x1234_ABEF, a1, 0x1234_ABEF);
@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     backend_test!(test_shift_word, F, {
-        let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let mut state = MachineCoreState::<M4K, F>::new();
 
         test_both_shift_word_instr!(
             state,
@@ -1255,7 +1255,7 @@ mod tests {
 
     backend_test!(test_bitwise_intruction, F, {
         proptest!(|(val1 in any::<u64>(), val2 in any::<u64>())| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             // The sign-extension of an immediate on 12 bits has bits 31:11 equal the sign-bit
             let prefix_mask = 0xFFFF_FFFF_FFFF_F800;
@@ -1290,7 +1290,7 @@ mod tests {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write(a0, r1_val);
             state.hart.xregisters.write(a1, r2_val);
@@ -1310,7 +1310,7 @@ mod tests {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write(a0, r1_val);
             state.hart.xregisters.write(a1, r2_val);
@@ -1330,7 +1330,7 @@ mod tests {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write(a0, r1_val);
             state.hart.xregisters.write(a1, r2_val);
@@ -1350,7 +1350,7 @@ mod tests {
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
         )| {
-            let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+            let mut state = MachineCoreState::<M4K, F>::new();
 
             state.hart.xregisters.write(a0, r1_val);
             state.hart.xregisters.write(a1, r2_val);
@@ -1375,7 +1375,7 @@ mod tests {
     }
 
     backend_test!(test_x64_mul_high, F, {
-        let mut state = MachineCoreState::<M4K, _>::new(&mut F::manager());
+        let mut state = MachineCoreState::<M4K, F>::new();
 
         // MULH (Signed × Signed)
         test_x64_mul_high!(

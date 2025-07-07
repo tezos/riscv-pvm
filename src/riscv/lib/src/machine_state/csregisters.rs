@@ -371,13 +371,13 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
 }
 
 impl<M: backend::ManagerBase> NewState<M> for CSRegisters<M> {
-    fn new(manager: &mut M) -> Self
+    fn new() -> Self
     where
         M: backend::ManagerAlloc,
     {
         Self {
-            fflags: Cell::new(manager),
-            frm: Cell::new(manager),
+            fflags: Cell::new(),
+            frm: Cell::new(),
         }
     }
 }
@@ -425,7 +425,7 @@ mod tests {
     }
 
     backend_test!(test_fcsr, F, {
-        let mut csrs = CSRegisters::new(&mut F::manager());
+        let mut csrs = CSRegisters::<F>::new();
 
         // check starting values
         assert_eq!(0, csrs.read::<CSRRepr>(CSRegister::fcsr));
