@@ -213,6 +213,27 @@ macro_rules! struct_layout {
                     $crate::state_backend::combine_partial_hashes([$($field_name),+], proof_hash)
                 }
             }
+
+            impl <
+                $(
+                    [<$field_name:camel>]: $crate::state_backend::CloneLayout
+                ),+
+            > $crate::state_backend::CloneLayout for [<$layout_t F>]<
+                $(
+                    [<$field_name:camel>]
+                ),+
+            >
+            {
+                fn clone_allocated<M: $crate::state_backend::ManagerClone>(
+                    space: $crate::state_backend::AllocatedOf<Self, $crate::state_backend::Ref<'_, M>>
+                ) -> $crate::state_backend::AllocatedOf<Self, M> {
+                    [<$layout_t F>] {
+                        $(
+                            $field_name: [<$field_name:camel>]::clone_allocated(space.$field_name),
+                        )+
+                    }
+                }
+            }
         }
     };
 }

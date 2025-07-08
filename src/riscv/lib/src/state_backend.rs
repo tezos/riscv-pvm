@@ -70,6 +70,7 @@
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
+pub mod clone_layout;
 mod commitment_layout;
 mod effects;
 mod elems;
@@ -84,6 +85,7 @@ pub mod verify_backend;
 
 use std::marker::PhantomData;
 
+pub use clone_layout::*;
 pub use commitment_layout::*;
 pub use effects::*;
 pub use elems::*;
