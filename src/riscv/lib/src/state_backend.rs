@@ -468,13 +468,11 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
 pub(crate) mod test_helpers {
     use trait_set::trait_set;
 
-    use super::AllocatedOf;
-    use super::Layout;
     use super::ManagerAlloc;
     use super::ManagerClone;
-    use super::ManagerDeserialise;
     use super::ManagerReadWrite;
     use super::ManagerSerialise;
+    use crate::state_backend::ManagerDeserialise;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -501,19 +499,6 @@ pub(crate) mod test_helpers {
             + ManagerDeserialise
             + ManagerClone
             + ManagerAlloc;
-    }
-
-    /// Copy the allocated space by serialising and deserialising it.
-    pub fn copy_via_serde<L, N, M>(refs: &AllocatedOf<L, N>) -> AllocatedOf<L, M>
-    where
-        L: Layout,
-        N: ManagerSerialise,
-        AllocatedOf<L, N>: serde::Serialize,
-        M: ManagerDeserialise,
-        AllocatedOf<L, M>: serde::de::DeserializeOwned,
-    {
-        let data = crate::storage::binary::serialise(refs).unwrap();
-        crate::storage::binary::deserialise(&data).unwrap()
     }
 
     /// Assert that two values are different. If they differ, offer a command to run that shows the
