@@ -33,6 +33,7 @@ use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Type;
 use cranelift::codegen::ir::types::I8;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift_jit::JITBuilder;
 use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
@@ -50,6 +51,7 @@ use crate::interpreter::float::RoundRTZ;
 use crate::interpreter::float::RoundRUP;
 use crate::interpreter::float::RoundingMode;
 use crate::interpreter::float::StaticRoundingMode;
+use crate::jit::builder::ext_calls;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
@@ -106,7 +108,6 @@ macro_rules! register_jsa_functions {
 register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
-    handle_exception => (handle_exception::<MC>, AbiCall<4>::args),
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
     ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
@@ -318,12 +319,15 @@ extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryCon
 /// References to locally imported state access methods, used to directly call these accessor
 /// methods in the JIT-compilation context.
 pub struct JsaCalls<'a, MC: MemoryConfig> {
+    /// Target configuration which provides useful information about the target ISA, such as
+    /// pointer type and width
+    target_config: TargetFrontendConfig,
+
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
-    handle_exception: Option<FuncRef>,
     raise_illegal_instruction_exception: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
@@ -386,12 +390,12 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         ptr_type: Type,
     ) -> Self {
         Self {
+            target_config: module.target_config(),
             module,
             imports,
             ptr_type,
             freg_read: None,
             freg_write: None,
-            handle_exception: None,
             raise_illegal_instruction_exception: None,
             raise_store_amo_access_fault_exception: None,
             ecall_from_mode: None,
@@ -434,20 +438,20 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let pc_slot = self.pc_slot(builder).init(builder, current_pc);
         let pc_ptr = pc_slot.ptr(builder);
 
-        let handle_exception = self.handle_exception.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.handle_exception, builder.func)
-        });
-
-        let call = builder.ins().call(*handle_exception, &[
-            core_ptr.to_value(),
-            pc_ptr.to_value(),
-            exception_ptr.to_value(),
-            result_ptr.to_value(),
-        ]);
-
-        // SAFETY: [`self::handle_exception`] returns a `bool`.
-        let handled = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+        // SAFETY: Arguments get cast into references with valid lifetimes.
+        // - `core_ptr` is a JIT function argument
+        // - `pc_ptr` points to a stack slot which is valid for the duration of the JIT function
+        // - `exception_ptr` points to a stack slot as well (allocated by the caller)
+        // - `result_ptr` is a JIT function argument
+        let handled = ext_calls::call4(
+            &self.target_config,
+            builder,
+            self::handle_exception,
+            unsafe { core_ptr.as_mut() },
+            unsafe { pc_ptr.as_mut() },
+            unsafe { exception_ptr.as_ref() },
+            unsafe { result_ptr.as_mut() },
+        );
 
         let new_pc = pc_slot.load(builder);
         ExceptionHandledOutcome { handled, new_pc }
