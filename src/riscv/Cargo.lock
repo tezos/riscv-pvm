@@ -1922,11 +1922,11 @@ checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "rustc_apfloat"
-version = "0.2.0+llvm-462a31f5a5ab"
+version = "0.2.3+llvm-462a31f5a5ab"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465187772033a5ee566f69fe008df03628fce549a0899aae76f0a0c2e34696be"
+checksum = "486c2179b4796f65bfe2ee33679acf0927ac83ecf583ad6c91c3b4570911b9ad"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.9.1",
  "smallvec",
 ]
 
