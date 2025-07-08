@@ -10,6 +10,8 @@
 //! Any returned values are written via 'out-pointers' - and should only be
 //! loaded on success.
 
+use std::mem::MaybeUninit;
+
 use cranelift::frontend::FunctionBuilder;
 
 use crate::jit::builder::typed::Pointer;
@@ -31,7 +33,7 @@ where
     pub(crate) is_exception: Value<bool>,
 
     /// Pointer to the exception in memory, if an exception occurred
-    pub(crate) exception_ptr: Pointer<Exception>,
+    pub(crate) exception_ptr: Pointer<MaybeUninit<Exception>>,
 
     /// Retrieve the result in case of success
     pub(crate) on_ok: F,
@@ -44,7 +46,7 @@ where
     /// Construct a new `Errno` that must be handled.
     pub(crate) fn new(
         is_exception: Value<bool>,
-        exception_ptr: Pointer<Exception>,
+        exception_ptr: Pointer<MaybeUninit<Exception>>,
         on_ok: F,
     ) -> Self {
         Self {
