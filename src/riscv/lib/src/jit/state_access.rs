@@ -109,7 +109,6 @@ register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
-    ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
     memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
     memory_store_u16 => (memory_store::<u16, MC>, AbiCall<4>::args),
     memory_store_u32 => (memory_store::<u32, MC>, AbiCall<4>::args),
@@ -225,11 +224,8 @@ extern "C" fn raise_store_amo_access_fault_exception(
 ///
 /// Writes the exception to the given exception memory, after which it would be safe to
 /// assume it is initialised.
-extern "C" fn ecall<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-    exception_out: &mut MaybeUninit<Exception>,
-) {
-    exception_out.write(core.hart.run_ecall());
+extern "C" fn ecall(exception_out: &mut MaybeUninit<Exception>) {
+    exception_out.write(Exception::EnvCall);
 }
 
 /// Store the lowest `width` bytes of the given value to memory, at the physical address.
@@ -325,7 +321,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     raise_store_amo_access_fault_exception: Option<FuncRef>,
-    ecall_from_mode: Option<FuncRef>,
     memory_store_u8: Option<FuncRef>,
     memory_store_u16: Option<FuncRef>,
     memory_store_u32: Option<FuncRef>,
@@ -392,7 +387,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             freg_read: None,
             freg_write: None,
             raise_store_amo_access_fault_exception: None,
-            ecall_from_mode: None,
             memory_store_u8: None,
             memory_store_u16: None,
             memory_store_u32: None,
@@ -502,23 +496,13 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     ///
     /// This returns an initialised pointer to the appropriate environment
     /// call exception for the current machine mode.
-    pub(super) fn ecall(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-    ) -> Pointer<Exception> {
+    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let ecall_from_mode = self.ecall_from_mode.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.ecall_from_mode, builder.func)
+        ext_calls::call1(&self.target_config, builder, self::ecall, unsafe {
+            exception_ptr.as_mut()
         });
-
-        builder.ins().call(*ecall_from_mode, &[
-            core_ptr.to_value(),
-            exception_ptr.to_value(),
-        ]);
 
         // SAFETY: The `ecall` function writes to the exception slot unconditionally.
         unsafe { exception_slot.assume_init().ptr(builder) }
