@@ -107,6 +107,15 @@ fn call_raw<A: ArgumentsTyped, R: ReturnTyped>(
     R::from_return_values(ret_values)
 }
 
+pub fn call1<A0: Typed, R: ReturnTyped>(
+    target_config: &TargetFrontendConfig,
+    builder: &mut FunctionBuilder,
+    callee: extern "C" fn(A0) -> R,
+    arg0: Value<A0>,
+) -> R::Value {
+    call_raw::<(A0,), R>(target_config, builder, callee as usize, &[arg0.to_value()])
+}
+
 pub fn call4<A0: Typed, A1: Typed, A2: Typed, A3: Typed, R: ReturnTyped>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,

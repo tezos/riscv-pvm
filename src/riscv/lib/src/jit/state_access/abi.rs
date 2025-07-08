@@ -79,12 +79,10 @@ macro_rules! impl_abicall {
     };
 }
 
-impl AbiCall<1> {
-    impl_abicall!(A1);
-}
 impl AbiCall<2> {
     impl_abicall!(A1, A2);
 }
+
 impl AbiCall<3> {
     impl_abicall!(A1, A2, A3);
 }
