@@ -106,7 +106,6 @@ macro_rules! register_jsa_functions {
 register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
-    ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
     f64_from_x64_unsigned_dynamic => (
         f64_from_x64_unsigned_dynamic::<MC>,
         AbiCall<4>::args
@@ -210,11 +209,8 @@ extern "C" fn raise_store_amo_access_fault_exception(
 ///
 /// Writes the exception to the given exception memory, after which it would be safe to
 /// assume it is initialised.
-extern "C" fn ecall<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-    exception_out: &mut MaybeUninit<Exception>,
-) {
-    exception_out.write(core.hart.run_ecall());
+extern "C" fn ecall(exception_out: &mut MaybeUninit<Exception>) {
+    exception_out.write(Exception::EnvCall);
 }
 
 /// Store the lowest `width` bytes of the given value to memory, at the physical address.
@@ -304,7 +300,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     ptr_type: Type,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
-    ecall_from_mode: Option<FuncRef>,
     f64_from_x64_unsigned_dynamic: Option<FuncRef>,
     f64_from_x64_unsigned_static: Option<FuncRef>,
 
@@ -358,7 +353,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             ptr_type,
             freg_read: None,
             freg_write: None,
-            ecall_from_mode: None,
             f64_from_x64_unsigned_dynamic: None,
             f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
@@ -459,23 +453,15 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     ///
     /// This returns an initialised pointer to the appropriate environment
     /// call exception for the current machine mode.
-    pub(super) fn ecall(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-    ) -> Pointer<Exception> {
+    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let ecall_from_mode = self.ecall_from_mode.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.ecall_from_mode, builder.func)
+        // SAFETY: The exception reference is guaranteed to be valid for the duration of the call as
+        // it points to a stack slot which is valid for the duration of the JIT function.
+        ext_calls::call1(&self.target_config, builder, self::ecall, unsafe {
+            exception_ptr.as_mut()
         });
-
-        builder.ins().call(*ecall_from_mode, &[
-            core_ptr.to_value(),
-            exception_ptr.to_value(),
-        ]);
 
         // SAFETY: The `ecall` function writes to the exception slot unconditionally.
         unsafe { exception_slot.assume_init().ptr(builder) }
