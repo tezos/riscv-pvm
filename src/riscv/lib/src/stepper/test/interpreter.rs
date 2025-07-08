@@ -92,7 +92,7 @@ fn interpret_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
 /// For the JIT, we run it twice - the first run to build up the blocks, and the
 /// second to run with these blocks already compiled (so that we actually use them).
 fn inline_jit_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
-    type BlockImpl = Jitted<InlineCompiler<M1M, Owned>, M1M, Owned>;
+    type BlockImpl = Jitted<InlineCompiler<M1M>, M1M>;
 
     let block_builder = Default::default();
     let block_builder = run_test_with_check::<BlockImpl>(path, check_xregs, block_builder);

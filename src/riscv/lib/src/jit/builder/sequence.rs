@@ -29,19 +29,17 @@ use crate::jit::JsaImports;
 use crate::jit::builder::X64;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
-use crate::jit::state_access::JitStateAccess;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::ManagerBase;
 
 /// Builder for an instruction sequence
-pub struct SequenceBuilder<'jit, MC: MemoryConfig, M: ManagerBase> {
+pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     /// IR builder
     builder: FunctionBuilder<'jit>,
 
     /// External function call manager
-    ext_calls: JsaCalls<'jit, MC, M>,
+    ext_calls: JsaCalls<'jit, MC>,
 
     /// Function entry block
     entry_block: Block,
@@ -59,17 +57,14 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig, M: ManagerBase> {
     result_param: Value,
 }
 
-impl<'jit, MC: MemoryConfig, M: ManagerBase> SequenceBuilder<'jit, MC, M> {
+impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
     /// Create a new sequence builder.
     pub fn new(
         module: &'jit mut JITModule,
-        imports: &'jit JsaImports<MC, M>,
+        imports: &'jit JsaImports<MC>,
         context: &'jit mut Context,
         builder_context: &'jit mut FunctionBuilderContext,
-    ) -> Self
-    where
-        M: JitStateAccess,
-    {
+    ) -> Self {
         // The pointer type is host-dependent, hence we need to retrieve it from the module's
         // target configuration.
         let ptr_type = module.target_config().pointer_type();
@@ -151,10 +146,7 @@ impl<'jit, MC: MemoryConfig, M: ManagerBase> SequenceBuilder<'jit, MC, M> {
     pub fn build_next_instruction<'seq>(
         &'seq mut self,
         width: InstrWidth,
-    ) -> InstructionBuilder<'seq, 'jit, MC, M>
-    where
-        M: JitStateAccess,
-    {
+    ) -> InstructionBuilder<'seq, 'jit, MC> {
         let entry_block = self.builder.create_block();
         self.builder.switch_to_block(entry_block);
 
@@ -184,10 +176,7 @@ impl<'jit, MC: MemoryConfig, M: ManagerBase> SequenceBuilder<'jit, MC, M> {
     }
 
     /// Finish building the sequence.
-    pub fn finish(mut self, instrs: &[LoweredInstruction])
-    where
-        M: JitStateAccess,
-    {
+    pub fn finish(mut self, instrs: &[LoweredInstruction]) {
         let exit_block = self.builder.create_block();
 
         // The exit block is used to write the program counter back to the machine core state, as
