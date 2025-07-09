@@ -103,10 +103,6 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    f64_from_x64_unsigned_dynamic => (
-        f64_from_x64_unsigned_dynamic::<MC>,
-        AbiCall<4>::args
-    ),
     f64_from_x64_unsigned_static_rne => (
         f64_from_x64_unsigned_static::<RoundRNE, MC>,
         AbiCall<2>::args
@@ -546,24 +542,18 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let f64_slot = self.f64_ptr_slot(builder);
         let f64_ptr = f64_slot.ptr(builder);
 
-        let new_f64_from_x64_unsigned_dynamic =
-            self.f64_from_x64_unsigned_dynamic.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.f64_from_x64_unsigned_dynamic, builder.func)
-            });
-
-        let call = builder.ins().call(*new_f64_from_x64_unsigned_dynamic, &[
-            core_ptr.to_value(),
-            exception_ptr.to_value(),
-            xval.to_value(),
-            f64_ptr.to_value(),
-        ]);
-
-        // SAFETY: [`self::f64_from_x64_unsigned_dynamic`] returns a `bool`.
-        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+        let is_exception = ext_calls::call4(
+            &self.target_config,
+            builder,
+            self::f64_from_x64_unsigned_dynamic,
+            unsafe { core_ptr.as_mut() },
+            unsafe { exception_ptr.as_mut() },
+            xval,
+            unsafe { f64_ptr.as_mut() },
+        );
 
         ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
-            // SAFETY: This closure runs after the success case of the call, where the f64_slot
+            // SAFETY: This closure runs after the success case of the call, where the `f64_slot`
             // is guaranteed to have been initialised with an f64 value.
             unsafe { f64_slot.assume_init().load(builder) }
         })
