@@ -2,23 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! JIT-compiled blocks must be able to interact with the
-//! RISC-V [`MachineCoreState`] passed to them.
+//! External state access function registry
 //!
-//! In Cranelift, this works in two stages.
-//!
-//! First, the `extern "C"` function pointers must be
-//! registered as external symbols in the [jit builder] & the corresponding signatures declared
-//! in the [jit module]. This allows generated code to link with these functions.
-//!
-//! The second step occurs _during jit compilation_ itself. The linked functions must be re-declared
-//! within the [function builder] itself. This then allows for a [direct function call] to be issued,
-//! which will indeed perform the function call at runtime.
-//!
-//! [jit builder]: JITBuilder
-//! [jit module]: cranelift_jit::JITModule
-//! [function builder]: cranelift::frontend::FunctionBuilderContext
-//! [direct function call]: cranelift::codegen::ir::InstBuilder::call
+//! This module provides state access methods using external functions (i.e. not implemented using
+//! Cranelift IR).
 
 pub(crate) mod stack;
 
@@ -53,68 +40,6 @@ use crate::state_backend::Elem;
 use crate::state_backend::owned_backend::Owned;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
-
-macro_rules! register_jsa_functions {
-    ($($name:ident => ($field:path, $fn:path)),* $(,)?) => {
-        /// Register state access symbols in the builder.
-        pub(super) fn register_jsa_symbols<MC: MemoryConfig>(
-            builder: &mut JITBuilder,
-        ) {
-            $(builder.symbol(stringify!($field), $field as *const u8);)*
-        }
-
-        /// Identifications of globally imported state access methods.
-        pub(crate) struct JsaImports<MC: MemoryConfig> {
-            $(
-                pub $name: FuncId,
-            )*
-            _pd: PhantomData<MC>,
-        }
-
-        impl<MC: MemoryConfig> JsaImports<MC> {
-            /// Register external functions within the JIT Module.
-            pub(super) fn declare_in_module(module: &mut JITModule) -> ModuleResult<Self> {
-                let ptr_type = module.target_config().pointer_type();
-                let call_conv = module.target_config().default_call_conv;
-
-                $(
-                    let abi = $fn($field);
-                    let $name = abi.declare_function(module, stringify!($field), ptr_type, call_conv)?;
-                )*
-
-                Ok(Self {
-                    $(
-                        $name,
-                    )*
-                    _pd: PhantomData,
-                })
-            }
-        }
-    };
-}
-
-register_jsa_functions!(
-    f64_from_x64_unsigned_static_rne => (
-        f64_from_x64_unsigned_static::<RoundRNE, MC>,
-        AbiCall<2>::args
-    ),
-    f64_from_x64_unsigned_static_rtz => (
-        f64_from_x64_unsigned_static::<RoundRTZ, MC>,
-        AbiCall<2>::args
-    ),
-    f64_from_x64_unsigned_static_rup => (
-        f64_from_x64_unsigned_static::<RoundRUP, MC>,
-        AbiCall<2>::args
-    ),
-    f64_from_x64_unsigned_static_rdn => (
-        f64_from_x64_unsigned_static::<RoundRDN, MC>,
-        AbiCall<2>::args
-    ),
-    f64_from_x64_unsigned_static_rmm => (
-        f64_from_x64_unsigned_static::<RoundRMM, MC>,
-        AbiCall<2>::args
-    ),
-);
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig>(
@@ -268,16 +193,12 @@ extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryCon
     MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND)
 }
 
-/// References to locally imported state access methods, used to directly call these accessor
-/// methods in the JIT-compilation context.
-pub struct JsaCalls<'a, MC: MemoryConfig> {
+/// External function call registry for state accesses
+pub struct JsaCalls<MC: MemoryConfig> {
     /// Target configuration which provides useful information about the target ISA, such as
     /// pointer type and width
     target_config: TargetFrontendConfig,
 
-    module: &'a mut JITModule,
-    imports: &'a JsaImports<MC>,
-    ptr_type: Type,
     /// Reusable stack slot for the exception pointer
     exception_ptr_slot: Option<stack::Slot<MaybeUninit<Exception>>>,
 
@@ -290,21 +211,21 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     _pd: PhantomData<MC>,
 }
 
-impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
+impl<MC: MemoryConfig> JsaCalls<MC> {
     /// Get the stack slot for the exception pointer.
     fn exception_ptr_slot(
         &mut self,
         builder: &mut FunctionBuilder,
     ) -> stack::Slot<MaybeUninit<Exception>> {
         self.exception_ptr_slot
-            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
             .clone()
     }
 
     /// Get the stack slot for the PC value.
     fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<MaybeUninit<Address>> {
         self.pc_slot
-            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
             .clone()
     }
 
@@ -314,21 +235,14 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         builder: &mut FunctionBuilder,
     ) -> stack::Slot<MaybeUninit<FValue>> {
         self.fvalue_ptr_slot
-            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
             .clone()
     }
 
-    /// Wrapper to simplify calling state access functions from within the function under construction.
-    pub(super) fn func_calls(
-        module: &'a mut JITModule,
-        imports: &'a JsaImports<MC>,
-        ptr_type: Type,
-    ) -> Self {
+    /// Construct a new `JsaCalls` instance with the given target configuration.
+    pub(super) fn new(target_config: TargetFrontendConfig) -> Self {
         Self {
-            target_config: module.target_config(),
-            module,
-            imports,
-            ptr_type,
+            target_config,
             exception_ptr_slot: None,
             pc_slot: None,
             fvalue_ptr_slot: None,
@@ -485,7 +399,8 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let xval_slot = stack::Slot::<MaybeUninit<V>>::new(self.ptr_type, builder);
+        let xval_slot =
+            stack::Slot::<MaybeUninit<V>>::new(self.target_config.pointer_type(), builder);
         let xval_ptr = xval_slot.ptr(builder);
 
         // SAFETY: The reference argument lifetimes are valid for the duration of the call:
