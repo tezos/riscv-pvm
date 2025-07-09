@@ -7,6 +7,8 @@
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::types::I8;
+use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 
@@ -26,9 +28,6 @@ pub trait StoreLoadInt: Typed + Stackable + Elem + 'static {
     /// The width of the value in memory
     const WIDTH: LoadStoreWidth;
 
-    /// Whether the value is signed or unsigned
-    const SIGNED: bool;
-
     /// Convert the value to an [`XValue`]. This will sign-extend or zero-extend the value.
     fn to_xvalue(self) -> XValue;
 
@@ -37,6 +36,9 @@ pub trait StoreLoadInt: Typed + Stackable + Elem + 'static {
 
     /// Convert an IR value from the representation of `Self` to its `XValue` representation.
     fn to_xvalue_ir(builder: &mut FunctionBuilder, value: Value<Self>) -> Value<XValue>;
+
+    /// Convert an IR value from its `XValue` representation to the representation of `Self`.
+    fn from_xvalue_ir(builder: &mut FunctionBuilder, value: Value<XValue>) -> Value<Self>;
 }
 
 macro_rules! impl_store_load_int {
@@ -44,8 +46,6 @@ macro_rules! impl_store_load_int {
         paste::paste! {
             impl StoreLoadInt for [<u $width>] {
                 const WIDTH: LoadStoreWidth = $variant;
-
-                const SIGNED: bool = false;
 
                 #[inline(always)]
                 fn to_xvalue(self) -> XValue {
@@ -69,12 +69,23 @@ macro_rules! impl_store_load_int {
                         unsafe { Value::<XValue>::from_raw(value) }
                     }
                 }
+
+                fn from_xvalue_ir(builder: &mut FunctionBuilder, value: Value<XValue>) -> Value<Self> {
+                    if $width == 64 {
+                        // SAFETY: Both are 64-bit integers.
+                        unsafe { value.cast() }
+                    } else {
+                        let value = value.to_value();
+                        let value = builder.ins().ireduce([<I $width>], value);
+
+                        // SAFETY: We reduced it to the right width.
+                        unsafe { Value::<Self>::from_raw(value) }
+                    }
+                }
             }
 
             impl StoreLoadInt for [<i $width>] {
                 const WIDTH: LoadStoreWidth = $variant;
-
-                const SIGNED: bool = true;
 
                 #[inline(always)]
                 fn to_xvalue(self) -> XValue {
@@ -96,6 +107,19 @@ macro_rules! impl_store_load_int {
 
                         // SAFETY: We extended it to the right width.
                         unsafe { Value::<XValue>::from_raw(value) }
+                    }
+                }
+
+                fn from_xvalue_ir(builder: &mut FunctionBuilder, value: Value<XValue>) -> Value<Self> {
+                    if $width == 64 {
+                        // SAFETY: Both are 64-bit integers.
+                        unsafe { value.cast() }
+                    } else {
+                        let value = value.to_value();
+                        let value = builder.ins().ireduce([<I $width>], value);
+
+                        // SAFETY: We reduced it to the right width.
+                        unsafe { Value::<Self>::from_raw(value) }
                     }
                 }
             }
