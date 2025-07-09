@@ -104,10 +104,6 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    f64_from_x64_unsigned_dynamic => (
-        f64_from_x64_unsigned_dynamic::<MC>,
-        AbiCall<4>::args
-    ),
     f64_from_x64_unsigned_static_rne => (
         f64_from_x64_unsigned_static::<RoundRNE, MC>,
         AbiCall<2>::args
@@ -292,7 +288,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
-    f64_from_x64_unsigned_dynamic: Option<FuncRef>,
     f64_from_x64_unsigned_static: Option<FuncRef>,
 
     /// Reusable stack slot for the exception pointer
@@ -346,7 +341,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             module,
             imports,
             ptr_type,
-            f64_from_x64_unsigned_dynamic: None,
             f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
             pc_slot: None,
@@ -547,21 +541,19 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let fvalue_slot = self.fvalue_ptr_slot(builder);
         let fvalue_ptr = fvalue_slot.ptr(builder);
 
-        let new_f64_from_x64_unsigned_dynamic =
-            self.f64_from_x64_unsigned_dynamic.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.f64_from_x64_unsigned_dynamic, builder.func)
-            });
-
-        let call = builder.ins().call(*new_f64_from_x64_unsigned_dynamic, &[
-            core_ptr.to_value(),
-            exception_ptr.to_value(),
-            xval.to_value(),
-            fvalue_ptr.to_value(),
-        ]);
-
-        // SAFETY: [`self::f64_from_x64_unsigned_dynamic`] returns a `bool`.
-        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument, therefore valid for the entire function
+        // - `exception_ptr` points to a stack slot which is valid for the duration of the function
+        // - `fvalue_ptr` also points to a stack slot
+        let is_exception = ext_calls::call4(
+            &self.target_config,
+            builder,
+            self::f64_from_x64_unsigned_dynamic,
+            unsafe { core_ptr.as_mut() },
+            unsafe { exception_ptr.as_mut() },
+            xval,
+            unsafe { fvalue_ptr.as_mut() },
+        );
 
         ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
             // SAFETY: This closure runs after the success case of the call, where the fvalue_slot
