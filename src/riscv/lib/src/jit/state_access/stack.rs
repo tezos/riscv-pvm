@@ -47,7 +47,6 @@ use cranelift::codegen::ir::Type;
 use cranelift::codegen::ir::Value;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
-use cranelift::prelude::types::F64;
 use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
@@ -143,7 +142,7 @@ impl StackAddressable for f64 {
 }
 
 impl Stackable for f64 {
-    const IR_TYPE: Type = F64;
+    const IR_TYPE: Type = I64;
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.
