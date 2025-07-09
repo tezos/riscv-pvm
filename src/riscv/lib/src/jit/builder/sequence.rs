@@ -24,7 +24,6 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use super::instruction::Outcome;
-use crate::jit::JsaImports;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::typed::Pointer;
@@ -47,7 +46,7 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     builder: FunctionBuilder<'jit>,
 
     /// External function call manager
-    ext_calls: JsaCalls<'jit, MC>,
+    ext_calls: JsaCalls<MC>,
 
     /// Function entry block
     entry_block: Block,
@@ -69,7 +68,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
     /// Create a new sequence builder.
     pub fn new(
         module: &'jit mut JITModule,
-        imports: &'jit JsaImports<MC>,
         context: &'jit mut Context,
         builder_context: &'jit mut FunctionBuilderContext,
     ) -> Self {
@@ -103,7 +101,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
         // [`JsaCalls`] allows us to perform calls to external functions, such as reading registers
         // or writing the program counter to the machine core state.
-        let ext_calls = JsaCalls::func_calls(module, imports, ptr_type);
+        let ext_calls = JsaCalls::func_calls(module.target_config());
 
         // The function entry block is the first basic block in the function. It brings the function
         // parameters values into scope.

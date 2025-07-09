@@ -21,8 +21,6 @@ use cranelift_module::Module;
 use cranelift_module::ModuleError;
 use thiserror::Error;
 
-use self::state_access::JsaImports;
-use self::state_access::register_jsa_symbols;
 use crate::jit::builder::sequence::SequenceBuilder;
 use crate::log;
 use crate::machine_state::MachineCoreState;
@@ -93,9 +91,6 @@ pub struct JIT<MC: MemoryConfig> {
     /// functions.
     module: JITModule,
 
-    /// Imported state access functions.
-    jsa_imports: JsaImports<MC>,
-
     /// Cache of compilation results.
     cache: HashMap<Hash, Option<JitFn<MC>>>,
 }
@@ -120,17 +115,13 @@ impl<MC: MemoryConfig> JIT<MC> {
         let isa_builder = cranelift_native::builder().map_err(JitError::UnsupportedPlatform)?;
         let isa = isa_builder.finish(settings::Flags::new(flag_builder))?;
 
-        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-        register_jsa_symbols::<MC>(&mut builder);
-
-        let mut module = JITModule::new(builder);
-        let jsa_imports = JsaImports::declare_in_module(&mut module)?;
+        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let module = JITModule::new(builder);
 
         Ok(Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: codegen::Context::new(),
             module,
-            jsa_imports,
             cache: Default::default(),
         })
     }
@@ -190,12 +181,7 @@ impl<MC: MemoryConfig> JIT<MC> {
 
     /// Start building a new sequence of instructions.
     fn start(&mut self) -> SequenceBuilder<'_, MC> {
-        SequenceBuilder::new(
-            &mut self.module,
-            &self.jsa_imports,
-            &mut self.ctx,
-            &mut self.builder_context,
-        )
+        SequenceBuilder::new(&mut self.module, &mut self.ctx, &mut self.builder_context)
     }
 
     /// Finalise and cache the function under construction.

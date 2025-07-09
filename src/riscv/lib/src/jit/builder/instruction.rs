@@ -137,7 +137,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     builder: &'seq mut FunctionBuilder<'jit>,
 
     /// External function call manager
-    ext_calls: &'seq mut JsaCalls<'jit, MC>,
+    ext_calls: &'seq mut JsaCalls<MC>,
 
     /// Block that starts the instruction
     entry_block: Block,
@@ -159,7 +159,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
     pub(super) fn new(
         builder: &'seq mut FunctionBuilder<'jit>,
-        ext_calls: &'seq mut JsaCalls<'jit, MC>,
+        ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
         instruction_pc: Value<Address>,
         core_param: Pointer<MachineCoreState<MC, Owned>>,
