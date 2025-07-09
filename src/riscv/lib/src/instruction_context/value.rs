@@ -11,6 +11,7 @@ use cranelift::prelude::types::I32;
 use super::LoadStoreWidth;
 use crate::instruction_context::ICB;
 use crate::jit::builder::instruction::InstructionBuilder;
+use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
@@ -19,7 +20,7 @@ use crate::machine_state::registers::XValue32;
 use crate::state_backend::Elem;
 
 /// Types which can be loaded and stored using the [`super::ICB`]
-pub trait StoreLoadInt: Stackable + Elem + 'static {
+pub trait StoreLoadInt: Typed + Stackable + Elem + 'static {
     /// The width of the value in memory
     const WIDTH: LoadStoreWidth;
 
