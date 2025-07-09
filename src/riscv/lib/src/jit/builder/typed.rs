@@ -19,6 +19,8 @@ use std::ptr::NonNull;
 
 use cranelift::codegen::ir::Type as CraneliftType;
 use cranelift::codegen::ir::Value as CraneliftValue;
+use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::InstBuilder;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::F32;
 use cranelift::prelude::types::F64;
@@ -120,6 +122,27 @@ impl<T> Value<T> {
     pub unsafe fn from_raw(value: CraneliftValue) -> Self {
         Value {
             value,
+            _pd: PhantomData,
+        }
+    }
+
+    /// TODO
+    ///
+    /// # Safety
+    ///
+    /// TODO
+    pub unsafe fn from_literal(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        literal: i64,
+    ) -> Self
+    where
+        T: Typed,
+    {
+        Value {
+            value: builder
+                .ins()
+                .iconst(T::TYPE.to_type(target_config), literal),
             _pd: PhantomData,
         }
     }

@@ -31,7 +31,6 @@ use cranelift::codegen::ir;
 use cranelift::codegen::ir::FuncRef;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::codegen::ir::Type;
-use cranelift::codegen::ir::types::I8;
 use cranelift::frontend::FunctionBuilder;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift_jit::JITBuilder;
@@ -106,8 +105,6 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    freg_read => (fregister_read::<MC>, AbiCall<2>::args),
-    freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
     memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
@@ -150,7 +147,7 @@ register_jsa_functions!(
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
+    core: &MachineCoreState<MC, Owned>,
     reg: FRegister,
 ) -> f64 {
     let fval = core.hart.fregisters.read(reg);
@@ -322,8 +319,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
-    freg_read: Option<FuncRef>,
-    freg_write: Option<FuncRef>,
     raise_illegal_instruction_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
     memory_store_u8: Option<FuncRef>,
@@ -389,8 +384,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             module,
             imports,
             ptr_type,
-            freg_read: None,
-            freg_write: None,
             raise_illegal_instruction_exception: None,
             ecall_from_mode: None,
             memory_store_u8: None,
@@ -732,15 +725,17 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         core_ptr: Pointer<MachineCoreState<MC, Owned>>,
         reg: FRegister,
     ) -> Value<f64> {
-        let freg_read = self.freg_read.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.freg_read, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        let call = builder.ins().call(*freg_read, &[core_ptr.to_value(), reg]);
+        let reg_value = unsafe {
+            Value::<FRegister>::from_literal(&self.target_config, builder, reg as u8 as i64)
+        };
 
-        // SAFETY: [`self::fregister_read`] returns a `f64`.
-        unsafe { Value::<f64>::from_raw(builder.inst_results(call)[0]) }
+        ext_calls::call2(
+            &self.target_config,
+            builder,
+            self::fregister_read,
+            unsafe { core_ptr.as_ref() },
+            reg_value,
+        )
     }
 
     /// Emit the required IR to write the value to the given fregister.
@@ -751,14 +746,18 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         reg: FRegister,
         value: Value<f64>,
     ) {
-        let freg_write = self.freg_write.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.freg_write, builder.func)
-        });
-        let reg = builder.ins().iconst(I8, reg as i64);
-        builder
-            .ins()
-            .call(*freg_write, &[core_ptr.to_value(), reg, value.to_value()]);
+        let reg_value = unsafe {
+            Value::<FRegister>::from_literal(&self.target_config, builder, reg as u8 as i64)
+        };
+
+        ext_calls::call3(
+            &self.target_config,
+            builder,
+            self::fregister_write,
+            unsafe { core_ptr.as_mut() },
+            reg_value,
+            value,
+        );
     }
 }
 

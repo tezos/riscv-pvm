@@ -17,9 +17,11 @@ use std::fmt;
 use std::num::NonZeroUsize;
 
 use arbitrary_int::u5;
+use cranelift::prelude::types::I8;
 
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
+use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
@@ -555,6 +557,10 @@ impl fmt::Display for FRegister {
         };
         f.write_str(name)
     }
+}
+
+impl typed::Typed for FRegister {
+    const TYPE: typed::Type = typed::Type::Basic(I8);
 }
 
 /// Floating-point number register value
