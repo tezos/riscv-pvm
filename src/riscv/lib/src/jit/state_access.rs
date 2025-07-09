@@ -20,23 +20,13 @@
 //! [function builder]: cranelift::frontend::FunctionBuilderContext
 //! [direct function call]: cranelift::codegen::ir::InstBuilder::call
 
-mod abi;
 pub(crate) mod stack;
 
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use abi::AbiCall;
-use cranelift::codegen::ir::FuncRef;
-use cranelift::codegen::ir::InstBuilder;
-use cranelift::codegen::ir::Type;
 use cranelift::frontend::FunctionBuilder;
 use cranelift::prelude::isa::TargetFrontendConfig;
-use cranelift_jit::JITBuilder;
-use cranelift_jit::JITModule;
-use cranelift_module::FuncId;
-use cranelift_module::Module;
-use cranelift_module::ModuleResult;
 
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
@@ -288,8 +278,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
-    f64_from_x64_unsigned_static: Option<FuncRef>,
-
     /// Reusable stack slot for the exception pointer
     exception_ptr_slot: Option<stack::Slot<MaybeUninit<Exception>>>,
 
@@ -341,7 +329,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             module,
             imports,
             ptr_type,
-            f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
             pc_slot: None,
             fvalue_ptr_slot: None,
@@ -571,25 +558,23 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         xval: Value<XValue>,
         rm: RoundingMode,
     ) -> Value<FValue> {
-        let new_f64_from_x64_unsigned_static =
-            self.f64_from_x64_unsigned_static.get_or_insert_with(|| {
-                let rm_func_id = match rm {
-                    RoundingMode::RNE => self.imports.f64_from_x64_unsigned_static_rne,
-                    RoundingMode::RTZ => self.imports.f64_from_x64_unsigned_static_rtz,
-                    RoundingMode::RUP => self.imports.f64_from_x64_unsigned_static_rup,
-                    RoundingMode::RDN => self.imports.f64_from_x64_unsigned_static_rdn,
-                    RoundingMode::RMM => self.imports.f64_from_x64_unsigned_static_rmm,
-                };
-                self.module.declare_func_in_func(rm_func_id, builder.func)
-            });
+        let callee = match rm {
+            RoundingMode::RNE => self::f64_from_x64_unsigned_static::<RoundRNE, _>,
+            RoundingMode::RTZ => self::f64_from_x64_unsigned_static::<RoundRTZ, _>,
+            RoundingMode::RDN => self::f64_from_x64_unsigned_static::<RoundRDN, _>,
+            RoundingMode::RUP => self::f64_from_x64_unsigned_static::<RoundRUP, _>,
+            RoundingMode::RMM => self::f64_from_x64_unsigned_static::<RoundRMM, _>,
+        };
 
-        let call = builder.ins().call(*new_f64_from_x64_unsigned_static, &[
-            core_ptr.to_value(),
-            xval.to_value(),
-        ]);
-
-        // SAFETY: [`self::f64_from_x64_unsigned_static`] returns a `FValue`.
-        unsafe { Value::<FValue>::from_raw(builder.inst_results(call)[0]) }
+        // SAFETY: The machine core state pointer is a JIT function argument, and therefore its
+        // pointee will outlive this call.
+        ext_calls::call2(
+            &self.target_config,
+            builder,
+            callee,
+            unsafe { core_ptr.as_mut() },
+            xval,
+        )
     }
 
     /// Emit the required IR to read the value from the given fregister.
