@@ -19,6 +19,8 @@ use std::ptr::NonNull;
 
 use cranelift::codegen::ir::Type as CraneliftType;
 use cranelift::codegen::ir::Value as CraneliftValue;
+use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::InstBuilder;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
@@ -115,6 +117,28 @@ impl<T> Value<T> {
     ///
     /// The caller must ensure the type `T` is correct for the given Cranelift value.
     pub unsafe fn from_raw(value: CraneliftValue) -> Self {
+        Value {
+            value,
+            _pd: PhantomData,
+        }
+    }
+
+    /// Construct a new typed value for an enum from its discriminant.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the discriminant corresponds to a valid variant of the enum.
+    pub unsafe fn from_discriminant(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        discriminant: i64,
+    ) -> Self
+    where
+        T: Typed,
+    {
+        let value = builder
+            .ins()
+            .iconst(T::TYPE.to_type(target_config), discriminant);
         Value {
             value,
             _pd: PhantomData,

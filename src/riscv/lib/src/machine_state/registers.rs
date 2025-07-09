@@ -14,12 +14,14 @@
 )]
 
 use std::fmt;
+use std::mem::Discriminant;
 use std::num::NonZeroUsize;
 
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
+use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
@@ -557,6 +559,16 @@ impl fmt::Display for FRegister {
     }
 }
 
+impl typed::Typed for FRegister {
+    const TYPE: typed::Type = {
+        if std::mem::size_of::<Discriminant<Self>>() != 1 {
+            panic!("FRegister is expected to be equal to u8");
+        }
+
+        typed::Type::Basic(cranelift::prelude::types::I8)
+    };
+}
+
 /// Floating-point number register value
 #[repr(transparent)]
 #[derive(
@@ -600,6 +612,16 @@ impl backend::Elem for FValue {
     unsafe fn write_unaligned(self, dest: *mut u8) {
         unsafe { dest.cast::<u64>().write_unaligned(self.0.to_le()) }
     }
+}
+
+impl typed::Typed for FValue {
+    const TYPE: typed::Type = {
+        if std::mem::size_of::<FValue>() != std::mem::size_of::<u64>() {
+            panic!("FValue must be represented as u64");
+        }
+
+        typed::Type::Basic(cranelift::prelude::types::I64)
+    };
 }
 
 /// Layout for [FRegisters]
