@@ -264,6 +264,42 @@ impl<MC: MemoryConfig> JIT<MC> {
             "Defined function"
         );
 
+        // Check during test if the compiled function contains any unsafe cranelift IR type/operation.
+        if cfg!(test) {
+            let function_detail_string = self.ctx.func.display().to_string();
+
+            // List of unsafe cranelift IR types/operations.
+            let unsafe_ir_type_and_operation = [
+                "f128",
+                "f64",
+                "f32",
+                "f16",
+                "fcmp",
+                "fadd",
+                "fsub",
+                "fmul",
+                "fdiv",
+                "fma",
+                "fneg",
+                "fabs",
+                "fcopysign",
+                "fmin",
+                "fmax",
+                "ceil",
+                "floor",
+                "trunc",
+                "nearest",
+            ];
+            for word in &unsafe_ir_type_and_operation {
+                assert!(
+                    !function_detail_string.contains(word),
+                    "Compiled function contains unsafe type/operation: {}. Full function detail: {}.",
+                    word,
+                    function_detail_string
+                );
+            }
+        }
+
         self.clear();
 
         // SAFETY: the signature of a JitFn matches exactly the abi we specified in the
