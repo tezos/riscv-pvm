@@ -482,6 +482,7 @@ pub(crate) mod test_helpers {
             fn $name() {
                 use $crate::state_backend::owned_backend::Owned;
                 use $crate::state_backend::proof_backend::ProofGen;
+                use $crate::state_backend::verify_backend::Verifier;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
 
                 fn inner<$fac_name: TestBackendFactory>() {
@@ -490,6 +491,7 @@ pub(crate) mod test_helpers {
 
                 inner::<Owned>();
                 inner::<ProofGen<Owned>>();
+                inner::<Verifier>();
             }
         };
     }

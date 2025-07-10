@@ -96,6 +96,39 @@ impl ManagerBase for Verifier {
     }
 }
 
+#[cfg(test)]
+mod test_helpers {
+    use crate::state_backend::ManagerAlloc;
+    use crate::state_backend::verify_backend::DynRegion;
+    use crate::state_backend::verify_backend::PageId;
+    use crate::state_backend::verify_backend::Region;
+    use crate::state_backend::verify_backend::Verifier;
+
+    impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
+        /// Construct a zero-initialized dynamic region.
+        fn zero_initialized() -> Self {
+            let nr_pages = LEN.div_ceil(LEAF_SIZE);
+
+            Self::from_pages((0..nr_pages).map(|page_id| {
+                let page_index = PageId::<LEAF_SIZE>::from_address(page_id * LEAF_SIZE);
+                (page_index, Box::new([0; LEAF_SIZE]))
+            }))
+        }
+    }
+
+    impl ManagerAlloc for Verifier {
+        fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
+            Region::Partial(Box::new(init_value.map(Some)))
+        }
+
+        fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
+            // Since this implementation is only for testing purposes, we can allocate the regions
+            // as zero initialized to mimic what an owned backend would do (to pass tests)
+            DynRegion::zero_initialized()
+        }
+    }
+}
+
 impl ManagerRead for Verifier {
     fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
         region[index]
