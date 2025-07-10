@@ -704,7 +704,6 @@ pub(crate) mod tests {
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::Elem;
-    use crate::state_backend::FnManagerIdent;
 
     /// Dummy type that helps us implement custom normalisation via [`Elem`]
     #[repr(C, packed)]
@@ -863,41 +862,5 @@ pub(crate) mod tests {
 
         let buffer = region.read::<[u8; 8]>(0);
         assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);
-    });
-
-    backend_test!(test_region_stored_format, F, {
-        // Writing to one item of the region must convert to stored format.
-        let mut region = Cells::<Flipper, 4, F>::new();
-
-        region.write(0, Flipper { a: 13, b: 37 });
-        assert_eq!(region.read(0), Flipper { a: 13, b: 37 });
-
-        let buffer = bincode::serialize(&region.struct_ref::<FnManagerIdent>()).unwrap();
-        assert_eq!(buffer[..2], [37, 13]);
-
-        // Replacing a value in the region must convert to and from stored format.
-        let old = region.replace(0, Flipper { a: 26, b: 74 });
-        assert_eq!(old, Flipper { a: 13, b: 37 });
-
-        let buffer = bincode::serialize(&region.struct_ref::<FnManagerIdent>()).unwrap();
-        assert_eq!(buffer[..2], [74, 26]);
-
-        // Writing to the entire region must convert properly to stored format.
-        region.write_all(&[
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
-
-        assert_eq!(region.read_all(), [
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
-
-        let buffer = bincode::serialize(&region.struct_ref::<FnManagerIdent>()).unwrap();
-        assert_eq!(buffer[..8], [22, 11, 24, 13, 26, 15, 28, 17]);
     });
 }

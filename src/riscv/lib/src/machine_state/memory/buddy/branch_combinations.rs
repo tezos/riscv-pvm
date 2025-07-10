@@ -52,7 +52,7 @@ macro_rules! combined_buddy_branch {
             impl<B, M> PartialEq for [<$name Alloc>]<B, M>
             where
                 B: Layout,
-                M: ManagerSerialise,
+                M: ManagerRead,
                 AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: PartialEq,
             {
                 fn eq(&self, other: &Self) -> bool {
@@ -100,7 +100,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: Layout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-
             }
 
             impl<B: CommitmentLayout> CommitmentLayout for [<$name Layout>]<B> {
