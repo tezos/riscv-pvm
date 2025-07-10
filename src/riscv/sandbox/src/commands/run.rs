@@ -12,7 +12,6 @@ use std::ops::Bound;
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::block_cache::block::Block;
-use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -26,15 +25,25 @@ use crate::cli::CommonOptions;
 use crate::cli::RunOptions;
 
 cfg_if::cfg_if! {
+    if #[cfg(feature = "huge-memory")] {
+        /// Memory configuration for a PVM with large virtual memory needs
+        type MemoryConfig = octez_riscv::machine_state::memory::M32G;
+    } else {
+        /// Memory configuration for a PVM with standard virtual memory needs
+        type MemoryConfig = octez_riscv::machine_state::memory::M1G;
+    }
+}
+
+cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Interpreted<M1G, Owned>;
+        type BlockImplInner = block::Interpreted<MemoryConfig, Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Jitted<octez_riscv::machine_state::block_cache::block::InlineCompiler<M1G>, M1G>;
+        type BlockImplInner = block::Jitted<block::InlineCompiler<MemoryConfig>, MemoryConfig>;
     } else {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Jitted<octez_riscv::machine_state::block_cache::block::OutlineCompiler<M1G>, M1G>;
+        type BlockImplInner = block::Jitted<block::OutlineCompiler<MemoryConfig>, MemoryConfig>;
     }
 }
 
@@ -67,9 +76,9 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-type PvmStepperRunner<B> = PvmStepper<Console<'static>, M1G, DefaultCacheConfig, Owned, B>;
+type PvmStepperRunner<B> = PvmStepper<Console<'static>, MemoryConfig, DefaultCacheConfig, Owned, B>;
 
-pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
+pub(crate) fn make_pvm_stepper<B: Block<MemoryConfig, Owned>>(
     program: &[u8],
     common: &CommonOptions,
     block_builder: B::BlockBuilder,
@@ -87,7 +96,7 @@ pub(crate) fn make_pvm_stepper<B: Block<M1G, Owned>>(
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, M1G, DefaultCacheConfig, Owned, B>::new(
+    let stepper = PvmStepper::<_, MemoryConfig, DefaultCacheConfig, Owned, B>::new(
         program,
         inbox.build(),
         console,
