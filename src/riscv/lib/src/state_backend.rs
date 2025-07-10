@@ -422,6 +422,7 @@ pub(crate) mod test_helpers {
                 }
 
                 inner::<$crate::state_backend::owned_backend::Owned>();
+                inner::<$crate::state_backend::verify_backend::Verifier>();
             }
         };
     }
