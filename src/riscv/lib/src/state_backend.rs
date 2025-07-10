@@ -409,7 +409,6 @@ pub(crate) mod test_helpers {
     use super::ManagerAlloc;
     use super::ManagerClone;
     use super::ManagerReadWrite;
-    use super::ManagerSerialise;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -432,7 +431,6 @@ pub(crate) mod test_helpers {
         ///
         /// Used for testing.
         pub trait TestBackendFactory = ManagerReadWrite
-            + ManagerSerialise
             + ManagerClone
             + ManagerAlloc;
     }
@@ -441,20 +439,9 @@ pub(crate) mod test_helpers {
     /// structural differences between the values.
     pub fn assert_eq_struct<T>(lhs: &T, rhs: &T)
     where
-        T: serde::Serialize + PartialEq,
+        T: PartialEq,
     {
         if lhs != rhs {
-            let (file_lhs, path_lhs) = tempfile::NamedTempFile::new().unwrap().keep().unwrap();
-            serde_json::to_writer_pretty(file_lhs, lhs).unwrap();
-            eprintln!("Lhs is located at {}", path_lhs.display());
-
-            let (file_rhs, path_rhs) = tempfile::NamedTempFile::new().unwrap().keep().unwrap();
-            serde_json::to_writer_pretty(file_rhs, rhs).unwrap();
-            eprintln!("Rhs is located at {}", path_rhs.display());
-
-            eprintln!("Run the following to diff them:");
-            eprintln!("jd {} {}", path_lhs.display(), path_rhs.display());
-
             panic!("Assertion failed: values are different");
         }
     }
@@ -463,10 +450,15 @@ pub(crate) mod test_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_test;
     use crate::state::NewState;
 
-    backend_test!(test_example, F, {
+    #[test]
+    fn test_example_owned() {
+        use crate::state_backend::Cell;
+        use crate::state_backend::Cells;
+        use crate::state_backend::FnManagerIdent;
+        use crate::state_backend::owned_backend::Owned;
+
         struct Example<M: ManagerBase> {
             first: Cell<u64, M>,
             second: Cells<u32, 4, M>,
@@ -475,7 +467,7 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut instance: Example<F> = Example {
+        let mut instance: Example<Owned> = Example {
             first: Cell::new(),
             second: Cells::new(),
         };
@@ -499,5 +491,5 @@ mod tests {
             data.as_ptr().cast::<[u32; 4]>().read().map(u32::from_le)
         };
         assert_eq!(second_value_read, second_value);
-    });
+    }
 }

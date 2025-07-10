@@ -772,9 +772,16 @@ pub(crate) mod tests {
         assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);
     });
 
-    backend_test!(test_region_stored_format, F, {
+    #[test]
+    fn test_region_stored_format_owned() {
+        // This test does not use `backend_test!` macro because it tests the
+        // serialisation feature of the `Owned` backend, which is not applicable
+        // to all backends.
+
+        use crate::state_backend::owned_backend::Owned;
+
         // Writing to one item of the region must convert to stored format.
-        let mut region = Cells::<Flipper, 4, F>::new();
+        let mut region = Cells::<Flipper, 4, Owned>::new();
 
         region.write(0, Flipper { a: 13, b: 37 });
         assert_eq!(region.read(0), Flipper { a: 13, b: 37 });
@@ -806,5 +813,5 @@ pub(crate) mod tests {
 
         let buffer = bincode::serialize(&region.struct_ref::<FnManagerIdent>()).unwrap();
         assert_eq!(buffer[..8], [22, 11, 24, 13, 26, 15, 28, 17]);
-    });
+    }
 }
