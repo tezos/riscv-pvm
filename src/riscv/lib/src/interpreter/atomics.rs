@@ -10,8 +10,14 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::instruction_context::comparable::Comparable;
 use crate::machine_state::registers::XRegister;
+use crate::machine_state::registers::read_xregister;
+use crate::machine_state::registers::write_xregister;
 use crate::machine_state::reservation_set::RES_SET_BITMASK;
 use crate::machine_state::reservation_set::UNSET_VALUE;
+use crate::state_backend::CellProj;
+use crate::state_context::StateContext;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 use crate::traps::Exception;
 
 pub const SC_SUCCESS: u64 = 0;
@@ -36,7 +42,7 @@ fn run_x64_atomic<I: ICB>(
     rd: XRegister,
     f: fn(I::XValue, I::XValue, &mut I) -> I::XValue,
 ) -> I::IResult<()> {
-    let address_rs1 = icb.xregister_read(rs1);
+    let address_rs1 = read_xregister(icb, rs1);
 
     // Handle the case where the address is not aligned.
     let result = icb.atomic_access_fault_guard::<u64>(address_rs1, ReservationSetOption::NoReset);
@@ -47,11 +53,11 @@ fn run_x64_atomic<I: ICB>(
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
         // Apply the binary operation to the loaded value and the value in rs2
-        let val_rs2 = icb.xregister_read(rs2);
+        let val_rs2 = read_xregister(icb, rs2);
         let res = f(val_rs1, val_rs2, icb);
 
         // Write the value read fom the address in rs1 in rd
-        icb.xregister_write(rd, val_rs1);
+        write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1
         icb.main_memory_store::<u64>(address_rs1, res)
@@ -65,7 +71,7 @@ fn run_x32_atomic<I: ICB>(
     rd: XRegister,
     f: fn(I::XValue32, I::XValue32, &mut I) -> I::XValue32,
 ) -> I::IResult<()> {
-    let address_rs1 = icb.xregister_read(rs1);
+    let address_rs1 = read_xregister(icb, rs1);
 
     // Handle the case where the address is not aligned.
     let result = icb.atomic_access_fault_guard::<u32>(address_rs1, ReservationSetOption::NoReset);
@@ -76,7 +82,7 @@ fn run_x32_atomic<I: ICB>(
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
         // Apply the binary operation to the loaded value and the value in rs2
-        let val_rs2 = icb.xregister_read(rs2);
+        let val_rs2 = read_xregister(icb, rs2);
         let val_rs1 = icb.narrow(val_rs1);
         let val_rs2 = icb.narrow(val_rs2);
         let res = f(val_rs1, val_rs2, icb);
@@ -86,7 +92,7 @@ fn run_x32_atomic<I: ICB>(
         let val_rs1 = icb.extend_signed(val_rs1);
 
         // Write the value read fom the address in rs1 in rd
-        icb.xregister_write(rd, val_rs1);
+        write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1
         icb.main_memory_store::<u32>(address_rs1, res)
@@ -367,7 +373,7 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     rs1: XRegister,
     rd: XRegister,
 ) -> I::IResult<()> {
-    let address_rs1 = icb.xregister_read(rs1);
+    let address_rs1 = read_xregister(icb, rs1);
 
     // "The A extension requires that the address held in rs1 be naturally
     // aligned to the size of the operand (i.e., eight-byte aligned for
@@ -384,8 +390,8 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     I::and_then(val_rs1_result, |val_rs1| {
         let aligned_address_rs1 = reservation_set_align_address::<V, I>(icb, address_rs1);
 
-        icb.reservation_set_write(aligned_address_rs1);
-        icb.xregister_write(rd, val_rs1);
+        write_reservation_set(icb, aligned_address_rs1);
+        write_xregister(icb, rd, val_rs1);
 
         icb.ok(())
     })
@@ -404,7 +410,7 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     rs2: XRegister,
     rd: XRegister,
 ) -> I::IResult<()> {
-    let address_rs1 = icb.xregister_read(rs1);
+    let address_rs1 = read_xregister(icb, rs1);
 
     // "The A extension requires that the address held in rs1 be naturally
     // aligned to the size of the operand (i.e., eight-byte aligned for
@@ -422,10 +428,10 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
             |icb| {
                 // If the address in rs1 belongs to a valid reservation, write
                 // the value in rs2 to this address and return success.
-                let value_rs2 = icb.xregister_read(rs2);
+                let value_rs2 = read_xregister(icb, rs2);
                 let sc_success_imm = icb.xvalue_of_imm(SC_SUCCESS as i64);
 
-                icb.xregister_write(rd, sc_success_imm);
+                write_xregister(icb, rd, sc_success_imm);
                 icb.main_memory_store::<V>(address_rs1, value_rs2)
             },
             |icb| {
@@ -433,7 +439,7 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
                 // there is no valid reservation set on the hart, do not write to
                 // memory and return failure.
                 let sc_failure_imm = icb.xvalue_of_imm(SC_FAILURE as i64);
-                icb.xregister_write(rd, sc_failure_imm);
+                write_xregister(icb, rd, sc_failure_imm);
 
                 icb.ok(())
             },
@@ -453,7 +459,7 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
     rs2: XRegister,
     rd: XRegister,
 ) -> I::IResult<()> {
-    let address_rs1 = icb.xregister_read(rs1);
+    let address_rs1 = read_xregister(icb, rs1);
 
     // "The A extension requires that the address held in rs1 be naturally
     // aligned to the size of the operand (i.e., eight-byte aligned for
@@ -468,10 +474,10 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
         // Get the value to store from rs2
-        let val_rs2 = icb.xregister_read(rs2);
+        let val_rs2 = read_xregister(icb, rs2);
 
         // Write the original value from memory to rd
-        icb.xregister_write(rd, val_rs1);
+        write_xregister(icb, rd, val_rs1);
 
         // Store rs2's value to memory
         icb.main_memory_store::<V>(address_rs1, val_rs2)
@@ -592,7 +598,7 @@ pub fn run_x64_atomic_store<I: ICB>(
 /// Reset the reservation set to an unset state.
 pub(crate) fn reset_reservation_set<I: ICB>(icb: &mut I) {
     let unset = icb.xvalue_of_imm(UNSET_VALUE as i64);
-    icb.reservation_set_write(unset);
+    write_reservation_set(icb, unset);
 }
 
 /// Align an address to the size of the reservation set.
@@ -611,7 +617,7 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
     icb: &mut I,
     address: I::XValue,
 ) -> I::Bool {
-    let start_addr = icb.reservation_set_read();
+    let start_addr = read_reservation_set(icb);
 
     // Regardless of success or failure, executing an SC.x instruction
     // invalidates any reservation held by this hart.
@@ -624,6 +630,24 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
     let in_reservation_set = aligned_address.compare(start_addr, Predicate::Equal, icb);
 
     icb.bool_and(is_set, in_reservation_set)
+}
+
+impl_projection! {
+    projection ReservationSetProj {
+        subject = MachineCoreCons,
+        target_projection = CellProj<u64>,
+        path = hart.reservation_set.start_addr,
+    }
+}
+
+/// Read the reservation set address from the machine state.
+pub(crate) fn read_reservation_set<SC: StateContext>(state: &mut SC) -> SC::X64 {
+    state.read_proj::<ReservationSetProj>(())
+}
+
+/// Write to the reservation set address in the machine state.
+pub(crate) fn write_reservation_set<SC: StateContext>(state: &mut SC, value: SC::X64) {
+    state.write_proj::<ReservationSetProj>((), value);
 }
 
 #[cfg(test)]

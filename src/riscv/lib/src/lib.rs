@@ -19,6 +19,7 @@ pub mod pvm;
 mod range_utils;
 mod state;
 pub mod state_backend;
+mod state_context;
 pub mod stepper;
 pub mod storage;
 mod traps;

@@ -14,6 +14,9 @@ use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
+use crate::machine_state::registers::read_xregister;
+use crate::machine_state::registers::read_xregister_nz;
+use crate::machine_state::registers::write_xregister_nz;
 use crate::parser::SHIFT_BITMASK;
 
 /// Moves the two's complement of `val(rs1)` into `rd`.
@@ -21,9 +24,9 @@ use crate::parser::SHIFT_BITMASK;
 /// Relevant RISC-V opcodes:
 /// - SUB
 pub fn run_neg(icb: &mut impl ICB, rd: NonZeroXRegister, rs1: NonZeroXRegister) {
-    let rs1_val = icb.xregister_read_nz(rs1);
+    let rs1_val = read_xregister_nz(icb, rs1);
     let result = rs1_val.negate(icb);
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Copies the value in register `rs2` into register `rd_rs1`.
@@ -38,8 +41,8 @@ pub fn run_neg(icb: &mut impl ICB, rd: NonZeroXRegister, rs1: NonZeroXRegister) 
 /// - SRL
 /// - SRA
 pub fn run_mv(icb: &mut impl ICB, rd_rs1: NonZeroXRegister, rs2: NonZeroXRegister) {
-    let rs2_val = icb.xregister_read_nz(rs2);
-    icb.xregister_write_nz(rd_rs1, rs2_val)
+    let rs2_val = read_xregister_nz(icb, rs2);
+    write_xregister_nz(icb, rd_rs1, rs2_val)
 }
 
 /// Does nothing.
@@ -70,25 +73,25 @@ pub fn run_add(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
     // Wrapped addition in two's complement behaves the same for signed and unsigned
     let result = lhs.add(rhs, icb);
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Perform `val(rs1) + val(rs2)` but only on lowest 32 bits
 /// and store the sign-extended result in `rd`.
 pub fn run_add_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZeroXRegister) {
-    let lhs = icb.xregister_read(rs1);
-    let rhs = icb.xregister_read(rs2);
+    let lhs = read_xregister(icb, rs1);
+    let rhs = read_xregister(icb, rs2);
 
     let sum = lhs.add(rhs, icb);
 
     let res = icb.narrow(sum);
     let res = icb.extend_signed(res);
 
-    icb.xregister_write_nz(rd, res)
+    write_xregister_nz(icb, rd, res)
 }
 
 /// Perform [`val(rs1) - val(rs2)`] and store the result in `rd`
@@ -102,11 +105,11 @@ pub fn run_sub(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
     // Wrapped subtraction in two's complement behaves the same for signed and unsigned
     let result = lhs.sub(rhs, icb);
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Perform `val(rs1) - val(rs2)` but only on lowest 32 bits
@@ -118,14 +121,14 @@ pub fn run_sub(
 pub fn run_sub_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZeroXRegister) {
     // We do not need to explicitly truncate for the lower bits since wrapping_sub
     // has the same semantics & result on the lower 32 bits irrespective of bit width
-    let lhs = icb.xregister_read(rs1);
-    let rhs = icb.xregister_read(rs2);
+    let lhs = read_xregister(icb, rs1);
+    let rhs = read_xregister(icb, rs2);
     let subtraction = lhs.sub(rhs, icb);
 
     // Truncate result to use only the lower 32 bits, then sign-extend to 64 bits.
     let res = icb.narrow(subtraction);
     let res = icb.extend_signed(res);
-    icb.xregister_write_nz(rd, res)
+    write_xregister_nz(icb, rd, res)
 }
 /// Saves in `rd` the bitwise AND between the value in `rs1` and `rs2`
 ///
@@ -138,11 +141,11 @@ pub fn run_and(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
 
     let res = lhs.and(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Saves in `rd` the bitwise OR between the value in `rs1` and `rs2`
@@ -156,11 +159,11 @@ pub fn run_or(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
 
     let res = lhs.or(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Perform `val(rs1) | imm` and store the result in `rd`
@@ -170,10 +173,10 @@ pub fn run_x64_or_immediate(
     rs1: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
     let res = lhs.or(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Perform `val(rs1) ^ val(rs2)` and store the result in `rd`
@@ -183,10 +186,10 @@ pub fn run_x64_xor(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
     let res = lhs.xor(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Perform `val(rs1) ^ imm` and store the result in `rd`
@@ -196,10 +199,10 @@ pub fn run_x64_xor_immediate(
     rs1: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
     let res = lhs.xor(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Add `imm` to val(rs1) and store the result in `rd`
@@ -212,16 +215,16 @@ pub fn run_x64_xor_immediate(
 pub fn run_addi(icb: &mut impl ICB, imm: i64, rs1: NonZeroXRegister, rd: NonZeroXRegister) {
     // Return the lower XLEN (64 bits in our case) bits of the addition
     // Irrespective of sign, the result is the same, casting to u64 for addition;
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
     let result = lhs.add(rhs, icb);
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Perform `val(rs1) + imm` but only on lowest 32 bits
 /// and store the sign-extended result in `rd`
 pub fn run_add_word_immediate(icb: &mut impl ICB, imm: i64, rs1: XRegister, rd: NonZeroXRegister) {
-    let lhs = icb.xregister_read(rs1);
+    let lhs = read_xregister(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
 
     let sum = lhs.add(rhs, icb);
@@ -229,7 +232,7 @@ pub fn run_add_word_immediate(icb: &mut impl ICB, imm: i64, rs1: XRegister, rd: 
     let res = icb.narrow(sum);
     let res = icb.extend_signed(res);
 
-    icb.xregister_write_nz(rd, res)
+    write_xregister_nz(icb, rd, res)
 }
 
 /// Saves in `rd` the bitwise AND between the value in `rs1` and `imm`
@@ -238,10 +241,10 @@ pub fn run_add_word_immediate(icb: &mut impl ICB, imm: i64, rs1: XRegister, rd: 
 /// - `ANDI`
 /// - `C.ANDI`
 pub fn run_andi(icb: &mut impl ICB, imm: i64, rs1: NonZeroXRegister, rd: NonZeroXRegister) {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
     let res = lhs.and(rhs, icb);
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// `SLTI` I-type instruction
@@ -257,13 +260,13 @@ pub fn run_set_less_than_immediate_signed(
     rs1: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read(rs1);
+    let lhs = read_xregister(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
 
     let cmp = lhs.compare(rhs, Predicate::LessThanSigned, icb);
     let res = icb.xvalue_from_bool(cmp);
 
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Places the value 1 in `rd` if val(rs1) is less than the immediate
@@ -277,13 +280,13 @@ pub fn run_set_less_than_immediate_unsigned(
     rs1: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read(rs1);
+    let lhs = read_xregister(icb, rs1);
     let rhs = icb.xvalue_of_imm(imm);
 
     let cmp = lhs.compare(rhs, Predicate::LessThanUnsigned, icb);
     let res = icb.xvalue_from_bool(cmp);
 
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Places the value 1 in `rd` if val(rs1) < val(rs2)
@@ -297,13 +300,13 @@ pub fn run_set_less_than_signed(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read(rs1);
-    let rhs = icb.xregister_read(rs2);
+    let lhs = read_xregister(icb, rs1);
+    let rhs = read_xregister(icb, rs2);
 
     let cmp = lhs.compare(rhs, Predicate::LessThanSigned, icb);
     let res = icb.xvalue_from_bool(cmp);
 
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Places the value 1 in `rd` if val(rs1) < val(rs2)
@@ -317,13 +320,13 @@ pub fn run_set_less_than_unsigned(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read(rs1);
-    let rhs = icb.xregister_read(rs2);
+    let lhs = read_xregister(icb, rs1);
+    let rhs = read_xregister(icb, rs2);
 
     let cmp = lhs.compare(rhs, Predicate::LessThanUnsigned, icb);
     let res = icb.xvalue_from_bool(cmp);
 
-    icb.xregister_write_nz(rd, res);
+    write_xregister_nz(icb, rd, res);
 }
 
 /// Multiply val(rs1) with val(rs2) and store the lower 64 bits of the result
@@ -337,26 +340,26 @@ pub fn run_mul(
     rs2: NonZeroXRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
     let result = lhs.mul(rhs, icb);
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Multiply `val(rs1)` with `val(rs2)` and store the lower 32 bits of the result
 /// in register `rd`.
 pub fn run_x32_mul(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZeroXRegister) {
-    let lhs = icb.xregister_read(rs1);
+    let lhs = read_xregister(icb, rs1);
     let lhs = icb.narrow(lhs);
 
-    let rhs = icb.xregister_read(rs2);
+    let rhs = read_xregister(icb, rs2);
     let rhs = icb.narrow(rhs);
 
     let result = lhs.mul(rhs, icb);
 
     let result = icb.extend_signed(result);
 
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 // Extend `val(rs1)` and `val(rs2)` to 128 bits, multiply the 128 bits value and store the upper 64 bits in `rd`
@@ -368,12 +371,12 @@ pub fn run_x64_mul_high(
     rd: NonZeroXRegister,
     mul_high_type: MulHighType,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
-    let rhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs1);
+    let rhs = read_xregister_nz(icb, rs2);
 
     let result = icb.mul_high(lhs, rhs, mul_high_type);
 
-    icb.xregister_write_nz(rd, result)
+    write_xregister_nz(icb, rd, result)
 }
 
 /// Signed integer division `⌊ val(rs1) / val(rs2) ⌋`, storing the result in `rd`.
@@ -388,8 +391,8 @@ pub fn run_x64_div_signed(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
@@ -412,7 +415,7 @@ pub fn run_x64_div_signed(
         },
     );
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Unsigned integer division `⌊ val(rs1) / val(rs2) ⌋`, storing the result in `rd`.
@@ -426,8 +429,8 @@ pub fn run_x64_div_unsigned(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
@@ -436,7 +439,7 @@ pub fn run_x64_div_unsigned(
         |icb| icb.xvalue_of_imm(!0),
         |icb| rval1.div_unsigned(rval2, icb),
     );
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Signed integer division of the lowest 32 bits of `val(rs1)` by the lowest 32 bits of `val(rs2)`,
@@ -452,8 +455,8 @@ pub fn run_x32_div_signed(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
 
     let rval1 = icb.narrow(rval1);
     let rval2 = icb.narrow(rval2);
@@ -482,7 +485,7 @@ pub fn run_x32_div_signed(
 
     let result = icb.extend_signed(result);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Unsigned integer division of the lowest 32 bits of `val(rs1)` by the lowest 32 bits of `val(rs2)`,
@@ -497,8 +500,8 @@ pub fn run_x32_div_unsigned(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
 
     let rval1 = icb.narrow(rval1);
     let rval2 = icb.narrow(rval2);
@@ -514,7 +517,7 @@ pub fn run_x32_div_unsigned(
 
     let result = icb.extend_signed(result);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Shift bits in `rs1` by `shift_amount = val(rs2)\[5:0\]` in the method specified by `shift`
@@ -533,13 +536,13 @@ pub fn run_shift(
     rd: NonZeroXRegister,
 ) {
     let bitmask = icb.xvalue_of_imm(SHIFT_BITMASK);
-    let lhs = icb.xregister_read_nz(rs2);
+    let lhs = read_xregister_nz(icb, rs2);
     let shift_amount = lhs.and(bitmask, icb);
 
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let result = lhs.shift(shift, shift_amount, icb);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Shift bits in `rs1` by `shift_amount = imm` in the method specified by `shift`
@@ -561,10 +564,10 @@ pub fn run_shift_immediate(
     rd: NonZeroXRegister,
 ) {
     let shift_amount = icb.xvalue_of_imm(imm);
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let result = lhs.shift(shift, shift_amount, icb);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Shift only lowest 32 bits in `rs1` by `shift_amount = val(rs2)\[5:0\]` in the method specified by `shift`
@@ -576,8 +579,8 @@ pub fn run_x32_shift(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read(rs1);
-    let shift_amount = icb.xregister_read(rs2);
+    let lhs = read_xregister(icb, rs1);
+    let shift_amount = read_xregister(icb, rs2);
     let shift_amount = shift_amount.and(icb.xvalue_of_imm(0b1_1111), icb);
     let shift_amount = icb.narrow(shift_amount);
 
@@ -587,7 +590,7 @@ pub fn run_x32_shift(
 
     let result = icb.extend_signed(result);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Shift only lowest 32 bits in `rs1` by `shift_amount = imm` in the method specified by `shift`
@@ -599,7 +602,7 @@ pub fn run_x32_shift_immediate(
     imm: i64,
     rd: NonZeroXRegister,
 ) {
-    let lhs = icb.xregister_read_nz(rs1);
+    let lhs = read_xregister_nz(icb, rs1);
     let shift_amount = icb.xvalue_of_imm(imm);
     let shift_amount = shift_amount.and(icb.xvalue_of_imm(0b1_1111), icb);
     let shift_amount = icb.narrow(shift_amount);
@@ -610,7 +613,7 @@ pub fn run_x32_shift_immediate(
 
     let result = icb.extend_signed(result);
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Signed integer remainder `val(rs1) % val(rs2)`, storing the result in `rd`.
@@ -625,8 +628,8 @@ pub fn run_x64_rem_signed(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
@@ -649,7 +652,7 @@ pub fn run_x64_rem_signed(
         },
     );
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Unsigned integer remainder `val(rs1) % val(rs2)`, storing the result in `rd`.
@@ -663,8 +666,8 @@ pub fn run_x64_rem_unsigned(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
@@ -674,7 +677,7 @@ pub fn run_x64_rem_unsigned(
         |icb| rval1.modulus_unsigned(rval2, icb),
     );
 
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Signed integer remainder `val(rs1) % val(rs2)`, storing the lower 32 bits of the result in `rd`.
@@ -686,8 +689,8 @@ pub fn run_x32_rem_signed(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
 
     // Narrow to 32 bits
     let rval1 = icb.narrow(rval1);
@@ -717,7 +720,7 @@ pub fn run_x32_rem_signed(
 
     // Sign extend back to 64 bits
     let result = icb.extend_signed(result);
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 /// Unsigned integer remainder `val(rs1) % val(rs2)`, storing the lower 32 bits of the result in `rd`.
@@ -729,8 +732,8 @@ pub fn run_x32_rem_unsigned(
     rs2: XRegister,
     rd: NonZeroXRegister,
 ) {
-    let rval1 = icb.xregister_read(rs1);
-    let rval2 = icb.xregister_read(rs2);
+    let rval1 = read_xregister(icb, rs1);
+    let rval2 = read_xregister(icb, rs2);
 
     let rval1 = icb.narrow(rval1);
     let rval2 = icb.narrow(rval2);
@@ -746,7 +749,7 @@ pub fn run_x32_rem_unsigned(
 
     // Sign extend back to 64 bits
     let result = icb.extend_signed(result);
-    icb.xregister_write_nz(rd, result);
+    write_xregister_nz(icb, rd, result);
 }
 
 #[cfg(test)]

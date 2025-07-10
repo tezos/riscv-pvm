@@ -19,9 +19,14 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 
 use crate::default::ConstDefault;
+use crate::instruction_context::ICB;
 use crate::machine_state::backend;
 use crate::state::NewState;
+use crate::state_backend::CellsProj;
 use crate::state_backend::owned_backend::Owned;
+use crate::state_context::StateContext;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 
 /// Integer register index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -665,6 +670,53 @@ impl<M: backend::ManagerClone> Clone for FRegisters<M> {
             registers: self.registers.clone(),
         }
     }
+}
+
+impl_projection! {
+    projection XRegisterProj {
+        subject = MachineCoreCons,
+        target_projection = CellsProj<XValue, 31>,
+        path = hart.xregisters.registers,
+    }
+}
+
+/// Read from a non-zero integer register.
+#[inline]
+pub fn read_xregister_nz<SC: StateContext + ?Sized>(
+    state: &mut SC,
+    reg: NonZeroXRegister,
+) -> SC::X64 {
+    state.read_proj::<XRegisterProj>((reg as usize,))
+}
+
+/// Write to a non-zero integer register.
+#[inline]
+pub fn write_xregister_nz<SC: StateContext + ?Sized>(
+    state: &mut SC,
+    reg: NonZeroXRegister,
+    value: SC::X64,
+) {
+    state.write_proj::<XRegisterProj>((reg as usize,), value)
+}
+
+/// Read from an integer register.
+#[inline]
+pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue {
+    if reg.is_zero() {
+        return icb.xvalue_of_imm(0);
+    }
+
+    icb.read_proj::<XRegisterProj>((reg as usize,))
+}
+
+/// Write to an integer register.
+#[inline]
+pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::XValue) {
+    if reg.is_zero() {
+        return;
+    }
+
+    icb.write_proj::<XRegisterProj>((reg as usize,), value)
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use super::EnrichedValue;
@@ -21,8 +22,14 @@ use super::owned_backend::Owned;
 use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
+use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
+use crate::state_backend::RegionProj;
+use crate::state_context::projection::ApplyCons;
+use crate::state_context::projection::CellCons;
+use crate::state_context::projection::CellsCons;
+use crate::state_context::projection::Projection;
 
 /// Link a stored value directly with a derived value -
 /// that would either be expensive to compute each time, or cannot
@@ -326,6 +333,52 @@ impl<E, M: ManagerRead> Deref for Cell<E, M> {
     }
 }
 
+/// Projection from [`Cell`] to its value type `E`
+pub struct CellProj<E>(PhantomData<E>);
+
+impl<E: 'static> Projection for CellProj<E> {
+    type Subject = CellCons<E>;
+
+    type Target = E;
+
+    type Parameter = ();
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        _param: Self::Parameter,
+    ) -> &'a Self::Target {
+        state.as_ref()
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        _param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        state.read()
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        _param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        state.write(value);
+    }
+
+    fn owned_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> i32 {
+        let field_offset: i32 = std::mem::offset_of!(Cell<E, Owned>, region.region)
+            .try_into()
+            .expect("Field offset exceeds i32 range");
+        field_offset + RegionProj::<E, 1>::owned_pointer_offset::<MC>((0,))
+    }
+}
+
 /// Multiple elements of type `E`
 #[repr(transparent)]
 pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
@@ -476,6 +529,52 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
         Self {
             region: M::clone_region(&self.region),
         }
+    }
+}
+
+/// Projection from [`Cells`] to its element type `E`
+pub struct CellsProj<E, const LEN: usize>(PhantomData<E>);
+
+impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
+    type Subject = CellsCons<E, LEN>;
+
+    type Target = E;
+
+    type Parameter = <RegionProj<E, LEN> as Projection>::Parameter;
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        RegionProj::<E, LEN>::project_ref::<MC, M>(&state.region, param)
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        RegionProj::<E, LEN>::project_read::<MC, M>(&state.region, param)
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
+    }
+
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> i32 {
+        let field_offset: i32 = std::mem::offset_of!(Cells<E, LEN, Owned>, region)
+            .try_into()
+            .expect("Field offset exceeds i32 range");
+        field_offset + RegionProj::<E, LEN>::owned_pointer_offset::<MC>(param)
     }
 }
 

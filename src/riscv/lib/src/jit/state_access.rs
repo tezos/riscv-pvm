@@ -106,7 +106,6 @@ macro_rules! register_jsa_functions {
 }
 
 register_jsa_functions!(
-    pc_write => (pc_write::<MC>, AbiCall<2>::args),
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     handle_exception => (handle_exception::<MC>, AbiCall<4>::args),
@@ -149,14 +148,7 @@ register_jsa_functions!(
         f64_from_x64_unsigned_static::<RoundRMM, MC>,
         AbiCall<2>::args
     ),
-    reservation_set_write => (reservation_set_write::<MC>, AbiCall<2>::args),
-    reservation_set_read => (reservation_set_read::<MC>, AbiCall<1>::args),
 );
-
-/// Update the instruction pc in the state.
-extern "C" fn pc_write<MC: MemoryConfig>(core: &mut MachineCoreState<MC, Owned>, pc: u64) {
-    core.hart.pc.write(pc)
-}
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig>(
@@ -297,21 +289,6 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
     }
 }
 
-/// Set the reservation set to the given starting address.
-extern "C" fn reservation_set_write<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-    address: u64,
-) {
-    MachineCoreState::reservation_set_write(core, address);
-}
-
-/// Read the reservation set starting address.
-extern "C" fn reservation_set_read<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-) -> u64 {
-    MachineCoreState::reservation_set_read(core)
-}
-
 extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
     exception_out: &mut MaybeUninit<Exception>,
@@ -346,7 +323,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     module: &'a mut JITModule,
     imports: &'a JsaImports<MC>,
     ptr_type: Type,
-    pc_write: Option<FuncRef>,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     handle_exception: Option<FuncRef>,
@@ -365,8 +341,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     memory_load_u32: Option<FuncRef>,
     memory_load_i64: Option<FuncRef>,
     memory_load_u64: Option<FuncRef>,
-    reservation_set_write: Option<FuncRef>,
-    reservation_set_read: Option<FuncRef>,
     f64_from_x64_unsigned_dynamic: Option<FuncRef>,
     f64_from_x64_unsigned_static: Option<FuncRef>,
 
@@ -413,7 +387,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             module,
             imports,
             ptr_type,
-            pc_write: None,
             freg_read: None,
             freg_write: None,
             handle_exception: None,
@@ -432,8 +405,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             memory_load_u32: None,
             memory_load_i64: None,
             memory_load_u64: None,
-            reservation_set_write: None,
-            reservation_set_read: None,
             f64_from_x64_unsigned_dynamic: None,
             f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
@@ -441,20 +412,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             f64_ptr_slot: None,
             _pd: PhantomData,
         }
-    }
-
-    /// Emit the required IR to set the pc to the given value.
-    pub(super) fn pc_write(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        pc_val: X64,
-    ) {
-        let pc_write = self.pc_write.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.pc_write, builder.func)
-        });
-        builder.ins().call(*pc_write, &[core_ptr, pc_val.0]);
     }
 
     /// Emit the required IR to call `handle_exception`.
@@ -694,42 +651,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
 
             X64(xval)
         })
-    }
-
-    /// Emit the required IR to call `set_reservation_set`.
-    ///
-    /// Sets the reservation set to the given address.
-    pub(super) fn reservation_set_write(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-        address: X64,
-    ) {
-        let reservation_set_write = self.reservation_set_write.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.reservation_set_write, builder.func)
-        });
-
-        builder
-            .ins()
-            .call(*reservation_set_write, &[core_ptr, address.0]);
-    }
-
-    /// Emit the required IR to call `reservation_set_read`.
-    ///
-    /// Reads the reservation set starting address.
-    pub(super) fn reservation_set_read(
-        &mut self,
-        builder: &mut FunctionBuilder<'_>,
-        core_ptr: Value,
-    ) -> X64 {
-        let reservation_set_read = self.reservation_set_read.get_or_insert_with(|| {
-            self.module
-                .declare_func_in_func(self.imports.reservation_set_read, builder.func)
-        });
-
-        let call = builder.ins().call(*reservation_set_read, &[core_ptr]);
-        X64(builder.inst_results(call)[0])
     }
 
     /// Emit the required IR to call `f64_from_x64_unsigned_dynamic`.
