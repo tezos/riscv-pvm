@@ -46,7 +46,10 @@ impl<T: ConstDefault, EG, M: ManagerBase> EffectCell<T, EG, M> {
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
         &'a self,
-    ) -> AllocatedOf<EffectCellLayout<T>, F::Output> {
+    ) -> AllocatedOf<EffectCellLayout<T>, F::Output>
+    where
+        T: Clone,
+    {
         self.inner.struct_ref::<F>()
     }
 }

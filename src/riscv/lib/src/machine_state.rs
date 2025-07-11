@@ -606,7 +606,6 @@ mod tests {
     use proptest::proptest;
 
     use super::MachineState;
-    use super::MachineStateLayout;
     use super::block_cache::block::Interpreted;
     use super::block_cache::block::InterpretedBlockBuilder;
     use super::instruction::Instruction;
@@ -635,9 +634,9 @@ mod tests {
     use crate::parser::instruction::SBTypeArgs;
     use crate::parser::instruction::SplitITypeArgs;
     use crate::parser::parse_block;
+    use crate::state_backend::FnManagerDerefClone;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::test_helpers::assert_eq_struct;
-    use crate::state_backend::test_helpers::copy_via_serde;
     use crate::traps::EnvironException;
 
     backend_test!(test_step, F, {
@@ -767,8 +766,6 @@ mod tests {
             }))
         ]);
 
-        type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
-
         type BlockRunner<F> = Interpreted<M4K, F>;
 
         type LocalMachineState<F> = MachineState<M4K, TestCacheConfig, BlockRunner<F>, F>;
@@ -815,7 +812,7 @@ mod tests {
         // Perform 2 steps consecutively in one backend.
         let state = {
             let mut state = LocalMachineState::<F>::bind(
-                copy_via_serde::<LocalLayout, _, _>(&base_state.struct_ref::<FnManagerIdent>()),
+                base_state.struct_ref::<FnManagerDerefClone>(),
                 InterpretedBlockBuilder,
             );
 
@@ -829,7 +826,7 @@ mod tests {
         let alt_state = {
             let alt_state = {
                 let mut state = LocalMachineState::<F>::bind(
-                    copy_via_serde::<LocalLayout, _, _>(&base_state.struct_ref::<FnManagerIdent>()),
+                    base_state.struct_ref::<FnManagerDerefClone>(),
                     InterpretedBlockBuilder,
                 );
                 state.step().unwrap();
@@ -838,7 +835,7 @@ mod tests {
 
             {
                 let mut state = LocalMachineState::<F>::bind(
-                    copy_via_serde::<LocalLayout, _, _>(&alt_state.struct_ref::<FnManagerIdent>()),
+                    alt_state.struct_ref::<FnManagerDerefClone>(),
                     InterpretedBlockBuilder,
                 );
                 state.step().unwrap();
