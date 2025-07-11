@@ -10,8 +10,11 @@
 //! Any returned values are written via 'out-pointers' - and should only be
 //! loaded on success.
 
-use cranelift::codegen::ir;
 use cranelift::frontend::FunctionBuilder;
+
+use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Value;
+use crate::traps::Exception;
 
 /// Helper type for ensuring fallible operations are handled correctly.
 ///
@@ -22,13 +25,13 @@ use cranelift::frontend::FunctionBuilder;
 ///   access.
 pub(crate) struct ErrnoImpl<T, F>
 where
-    F: FnOnce(&mut FunctionBuilder<'_>) -> T,
+    F: FnOnce(&mut FunctionBuilder) -> T,
 {
     /// Boolean value indicating whether an exception occurred
-    pub(crate) is_exception: ir::Value,
+    pub(crate) is_exception: Value<bool>,
 
     /// Pointer to the exception in memory, if an exception occurred
-    pub(crate) exception_ptr: ir::Value,
+    pub(crate) exception_ptr: Pointer<Exception>,
 
     /// Retrieve the result in case of success
     pub(crate) on_ok: F,
@@ -36,12 +39,16 @@ where
 
 impl<T, F> ErrnoImpl<T, F>
 where
-    F: FnOnce(&mut FunctionBuilder<'_>) -> T,
+    F: FnOnce(&mut FunctionBuilder) -> T,
 {
     /// Construct a new `Errno` that must be handled.
-    pub(crate) fn new(errno: ir::Value, exception_ptr: ir::Value, on_ok: F) -> Self {
+    pub(crate) fn new(
+        is_exception: Value<bool>,
+        exception_ptr: Pointer<Exception>,
+        on_ok: F,
+    ) -> Self {
         Self {
-            is_exception: errno,
+            is_exception,
             exception_ptr,
             on_ok,
         }

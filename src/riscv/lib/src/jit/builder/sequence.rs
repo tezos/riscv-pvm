@@ -19,22 +19,27 @@ use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::FunctionBuilderContext;
 use cranelift::prelude::InstBuilder;
-use cranelift::prelude::Value;
 use cranelift::prelude::types::I64;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use super::instruction::Outcome;
 use crate::jit::JsaImports;
-use crate::jit::builder::X64;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
+use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Value;
 use crate::jit::state_access::JsaCalls;
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::write_pc;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::XValue;
 use crate::parser::instruction::InstrWidth;
+use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
+use crate::traps::EnvironException;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
@@ -48,16 +53,16 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     entry_block: Block,
 
     /// Parameter pointing to the `MachineCoreState`
-    core_param: Value,
+    core_param: Pointer<MachineCoreState<MC, Owned>>,
 
     /// Parameter holding the program counter at the start of the sequence
-    program_counter_param: Value,
+    program_counter_param: Value<Address>,
 
     /// Offset to the program counter for the next instruction
     program_counter_offset: i64,
 
     /// Parameter pointing to the sequence result
-    result_param: Value,
+    result_param: Pointer<Result<(), EnvironException>>,
 }
 
 impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
@@ -107,9 +112,23 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         builder.append_block_params_for_function_params(param_block);
         builder.switch_to_block(param_block);
 
-        let core_param = builder.block_params(param_block)[1];
-        let program_counter_param = builder.block_params(param_block)[2];
-        let result_param = builder.block_params(param_block)[3];
+        // SAFETY: `JitFn` accepts a `&mut MachineCoreState<MC, Owned>` as the 2nd parameter.
+        let core_param = unsafe {
+            let raw_value = builder.block_params(param_block)[1];
+            Pointer::<MachineCoreState<MC, Owned>>::from_raw(raw_value)
+        };
+
+        // SAFETY: `JitFn` accepts an `Address` as the 3rd parameter.
+        let program_counter_param = unsafe {
+            let raw_value = builder.block_params(param_block)[2];
+            Value::<Address>::from_raw(raw_value)
+        };
+
+        // SAFETY: `JitFn` accepts a `&mut Result<(), EnvironException>` as the 4th parameter.
+        let result_param = unsafe {
+            let raw_value = builder.block_params(param_block)[3];
+            Pointer::<Result<(), EnvironException>>::from_raw(raw_value)
+        };
 
         // The entry block is where we will eventually transition to the first instruction basic
         // block. The function's entry block (`param_block` for our purposes) will directly jump to
@@ -157,9 +176,15 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         let instruction_pc = if self.program_counter_offset == 0 {
             self.program_counter_param
         } else {
-            self.builder
-                .ins()
-                .iadd_imm(self.program_counter_param, self.program_counter_offset)
+            // SAFETY: `iadd_imm` is a unary operation that preserves the type of the program
+            // counter value.
+            unsafe {
+                self.program_counter_param.lift_unary(|program_counter| {
+                    self.builder
+                        .ins()
+                        .iadd_imm(program_counter, self.program_counter_offset)
+                })
+            }
         };
 
         let instr_builder = InstructionBuilder::new(
@@ -187,9 +212,15 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         {
             self.builder.switch_to_block(exit_block);
             let steps = self.builder.append_block_param(exit_block, I64);
-            let final_program_counter = self.builder.append_block_param(exit_block, I64);
 
-            write_pc(&mut self, X64(final_program_counter));
+            // SAFETY: We're declaring the value as a `I64` which has the same representation of
+            // `Address`.
+            let final_program_counter = unsafe {
+                let final_program_counter = self.builder.append_block_param(exit_block, I64);
+                Value::<Address>::from_raw(final_program_counter)
+            };
+
+            write_pc(&mut self, final_program_counter);
 
             self.builder.ins().return_(&[steps]);
         }
@@ -199,11 +230,11 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             // will be returned as the result of the JIT function.
             // `final_program_counter` is the program counter that we want to commit back to the
             // machine core state when existing the sequence.
-            |builder: &mut FunctionBuilder<'_>, steps: i64, final_program_counter: Value| {
+            |builder: &mut FunctionBuilder, steps: i64, final_program_counter: Value<Address>| {
                 let steps = builder.ins().iconst(I64, steps);
                 builder.ins().jump(exit_block, &[
                     BlockArg::Value(steps),
-                    BlockArg::Value(final_program_counter),
+                    BlockArg::Value(final_program_counter.to_value()),
                 ]);
             };
 
@@ -231,14 +262,18 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                             // This is a successful outcome, hence +1 step.
                             let step_counter = instr_index as i64 + 1;
 
-                            // At this point `program_counter_offset` is the sum of all instruction
-                            // widths. We can add it to the program counter for the start of the
-                            // sequence to obtain the final program counter which is just past the
-                            // last instruction.
-                            let final_program_counter = self
-                                .builder
-                                .ins()
-                                .iadd_imm(self.program_counter_param, self.program_counter_offset);
+                            // SAFETY: `iadd_imm` preserves the type of the program counter value.
+                            let final_program_counter = unsafe {
+                                self.program_counter_param.lift_unary(|program_counter| {
+                                    // At this point `program_counter_offset` is the sum of all instruction
+                                    // widths. We can add it to the program counter for the start of the
+                                    // sequence to obtain the final program counter which is just past the
+                                    // last instruction.
+                                    self.builder
+                                        .ins()
+                                        .iadd_imm(program_counter, self.program_counter_offset)
+                                })
+                            };
 
                             // If there is no next instruction, we jump to the exit block.
                             jump_to_exit(&mut self.builder, step_counter, final_program_counter);
@@ -265,12 +300,14 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                         // This is a successful outcome, hence +1 step.
                         let step_counter = instr_index as i64 + 1;
 
-                        // The new program counter is relative to the program counter of the
-                        // instruction that is being executed.
-                        let final_program_counter = self
-                            .builder
-                            .ins()
-                            .iadd_imm(instr.program_counter(), *offset);
+                        // SAFETY: `iadd_imm` preserves the type of the program counter value.
+                        let final_program_counter = unsafe {
+                            // The new program counter is relative to the program counter of the
+                            // instruction that is being executed.
+                            instr.program_counter().lift_unary(|program_counter| {
+                                self.builder.ins().iadd_imm(program_counter, *offset)
+                            })
+                        };
 
                         jump_to_exit(&mut self.builder, step_counter, final_program_counter);
                     }
@@ -296,7 +333,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 }
 
 impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
-    type X64 = X64;
+    type X64 = Value<XValue>;
 
     fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
     where
