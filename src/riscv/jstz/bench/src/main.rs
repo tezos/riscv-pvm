@@ -16,11 +16,11 @@ mod results;
 
 const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T, E = Box<dyn Error>> = std::result::Result<T, E>;
 
 #[derive(Debug, Parser)]
 #[command(long_about = None)]
-pub struct Cli {
+struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
