@@ -90,6 +90,7 @@ test: build
 	@cargo test --workspace $(EXTRA_FLAGS)
 	@make -C dummy_kernel test
 	@make -C jstz test
+	@make -C etherlink test
 
 .PHONY: test-long
 test-long:
