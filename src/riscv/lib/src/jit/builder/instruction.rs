@@ -543,7 +543,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when the store failed
         {
             self.builder.switch_to_block(exception_block);
-            self.handle_exception::<()>(errno.exception_ptr);
+
+            // SAFETY: When the memory store external function call encounters an error, it will
+            // write to the exception pointer. This block handles such a failure case, so we can
+            // assume that the pointee is initialised.
+            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
+
+            self.handle_exception::<()>(exception_ptr);
         }
 
         // Code for when the store succeeded
@@ -580,7 +586,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when the load failed
         {
             self.builder.switch_to_block(exception_block);
-            self.handle_exception::<()>(errno.exception_ptr);
+
+            // SAFETY: When the memory load external function call encounters an error, it will
+            // write to the exception pointer. This block handles such a failure case, so we can
+            // assume that the pointee is initialised.
+            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
+
+            self.handle_exception::<()>(exception_ptr);
         }
 
         // Code for when the load succeeded
@@ -646,7 +658,13 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when an exception was raised.
         {
             self.builder.switch_to_block(exception_block);
-            self.handle_exception::<()>(errno.exception_ptr);
+
+            // SAFETY: When the external function call encounters an error, it will write to the
+            // exception pointer. This block handles such a failure case, so we can assume that the
+            // pointee is initialised.
+            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
+
+            self.handle_exception::<()>(exception_ptr);
         }
 
         // Code for when the conversion succeeded.
