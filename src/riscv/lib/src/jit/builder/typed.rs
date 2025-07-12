@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
 use cranelift::codegen::ir::Type as CraneliftType;
@@ -192,20 +191,6 @@ impl<T> Value<NonNull<T>> {
     }
 
     pub unsafe fn as_mut<'a>(&self) -> Value<&'a mut T> {
-        Value {
-            value: self.value,
-            _pd: PhantomData,
-        }
-    }
-}
-
-impl<T> Value<NonNull<MaybeUninit<T>>> {
-    /// Treat the pointee `T` as initialised.
-    ///
-    /// # Safety
-    ///
-    /// You must ensure that the pointee is indeed initialised before using it.
-    pub unsafe fn assume_init(self) -> Value<NonNull<T>> {
         Value {
             value: self.value,
             _pd: PhantomData,
