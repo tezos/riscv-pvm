@@ -542,7 +542,7 @@ mod tests {
 
             // Out of bounds loads / stores
             prop_assert!(perform_test(invalid_offset).is_err_and(|e|
-                matches!(e, Exception::StoreAMOAccessFault(_))
+                matches!(e, Exception::StoreAMOAccessFault)
             ));
             // Aligned loads / stores
             prop_assert!(perform_test(aligned_offset).is_ok());
@@ -551,7 +551,7 @@ mod tests {
 
             // Out of bounds loads / stores
             prop_assert!(perform_test(invalid_offset).is_err_and(|e|
-                matches!(e, Exception::StoreAMOAccessFault(_))
+                matches!(e, Exception::StoreAMOAccessFault)
             ));
             // Aligned loads / stores
             prop_assert!(perform_test(aligned_offset).is_ok());

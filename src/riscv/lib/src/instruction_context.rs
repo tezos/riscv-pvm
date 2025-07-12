@@ -327,7 +327,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
             if let ReservationSetOption::Reset = reservation_set_option {
                 reset_reservation_set(self);
             }
-            Err(Exception::StoreAMOAccessFault(address))
+            Err(Exception::StoreAMOAccessFault)
         } else {
             Ok(())
         }
@@ -373,7 +373,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     ) -> Self::IResult<()> {
         self.main_memory
             .write(address, V::from_xvalue(value))
-            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault(address))
+            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault)
     }
 
     #[inline(always)]
@@ -384,7 +384,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         self.main_memory
             .read(address)
             .map(V::to_xvalue)
-            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
+            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
     }
 
     fn f64_from_x64_unsigned_static(
