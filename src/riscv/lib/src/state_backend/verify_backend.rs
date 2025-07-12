@@ -21,6 +21,7 @@ use super::ManagerWrite;
 use super::PartialHashError;
 use super::Ref;
 use crate::state_backend::Elem;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
@@ -93,6 +94,16 @@ impl ManagerBase for Verifier {
 
     fn as_devalued_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> &Self::Region<V::E, 1> {
         &cell.underlying
+    }
+}
+
+impl ManagerAlloc for Verifier {
+    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
+        Region::Partial(Box::new(init_value.map(Some)))
+    }
+
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
+        DynRegion::default()
     }
 }
 
