@@ -12,7 +12,6 @@ use cranelift::codegen::ir::types::I16;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::prelude::isa::CallConv;
-use cranelift::prelude::types::F64;
 use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
 use cranelift_module::Linkage;
@@ -162,7 +161,7 @@ impl ToCraneliftRepr for FRegister {
 }
 
 impl ToCraneliftRepr for f64 {
-    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(F64);
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I64);
 }
 
 /// A valid return type for an external function call.
