@@ -10,13 +10,10 @@
 //! Any returned values are written via 'out-pointers' - and should only be
 //! loaded on success.
 
-use std::mem::MaybeUninit;
-
 use cranelift::frontend::FunctionBuilder;
 
-use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
-use crate::traps::Exception;
+use crate::jit::state_access::ExceptionCode;
 
 /// Helper type for ensuring fallible operations are handled correctly.
 ///
@@ -29,11 +26,8 @@ pub(crate) struct ErrnoImpl<T, F>
 where
     F: FnOnce(&mut FunctionBuilder) -> T,
 {
-    /// Boolean value indicating whether an exception occurred
-    pub(crate) is_exception: Value<bool>,
-
-    /// Pointer to the exception in memory, if an exception occurred
-    pub(crate) exception_ptr: Pointer<MaybeUninit<Exception>>,
+    /// Exception value, if an exception occurred
+    pub(crate) exception: Value<ExceptionCode>,
 
     /// Retrieve the result in case of success
     pub(crate) on_ok: F,
@@ -44,15 +38,7 @@ where
     F: FnOnce(&mut FunctionBuilder) -> T,
 {
     /// Construct a new `Errno` that must be handled.
-    pub(crate) fn new(
-        is_exception: Value<bool>,
-        exception_ptr: Pointer<MaybeUninit<Exception>>,
-        on_ok: F,
-    ) -> Self {
-        Self {
-            is_exception,
-            exception_ptr,
-            on_ok,
-        }
+    pub(crate) fn new(exception: Value<ExceptionCode>, on_ok: F) -> Self {
+        Self { exception, on_ok }
     }
 }

@@ -12,10 +12,11 @@ pub(crate) mod stack;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
-use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::IntCC;
 use cranelift::prelude::isa::TargetFrontendConfig;
+use cranelift::prelude::types::I64;
 
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
@@ -28,6 +29,7 @@ use crate::interpreter::float::RoundRUP;
 use crate::interpreter::float::RoundingMode;
 use crate::interpreter::float::StaticRoundingMode;
 use crate::jit::builder::ext_calls;
+use crate::jit::builder::typed;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
@@ -41,6 +43,57 @@ use crate::state_backend::Elem;
 use crate::state_backend::owned_backend::Owned;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ExceptionCode(i64);
+
+impl ExceptionCode {
+    const NO_ERROR: Self = Self(0);
+
+    pub fn from_exception(exception: Exception) -> Self {
+        Self(match exception {
+            Exception::InstructionAccessFault => -1,
+            Exception::IllegalInstruction => -2,
+            Exception::Breakpoint => -3,
+            Exception::LoadAccessFault => -4,
+            Exception::StoreAMOAccessFault => -5,
+            Exception::EnvCall => -6,
+            Exception::InstructionPageFault => -7,
+            Exception::LoadPageFault => -8,
+            Exception::StoreAMOPageFault => -9,
+        })
+    }
+
+    pub unsafe fn to_exception(self) -> Exception {
+        match self.0 {
+            -1 => Exception::InstructionAccessFault,
+            -2 => Exception::IllegalInstruction,
+            -3 => Exception::Breakpoint,
+            -4 => Exception::LoadAccessFault,
+            -5 => Exception::StoreAMOAccessFault,
+            -6 => Exception::EnvCall,
+            -7 => Exception::InstructionPageFault,
+            -8 => Exception::LoadPageFault,
+            -9 => Exception::StoreAMOPageFault,
+            _ => unreachable!("Invalid exception code: {}", self.0),
+        }
+    }
+
+    pub fn build_value(&self, builder: &mut FunctionBuilder) -> Value<Self> {
+        let raw = builder.ins().iconst(I64, self.0);
+        unsafe { Value::<Self>::from_raw(raw) }
+    }
+
+    pub fn build_is_exception(builder: &mut FunctionBuilder, code: Value<Self>) -> Value<bool> {
+        let raw = builder.ins().icmp_imm(IntCC::NotEqual, code.to_value(), 0);
+        unsafe { Value::<bool>::from_raw(raw) }
+    }
+}
+
+impl typed::Typed for ExceptionCode {
+    const TYPE: typed::Type = typed::Type::Basic(I64);
+}
 
 /// Read the value of the given [`FRegister`].
 extern "C" fn fregister_read<MC: MemoryConfig>(
@@ -79,45 +132,23 @@ extern "C" fn fregister_write<MC: MemoryConfig>(
 extern "C" fn handle_exception<MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
     current_pc: &mut Address,
-    exception: &Exception,
+    exception: ExceptionCode,
     result: &mut Result<(), EnvironException>,
 ) -> bool {
-    let res = core.address_on_exception(*exception, *current_pc);
+    let exception = unsafe { exception.to_exception() };
+    let res = core.address_on_exception(exception, *current_pc);
 
     match res {
         Err(e) => {
             *result = Err(e);
             false
         }
+
         Ok(address) => {
             *current_pc = address;
             true
         }
     }
-}
-
-/// Raise an [`Exception::IllegalInstruction`].
-///
-/// Writes the instruction to the given exception memory, after which it would be safe to
-/// assume it is initialised.
-extern "C" fn raise_illegal_instruction_exception(exception_out: &mut MaybeUninit<Exception>) {
-    exception_out.write(Exception::IllegalInstruction);
-}
-
-/// Raise an [`Exception::StoreAMOAccessFault`].
-///
-/// Writes the instruction to the given exception memory, after which it would be safe to
-/// assume it is initialised.
-extern "C" fn raise_store_amo_access_fault_exception(exception_out: &mut MaybeUninit<Exception>) {
-    exception_out.write(Exception::StoreAMOAccessFault);
-}
-
-/// Raise the appropriate environment-call exception given the current machine mode.
-///
-/// Writes the exception to the given exception memory, after which it would be safe to
-/// assume it is initialised.
-extern "C" fn ecall(exception_out: &mut MaybeUninit<Exception>) {
-    exception_out.write(Exception::EnvCall);
 }
 
 /// Store the lowest `width` bytes of the given value to memory, at the physical address.
@@ -130,14 +161,10 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
     address: u64,
     value: E,
-    exception_out: &mut MaybeUninit<Exception>,
-) -> bool {
+) -> ExceptionCode {
     match core.main_memory.write(address, value) {
-        Ok(()) => false,
-        Err(BadMemoryAccess) => {
-            exception_out.write(Exception::StoreAMOAccessFault);
-            true
-        }
+        Ok(()) => ExceptionCode::NO_ERROR,
+        Err(BadMemoryAccess) => ExceptionCode::from_exception(Exception::StoreAMOAccessFault),
     }
 }
 
@@ -153,36 +180,30 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
     core: &MachineCoreState<MC, Owned>,
     address: u64,
     xval_out: &mut MaybeUninit<E>,
-    exception_out: &mut MaybeUninit<Exception>,
-) -> bool {
+) -> ExceptionCode {
     match core.main_memory.read::<E>(address) {
         Ok(value) => {
             xval_out.write(value);
-            false
+            ExceptionCode::NO_ERROR
         }
-        Err(BadMemoryAccess) => {
-            exception_out.write(Exception::LoadAccessFault);
-            true
-        }
+
+        Err(BadMemoryAccess) => ExceptionCode::from_exception(Exception::LoadAccessFault),
     }
 }
 
 extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
-    exception_out: &mut MaybeUninit<Exception>,
     xval: XValue,
     f64_out: &mut MaybeUninit<f64>,
-) -> bool {
+) -> ExceptionCode {
     match MachineCoreState::f64_from_x64_unsigned_dynamic(core, xval) {
         Ok(fval) => {
             let f64val = fval.bits();
             f64_out.write(f64val);
-            false
+            ExceptionCode::NO_ERROR
         }
-        Err(e) => {
-            exception_out.write(e);
-            true
-        }
+
+        Err(e) => ExceptionCode::from_exception(e),
     }
 }
 
@@ -201,9 +222,6 @@ pub struct JsaCalls<MC: MemoryConfig> {
     /// Target configuration which provides useful information about the target ISA, such as
     /// pointer type and width
     target_config: TargetFrontendConfig,
-    f64_from_x64_unsigned_dynamic: Option<FuncRef>,
-    /// Reusable stack slot for the exception pointer
-    exception_ptr_slot: Option<stack::Slot<MaybeUninit<Exception>>>,
 
     /// Reusable stack slot for the PC value
     pc_slot: Option<stack::Slot<MaybeUninit<Address>>>,
@@ -215,16 +233,6 @@ pub struct JsaCalls<MC: MemoryConfig> {
 }
 
 impl<MC: MemoryConfig> JsaCalls<MC> {
-    /// Get the stack slot for the exception pointer.
-    fn exception_ptr_slot(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> stack::Slot<MaybeUninit<Exception>> {
-        self.exception_ptr_slot
-            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
-            .clone()
-    }
-
     /// Get the stack slot for the PC value.
     fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<MaybeUninit<Address>> {
         self.pc_slot
@@ -243,8 +251,6 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn func_calls(target_config: TargetFrontendConfig) -> Self {
         Self {
             target_config,
-            f64_from_x64_unsigned_dynamic: None,
-            exception_ptr_slot: None,
             pc_slot: None,
             f64_ptr_slot: None,
             _pd: PhantomData,
@@ -262,7 +268,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         &mut self,
         builder: &mut FunctionBuilder,
         core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-        exception_ptr: Pointer<Exception>,
+        exception: Value<ExceptionCode>,
         result_ptr: Pointer<Result<(), EnvironException>>,
         current_pc: Value<Address>,
     ) -> ExceptionHandledOutcome {
@@ -280,7 +286,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             self::handle_exception,
             unsafe { core_ptr.as_mut() },
             unsafe { pc_ptr.as_mut() },
-            unsafe { exception_ptr.as_ref() },
+            exception,
             unsafe { result_ptr.as_mut() },
         );
 
@@ -294,22 +300,8 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn raise_illegal_instruction_exception(
         &mut self,
         builder: &mut FunctionBuilder,
-    ) -> Pointer<Exception> {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
-        // SAFETY: The exception pointer reference is scoped to the JIT function. Hence it is safe
-        // to pass it to the external function which is called within the JIT function scope.
-        ext_calls::call1(
-            &self.target_config,
-            builder,
-            self::raise_illegal_instruction_exception,
-            unsafe { exception_ptr.as_mut() },
-        );
-
-        // SAFETY: The `raise_illegal_instruction_exception` function writes to the exception slot
-        // unconditionally.
-        unsafe { exception_slot.assume_init().ptr(builder) }
+    ) -> Value<ExceptionCode> {
+        ExceptionCode::from_exception(Exception::IllegalInstruction).build_value(builder)
     }
 
     /// Emit the required IR to call `raise_store_amo_access_fault_exception`.
@@ -318,40 +310,16 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn raise_store_amo_access_fault_exception(
         &mut self,
         builder: &mut FunctionBuilder,
-    ) -> Pointer<Exception> {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
-        // SAFETY: The exception reference is guaranteed to be valid for the duration of the call as
-        // it is scoped to the JIT function.
-        ext_calls::call1(
-            &self.target_config,
-            builder,
-            self::raise_store_amo_access_fault_exception,
-            unsafe { exception_ptr.as_mut() },
-        );
-
-        // SAFETY: The `raise_store_amo_access_fault_exception` function writes to the exception
-        // slot unconditionally.
-        unsafe { exception_slot.assume_init().ptr(builder) }
+    ) -> Value<ExceptionCode> {
+        ExceptionCode::from_exception(Exception::StoreAMOAccessFault).build_value(builder)
     }
 
     /// Emit the required IR to call `ecall`.
     ///
     /// This returns an initialised pointer to the appropriate environment
     /// call exception for the current machine mode.
-    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder) -> Pointer<Exception> {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
-        // SAFETY: The exception reference is guaranteed to be valid for the duration of the call as
-        // it points to a stack slot which is valid for the duration of the JIT function.
-        ext_calls::call1(&self.target_config, builder, self::ecall, unsafe {
-            exception_ptr.as_mut()
-        });
-
-        // SAFETY: The `ecall` function writes to the exception slot unconditionally.
-        unsafe { exception_slot.assume_init().ptr(builder) }
+    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder) -> Value<ExceptionCode> {
+        ExceptionCode::from_exception(Exception::EnvCall).build_value(builder)
     }
 
     /// Emit the required IR to call `memory_store`.
@@ -364,25 +332,21 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         phys_address: Value<Address>,
         value: Value<XValue>,
     ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder) + 'static> {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
         let value = V::from_xvalue_ir(builder, value);
 
         // SAFETY: The reference argument lifetimes are valid for the duration of the call:
         // - `core_ptr` is a JIT function argument
         // - `exception_ptr` points to a stack slot within the JIT function
-        let is_exception = ext_calls::call4(
+        let exception = ext_calls::call3(
             &self.target_config,
             builder,
             self::memory_store,
             unsafe { core_ptr.as_mut() },
             phys_address,
             value,
-            unsafe { exception_ptr.as_mut() },
         );
 
-        ErrnoImpl::new(is_exception, exception_ptr, |_| {})
+        ErrnoImpl::new(exception, |_| {})
     }
 
     /// Emit the required IR to call `memory_load`.
@@ -395,9 +359,6 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         phys_address: Value<Address>,
     ) -> ErrnoImpl<Value<XValue>, impl FnOnce(&mut FunctionBuilder) -> Value<XValue> + 'static>
     {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
         let xval_slot =
             stack::Slot::<MaybeUninit<V>>::new(self.target_config.pointer_type(), builder);
         let xval_ptr = xval_slot.ptr(builder);
@@ -406,17 +367,16 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         // - `core_ptr` is a JIT function argument
         // - `xval_ptr` points to a stack slot which is valid for the duration of the JIT function
         // - `exception_ptr` points to a stack slot within the JIT function as well
-        let is_exception = ext_calls::call4(
+        let exception = ext_calls::call3(
             &self.target_config,
             builder,
             self::memory_load,
             unsafe { core_ptr.as_ref() },
             phys_address,
             unsafe { xval_ptr.as_mut() },
-            unsafe { exception_ptr.as_mut() },
         );
 
-        ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
+        ErrnoImpl::new(exception, move |builder| {
             // SAFETY: The slot is guaranteed to be initialised at this point as this closure
             // generates IR for the success case when the external function will have written to
             // the stack slot.
@@ -435,23 +395,19 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         core_ptr: Pointer<MachineCoreState<MC, Owned>>,
         xval: Value<XValue>,
     ) -> ErrnoImpl<Value<f64>, impl FnOnce(&mut FunctionBuilder) -> Value<f64> + 'static> {
-        let exception_slot = self.exception_ptr_slot(builder);
-        let exception_ptr = exception_slot.ptr(builder);
-
         let f64_slot = self.f64_ptr_slot(builder);
         let f64_ptr = f64_slot.ptr(builder);
 
-        let is_exception = ext_calls::call4(
+        let exception = ext_calls::call3(
             &self.target_config,
             builder,
             self::f64_from_x64_unsigned_dynamic,
             unsafe { core_ptr.as_mut() },
-            unsafe { exception_ptr.as_mut() },
             xval,
             unsafe { f64_ptr.as_mut() },
         );
 
-        ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
+        ErrnoImpl::new(exception, move |builder| {
             // SAFETY: This closure runs after the success case of the call, where the `f64_slot`
             // is guaranteed to have been initialised with an f64 value.
             unsafe { f64_slot.assume_init().load(builder) }
