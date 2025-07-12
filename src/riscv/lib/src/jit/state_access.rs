@@ -108,11 +108,8 @@ extern "C" fn raise_illegal_instruction_exception(exception_out: &mut MaybeUnini
 ///
 /// Writes the instruction to the given exception memory, after which it would be safe to
 /// assume it is initialised.
-extern "C" fn raise_store_amo_access_fault_exception(
-    exception_out: &mut MaybeUninit<Exception>,
-    address: u64,
-) {
-    exception_out.write(Exception::StoreAMOAccessFault(address));
+extern "C" fn raise_store_amo_access_fault_exception(exception_out: &mut MaybeUninit<Exception>) {
+    exception_out.write(Exception::StoreAMOAccessFault);
 }
 
 /// Raise the appropriate environment-call exception given the current machine mode.
@@ -138,7 +135,7 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
     match core.main_memory.write(address, value) {
         Ok(()) => false,
         Err(BadMemoryAccess) => {
-            exception_out.write(Exception::StoreAMOAccessFault(address));
+            exception_out.write(Exception::StoreAMOAccessFault);
             true
         }
     }
@@ -164,7 +161,7 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
             false
         }
         Err(BadMemoryAccess) => {
-            exception_out.write(Exception::LoadAccessFault(address));
+            exception_out.write(Exception::LoadAccessFault);
             true
         }
     }
@@ -321,19 +318,17 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn raise_store_amo_access_fault_exception(
         &mut self,
         builder: &mut FunctionBuilder,
-        address: Value<Address>,
     ) -> Pointer<Exception> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
         // SAFETY: The exception reference is guaranteed to be valid for the duration of the call as
         // it is scoped to the JIT function.
-        ext_calls::call2(
+        ext_calls::call1(
             &self.target_config,
             builder,
             self::raise_store_amo_access_fault_exception,
             unsafe { exception_ptr.as_mut() },
-            address,
         );
 
         // SAFETY: The `raise_store_amo_access_fault_exception` function writes to the exception

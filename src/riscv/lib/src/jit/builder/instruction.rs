@@ -504,7 +504,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 
             let exception_ptr = self
                 .ext_calls
-                .raise_store_amo_access_fault_exception(self.builder, address);
+                .raise_store_amo_access_fault_exception(self.builder);
             self.handle_exception::<()>(exception_ptr);
         }
 

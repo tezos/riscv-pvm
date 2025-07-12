@@ -25,8 +25,6 @@ use std::fmt::Formatter;
 
 use tezos_smart_rollup_constants::riscv::SbiError;
 
-use crate::machine_state::memory::Address;
-
 /// RISC-V Exceptions (also known as synchronous exceptions)
 #[derive(PartialEq, Eq, thiserror::Error, strum::Display, Debug, Clone, Copy)]
 pub enum EnvironException {
@@ -41,12 +39,12 @@ impl TryFrom<&Exception> for EnvironException {
             Exception::EnvCall => Ok(EnvironException::EnvCall),
             Exception::Breakpoint
             | Exception::IllegalInstruction
-            | Exception::InstructionAccessFault(_)
-            | Exception::LoadAccessFault(_)
-            | Exception::StoreAMOAccessFault(_)
-            | Exception::InstructionPageFault(_)
-            | Exception::LoadPageFault(_)
-            | Exception::StoreAMOPageFault(_) => {
+            | Exception::InstructionAccessFault
+            | Exception::LoadAccessFault
+            | Exception::StoreAMOAccessFault
+            | Exception::InstructionPageFault
+            | Exception::LoadPageFault
+            | Exception::StoreAMOPageFault => {
                 Err("Execution environment supports only ecall exceptions")
             }
         }
@@ -56,27 +54,24 @@ impl TryFrom<&Exception> for EnvironException {
 /// RISC-V Exceptions (also known as synchronous exceptions)
 #[derive(PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
 pub enum Exception {
-    /// `InstructionAccessFault(addr)` where `addr` is the faulting instruction address
-    InstructionAccessFault(Address),
+    InstructionAccessFault,
     IllegalInstruction,
     Breakpoint,
-    /// `LoadAccessFault(addr)` where `addr` is the faulting load address
-    LoadAccessFault(Address),
-    /// `StoreAccessFault(addr)` where `addr` is the faulting store address
-    StoreAMOAccessFault(Address),
+    LoadAccessFault,
+    StoreAMOAccessFault,
     EnvCall,
-    InstructionPageFault(Address),
-    LoadPageFault(Address),
-    StoreAMOPageFault(Address),
+    InstructionPageFault,
+    LoadPageFault,
+    StoreAMOPageFault,
 }
 
 impl core::fmt::Debug for Exception {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            Self::InstructionPageFault(adr) => write!(f, "InstructionPageFault({adr:#X})"),
-            Self::LoadPageFault(adr) => write!(f, "LoadPageFault({adr:#X})"),
-            Self::StoreAMOPageFault(adr) => write!(f, "StoreAMOPageFault({adr:#X})"),
-            Self::LoadAccessFault(adr) => write!(f, "LoadAccessFault({adr:#X})"),
+            Self::InstructionPageFault => write!(f, "InstructionPageFault"),
+            Self::LoadPageFault => write!(f, "LoadPageFault"),
+            Self::StoreAMOPageFault => write!(f, "StoreAMOPageFault"),
+            Self::LoadAccessFault => write!(f, "LoadAccessFault"),
             other => write!(f, "{other}"),
         }
     }
@@ -85,12 +80,12 @@ impl core::fmt::Debug for Exception {
 impl From<Exception> for SbiError {
     fn from(value: Exception) -> Self {
         match value {
-            Exception::InstructionAccessFault(_)
-            | Exception::InstructionPageFault(_)
-            | Exception::LoadAccessFault(_)
-            | Exception::LoadPageFault(_)
-            | Exception::StoreAMOAccessFault(_)
-            | Exception::StoreAMOPageFault(_) => SbiError::InvalidAddress,
+            Exception::InstructionAccessFault
+            | Exception::InstructionPageFault
+            | Exception::LoadAccessFault
+            | Exception::LoadPageFault
+            | Exception::StoreAMOAccessFault
+            | Exception::StoreAMOPageFault => SbiError::InvalidAddress,
             Exception::IllegalInstruction | Exception::Breakpoint | Exception::EnvCall => {
                 SbiError::Failed
             }

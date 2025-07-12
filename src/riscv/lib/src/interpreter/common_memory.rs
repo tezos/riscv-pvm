@@ -23,7 +23,7 @@ where
     ) -> Result<T, Exception> {
         self.main_memory
             .read(address)
-            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault(address))
+            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
     }
 
     /// Generic read function for loading `T::STORED_SIZE` bytes from address val(rs1) + imm
@@ -44,7 +44,7 @@ where
     ) -> Result<(), Exception> {
         self.main_memory
             .write(address, value)
-            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault(address))
+            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault)
     }
 
     /// Generic store operation for writing `T::STORED_SIZE` bytes starting at address val(rs1) + imm
