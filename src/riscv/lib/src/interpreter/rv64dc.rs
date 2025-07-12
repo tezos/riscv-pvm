@@ -122,7 +122,7 @@ mod test {
 
             // Out of bounds loads / stores
             prop_assert!(perform_test(OUT_OF_BOUNDS_OFFSET).is_err_and(|e|
-                matches!(e, Exception::StoreAMOAccessFault(_))
+                matches!(e, Exception::StoreAMOAccessFault)
             ));
         });
     });
@@ -157,7 +157,7 @@ mod test {
 
             // Out of bounds loads / stores
             prop_assert!(perform_test(OUT_OF_BOUNDS_OFFSET).is_err_and(|e|
-                matches!(e, Exception::StoreAMOAccessFault(_))
+                matches!(e, Exception::StoreAMOAccessFault)
             ));
         });
     });
