@@ -53,8 +53,9 @@ impl TryFrom<&Exception> for EnvironException {
 
 /// RISC-V Exceptions (also known as synchronous exceptions)
 #[derive(PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
+#[repr(i64)]
 pub enum Exception {
-    InstructionAccessFault,
+    InstructionAccessFault = 1,
     IllegalInstruction,
     Breakpoint,
     LoadAccessFault,
