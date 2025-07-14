@@ -44,29 +44,6 @@ pub fn run_j_absolute<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
     imm.and(mask, icb)
 }
 
-/// Store the next instruction address in `rd` and jump to the target address.
-/// Always returns the target address (current program counter + imm)
-pub fn run_jump_and_link_pc<I: ICB>(
-    icb: &mut I,
-    imm: i64,
-    rd: NonZeroXRegister,
-    width: InstrWidth,
-) -> <I as ICB>::XValue {
-    // The return address to be saved in `rd` is that of the instruction following this one
-    let current_pc = icb.pc_read();
-    let width = icb.xvalue_of_imm(width as i64);
-    let return_address = current_pc.add(width, icb);
-
-    let imm = icb.xvalue_of_imm(imm);
-    // The target address is obtained by adding the imm to the current PC
-    let target_address = current_pc.add(imm, icb);
-
-    // Store the return address in rd
-    write_xregister_nz(icb, rd, return_address);
-
-    target_address
-}
-
 /// Performs an unconditional control transfer to the address in register `rs1`
 /// and stores the address of the instruction following the jump in register `rd`.
 pub fn run_jalr<I: ICB>(
@@ -151,8 +128,9 @@ pub fn run_jalr_absolute<I: ICB>(
 
 /// Add the immediate `imm` to the PC and store the result in `rd`.
 ///
-/// Relevant RISC-V opcodes:
-/// - AUIPC
+/// This function is used to implement the `AUIPC` instruction, as well as
+/// `linking` for jump instructions that require it, where the passed `imm` is the
+/// instruction width to be added to the PC.
 pub fn run_add_immediate_to_pc(icb: &mut impl ICB, imm: i64, rd: NonZeroXRegister) {
     let lhs = icb.pc_read();
     let rhs = icb.xvalue_of_imm(imm);
@@ -226,7 +204,6 @@ mod tests {
     use crate::interpreter::branching::run_jalr_absolute;
     use crate::interpreter::branching::run_jalr_imm;
     use crate::interpreter::branching::run_jr_imm;
-    use crate::interpreter::branching::run_jump_and_link_pc;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::ProgramCounterUpdate;
     use crate::machine_state::memory::M4K;
@@ -275,14 +252,6 @@ mod tests {
 
             assert_eq!(state.hart.pc.read(), init_pc);
             assert_eq!(new_pc, imm as u64 & !1);
-
-            // TEST Jal
-            state.hart.pc.write(init_pc);
-            let new_pc = run_jump_and_link_pc(&mut state, imm, rd, InstrWidth::Uncompressed);
-
-            assert_eq!(state.hart.pc.read(), init_pc);
-            assert_eq!(new_pc, init_pc.wrapping_add_signed(imm));
-            assert_eq!(state.hart.xregisters.read_nz(rd), res_rd);
 
             // TEST JalrAbsolute
             state.hart.pc.write(init_pc);

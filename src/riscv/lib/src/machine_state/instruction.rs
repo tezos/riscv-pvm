@@ -1681,9 +1681,11 @@ impl Args {
     /// SAFETY: This function must only be called on an `Args` belonging
     /// to the same OpCode as the OpCode used to derive this function.
     unsafe fn run_jump_and_link_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        // link the return address to the program counter
         let rd = unsafe { self.rd.nzx };
-        let addr = branching::run_jump_and_link_pc(icb, self.imm, rd, self.width);
-        let pcu = ProgramCounterUpdate::Set(addr);
+        branching::run_add_immediate_to_pc(icb, self.width as i64, rd);
+
+        let pcu = ProgramCounterUpdate::Relative(self.imm);
         icb.ok(pcu)
     }
 
@@ -2890,6 +2892,40 @@ mod test {
 
             assert_eq!(state.hart.pc.read(), init_pc);
             assert_eq!(pcupdate, res_pcupdate);
+        }
+    });
+
+    // test that ProgramCounterUpdate::Relative is returned and that the PC does not change
+    // in the state.
+    backend_test!(test_jumps, F, {
+        let test_cases = [
+            (42, 42, NonZeroXRegister::x1, InstrWidth::Compressed),
+            (0, 1000, NonZeroXRegister::x2, InstrWidth::Uncompressed),
+            (
+                u64::MAX - 1,
+                100,
+                NonZeroXRegister::x3,
+                InstrWidth::Uncompressed,
+            ),
+            (100, -50, NonZeroXRegister::x4, InstrWidth::Compressed),
+        ];
+
+        for (init_pc, imm, rd, width) in test_cases {
+            let mut state = MachineCoreState::<M4K, F>::new();
+
+            // Test JumpAndLinkPC
+            let res_pcupdate = Ok(ProgramCounterUpdate::Relative(imm));
+
+            state.hart.pc.write(init_pc);
+            let jump = Instruction::new_jump_and_link_pc(rd, imm, width);
+            let pcupdate = unsafe { jump.args.run_jump_and_link_pc(&mut state) };
+
+            assert_eq!(state.hart.pc.read(), init_pc);
+            assert_eq!(pcupdate, res_pcupdate);
+            assert_eq!(
+                state.hart.xregisters.read_nz(rd),
+                init_pc.wrapping_add(width as u64)
+            );
         }
     });
 }

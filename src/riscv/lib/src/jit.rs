@@ -1286,6 +1286,8 @@ mod tests {
             test_jump_and_link_pc(10, 0, 10, 2, Compressed),
             test_jump_and_link_pc(-10, 10, 0, 12, Compressed),
             test_jump_and_link_pc(1000, 1000, 2000, 1004, Uncompressed),
+            test_jump_and_link_pc(-1000, 500, -500_i64 as u64, 504, Uncompressed),
+            test_jump_and_link_pc(10, u64::MAX - 1, 8, 0, Compressed),
         ];
 
         let mut jit = JIT::<M4K>::new().unwrap();
