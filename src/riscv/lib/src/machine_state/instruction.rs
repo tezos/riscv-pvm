@@ -259,7 +259,7 @@ pub enum OpCode {
     AddImmediateToPC,
 
     // RV64I jump instructions
-    Jal,
+    JumpAndLinkPC,
     /// Previous `Jalr`. Same as current `Jalr` except jump to `val(rs1) + imm`.
     JalrImm,
 
@@ -479,7 +479,7 @@ impl OpCode {
                 Args::run_branch_greater_than_or_equal_unsigned
             }
             Self::AddImmediateToPC => Args::run_add_immediate_to_pc,
-            Self::Jal => Args::run_jal,
+            Self::JumpAndLinkPC => Args::run_jump_and_link_pc,
             Self::JalrImm => Args::run_jalr_imm,
             Self::JrImm => Args::run_jr_imm,
             Self::JalrAbsolute => Args::run_jalr_absolute,
@@ -651,7 +651,7 @@ impl OpCode {
             Self::Jr => Some(Args::run_jr),
             Self::JrImm => Some(Args::run_jr_imm),
             Self::JAbsolute => Some(Args::run_j_absolute),
-            Self::Jal => Some(Args::run_jal),
+            Self::JumpAndLinkPC => Some(Args::run_jump_and_link_pc),
             Self::Jalr => Some(Args::run_jalr),
             Self::JalrImm => Some(Args::run_jalr_imm),
             Self::JalrAbsolute => Some(Args::run_jalr_absolute),
@@ -1680,9 +1680,9 @@ impl Args {
 
     /// SAFETY: This function must only be called on an `Args` belonging
     /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jal<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+    unsafe fn run_jump_and_link_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rd = unsafe { self.rd.nzx };
-        let addr = branching::run_jal(icb, self.imm, rd, self.width);
+        let addr = branching::run_jump_and_link_pc(icb, self.imm, rd, self.width);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }

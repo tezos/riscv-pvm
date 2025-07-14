@@ -628,10 +628,10 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Jal`].
-    pub(crate) fn new_jal(rd: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JumpAndLinkPC`].
+    pub(crate) fn new_jump_and_link_pc(rd: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
         Self {
-            opcode: OpCode::Jal,
+            opcode: OpCode::JumpAndLinkPC,
             args: Args {
                 rd: rd.into(),
                 imm,
@@ -2423,7 +2423,9 @@ impl Instruction {
         match split_x0(args.rd) {
             // If rd is 0, we are just doing an unconditional jump and not storing the current pc.
             X::X0 => Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed),
-            X::NonZero(rd) => Instruction::new_jal(rd, args.imm, InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
+                Instruction::new_jump_and_link_pc(rd, args.imm, InstrWidth::Uncompressed)
+            }
         }
     }
 

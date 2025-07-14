@@ -385,7 +385,7 @@ pub fn opcode_to_argsshape(opcode: &OpCode) -> ArgsShape {
         | X32ShiftLeftImm
         | X32ShiftRightImmUnsigned
         | X32ShiftRightImmSigned
-        | Jal
+        | JumpAndLinkPC
         | JumpPC
         | JrImm
         | JAbsolute

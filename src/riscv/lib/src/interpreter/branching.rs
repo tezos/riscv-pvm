@@ -46,7 +46,7 @@ pub fn run_j_absolute<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
 
 /// Store the next instruction address in `rd` and jump to the target address.
 /// Always returns the target address (current program counter + imm)
-pub fn run_jal<I: ICB>(
+pub fn run_jump_and_link_pc<I: ICB>(
     icb: &mut I,
     imm: i64,
     rd: NonZeroXRegister,
@@ -222,11 +222,11 @@ mod tests {
     use crate::backend_test;
     use crate::instruction_context::Predicate;
     use crate::interpreter::branching::run_j_absolute;
-    use crate::interpreter::branching::run_jal;
     use crate::interpreter::branching::run_jalr;
     use crate::interpreter::branching::run_jalr_absolute;
     use crate::interpreter::branching::run_jalr_imm;
     use crate::interpreter::branching::run_jr_imm;
+    use crate::interpreter::branching::run_jump_and_link_pc;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::ProgramCounterUpdate;
     use crate::machine_state::memory::M4K;
@@ -278,7 +278,7 @@ mod tests {
 
             // TEST Jal
             state.hart.pc.write(init_pc);
-            let new_pc = run_jal(&mut state, imm, rd, InstrWidth::Uncompressed);
+            let new_pc = run_jump_and_link_pc(&mut state, imm, rd, InstrWidth::Uncompressed);
 
             assert_eq!(state.hart.pc.read(), init_pc);
             assert_eq!(new_pc, init_pc.wrapping_add_signed(imm));
