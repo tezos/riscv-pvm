@@ -1198,7 +1198,7 @@ impl Instruction {
 
     /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32Mul`].
     pub(crate) fn new_x32_mul(
-        rd: XRegister,
+        rd: NonZeroXRegister,
         rs1: XRegister,
         rs2: XRegister,
         width: InstrWidth,
@@ -2710,6 +2710,23 @@ impl Instruction {
             }
             (X::NonZero(rd), X::NonZero(rs1), X::NonZero(rs2)) => {
                 Instruction::new_x64_mul_high_unsigned(rd, rs1, rs2, InstrWidth::Uncompressed)
+            }
+        }
+    }
+
+    /// Convert [`InstrCacheable::Mulw`] according to whether the destination register is non-zero.
+    ///
+    /// The `mulw` instruction performs multiplication of the lower 32 bits of two source registers
+    /// and stores the sign-extended result in the destination register. If the destination is `x0`
+    /// (the zero register), the instruction is optimized to a NOP since writes to `x0` are discarded.
+    ///
+    /// [`InstrCacheable::Mulw`]: crate::parser::instruction::InstrCacheable::Mulw
+    pub(crate) fn from_ic_mulw(args: &RTypeArgs) -> Instruction {
+        use XRegisterParsed as X;
+        match split_x0(args.rd) {
+            X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
+            X::NonZero(rd) => {
+                Instruction::new_x32_mul(rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
             }
         }
     }

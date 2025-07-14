@@ -1917,9 +1917,7 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Mulh(args) => Instruction::from_ic_mulh(args),
             InstrCacheable::Mulhsu(args) => Instruction::from_ic_mulhsu(args),
             InstrCacheable::Mulhu(args) => Instruction::from_ic_mulhu(args),
-            InstrCacheable::Mulw(args) => {
-                Instruction::new_x32_mul(args.rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
-            }
+            InstrCacheable::Mulw(args) => Instruction::from_ic_mulw(args),
 
             // RV64F instructions
             InstrCacheable::Flw(args) => Instruction {
