@@ -343,35 +343,39 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     f64_from_x64_unsigned_static: Option<FuncRef>,
 
     /// Reusable stack slot for the exception pointer
-    exception_ptr_slot: Option<stack::Slot<Exception>>,
+    exception_ptr_slot: Option<stack::Slot<MaybeUninit<Exception>>>,
 
     /// Reusable stack slot for the PC value
-    pc_slot: Option<stack::Slot<Address>>,
+    pc_slot: Option<stack::Slot<MaybeUninit<Address>>>,
 
-    // Reusable stack slot for an FValue.
-    f64_ptr_slot: Option<stack::Slot<f64>>,
+    /// Reusable stack slot for an FValue.
+    f64_ptr_slot: Option<stack::Slot<MaybeUninit<f64>>>,
+
     _pd: PhantomData<MC>,
 }
 
 impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
     /// Get the stack slot for the exception pointer.
-    fn exception_ptr_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<Exception> {
+    fn exception_ptr_slot(
+        &mut self,
+        builder: &mut FunctionBuilder,
+    ) -> stack::Slot<MaybeUninit<Exception>> {
         self.exception_ptr_slot
-            .get_or_insert_with(|| stack::Slot::<Exception>::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
             .clone()
     }
 
     /// Get the stack slot for the PC value.
-    fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<Address> {
+    fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<MaybeUninit<Address>> {
         self.pc_slot
             .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
             .clone()
     }
 
     /// Get the stack slot for an FValue.
-    fn f64_ptr_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<f64> {
+    fn f64_ptr_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<MaybeUninit<f64>> {
         self.f64_ptr_slot
-            .get_or_insert_with(|| stack::Slot::<f64>::new(self.ptr_type, builder))
+            .get_or_insert_with(|| stack::Slot::new(self.ptr_type, builder))
             .clone()
     }
 
@@ -427,8 +431,7 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         result_ptr: Pointer<Result<(), EnvironException>>,
         current_pc: Value<Address>,
     ) -> ExceptionHandledOutcome {
-        let pc_slot = self.pc_slot(builder);
-        pc_slot.store(builder, current_pc);
+        let pc_slot = self.pc_slot(builder).init(builder, current_pc);
         let pc_ptr = pc_slot.ptr(builder);
 
         let handle_exception = self.handle_exception.get_or_insert_with(|| {
@@ -446,10 +449,7 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         // SAFETY: [`self::handle_exception`] returns a `bool`.
         let handled = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
 
-        // SAFETY: the pc is initialised prior to the call, and is guaranteed to
-        // remain initialised regardless of the result of external call.
-        let new_pc = unsafe { pc_slot.load(builder) };
-
+        let new_pc = pc_slot.load(builder);
         ExceptionHandledOutcome { handled, new_pc }
     }
 
@@ -476,7 +476,9 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             .ins()
             .call(*raise_illegal, &[exception_ptr.to_value()]);
 
-        exception_ptr
+        // SAFETY: The `raise_illegal_instruction_exception` function writes to the exception slot
+        // unconditionally.
+        unsafe { exception_slot.assume_init().ptr(builder) }
     }
 
     /// Emit the required IR to call `raise_store_amo_access_fault_exception`.
@@ -504,7 +506,9 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             address.to_value(),
         ]);
 
-        exception_ptr
+        // SAFETY: The `raise_store_amo_access_fault_exception` function writes to the exception
+        // slot unconditionally.
+        unsafe { exception_slot.assume_init().ptr(builder) }
     }
 
     /// Emit the required IR to call `ecall`.
@@ -529,7 +533,8 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             exception_ptr.to_value(),
         ]);
 
-        exception_ptr
+        // SAFETY: The `ecall` function writes to the exception slot unconditionally.
+        unsafe { exception_slot.assume_init().ptr(builder) }
     }
 
     /// Emit the required IR to call `memory_store`.
@@ -597,7 +602,7 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let xval = stack::Slot::<V>::new(self.ptr_type, builder);
+        let xval = stack::Slot::<MaybeUninit<V>>::new(self.ptr_type, builder);
         let xval_ptr = xval.ptr(builder);
 
         let memory_load = match (V::WIDTH, V::SIGNED) {
@@ -646,8 +651,10 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
 
         ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
-            // SAFETY: The stack slot is guaranteed initialised at this point.
-            let xval = unsafe { xval.load(builder) };
+            // SAFETY: The slot is guaranteed to be initialised at this point as this closure
+            // generates IR for the success case when the external function will have written to
+            // the stack slot.
+            let xval = unsafe { xval.assume_init().load(builder) };
 
             let xval = if V::IR_TYPE == ir::types::I64 {
                 xval.to_value()
@@ -697,7 +704,7 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         ErrnoImpl::new(is_exception, exception_ptr, move |builder| {
             // SAFETY: This closure runs after the success case of the call, where the f64_slot
             // is guaranteed to have been initialised with an f64 value.
-            unsafe { f64_slot.load(builder) }
+            unsafe { f64_slot.assume_init().load(builder) }
         })
     }
 
