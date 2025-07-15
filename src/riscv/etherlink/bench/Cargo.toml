@@ -1,0 +1,12 @@
+[package]
+name = "inbox-bench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap.workspace = true
+comfy-table.workspace = true
+primitive-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tezos-smart-rollup.workspace = true
