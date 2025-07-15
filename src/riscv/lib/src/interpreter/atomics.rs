@@ -705,7 +705,7 @@ pub(crate) mod test {
                     let res = state.hart.xregisters.read(a2);
                     let val: $t = state.read_from_address(r1_addr)?;
                     prop_assert_eq!(res, SC_SUCCESS);
-                    prop_assert_eq!(val, r1_val.wrapping_add(imm as u64) as $t);
+                    prop_assert_eq!(val, r1_val.wrapping_add_signed(imm) as $t);
 
                     // SC.x fails when a previous SC.x has been executed
                     $sc(&mut *state, a0, a1, a2, false, false)?;

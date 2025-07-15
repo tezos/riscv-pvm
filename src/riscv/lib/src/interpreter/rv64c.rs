@@ -24,7 +24,7 @@ where
         // We do not need to explicitly truncate for the lower bits since wrapping_add
         // has the same semantics & result on the lower 32 bits irrespective of bit width
         let rval = self.read_nz(rd_rs1);
-        let result = rval.wrapping_add(imm as u64);
+        let result = rval.wrapping_add_signed(imm);
         // Truncate result to use only the lower 32 bits, then sign-extend to 64 bits.
         let result = result as i32 as u64;
         self.write_nz(rd_rs1, result);

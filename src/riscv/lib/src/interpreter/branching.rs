@@ -14,20 +14,6 @@ use crate::machine_state::registers::read_xregister_nz;
 use crate::machine_state::registers::write_xregister_nz;
 use crate::parser::instruction::InstrWidth;
 
-/// Performs an unconditional control transfer. The immediate is added to
-/// the pc to form the jump target address.
-///
-/// Relevant RISC-V opcodes:
-/// - C.J
-/// - JAL
-/// - BEQ
-/// - C.BEQZ
-pub fn run_j<I: ICB>(icb: &mut I, imm: i64) -> <I as ICB>::XValue {
-    let imm = icb.xvalue_of_imm(imm);
-    let current_pc = icb.pc_read();
-    current_pc.add(imm, icb)
-}
-
 /// Performs an unconditional control transfer to the address in register `rs1`.
 pub fn run_jr<I: ICB>(icb: &mut I, rs1: NonZeroXRegister) -> <I as ICB>::XValue {
     // The target address is obtained by setting the
@@ -193,7 +179,7 @@ pub fn run_branch<I: ICB>(
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
     width: InstrWidth,
-) -> ProgramCounterUpdate<<I as ICB>::XValue> {
+) -> ProgramCounterUpdate<I::XValue> {
     let lhs = read_xregister_nz(icb, rs1);
     let rhs = read_xregister_nz(icb, rs2);
     let cond = lhs.compare(rhs, predicate, icb);
@@ -221,7 +207,7 @@ pub fn run_branch_compare_zero<I: ICB>(
     imm: i64,
     rs1: NonZeroXRegister,
     width: InstrWidth,
-) -> ProgramCounterUpdate<<I as ICB>::XValue> {
+) -> ProgramCounterUpdate<I::XValue> {
     let lhs = read_xregister_nz(icb, rs1);
     let rhs = icb.xvalue_of_imm(0);
     let cond = lhs.compare(rhs, predicate, icb);
@@ -295,7 +281,7 @@ mod tests {
             let new_pc = run_jal(&mut state, imm, rd, InstrWidth::Uncompressed);
 
             assert_eq!(state.hart.pc.read(), init_pc);
-            assert_eq!(new_pc, init_pc.wrapping_add(imm as u64));
+            assert_eq!(new_pc, init_pc.wrapping_add_signed(imm));
             assert_eq!(state.hart.xregisters.read_nz(rd), res_rd);
 
             // TEST JalrAbsolute
@@ -386,7 +372,7 @@ mod tests {
             prop_assume!(r1_val != r2_val);
             // to ensure branch_pc, init_pc, next_pc are different
             prop_assume!(imm > 10);
-            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add(imm as u64));
+            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add_signed(imm));
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);
@@ -432,7 +418,7 @@ mod tests {
         )| {
             // to ensure branch_pc and init_pc are different
             prop_assume!(imm > 10);
-            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add(imm as u64));
+            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add_signed(imm));
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);
@@ -473,7 +459,7 @@ mod tests {
         )| {
             // to ensure branch_pc and init_pc are different
             prop_assume!(imm > 10);
-            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add(imm as u64));
+            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add_signed(imm));
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
 
@@ -509,7 +495,7 @@ mod tests {
             prop_assume!(r1_val < r2_val);
             // to ensure branch_pc and init_pc are different
             prop_assume!(imm > 10);
-            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add(imm as u64));
+            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add_signed(imm));
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let pc_update_init_pcu = ProgramCounterUpdate::Set(init_pc);
@@ -560,7 +546,7 @@ mod tests {
         )| {
             // to ensure branch_pc, init_pc, next_pc are different
             prop_assume!(imm > 10);
-            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add(imm as u64));
+            let branch_pcu = ProgramCounterUpdate::Set(init_pc.wrapping_add_signed(imm));
             let width = InstrWidth::Uncompressed;
             let next_pcu = ProgramCounterUpdate::Next(InstrWidth::Uncompressed);
             let init_pcu = ProgramCounterUpdate::Set(init_pc);

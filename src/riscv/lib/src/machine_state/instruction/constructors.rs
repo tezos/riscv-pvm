@@ -616,10 +616,10 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::J`].
-    pub(crate) fn new_j(imm: i64, width: InstrWidth) -> Self {
+    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JumpPC`].
+    pub(crate) fn new_jump_pc(imm: i64, width: InstrWidth) -> Self {
         Self {
-            opcode: OpCode::J,
+            opcode: OpCode::JumpPC,
             args: Args {
                 imm,
                 width,
@@ -2422,7 +2422,7 @@ impl Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // If rd is 0, we are just doing an unconditional jump and not storing the current pc.
-            X::X0 => Instruction::new_j(args.imm, InstrWidth::Uncompressed),
+            X::X0 => Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed),
             X::NonZero(rd) => Instruction::new_jal(rd, args.imm, InstrWidth::Uncompressed),
         }
     }
@@ -2434,9 +2434,9 @@ impl Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, then the instruction is an unconditional jump.
-            (X::X0, X::X0) => Instruction::new_j(args.imm, InstrWidth::Uncompressed),
+            (X::X0, X::X0) => Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed),
             (X::NonZero(rs1), X::NonZero(rs2)) if rs1 == rs2 => {
-                Instruction::new_j(args.imm, InstrWidth::Uncompressed)
+                Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed)
             }
             // If either register is x0, then the condition to branch is whether the other register stores 0.
             (X::NonZero(rs1), X::X0) | (X::X0, X::NonZero(rs1)) => {
@@ -2455,7 +2455,7 @@ impl Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             // If `rd_rs1` is zero, the result is an unconditional jump
-            X::X0 => Instruction::new_j(args.imm, InstrWidth::Compressed),
+            X::X0 => Instruction::new_jump_pc(args.imm, InstrWidth::Compressed),
             X::NonZero(rd_rs1) => {
                 Instruction::new_branch_equal_zero(rd_rs1, args.imm, InstrWidth::Compressed)
             }
@@ -2564,9 +2564,9 @@ impl Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, the values are the same so we always branch.
-            (X::X0, X::X0) => Instruction::new_j(args.imm, InstrWidth::Uncompressed),
+            (X::X0, X::X0) => Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed),
             (X::NonZero(rs1), X::NonZero(rs2)) if rs1 == rs2 => {
-                Instruction::new_j(args.imm, InstrWidth::Uncompressed)
+                Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed)
             }
             // If rs1 is x0, the condition to branch is whether `val(rs2) <= 0`.
             (X::X0, X::NonZero(rs1)) => Instruction::new_branch_less_than_or_equal_zero(
@@ -2623,10 +2623,10 @@ impl Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If rs2 is x0, rs1 is either the same or more than rs2, so we always branch.
-            (_, X::X0) => Instruction::new_j(args.imm, InstrWidth::Uncompressed),
+            (_, X::X0) => Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed),
             // If the registers are the same, the values are the same so we always branch.
             (X::NonZero(rs1), X::NonZero(rs2)) if rs1 == rs2 => {
-                Instruction::new_j(args.imm, InstrWidth::Uncompressed)
+                Instruction::new_jump_pc(args.imm, InstrWidth::Uncompressed)
             }
             // If rs1 is x0, the condition to branch is whether `val(rs2) == 0`.
             (X::X0, X::NonZero(rs1)) => {
