@@ -9,6 +9,7 @@ mod fs;
 mod memory;
 mod parameters;
 mod rng;
+mod signals;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
@@ -20,7 +21,6 @@ use self::addr::VirtAddr;
 use self::error::Error;
 use self::memory::STACK_SIZE;
 use super::Pvm;
-use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
@@ -162,29 +162,6 @@ enum AuxVectorKey {
 
     /// [AT_PHDR](https://github.com/torvalds/linux/blob/bb066fe812d6fb3a9d01c073d9f1e2fd5a63403b/include/uapi/linux/auxvec.h#L12)
     ProgramHeadersPtr = 3,
-}
-
-/// `sizeof(struct sigaction)` on the Kernel side
-const SIZE_SIGACTION: usize = 32;
-
-/// The size left over from this reduced implementation of `struct sigaction`
-const SIZE_SIGACTION_BUFFER: usize = SIZE_SIGACTION - size_of::<VirtAddr>();
-
-/// An action taken by a process upon receipt of a given signal
-#[expect(unused, reason = "The use of this has not been implemented yet")]
-struct SigAction {
-    action: VirtAddr,
-    buffer: [u8; SIZE_SIGACTION_BUFFER],
-}
-
-/// A mapping of (supported) signals to their signal actions
-#[expect(unused, reason = "The use of this has not been implemented yet")]
-pub struct SignalActions {
-    action: [SigAction; parameters::SUPPORTED_SIGNALS.len()],
-}
-
-impl ConstDefault for SignalActions {
-    const DEFAULT: Self = SignalActions { action: [] };
 }
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
@@ -918,7 +895,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
-        old: parameters::SignalActionPtr,
+        old: signals::SignalActionPtr,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
@@ -943,15 +920,16 @@ impl<M: ManagerBase> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
-        old: parameters::SignalActionPtr,
-        _: parameters::SigsetTSizeEightBytes,
+        old: signals::SignalActionPtr,
+        _: signals::SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
     {
         if let Some(old) = old.address() {
             // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
+            core.main_memory
+                .write(old, [0u8; signals::SIZE_SIGACTION])?;
         }
 
         // Return 0 as an indicator of success
@@ -965,8 +943,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
-        old: parameters::SignalActionPtr,
-        _: parameters::SigsetTSizeEightBytes,
+        old: signals::SignalActionPtr,
+        _: signals::SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
@@ -974,7 +952,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         if let Some(old) = old.address() {
             // As we don't store the previous mask, we just zero out the memory
             core.main_memory
-                .write(old, [0u8; parameters::SIGSET_SIZE as usize])?;
+                .write(old, [0u8; signals::SIGSET_SIZE as usize])?;
         }
 
         // Return 0 as an indicator of success
@@ -986,7 +964,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     fn handle_tkill(
         &mut self,
         _: parameters::MainThreadId,
-        signal: parameters::Signal,
+        signal: signals::Signal,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
         M: ManagerReadWrite,
