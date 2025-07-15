@@ -17,7 +17,87 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
+use cranelift::codegen::ir::Type as CraneliftType;
 use cranelift::codegen::ir::Value as CraneliftValue;
+use cranelift::prelude::isa::TargetFrontendConfig;
+use cranelift::prelude::types::I8;
+use cranelift::prelude::types::I16;
+use cranelift::prelude::types::I32;
+use cranelift::prelude::types::I64;
+
+/// Cranelift IR type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    /// Basic Cranelift type (e.g. intergers)
+    Basic(CraneliftType),
+
+    /// Target-dependent pointer type
+    Pointer,
+}
+
+impl Type {
+    /// Instantiate a proper Cranelift type. This resolves any target-dependent types to Cranelift
+    /// types.
+    pub(super) fn to_type(self, target_config: &TargetFrontendConfig) -> CraneliftType {
+        match self {
+            Type::Basic(ty) => ty,
+            Type::Pointer => target_config.pointer_type(),
+        }
+    }
+}
+
+/// Trait for types that can be represented in Cranelift IR
+pub trait Typed {
+    const TYPE: Type;
+}
+
+impl Typed for bool {
+    const TYPE: Type = Type::Basic(I8);
+}
+
+impl Typed for u8 {
+    const TYPE: Type = Type::Basic(I8);
+}
+
+impl Typed for i8 {
+    const TYPE: Type = Type::Basic(I8);
+}
+
+impl Typed for u16 {
+    const TYPE: Type = Type::Basic(I16);
+}
+
+impl Typed for i16 {
+    const TYPE: Type = Type::Basic(I16);
+}
+
+impl Typed for u32 {
+    const TYPE: Type = Type::Basic(I32);
+}
+
+impl Typed for i32 {
+    const TYPE: Type = Type::Basic(I32);
+}
+
+impl Typed for u64 {
+    const TYPE: Type = Type::Basic(I64);
+}
+
+impl Typed for i64 {
+    const TYPE: Type = Type::Basic(I64);
+}
+
+impl<T> Typed for NonNull<T> {
+    const TYPE: Type = Type::Pointer;
+}
+
+impl<T> Typed for &T {
+    const TYPE: Type = Type::Pointer;
+}
+
+impl<T> Typed for &mut T {
+    const TYPE: Type = Type::Pointer;
+}
 
 /// Strongly-typed IR value
 #[derive(Debug)]
@@ -74,6 +154,34 @@ impl<T> Value<T> {
 
         // SAFETY: `f` must produce a Cranelift value of type `T`.
         unsafe { Value::<T>::from_raw(raw) }
+    }
+}
+
+impl<T: Sized> Value<NonNull<T>> {
+    /// Treat a non-null pointer to `T` as an immutable reference to `T`. Pointers and references
+    /// have the same representation.
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that the lifetime of the returned reference is valid.
+    pub unsafe fn as_ref<'a>(&self) -> Value<&'a T> {
+        Value {
+            value: self.value,
+            _pd: PhantomData,
+        }
+    }
+
+    /// Treat a non-null pointer to `T` as a mutable reference to `T`. Pointers and references
+    /// have the same representation.
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that the lifetime of the returned reference is valid.
+    pub unsafe fn as_mut<'a>(&self) -> Value<&'a mut T> {
+        Value {
+            value: self.value,
+            _pd: PhantomData,
+        }
     }
 }
 
