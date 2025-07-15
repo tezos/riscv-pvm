@@ -34,6 +34,8 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
+use crate::pvm::linux::signals::SignalActions;
+use crate::pvm::linux::signals::SignalActionsLayout;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
@@ -45,7 +47,11 @@ use crate::traps::Exception;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
 /// instructions.
-pub type MachineCoreStateLayout<MC> = (HartStateLayout, <MC as MemoryConfig>::Layout);
+pub type MachineCoreStateLayout<MC> = (
+    HartStateLayout,
+    <MC as MemoryConfig>::Layout,
+    SignalActionsLayout,
+);
 
 /// The part of the machine state required to run (almost all) instructions.
 ///
@@ -57,6 +63,7 @@ pub type MachineCoreStateLayout<MC> = (HartStateLayout, <MC as MemoryConfig>::La
 pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
     pub hart: HartState<M>,
     pub main_memory: MC::State<M>,
+    pub signal_actions: SignalActions<M>,
 }
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
@@ -116,6 +123,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         Self {
             hart: HartState::bind(space.0),
             main_memory: MC::bind(space.1),
+            signal_actions: SignalActions::bind(space.2),
         }
     }
 
@@ -127,6 +135,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         (
             self.hart.struct_ref::<F>(),
             MC::struct_ref::<_, F>(&self.main_memory),
+            self.signal_actions.struct_ref::<F>(),
         )
     }
 
@@ -137,6 +146,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     {
         self.hart.reset(memory::FIRST_ADDRESS);
         self.main_memory.reset();
+        self.signal_actions.reset();
     }
 
     /// Advance [`MachineState`] by executing an [`InstrCacheable`].
@@ -159,6 +169,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineC
         Self {
             hart: HartState::new(),
             main_memory: NewState::new(),
+            signal_actions: SignalActions::new(),
         }
     }
 }
@@ -168,6 +179,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
         Self {
             hart: self.hart.clone(),
             main_memory: self.main_memory.clone(),
+            signal_actions: self.signal_actions.clone(),
         }
     }
 }

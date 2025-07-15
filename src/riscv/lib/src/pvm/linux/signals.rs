@@ -13,11 +13,155 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
+use crate::state_backend::AllocatedOf;
+use crate::state_backend::Atom;
+use crate::state_backend::Cell;
+use crate::state_backend::FnManager;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::Ref;
+use crate::struct_layout;
 
-/// `size_of(struct sigaction)` on the Kernel side
-pub const SIZE_SIGACTION: usize = 32;
+const SIZE_SIGACTION: usize = 32;
+
+/// Convert an identifier into the literal `1`, so it can be used to count the number of
+/// repetitions
+macro_rules! count_identifiers {
+    ($identifer:ident) => {
+        1usize
+    };
+}
+
+// Marks an enum that is a subset of `Signum` as being supported by the PVM. Provides an array of
+// supported `Signum`s as Indexed<enum> which can then be used as an index into the SignalActions
+// array.
+macro_rules! supported {
+    (
+        $(
+            #[$attributes:meta]
+        )*
+        $visibility:vis enum $enum_identifier:ident {
+            $(
+                $enum_variant:ident$(= $value:expr)?$(,)?
+            )*
+        }
+    ) => {
+        // Reproduce the enum passed in
+        $(
+            #[$attributes]
+        )*
+        $visibility enum $enum_identifier {
+            $(
+                $enum_variant $(= $value)?
+            ),*
+        }
+
+        paste::paste! {
+            /// The total number of supported signums
+            const [<$enum_identifier:snake:upper _COUNT>]: usize = 0 $( + count_identifiers!($enum_variant))*;
+
+            /// An array of [[<$enum_identifier:upper _COUNT>]] [VirtAddr]s, one action for each
+            /// supported signal
+            $visibility struct SignalActions<M: ManagerBase> {
+                signal_actions: [Cell<VirtAddr, M>; [<$enum_identifier:snake:upper _COUNT>]],
+            }
+
+            struct_layout! {
+                /// Layout for [SignalActions]
+                $visibility struct SignalActionsLayout {
+                    signal_actions: [Atom<VirtAddr>; [<$enum_identifier:snake:upper _COUNT>]],
+                }
+            }
+        }
+
+        impl TryFrom<Signum> for $enum_identifier {
+            type Error = Error;
+
+            /// Convert a [Signum] into a supported [$enum_identifier], or return an error
+            fn try_from(value: Signum) -> Result<Self, Self::Error> {
+                let value = value.try_into()?;
+                match value {
+                    $(
+                        Signum::$enum_variant => Ok($enum_identifier::$enum_variant),
+                    )*
+                    _ => Err(Error::InvalidArgument),
+                }
+            }
+        }
+
+        impl TryFrom<u64> for Signal {
+            type Error = Error;
+
+            /// Only supported signals can be used to create a valid Signal
+            fn try_from(value: u64) -> Result<Self, Self::Error> {
+                let value = value.try_into()?;
+                match value {
+                    $(
+                        Signum::$enum_variant => Ok(Signal(value)),
+                    )*
+                    _ => Err(Error::InvalidArgument),
+                }
+            }
+        }
+    }
+}
+
+impl<M: ManagerAlloc> Default for SignalActions<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: ManagerBase> SignalActions<M> {
+    /// Allocate a new [SignalActions]
+    pub fn new() -> Self
+    where
+        M: ManagerAlloc,
+    {
+        SignalActions::<M> {
+            signal_actions: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+        }
+    }
+
+    /// Bind the given allocated regions to the supervisor state.
+    pub fn bind(space: AllocatedOf<SignalActionsLayout, M>) -> Self {
+        SignalActions::<M> {
+            signal_actions: space.signal_actions,
+        }
+    }
+
+    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
+    /// the constituents of `N` that were produced from the constituents of `&M`.
+    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
+        &'a self,
+    ) -> AllocatedOf<SignalActionsLayout, F::Output> {
+        SignalActionsLayoutF {
+            signal_actions: self
+                .signal_actions
+                .each_ref()
+                .map(|sig_action| Cell::struct_ref::<F>(sig_action)),
+        }
+    }
+
+    pub fn reset(&mut self)
+    where
+        M: ManagerReadWrite,
+    {
+        self.signal_actions
+            .iter_mut()
+            .for_each(|sig_action| sig_action.write(VirtAddr::new(0)));
+    }
+}
+
+impl<M: ManagerClone> Clone for SignalActions<M> {
+    fn clone(&self) -> Self {
+        SignalActions::<M> {
+            signal_actions: self.signal_actions.clone(),
+        }
+    }
+}
 
 /// Size of the `sigset_t` type in bytes
 ///
@@ -101,35 +245,34 @@ impl TryFrom<u64> for Signum {
     }
 }
 
+supported!(
+    /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+    #[derive(Debug, Clone, Copy)]
+    #[repr(usize)]
+    pub enum IndexedSignum {
+        Sigill = 0,
+        Sigabrt,
+        Sigiot,
+        Sigbus,
+        Sigfpe,
+        Sigkill,
+        Sigusr1,
+        Sigsegv,
+        Sigusr2,
+        Sigpipe,
+        Sigterm,
+        Sigstop,
+        Sigsys,
+    }
+);
+
 /// A signal that is supported by the PVM
 #[derive(Debug, Clone, Copy)]
-#[expect(unused, reason = "The use of this has not been implemented yet")]
+#[expect(
+    dead_code,
+    reason = "The use of the signum hasn't been implemented yet"
+)]
 pub struct Signal(Signum);
-
-impl TryFrom<u64> for Signal {
-    type Error = Error;
-
-    /// Only supported signals can be used to create a valid Signal
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let value = value.try_into()?;
-        match value {
-            Signum::Sigill
-            | Signum::Sigabrt
-            | Signum::Sigiot
-            | Signum::Sigbus
-            | Signum::Sigfpe
-            | Signum::Sigkill
-            | Signum::Sigusr1
-            | Signum::Sigsegv
-            | Signum::Sigusr2
-            | Signum::Sigpipe
-            | Signum::Sigterm
-            | Signum::Sigstop
-            | Signum::Sigsys => Ok(Signal(value)),
-            _ => Err(Error::InvalidArgument),
-        }
-    }
-}
 
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
@@ -225,7 +368,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: Signal,
-        _: u64,
+        _: SignalActionPtr,
         old: SignalActionPtr,
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
