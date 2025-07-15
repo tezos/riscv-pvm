@@ -269,6 +269,45 @@ impl TryFrom<u64> for RobustListHeadSize {
     }
 }
 
+/// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+#[expect(unused, reason = "Some variants are not supported")]
+pub enum Signum {
+    Sighup = 1,
+    Sigint,
+    Sigquit,
+    Sigill,
+    Sigabrt,
+    Sigiot,
+    Sigbus,
+    Sigfpe,
+    Sigkill,
+    Sigusr1,
+    Sigsegv,
+    Sigusr2,
+    Sigpipe,
+    Sigalrm,
+    Sigterm,
+    Sigstkflt,
+    Sigchld,
+    Sigcont,
+    Sigstop,
+    Sigtstp,
+    Sigttin,
+    Sigttou,
+    Sigurg,
+    Sigxcpu,
+    Sigxfsz,
+    Sigvtalrm,
+    Sigprof,
+    Sigwinch,
+    Sigio,
+    Sigpwr,
+    Sigsys,
+}
+
+/// The signums supported for handling
+pub const SUPPORTED_SIGNALS: [Signum; 0] = [];
+
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
 pub struct Signal(u7);
@@ -293,21 +332,21 @@ impl Signal {
 
 /// An address of a signal action in the VM memory
 #[derive(Clone, Copy)]
-pub struct SignalAction(pub Option<NonZeroU64>);
+pub struct SignalActionPtr(pub Option<NonZeroU64>);
 
-impl fmt::Debug for SignalAction {
+impl fmt::Debug for SignalActionPtr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:#x}", self.0.map(|nz| nz.get()).unwrap_or(0))
     }
 }
 
-impl From<u64> for SignalAction {
+impl From<u64> for SignalActionPtr {
     fn from(value: u64) -> Self {
-        SignalAction(NonZeroU64::new(value))
+        SignalActionPtr(NonZeroU64::new(value))
     }
 }
 
-impl SignalAction {
+impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
     pub fn address(&self) -> Option<u64> {
         self.0.map(|nz| nz.get())

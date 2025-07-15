@@ -20,6 +20,7 @@ use self::addr::VirtAddr;
 use self::error::Error;
 use self::memory::STACK_SIZE;
 use super::Pvm;
+use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
@@ -161,6 +162,29 @@ enum AuxVectorKey {
 
     /// [AT_PHDR](https://github.com/torvalds/linux/blob/bb066fe812d6fb3a9d01c073d9f1e2fd5a63403b/include/uapi/linux/auxvec.h#L12)
     ProgramHeadersPtr = 3,
+}
+
+/// `sizeof(struct sigaction)` on the Kernel side
+const SIZE_SIGACTION: usize = 32;
+
+/// The size left over from this reduced implementation of `struct sigaction`
+const SIZE_SIGACTION_BUFFER: usize = SIZE_SIGACTION - size_of::<VirtAddr>();
+
+/// An action taken by a process upon receipt of a given signal
+#[expect(unused, reason = "The use of this has not been implemented yet")]
+struct SigAction {
+    action: VirtAddr,
+    buffer: [u8; SIZE_SIGACTION_BUFFER],
+}
+
+/// A mapping of (supported) signals to their signal actions
+#[expect(unused, reason = "The use of this has not been implemented yet")]
+pub struct SignalActions {
+    action: [SigAction; parameters::SUPPORTED_SIGNALS.len()],
+}
+
+impl ConstDefault for SignalActions {
+    const DEFAULT: Self = SignalActions { action: [] };
 }
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
@@ -362,6 +386,39 @@ where
         Ok(())
     }
 
+    /// Configure the signal actions for a new process.
+    fn prepare_signal_actions(&mut self) -> Result<(), MachineError>
+    where
+        M: ManagerReadWrite,
+    {
+        let signal_actions = self
+            .machine_state
+            .core
+            .main_memory
+            .allocate_and_protect_pages(
+                None,
+                size_of::<signals::SignalActions>(),
+                Permissions::READ_WRITE,
+                true,
+            )?;
+
+        for i in 0..size_of::<signals::SignalActions>() as u64 {
+            self.machine_state
+                .core
+                .main_memory
+                .write(signal_actions + i, 0)?;
+        }
+
+        let signal_actions = VirtAddr::new(signal_actions);
+        let signal_actions_end = signal_actions + size_of::<signals::SignalActions>() as u64;
+
+        self.system_state
+            .signal_actions
+            .write(signal_actions..signal_actions_end);
+
+        Ok(())
+    }
+
     /// Install a Linux program and configure the Hart to start it.
     pub fn setup_linux_process(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
@@ -371,6 +428,9 @@ where
 
         // The stack needs to be prepared before we can push anything to it
         self.prepare_stack()?;
+
+        // Setup signal action addresses
+        self.prepare_signal_actions()?;
 
         // Auxiliary values vector
         let mut auxv = vec![(AuxVectorKey::PageSize, PAGE_SIZE.get())];
@@ -439,6 +499,7 @@ where
 struct_layout! {
     pub struct SupervisorStateLayout {
         tid_address: Atom<VirtAddr>,
+        signal_actions: Atom<Range<VirtAddr>>,
         program: Atom<Range<VirtAddr>>,
         heap: Atom<Range<VirtAddr>>,
         stack_guard: Atom<Range<VirtAddr>>,
@@ -455,6 +516,9 @@ pub struct SupervisorState<M: ManagerBase> {
 
     /// Exit code for when the process exited
     exit_code: u64,
+
+    /// The handlers for signals for this process
+    signal_actions: Cell<Range<VirtAddr>, M>,
 
     /// Program in memory
     program: Cell<Range<VirtAddr>, M>,
@@ -476,6 +540,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             tid_address: Cell::new(),
             exited: false,
             exit_code: 0,
+            signal_actions: Cell::new(),
             program: Cell::new(),
             heap: Cell::new(),
             stack_guard: Cell::new(),
@@ -488,6 +553,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             tid_address: space.tid_address,
             exited: false,
             exit_code: 0,
+            signal_actions: space.signal_actions,
             program: space.program,
             stack_guard: space.stack_guard,
             heap: space.heap,
@@ -501,6 +567,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ) -> AllocatedOf<SupervisorStateLayout, F::Output> {
         SupervisorStateLayoutF {
             tid_address: self.tid_address.struct_ref::<F>(),
+            signal_actions: self.signal_actions.struct_ref::<F>(),
             program: self.program.struct_ref::<F>(),
             stack_guard: self.stack_guard.struct_ref::<F>(),
             heap: self.heap.struct_ref::<F>(),
@@ -851,7 +918,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
-        old: parameters::SignalAction,
+        old: parameters::SignalActionPtr,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
@@ -876,15 +943,12 @@ impl<M: ManagerBase> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
-        old: parameters::SignalAction,
+        old: parameters::SignalActionPtr,
         _: parameters::SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
     {
-        /// `sizeof(struct sigaction)` on the Kernel side
-        const SIZE_SIGACTION: usize = 32;
-
         if let Some(old) = old.address() {
             // As we don't store the previous signal handler, we just zero out the memory
             core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
@@ -901,7 +965,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
         _: u64,
         _: u64,
-        old: parameters::SignalAction,
+        old: parameters::SignalActionPtr,
         _: parameters::SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
@@ -1124,6 +1188,7 @@ impl<M: ManagerClone> Clone for SupervisorState<M> {
             tid_address: self.tid_address.clone(),
             exited: self.exited,
             exit_code: self.exit_code,
+            signal_actions: self.signal_actions.clone(),
             program: self.program.clone(),
             stack_guard: self.stack_guard.clone(),
             heap: self.heap.clone(),
