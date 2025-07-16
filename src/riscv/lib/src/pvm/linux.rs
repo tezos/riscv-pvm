@@ -918,7 +918,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     fn handle_rt_sigaction(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
+        _: signals::Signal,
         _: u64,
         old: signals::SignalActionPtr,
         _: signals::SigsetTSizeEightBytes,
