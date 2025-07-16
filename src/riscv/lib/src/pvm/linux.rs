@@ -851,7 +851,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     fn handle_tkill(
         &mut self,
         _: parameters::MainThreadId,
-        signal: signals::Signal,
+        signal: signals::TkillSignal,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
         M: ManagerReadWrite,
