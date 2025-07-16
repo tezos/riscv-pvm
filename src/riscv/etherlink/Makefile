@@ -8,6 +8,8 @@ ifneq ($(NATIVE_TARGET),)
 NATIVE_OPT := --target "$(NATIVE_TARGET)"
 endif
 
+INBOX_FILE ?= "../../../assets/etherlink-erc20-inbox.json"
+
 .PHONY: all
 all: build check test inbox-bench
 
@@ -24,16 +26,25 @@ build: build-kernel inbox-bench
 build-kernel:
 	@cargo build -p etherlink --release
 
+.PHONY: build-kernel-static
+build-kernel-static:
+	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features static-inbox
+
+.PHONY: build-kernel-native
+build-kernel-native:
+	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features static-inbox $(NATIVE_OPT)
+
 .PHONY: test
-test:
+test: build-kernel build-kernel-native
 	@../../../scripts/etherlink-bench.sh
+	@../../../scripts/etherlink-bench.sh -sn
 
 .PHONY: check
 check:
 	@exec ../../../scripts/format.sh --check
-	@cargo check --workspace --locked
-	@cargo clippy -- --deny warnings
-	@cargo doc --all-features --document-private-items --no-deps
+	@INBOX_FILE=$(INBOX_FILE) cargo check --all-features --workspace --locked
+	@INBOX_FILE=$(INBOX_FILE) cargo clippy --all-features -- --deny warnings
+	@INBOX_FILE=$(INBOX_FILE) cargo doc --all-features --document-private-items --no-deps
 
 .PHONY: inbox-bench
 inbox-bench:

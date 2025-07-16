@@ -35,6 +35,10 @@ const VALUES: [(&str, &str); 6] = [
 ];
 
 #[entrypoint::main]
+#[cfg_attr(
+    feature = "static-inbox",
+    entrypoint::runtime(static_inbox = "$INBOX_FILE")
+)]
 pub fn entry(host: &mut impl Runtime) {
     static ONCE: Once = Once::new();
 

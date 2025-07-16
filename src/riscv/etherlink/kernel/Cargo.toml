@@ -10,3 +10,11 @@ tezos-smart-rollup.workspace = true
 [dependencies.evm_kernel]
 workspace = true
 features = ["debug"]
+
+[target.'cfg(not(target_arch = "riscv64"))'.dependencies.evm_kernel]
+workspace = true
+features = ["debug", "dummy-store-get-hash"]
+
+[features]
+default = []
+static-inbox = []
