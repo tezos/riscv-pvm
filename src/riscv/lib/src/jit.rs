@@ -1246,14 +1246,14 @@ mod tests {
                 .build()
         };
 
-        let test_jal = |offset: i64,
-                        initial_pc: u64,
-                        expected_pc: u64,
-                        expected_x1: u64,
-                        intruction_width: InstrWidth|
+        let test_jump_and_link_pc = |offset: i64,
+                                     initial_pc: u64,
+                                     expected_pc: u64,
+                                     expected_x1: u64,
+                                     intruction_width: InstrWidth|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_instructions(&[I::new_jal(x1, offset, intruction_width)])
+                .set_instructions(&[I::new_jump_and_link_pc(x1, offset, intruction_width)])
                 .set_initial_pc(initial_pc)
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), expected_pc);
@@ -1282,10 +1282,12 @@ mod tests {
             // Test j_absolute
             test_j_absolute(10, Compressed),
             test_j_absolute(0, Uncompressed),
-            // Test jal
-            test_jal(10, 0, 10, 2, Compressed),
-            test_jal(-10, 10, 0, 12, Compressed),
-            test_jal(1000, 1000, 2000, 1004, Uncompressed),
+            // Test jump_and_link_pc
+            test_jump_and_link_pc(10, 0, 10, 2, Compressed),
+            test_jump_and_link_pc(-10, 10, 0, 12, Compressed),
+            test_jump_and_link_pc(1000, 1000, 2000, 1004, Uncompressed),
+            test_jump_and_link_pc(-1000, 500, -500_i64 as u64, 504, Uncompressed),
+            test_jump_and_link_pc(10, u64::MAX - 1, 8, 0, Compressed),
         ];
 
         let mut jit = JIT::<M4K>::new().unwrap();
