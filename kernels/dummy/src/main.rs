@@ -12,9 +12,9 @@ use tezos_smart_rollup::prelude::*;
 use tezos_smart_rollup::storage::path::OwnedPath;
 use tezos_smart_rollup::types::SmartRollupAddress;
 use tezos_smart_rollup_constants::core::PREIMAGE_HASH_SIZE;
+use tezos_smart_rollup_constants::riscv::SbiError;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
-use tezos_smart_rollup_constants::riscv::SbiError;
 
 #[entrypoint::main]
 pub fn entry(host: &mut impl Runtime) {
