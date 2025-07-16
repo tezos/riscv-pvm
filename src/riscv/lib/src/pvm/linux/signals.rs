@@ -6,6 +6,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use arbitrary_int::u7;
+use strum::FromRepr;
 
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
@@ -22,6 +23,73 @@ pub const SIZE_SIGACTION: usize = 32;
 ///
 /// As we're building a 64-bit system, the sigset should be 64-bit wide as well.
 pub const SIGSET_SIZE: u64 = 8;
+
+/// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+#[derive(Debug, Clone, Copy, FromRepr)]
+#[repr(u64)]
+pub enum Signal {
+    Sigill = 4,
+    Sigabrt = 5,
+    Sigiot = 6,
+    Sigbus = 7,
+    Sigfpe = 8,
+    Sigkill = 9,
+    Sigusr1 = 10,
+    Sigsegv = 11,
+    Sigusr2 = 12,
+    Sigpipe = 13,
+    Sigterm = 15,
+    Sigstop = 19,
+    Sigsys = 31,
+}
+
+impl TryFrom<u64> for Signal {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or(Error::InvalidArgument)
+    }
+}
+
+/// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+/// The representation of these enums are used for indices into signal action storage.
+#[derive(Debug, Clone, Copy)]
+#[repr(usize)]
+pub enum SignalIndex {
+    Sigill = 0,
+    Sigabrt,
+    Sigiot,
+    Sigbus,
+    Sigfpe,
+    Sigkill,
+    Sigusr1,
+    Sigsegv,
+    Sigusr2,
+    Sigpipe,
+    Sigterm,
+    Sigstop,
+    Sigsys,
+}
+
+impl From<Signal> for SignalIndex {
+    fn from(value: Signal) -> Self {
+        match value {
+            Signal::Sigill => SignalIndex::Sigill,
+            Signal::Sigabrt => SignalIndex::Sigabrt,
+            Signal::Sigiot => SignalIndex::Sigiot,
+            Signal::Sigbus => SignalIndex::Sigbus,
+            Signal::Sigfpe => SignalIndex::Sigfpe,
+            Signal::Sigkill => SignalIndex::Sigkill,
+            Signal::Sigusr1 => SignalIndex::Sigusr1,
+            Signal::Sigsegv => SignalIndex::Sigsegv,
+            Signal::Sigusr2 => SignalIndex::Sigusr2,
+            Signal::Sigpipe => SignalIndex::Sigpipe,
+            Signal::Sigterm => SignalIndex::Sigterm,
+            Signal::Sigstop => SignalIndex::Sigstop,
+            Signal::Sigsys => SignalIndex::Sigsys,
+        }
+    }
+}
 
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
@@ -115,7 +183,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_rt_sigaction(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
+        _: Signal,
         _: u64,
         old: SignalActionPtr,
         _: SigsetTSizeEightBytes,
