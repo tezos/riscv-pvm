@@ -904,32 +904,49 @@ impl<M: ManagerBase> SupervisorState<M> {
         const SIZE_SIGALTSTACK: usize = 24;
 
         if let Some(old) = old.address() {
-            core.main_memory.write(old, [0u8; SIZE_SIGALTSTACK])?;
+            core.main_memory
+                .write(old.to_machine_address(), [0u8; SIZE_SIGALTSTACK])?;
         }
 
         // Return 0 as an indicator of success
         Ok(0)
     }
 
-    /// Handle `rt_sigaction` system call. This does nothing effectively. It does not support
-    /// retrieving the previous handler for a signal - it just zeroes out the memory.
+    /// Handle `rt_sigaction` system call.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigaction.2.html>
     fn handle_rt_sigaction(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: signals::Signal,
-        _: u64,
+        signal: signals::Signal,
+        action: signals::SignalActionPtr,
         old: signals::SignalActionPtr,
         _: signals::SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
     {
+        let index = signal.index() as u64;
+        let signal_action = self.signal_actions.start + index * signals::SIZE_SIGACTION as u64;
+
         if let Some(old) = old.address() {
-            // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory
-                .write(old, [0u8; signals::SIZE_SIGACTION])?;
+            let old = old + index * signals::SIGSET_SIZE;
+            for i in 0u64..signals::SIZE_SIGACTION as u64 {
+                core.main_memory.write(
+                    (old + i).to_machine_address(),
+                    (signal_action + i).to_machine_address(),
+                )?;
+            }
+        }
+
+        if let Some(action) = action.address() {
+            let action = action + index * signals::SIGSET_SIZE;
+            for i in 0u64..signals::SIGSET_SIZE {
+                core.main_memory.write(
+                    (signal_action + i).to_machine_address(),
+                    (action + i).to_machine_address(),
+                )?;
+            }
         }
 
         // Return 0 as an indicator of success
@@ -951,8 +968,10 @@ impl<M: ManagerBase> SupervisorState<M> {
     {
         if let Some(old) = old.address() {
             // As we don't store the previous mask, we just zero out the memory
-            core.main_memory
-                .write(old, [0u8; signals::SIGSET_SIZE as usize])?;
+            core.main_memory.write(
+                old.to_machine_address(),
+                [0u8; signals::SIGSET_SIZE as usize],
+            )?;
         }
 
         // Return 0 as an indicator of success
