@@ -12,6 +12,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::SupervisorState;
+use crate::pvm::linux::VirtAddr;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
@@ -158,8 +159,8 @@ pub struct SignalActionPtr(pub Option<NonZeroU64>);
 
 impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
-    pub fn address(&self) -> Option<u64> {
-        self.0.map(|nz| nz.get())
+    pub fn address(&self) -> Option<VirtAddr> {
+        self.0.map(|nz| VirtAddr::new(nz.get()))
     }
 }
 
@@ -208,7 +209,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         const SIZE_SIGALTSTACK: usize = 24;
 
         if let Some(old) = old.address() {
-            core.main_memory.write(old, [0u8; SIZE_SIGALTSTACK])?;
+            core.main_memory
+                .write(old.to_machine_address(), [0u8; SIZE_SIGALTSTACK])?;
         }
 
         // Return 0 as an indicator of success
@@ -232,7 +234,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     {
         if let Some(old) = old.address() {
             // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
+            core.main_memory
+                .write(old.to_machine_address(), [0u8; SIZE_SIGACTION])?;
         }
 
         // Return 0 as an indicator of success
@@ -254,7 +257,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     {
         if let Some(old) = old.address() {
             // As we don't store the previous mask, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIGSET_SIZE as usize])?;
+            core.main_memory
+                .write(old.to_machine_address(), [0u8; SIGSET_SIZE as usize])?;
         }
 
         // Return 0 as an indicator of success
