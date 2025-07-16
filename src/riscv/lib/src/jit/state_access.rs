@@ -109,7 +109,6 @@ register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
-    raise_store_amo_access_fault_exception => (raise_store_amo_access_fault_exception, AbiCall<2>::args),
     ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
     memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
     memory_store_u16 => (memory_store::<u16, MC>, AbiCall<4>::args),
@@ -329,7 +328,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     raise_illegal_instruction_exception: Option<FuncRef>,
-    raise_store_amo_access_fault_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
     memory_store_u8: Option<FuncRef>,
     memory_store_u16: Option<FuncRef>,
@@ -397,7 +395,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             freg_read: None,
             freg_write: None,
             raise_illegal_instruction_exception: None,
-            raise_store_amo_access_fault_exception: None,
             ecall_from_mode: None,
             memory_store_u8: None,
             memory_store_u16: None,
@@ -496,19 +493,15 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let raise_store_amo_access_fault = self
-            .raise_store_amo_access_fault_exception
-            .get_or_insert_with(|| {
-                self.module.declare_func_in_func(
-                    self.imports.raise_store_amo_access_fault_exception,
-                    builder.func,
-                )
-            });
-
-        builder.ins().call(*raise_store_amo_access_fault, &[
-            exception_ptr.to_value(),
-            address.to_value(),
-        ]);
+        // SAFETY: The exception reference is guaranteed to be valid for the duration of the call as
+        // it is scoped to the JIT function.
+        ext_calls::call2(
+            &self.target_config,
+            builder,
+            self::raise_store_amo_access_fault_exception,
+            unsafe { exception_ptr.as_mut() },
+            address,
+        );
 
         // SAFETY: The `raise_store_amo_access_fault_exception` function writes to the exception
         // slot unconditionally.
