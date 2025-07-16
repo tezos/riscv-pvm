@@ -2,9 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fmt;
-use std::num::NonZeroU64;
-
 use arbitrary_int::u7;
 use strum::FromRepr;
 
@@ -13,6 +10,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::SupervisorState;
+use crate::pvm::linux::VirtAddr;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
@@ -114,25 +112,19 @@ impl TryFrom<u64> for TkillSignal {
 }
 
 /// An address of a signal action in the VM memory
-#[derive(Clone, Copy)]
-pub struct SignalActionPtr(pub Option<NonZeroU64>);
+#[derive(Clone, Copy, Debug)]
+pub struct SignalActionPtr(Option<VirtAddr>);
 
 impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
     pub fn address(&self) -> Option<u64> {
-        self.0.map(|nz| nz.get())
-    }
-}
-
-impl fmt::Debug for SignalActionPtr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0.map(|nz| nz.get()).unwrap_or(0))
+        self.0.map(|addr| addr.to_machine_address())
     }
 }
 
 impl From<u64> for SignalActionPtr {
     fn from(value: u64) -> Self {
-        SignalActionPtr(NonZeroU64::new(value))
+        SignalActionPtr(Some(VirtAddr::new(value)))
     }
 }
 
