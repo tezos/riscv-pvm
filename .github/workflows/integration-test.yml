@@ -1,0 +1,34 @@
+
+name: Tezos integration tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-tezos-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Nix setup
+        uses: nixbuild/nix-quick-install-action@v32
+        with:
+          nix_conf: |
+            keep-env-derivations = true
+            keep-derivations = true
+            keep-outputs = true
+            experimental-features = nix-command flakes
+
+      - name: Checkout Tezos
+        run: git clone https://gitlab.com/tezos/tezos.git tezos
+
+      - name: Update RISC-V PVM dependency for Tezos
+        run: nix develop --command make -C src/riscv update-riscv-pvm
+        working-directory: tezos
+
+      - name: Build Tezos
+        run: nix develop --command make
+        working-directory: tezos
+
+      - name: Run Tezos RISC-V refutation game integration tests
+        run: nix develop --command dune exec tezt/tests/main.exe -- riscv_slow_sequential
+        working-directory: tezos
