@@ -23,14 +23,23 @@ struct SigAction {
     buffer: [u8; SIZE_SIGACTION_BUFFER],
 }
 
+impl ConstDefault for SigAction {
+    const DEFAULT: Self = SigAction {
+        action: VirtAddr::new(0),
+        buffer: [0; SIZE_SIGACTION_BUFFER],
+    };
+}
+
 /// A mapping of (supported) signals to their signal actions
 #[expect(unused, reason = "The use of this has not been implemented yet")]
 pub struct SignalActions {
-    action: [SigAction; SUPPORTED_SIGNALS.len()],
+    action: [SigAction; INDEXED_SIGNUM_COUNT],
 }
 
 impl ConstDefault for SignalActions {
-    const DEFAULT: Self = SignalActions { action: [] };
+    const DEFAULT: Self = SignalActions {
+        action: [SigAction::DEFAULT; INDEXED_SIGNUM_COUNT],
+    };
 }
 
 /// Size of the `sigset_t` type in bytes
@@ -74,9 +83,6 @@ pub enum Signum {
     Sigsys,
 }
 
-/// The signums supported for handling
-pub const SUPPORTED_SIGNALS: [Signum; 0] = [];
-
 impl TryFrom<u64> for Signum {
     type Error = Error;
 
@@ -118,33 +124,118 @@ impl TryFrom<u64> for Signum {
     }
 }
 
+/// Maps an identifier into a literal used for counting. By using this on repeated literals and
+/// summing, the total number of literals can be found
+macro_rules! count_variant {
+    ($variant:ident) => {
+        1usize
+    };
+}
+
+/// Marks an enum that is a subset of [Signum] as being supported by the PVM Provides an array of
+/// supported [Signum]s as Indexed<enum> which can then be used as an index into the
+/// SignalActions array.
+macro_rules! supported {
+    (
+        $(
+            #[$attributes:meta]
+        )*
+        $visibility:vis enum $enum_identifier:ident {
+            $(
+                $enum_variant:ident$(= $value:expr)?$(,)?
+            )*
+        }
+    ) => {
+        /// The variants supported
+        $(
+            #[$attributes]
+        )*
+        $visibility enum $enum_identifier {
+            $(
+                $enum_variant $(= $value)?
+            ),*
+        }
+
+        paste::paste! {
+            /// The total number of supported variants
+            $visibility const [<$enum_identifier:snake:upper _COUNT>]: usize = 0usize $(
+                + count_variant!($enum_variant)
+            )*;
+        }
+
+        paste::paste! {
+            /// An array of the supported variants
+            #[expect(unused, reason = "The use of this has not been implemented yet")]
+            $visibility const [<$enum_identifier:snake:upper S>]:
+                [$enum_identifier; [<$enum_identifier:snake:upper _COUNT>]] = [
+                $(
+                    $enum_identifier::$enum_variant,
+                )*
+            ];
+        }
+
+        impl TryFrom<Signum> for $enum_identifier {
+            type Error = Error;
+
+            fn try_from(value: Signum) -> Result<Self, Self::Error> {
+                let value = value.try_into()?;
+                match value {
+                    $(
+                        Signum::$enum_variant => Ok($enum_identifier::$enum_variant),
+                    )*
+                    _ => Err(Error::InvalidArgument),
+                }
+            }
+        }
+
+        impl TryFrom<u64> for Signal {
+            type Error = Error;
+
+            /// Only supported signals can be used to create a valid Signal
+            fn try_from(value: u64) -> Result<Self, Self::Error> {
+                let value = value.try_into()?;
+                match value {
+                    $(
+                        Signum::$enum_variant => Ok(Signal(value)),
+                    )*
+                    _ => Err(Error::InvalidArgument),
+                }
+            }
+        }
+    };
+}
+
+supported!(
+    /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+    #[derive(Debug, Clone, Copy)]
+    #[repr(usize)]
+    pub enum IndexedSignum {
+        Sigill = 0,
+        Sigabrt,
+        Sigiot,
+        Sigbus,
+        Sigfpe,
+        Sigkill,
+        Sigusr1,
+        Sigsegv,
+        Sigusr2,
+        Sigpipe,
+        Sigterm,
+        Sigstop,
+        Sigsys,
+    }
+);
+
 /// A signal that is supported by the PVM
 #[derive(Debug, Clone, Copy)]
-#[expect(unused, reason = "The use of this has not been implemented yet")]
 pub struct Signal(Signum);
 
-impl TryFrom<u64> for Signal {
-    type Error = Error;
-
-    /// Only supported signals can be used to create a valid Signal
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        let value = value.try_into()?;
-        match value {
-            Signum::Sigill
-            | Signum::Sigabrt
-            | Signum::Sigiot
-            | Signum::Sigbus
-            | Signum::Sigfpe
-            | Signum::Sigkill
-            | Signum::Sigusr1
-            | Signum::Sigsegv
-            | Signum::Sigusr2
-            | Signum::Sigpipe
-            | Signum::Sigterm
-            | Signum::Sigstop
-            | Signum::Sigsys => Ok(Signal(value)),
-            _ => Err(Error::InvalidArgument),
-        }
+impl Signal {
+    pub fn index(self) -> usize {
+        // SAFETY: Only supported signals can be used to construct a Signal.
+        // The macro ensures this is in-bounds.
+        let value: IndexedSignum = self.0.try_into().unwrap();
+        unsafe { std::mem::transmute(value) }
     }
 }
 
