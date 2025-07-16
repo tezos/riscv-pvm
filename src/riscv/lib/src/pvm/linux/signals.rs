@@ -188,8 +188,8 @@ impl From<u64> for SignalActionPtr {
 
 impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
-    pub fn address(&self) -> Option<u64> {
-        self.0.map(|nz| nz.get())
+    pub fn address(&self) -> Option<VirtAddr> {
+        self.0.map(|nz| VirtAddr::new(nz.get()))
     }
 }
 

@@ -904,7 +904,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         const SIZE_SIGALTSTACK: usize = 24;
 
         if let Some(old) = old.address() {
-            core.main_memory.write(old, [0u8; SIZE_SIGALTSTACK])?;
+            core.main_memory
+                .write(old.to_machine_address(), [0u8; SIZE_SIGALTSTACK])?;
         }
 
         // Return 0 as an indicator of success
@@ -929,7 +930,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         if let Some(old) = old.address() {
             // As we don't store the previous signal handler, we just zero out the memory
             core.main_memory
-                .write(old, [0u8; signals::SIZE_SIGACTION])?;
+                .write(old.to_machine_address(), [0u8; signals::SIZE_SIGACTION])?;
         }
 
         // Return 0 as an indicator of success
@@ -951,8 +952,10 @@ impl<M: ManagerBase> SupervisorState<M> {
     {
         if let Some(old) = old.address() {
             // As we don't store the previous mask, we just zero out the memory
-            core.main_memory
-                .write(old, [0u8; signals::SIGSET_SIZE as usize])?;
+            core.main_memory.write(
+                old.to_machine_address(),
+                [0u8; signals::SIGSET_SIZE as usize],
+            )?;
         }
 
         // Return 0 as an indicator of success
