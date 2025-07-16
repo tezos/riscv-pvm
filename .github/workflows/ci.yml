@@ -95,15 +95,13 @@ jobs:
       # contains all downloads.
       - name: Prefetch Cargo downloads
         if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main' 
-        run: nix develop --command find src/riscv -iname Cargo.lock -execdir cargo fetch \;
+        run: nix develop --command find . -iname Cargo.lock -execdir cargo fetch \;
 
       - name: Build dependencies
         run: nix develop --command make build-deps-slim
-        working-directory: src/riscv
 
       - name: Run 'make ${{ matrix.make-target }}'
         run: nix develop --command make ${{ matrix.make-target }}
-        working-directory: src/riscv
 
       - name: Save Rustup and Cargo cache
         if: github.ref_name == 'main'

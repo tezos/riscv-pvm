@@ -49,11 +49,12 @@ if [ -z "$TX" ] || [ -z "$RISCV_IT" ] || [ -z "$NATIVE_IT" ] || [ -z "$CHANGE_CO
   exit 1
 fi
 
-NATIVE=$(make --silent -C jstz print-native-target | grep -wv make)
 
 CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
 cd "$RISCV_DIR"
+
+NATIVE=$(make --silent -C kernels/jstz print-native-target | grep -wv make)
 
 git checkout "$CHANGE_COMM" --quiet
 
