@@ -590,11 +590,9 @@ mod tests {
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::block_cache::config::TestCacheConfig;
+    use crate::machine_state::instruction::Args;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::instruction::OpCode;
-    use crate::machine_state::instruction::tagged_instruction::TaggedArgs;
-    use crate::machine_state::instruction::tagged_instruction::TaggedInstruction;
-    use crate::machine_state::instruction::tagged_instruction::TaggedRegister;
     use crate::machine_state::memory;
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
@@ -615,17 +613,16 @@ mod tests {
     backend_test!(test_writing_full_block_fetchable_uncompressed, F, {
         let mut state = TestState::<F>::new();
 
-        let uncompressed = Instruction::try_from(TaggedInstruction {
+        let uncompressed = Instruction {
             opcode: OpCode::X64Store,
-            args: TaggedArgs {
+            args: Args {
                 rs1: t1.into(),
                 rs2: t0.into(),
-                rd: TaggedRegister::X(XRegister::x1),
+                rd: XRegister::x1.into(),
                 imm: 8,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 10;
 
@@ -641,18 +638,17 @@ mod tests {
     backend_test!(test_writing_full_block_fetchable_compressed, F, {
         let mut state = TestState::<F>::new();
 
-        let compressed = Instruction::try_from(TaggedInstruction {
+        let compressed = Instruction {
             opcode: OpCode::Li,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a0.into(),
                 imm: 1,
                 rs1: nz::ra.into(),
                 rs2: nz::ra.into(),
                 width: InstrWidth::Compressed,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 10;
 
@@ -669,18 +665,17 @@ mod tests {
     backend_test!(test_writing_half_block_fetchable_compressed, F, {
         let mut state = TestState::<F>::new();
 
-        let compressed = Instruction::try_from(TaggedInstruction {
+        let compressed = Instruction {
             opcode: OpCode::Li,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a0.into(),
                 imm: 1,
                 rs1: nz::ra.into(),
                 rs2: nz::ra.into(),
                 width: InstrWidth::Compressed,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 10;
 
@@ -696,18 +691,17 @@ mod tests {
     backend_test!(test_writing_two_blocks_fetchable_compressed, F, {
         let mut state = TestState::<F>::new();
 
-        let compressed = Instruction::try_from(TaggedInstruction {
+        let compressed = Instruction {
             opcode: OpCode::Li,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a0.into(),
                 imm: 1,
                 rs1: nz::ra.into(),
                 rs2: nz::ra.into(),
                 width: InstrWidth::Compressed,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 10;
 
@@ -728,18 +722,17 @@ mod tests {
     backend_test!(test_crossing_page_exactly_creates_new_block, F, {
         let mut state = TestState::<F>::new();
 
-        let compressed = Instruction::try_from(TaggedInstruction {
+        let compressed = Instruction {
             opcode: OpCode::Li,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a0.into(),
                 imm: 1,
                 rs1: nz::ra.into(),
                 rs2: nz::ra.into(),
                 width: InstrWidth::Compressed,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = PAGE_SIZE.get() - 10;
 
@@ -760,17 +753,16 @@ mod tests {
         let mut core_state = MachineCoreState::<M4K, F>::new();
         let mut block_state = TestState::<F>::new();
 
-        let addiw = Instruction::try_from(TaggedInstruction {
+        let addiw = Instruction {
             opcode: OpCode::AddWordImmediate,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a1.into(),
                 rs1: a1.into(),
                 imm: 257,
-                rs2: TaggedRegister::X(XRegister::x1),
-                ..TaggedArgs::DEFAULT
+                rs2: XRegister::x1.into(),
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let block_addr = memory::FIRST_ADDRESS;
 
@@ -839,17 +831,16 @@ mod tests {
     backend_test!(test_concat_blocks_suitable, F, {
         let mut state = TestState::<F>::new();
 
-        let uncompressed = Instruction::try_from(TaggedInstruction {
+        let uncompressed = Instruction {
             opcode: OpCode::X64Store,
-            args: TaggedArgs {
+            args: Args {
                 rs1: t1.into(),
                 rs2: t0.into(),
-                rd: TaggedRegister::X(XRegister::x1),
+                rd: XRegister::x1.into(),
                 imm: 8,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 30;
         let preceding_num_instr: u64 = 5;
@@ -875,17 +866,16 @@ mod tests {
     backend_test!(test_concat_blocks_too_big, F, {
         let mut state = TestState::<F>::new();
 
-        let uncompressed = Instruction::try_from(TaggedInstruction {
+        let uncompressed = Instruction {
             opcode: OpCode::X64Store,
-            args: TaggedArgs {
+            args: Args {
                 rs1: t1.into(),
                 rs2: t0.into(),
-                rd: TaggedRegister::X(XRegister::x1),
+                rd: XRegister::x1.into(),
                 imm: 8,
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let addr = 30;
         let preceding_num_instr: u64 = 5;
@@ -931,19 +921,15 @@ mod tests {
 
         let populate_block = |block: &mut TestState<Owned>| {
             for i in 0..TestCacheConfig::CACHE_SIZE {
-                block.push_instr_uncompressed(
-                    i as Address,
-                    Instruction::try_from(TaggedInstruction {
-                        opcode: OpCode::Add,
-                        args: TaggedArgs {
-                            rd: nz::a1.into(),
-                            rs1: nz::a1.into(),
-                            rs2: nz::a2.into(),
-                            ..TaggedArgs::DEFAULT
-                        },
-                    })
-                    .unwrap(),
-                );
+                block.push_instr_uncompressed(i as Address, Instruction {
+                    opcode: OpCode::Add,
+                    args: Args {
+                        rd: nz::a1.into(),
+                        rs1: nz::a1.into(),
+                        rs2: nz::a2.into(),
+                        ..Args::DEFAULT
+                    },
+                });
             }
         };
 

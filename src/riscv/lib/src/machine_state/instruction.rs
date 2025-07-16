@@ -13,16 +13,11 @@
 //! dispatching every time an instruction is run.
 
 mod constructors;
-pub(crate) mod tagged_instruction;
 
-use std::fmt;
 use std::fmt::Debug;
-use std::fmt::Formatter;
 
 use serde::Deserialize;
 use serde::Serialize;
-use tagged_instruction::ArgsShape;
-use tagged_instruction::opcode_to_argsshape;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -85,82 +80,14 @@ use crate::traps::Exception;
 /// This is preferred within the caches, as it enables 'pre-dispatch' of functions
 ///
 /// Instructions are constructable from [`InstrCacheable`] instructions.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct Instruction {
     /// The operation (over the machine state) that this instruction represents.
     pub opcode: OpCode,
+
     /// Arguments that are passed to the opcode-function. As a flat structure, it contains
     /// all possible arguments. Each instruction will only use a subset.
-    args: Args,
-}
-
-impl Debug for Instruction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        struct DebugArgs<'a>(&'a dyn Fn(&mut Formatter<'_>) -> fmt::Result);
-
-        impl Debug for DebugArgs<'_> {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                (self.0)(f)
-            }
-        }
-
-        let debug_args = |f: &mut Formatter<'_>| {
-            let mut debug_struct = f.debug_struct("Args");
-            match opcode_to_argsshape(&self.opcode) {
-                ArgsShape::XSrcXDest => {
-                    debug_struct.field("rd", &self.args.rd.x);
-                    debug_struct.field("rs1", &self.args.rs1.x);
-                    debug_struct.field("rs2", &self.args.rs2.x);
-                }
-                ArgsShape::FSrcFDest => {
-                    debug_struct.field("rd", &self.args.rd.f);
-                    debug_struct.field("rs1", &self.args.rs1.f);
-                    debug_struct.field("rs2", &self.args.rs2.f);
-                }
-                ArgsShape::XSrcFDest => {
-                    debug_struct.field("rd", &self.args.rd.f);
-                    debug_struct.field("rs1", &self.args.rs1.x);
-                    debug_struct.field("rs2", &self.args.rs2.x);
-                }
-                ArgsShape::FSrcXDest => {
-                    debug_struct.field("rd", &self.args.rd.x);
-                    debug_struct.field("rs1", &self.args.rs1.f);
-                    debug_struct.field("rs2", &self.args.rs2.f);
-                }
-                ArgsShape::XSrcFSrc => {
-                    debug_struct.field("rd", &self.args.rd.x);
-                    debug_struct.field("rs1", &self.args.rs1.x);
-                    debug_struct.field("rs2", &self.args.rs2.f);
-                }
-                ArgsShape::NZXSrcNZXDest => {
-                    debug_struct.field("rd", &self.args.rd.nzx);
-                    debug_struct.field("rs1", &self.args.rs1.nzx);
-                    debug_struct.field("rs2", &self.args.rs2.nzx);
-                }
-                ArgsShape::XSrcNZXDest => {
-                    debug_struct.field("rd", &self.args.rd.nzx);
-                    debug_struct.field("rs1", &self.args.rs1.x);
-                    debug_struct.field("rs2", &self.args.rs2.x);
-                }
-            }
-
-            debug_struct
-                .field("imm", &self.args.imm)
-                .field("csr", &self.args.csr)
-                .field("rs3f", &self.args.rs3f)
-                .field("rm", &self.args.rm)
-                .field("aq", &self.args.aq)
-                .field("rl", &self.args.rl)
-                .field("width", &self.args.width)
-                .finish()
-        };
-        let debug_args = DebugArgs(&debug_args);
-
-        f.debug_struct("Instruction")
-            .field("opcode", &self.opcode)
-            .field("args", &debug_args)
-            .finish()
-    }
+    pub args: Args,
 }
 
 impl Instruction {
@@ -2672,11 +2599,16 @@ impl From<&FCmpArgs> for Args {
 #[cfg(test)]
 mod test {
     use crate::backend_test;
+    use crate::default::ConstDefault;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::ProgramCounterUpdate;
+    use crate::machine_state::instruction::Args;
     use crate::machine_state::instruction::Instruction;
+    use crate::machine_state::instruction::OpCode;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::registers::FRegister;
     use crate::machine_state::registers::NonZeroXRegister;
+    use crate::machine_state::registers::XRegister;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
 
@@ -2736,4 +2668,102 @@ mod test {
             );
         }
     });
+
+    #[test]
+    fn test_miri_instruction_serde() {
+        let instr_xsrc_xdst = Instruction {
+            opcode: OpCode::Add,
+            args: Args {
+                rd: NonZeroXRegister::x1.into(),
+                rs1: NonZeroXRegister::x2.into(),
+                rs2: NonZeroXRegister::x2.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_xsrc_xdst_ser = bincode::serialize(&instr_xsrc_xdst).unwrap();
+        let instr_xsrc_xdst_de: Instruction = bincode::deserialize(&instr_xsrc_xdst_ser).unwrap();
+
+        assert_eq!(instr_xsrc_xdst, instr_xsrc_xdst_de);
+
+        let instr_fsrc_fdst = Instruction {
+            opcode: OpCode::Fadds,
+            args: Args {
+                rd: FRegister::f0.into(),
+                rs1: FRegister::f0.into(),
+                rs2: FRegister::f0.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_fsrc_fdst_ser = bincode::serialize(&instr_fsrc_fdst).unwrap();
+        let instr_fsrc_fdst_de: Instruction = bincode::deserialize(&instr_fsrc_fdst_ser).unwrap();
+
+        assert_eq!(instr_fsrc_fdst, instr_fsrc_fdst_de);
+
+        let instr_xsrc_fdst = Instruction {
+            opcode: OpCode::Flw,
+            args: Args {
+                rd: FRegister::f0.into(),
+                rs1: XRegister::x0.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_xsrc_fdst_ser = bincode::serialize(&instr_xsrc_fdst).unwrap();
+        let instr_xsrc_fdst_de: Instruction = bincode::deserialize(&instr_xsrc_fdst_ser).unwrap();
+
+        assert_eq!(instr_xsrc_fdst, instr_xsrc_fdst_de);
+
+        let instr_fsrc_xdst = Instruction {
+            opcode: OpCode::Feqs,
+            args: Args {
+                rd: XRegister::x0.into(),
+                rs1: FRegister::f0.into(),
+                rs2: FRegister::f0.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_fsrc_xdst_ser = bincode::serialize(&instr_fsrc_xdst).unwrap();
+        let instr_fsrc_xdst_de: Instruction = bincode::deserialize(&instr_fsrc_xdst_ser).unwrap();
+
+        assert_eq!(instr_fsrc_xdst, instr_fsrc_xdst_de);
+
+        let instr_xsrc_fsrc = Instruction {
+            opcode: OpCode::Fsw,
+            args: Args {
+                rs1: XRegister::x0.into(),
+                rs2: FRegister::f0.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_xsrc_fsrc_ser = bincode::serialize(&instr_xsrc_fsrc).unwrap();
+        let instr_xsrc_fsrc_de: Instruction = bincode::deserialize(&instr_xsrc_fsrc_ser).unwrap();
+
+        assert_eq!(instr_xsrc_fsrc, instr_xsrc_fsrc_de);
+
+        let instr_nzxsrc_nzxdest = Instruction {
+            opcode: OpCode::Jr,
+            args: Args {
+                rs1: NonZeroXRegister::x2.into(),
+                ..Args::DEFAULT
+            },
+        };
+
+        let instr_nzxsrc_nzxdest_ser = bincode::serialize(&instr_nzxsrc_nzxdest).unwrap();
+        let instr_nzxsrc_nzxdest_de: Instruction =
+            bincode::deserialize(&instr_nzxsrc_nzxdest_ser).unwrap();
+
+        assert_eq!(instr_nzxsrc_nzxdest, instr_nzxsrc_nzxdest_de);
+
+        // ensure width of all serialised instructions are the same
+        let ser_len = instr_xsrc_xdst_ser.len();
+        assert_eq!(instr_fsrc_fdst_ser.len(), ser_len);
+        assert_eq!(instr_xsrc_fdst_ser.len(), ser_len);
+        assert_eq!(instr_fsrc_xdst_ser.len(), ser_len);
+        assert_eq!(instr_xsrc_fsrc_ser.len(), ser_len);
+        assert_eq!(instr_nzxsrc_nzxdest_ser.len(), ser_len);
+    }
 }

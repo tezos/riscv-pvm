@@ -25,7 +25,7 @@ use crate::parser::instruction::UJTypeArgs;
 use crate::parser::split_x0;
 
 impl Instruction {
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for the [`OpCode::Add`].
+    /// Create a new [`Instruction`] for [`OpCode::Add`].
     pub(crate) fn new_add(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -44,7 +44,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::AddWord`].
+    /// Create a new [`Instruction`] for [`OpCode::AddWord`].
     pub(crate) fn new_add_word(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -63,7 +63,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::AddWordImmediate`].
+    /// Create a new [`Instruction`] for [`OpCode::AddWordImmediate`].
     pub(crate) fn new_add_word_immediate(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -82,7 +82,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for the [`OpCode::Sub`].
+    /// Create a new [`Instruction`] for [`OpCode::Sub`].
     pub(crate) fn new_sub(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -101,7 +101,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::SubWord`].
+    /// Create a new [`Instruction`] for [`OpCode::SubWord`].
     pub(crate) fn new_sub_word(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -120,7 +120,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for the [`OpCode::Neg`].
+    /// Create a new [`Instruction`] for [`OpCode::Neg`].
     pub(crate) fn new_neg(rd: NonZeroXRegister, rs2: NonZeroXRegister, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Neg,
@@ -133,7 +133,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Mv`].
+    /// Create a new [`Instruction`] for [`OpCode::Mv`].
     pub(crate) fn new_mv(rd: NonZeroXRegister, rs2: NonZeroXRegister, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Mv,
@@ -146,7 +146,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Li`].
+    /// Create a new [`Instruction`] for [`OpCode::Li`].
     pub(crate) fn new_li(rd: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Li,
@@ -159,7 +159,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for  [`OpCode::Nop`].
+    /// Create a new [`Instruction`] for [`OpCode::Nop`].
     pub(crate) fn new_nop(width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Nop,
@@ -170,8 +170,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::Unknown`].
+    /// Create a new [`Instruction`] for [`OpCode::Unknown`].
     pub(crate) fn new_unknown(width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Unknown,
@@ -182,7 +181,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Addi`].
+    /// Create a new [`Instruction`] for [`OpCode::Addi`].
     pub(crate) fn new_addi(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -201,7 +200,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Andi`].
+    /// Create a new [`Instruction`] for [`OpCode::Andi`].
     pub(crate) fn new_andi(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -220,7 +219,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64OrImm`].
+    /// Create a new [`Instruction`] for [`OpCode::X64OrImm`].
     pub(crate) fn new_x64_or_immediate(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -239,7 +238,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64XorImm`].
+    /// Create a new [`Instruction`] for [`OpCode::X64XorImm`].
     pub(crate) fn new_x64_xor_immediate(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -258,7 +257,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftLeftImmediate`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftLeftImmediate`].
     pub(crate) fn new_shift_left_immediate(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -277,7 +276,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftRightImmediateUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftRightImmediateUnsigned`].
     pub(crate) fn new_shift_right_immediate_unsigned(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -296,7 +295,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftRightImmediateSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftRightImmediateSigned`].
     pub(crate) fn new_shift_right_immediate_signed(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -315,7 +314,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftLeft`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftLeft`].
     pub(crate) fn new_x32_shift_left(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -334,7 +333,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftRightUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftRightUnsigned`].
     pub(crate) fn new_x32_shift_right_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -353,7 +352,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftRightSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftRightSigned`].
     pub(crate) fn new_x32_shift_right_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -372,7 +371,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftLeftImm`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftLeftImm`].
     pub(crate) fn new_x32_shift_left_immediate(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -391,7 +390,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftRightImmUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftRightImmUnsigned`].
     pub(crate) fn new_x32_shift_right_immediate_unsigned(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -410,7 +409,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32ShiftRightImmSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32ShiftRightImmSigned`].
     pub(crate) fn new_x32_shift_right_immediate_signed(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -429,8 +428,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::SetLessThanSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::SetLessThanSigned`].
     pub(crate) fn new_set_less_than_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -448,7 +446,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::SetLessThanUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::SetLessThanUnsigned`].
     pub(crate) fn new_set_less_than_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -466,7 +464,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::SetLessThanImmediateSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::SetLessThanImmediateSigned`].
     pub(crate) fn new_set_less_than_immediate_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -484,7 +482,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::SetLessThanImmediateUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::SetLessThanImmediateUnsigned`].
     pub(crate) fn new_set_less_than_immediate_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -502,7 +500,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::And`].
+    /// Create a new [`Instruction`] for [`OpCode::And`].
     pub(crate) fn new_and(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -521,7 +519,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Or`].
+    /// Create a new [`Instruction`] for [`OpCode::Or`].
     pub(crate) fn new_or(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -540,7 +538,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64Xor`].
+    /// Create a new [`Instruction`] for [`OpCode::X64Xor`].
     pub(crate) fn new_x64_xor(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -559,7 +557,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftLeft`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftLeft`].
     pub(crate) fn new_shift_left(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -578,7 +576,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftRightUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftRightUnsigned`].
     pub(crate) fn new_shift_right_unsigned(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -597,7 +595,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ShiftRightSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::ShiftRightSigned`].
     pub(crate) fn new_shift_right_signed(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -616,7 +614,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JumpPC`].
+    /// Create a new [`Instruction`] for [`OpCode::JumpPC`].
     pub(crate) fn new_jump_pc(imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::JumpPC,
@@ -628,7 +626,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JumpAndLinkPC`].
+    /// Create a new [`Instruction`] for [`OpCode::JumpAndLinkPC`].
     pub(crate) fn new_jump_and_link_pc(rd: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::JumpAndLinkPC,
@@ -641,8 +639,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchEqual`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchEqual`].
     pub(crate) fn new_branch_equal(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -661,8 +658,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchEqualZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchEqualZero`].
     pub(crate) fn new_branch_equal_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -679,8 +675,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchNotEqual`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchNotEqual`].
     pub(crate) fn new_branch_not_equal(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -699,8 +694,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchNotEqualZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchNotEqualZero`].
     pub(crate) fn new_branch_not_equal_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -717,7 +711,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JAbsolute`].
+    /// Create a new [`Instruction`] for [`OpCode::JAbsolute`].
     pub(crate) fn new_j_absolute(imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::JAbsolute,
@@ -729,7 +723,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JalrImm`].
+    /// Create a new [`Instruction`] for [`OpCode::JalrImm`].
     pub(crate) fn new_jalr_imm(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -748,7 +742,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JalrAbsolute`].
+    /// Create a new [`Instruction`] for [`OpCode::JalrAbsolute`].
     pub(crate) fn new_jalr_absolute(rd: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::JalrAbsolute,
@@ -761,7 +755,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::JrImm`].
+    /// Create a new [`Instruction`] for [`OpCode::JrImm`].
     pub(crate) fn new_jr_imm(rs1: NonZeroXRegister, imm: i64, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::JrImm,
@@ -774,7 +768,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Jr`].
+    /// Create a new [`Instruction`] for [`OpCode::Jr`].
     pub(crate) fn new_jr(rs1: NonZeroXRegister, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Jr,
@@ -786,7 +780,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Jalr`].
+    /// Create a new [`Instruction`] for [`OpCode::Jalr`].
     pub(crate) fn new_jalr(rd: NonZeroXRegister, rs1: NonZeroXRegister, width: InstrWidth) -> Self {
         Self {
             opcode: OpCode::Jalr,
@@ -799,7 +793,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64LoadSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64LoadSigned`].
     pub(crate) fn new_x64_load_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -818,7 +812,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64Store`].
+    /// Create a new [`Instruction`] for [`OpCode::X64Store`].
     pub(crate) fn new_x64_store(
         rs1: XRegister,
         rs2: XRegister,
@@ -837,7 +831,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32LoadSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32LoadSigned`].
     pub(crate) fn new_x32_load_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -856,7 +850,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32LoadUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32LoadUnsigned`].
     pub(crate) fn new_x32_load_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -875,7 +869,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32Store`].
+    /// Create a new [`Instruction`] for [`OpCode::X32Store`].
     pub(crate) fn new_x32_store(
         rs1: XRegister,
         rs2: XRegister,
@@ -894,7 +888,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X16LoadSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X16LoadSigned`].
     pub(crate) fn new_x16_load_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -913,7 +907,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X16LoadUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X16LoadUnsigned`].
     pub(crate) fn new_x16_load_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -932,7 +926,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X16Store`].
+    /// Create a new [`Instruction`] for [`OpCode::X16Store`].
     pub(crate) fn new_x16_store(
         rs1: XRegister,
         rs2: XRegister,
@@ -951,7 +945,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X8LoadSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X8LoadSigned`].
     pub(crate) fn new_x8_load_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -970,7 +964,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X8LoadUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X8LoadUnsigned`].
     pub(crate) fn new_x8_load_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -989,7 +983,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X8Store`].
+    /// Create a new [`Instruction`] for [`OpCode::X8Store`].
     pub(crate) fn new_x8_store(
         rs1: XRegister,
         rs2: XRegister,
@@ -1008,8 +1002,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchLessThanSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchLessThanSigned`].
     pub(crate) fn new_branch_less_than_signed(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -1028,8 +1021,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchLessThanZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchLessThanZero`].
     pub(crate) fn new_branch_less_than_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -1046,8 +1038,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchLessThanOrEqualZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchLessThanOrEqualZero`].
     pub(crate) fn new_branch_less_than_or_equal_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -1064,8 +1055,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchGreaterThanOrEqualSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchGreaterThanOrEqualSigned`].
     pub(crate) fn new_branch_greater_than_or_equal_signed(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -1084,8 +1074,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchGreaterThanOrEqualZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchGreaterThanOrEqualZero`].
     pub(crate) fn new_branch_greater_than_or_equal_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -1102,8 +1091,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchGreaterThanZero`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchGreaterThanZero`].
     pub(crate) fn new_branch_greater_than_zero(
         rs1: NonZeroXRegister,
         imm: i64,
@@ -1120,8 +1108,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchLessThanUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchLessThanUnsigned`].
     pub(crate) fn new_branch_less_than_unsigned(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -1140,8 +1127,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for
-    /// [`OpCode::BranchGreaterThanOrEqualUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::BranchGreaterThanOrEqualUnsigned`].
     pub(crate) fn new_branch_greater_than_or_equal_unsigned(
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
@@ -1160,7 +1146,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::AddImmediateToPC`].
+    /// Create a new [`Instruction`] for [`OpCode::AddImmediateToPC`].
     pub(crate) fn new_add_immediate_to_pc(
         rd: NonZeroXRegister,
         imm: i64,
@@ -1177,7 +1163,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Mul`].
+    /// Create a new [`Instruction`] for [`OpCode::Mul`].
     pub(crate) fn new_mul(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -1196,7 +1182,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32Mul`].
+    /// Create a new [`Instruction`] for [`OpCode::X32Mul`].
     pub(crate) fn new_x32_mul(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1215,7 +1201,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64MulHighSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64MulHighSigned`].
     pub(crate) fn new_x64_mul_high_signed(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -1234,7 +1220,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64MulHighSignedUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64MulHighSignedUnsigned`].
     pub(crate) fn new_x64_mul_high_signed_unsigned(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -1253,7 +1239,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64MulHighUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64MulHighUnsigned`].
     pub(crate) fn new_x64_mul_high_unsigned(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
@@ -1272,7 +1258,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64DivSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64DivSigned`].
     pub(crate) fn new_x64_div_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1291,7 +1277,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64DivUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64DivUnsigned`].
     pub(crate) fn new_x64_div_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1310,7 +1296,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32DivSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32DivSigned`].
     pub(crate) fn new_x32_div_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1329,7 +1315,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32DivUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32DivUnsigned`].
     pub(crate) fn new_x32_div_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1348,7 +1334,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::ECall`].
+    /// Create a new [`Instruction`] for [`OpCode::ECall`].
     pub(crate) fn new_ecall() -> Self {
         Self {
             opcode: OpCode::ECall,
@@ -1359,7 +1345,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::Fadds`].
+    /// Create a new [`Instruction`] for [`OpCode::Fadds`].
     /// The fadds instruction has not been lowered yet, and this function is only used for testing.
     #[cfg(test)]
     pub(crate) fn new_fadds(
@@ -1380,7 +1366,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicAdd`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicAdd`].
     pub(crate) fn new_x64_atomic_add(
         rd: XRegister,
         rs1: XRegister,
@@ -1403,7 +1389,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicAnd`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicAnd`].
     pub(crate) fn new_x64_atomic_and(
         rd: XRegister,
         rs1: XRegister,
@@ -1426,7 +1412,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicOr`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicOr`].
     pub(crate) fn new_x64_atomic_or(
         rd: XRegister,
         rs1: XRegister,
@@ -1449,7 +1435,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicXor`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicXor`].
     pub(crate) fn new_x64_atomic_xor(
         rd: XRegister,
         rs1: XRegister,
@@ -1472,7 +1458,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicMinSigned`].
     pub(crate) fn new_x64_atomic_min_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1495,7 +1481,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMinUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicMinUnsigned`].
     pub(crate) fn new_x64_atomic_min_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1518,7 +1504,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMaxSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicMaxSigned`].
     pub(crate) fn new_x64_atomic_max_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1541,7 +1527,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicMaxUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicMaxUnsigned`].
     pub(crate) fn new_x64_atomic_max_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1564,7 +1550,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMinSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicMinSigned`].
     pub(crate) fn new_x32_atomic_min_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1587,7 +1573,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMinUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicMinUnsigned`].
     pub(crate) fn new_x32_atomic_min_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1610,7 +1596,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMaxSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicMaxSigned`].
     pub(crate) fn new_x32_atomic_max_signed(
         rd: XRegister,
         rs1: XRegister,
@@ -1633,7 +1619,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicMaxUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicMaxUnsigned`].
     pub(crate) fn new_x32_atomic_max_unsigned(
         rd: XRegister,
         rs1: XRegister,
@@ -1656,7 +1642,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicLoad`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicLoad`].
     pub(crate) fn new_x32_atomic_load(
         rd: XRegister,
         rs1: XRegister,
@@ -1677,7 +1663,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicStore`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicStore`].
     pub(crate) fn new_x32_atomic_store(
         rd: XRegister,
         rs1: XRegister,
@@ -1700,7 +1686,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicLoad`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicLoad`].
     pub(crate) fn new_x64_atomic_load(
         rd: XRegister,
         rs1: XRegister,
@@ -1721,7 +1707,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicStore`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicStore`].
     pub(crate) fn new_x64_atomic_store(
         rd: XRegister,
         rs1: XRegister,
@@ -1744,7 +1730,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicAdd`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicAdd`].
     pub(crate) fn new_x32_atomic_add(
         rd: XRegister,
         rs1: XRegister,
@@ -1767,7 +1753,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicXor`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicXor`].
     pub(crate) fn new_x32_atomic_xor(
         rd: XRegister,
         rs1: XRegister,
@@ -1790,7 +1776,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicAnd`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicAnd`].
     pub(crate) fn new_x32_atomic_and(
         rd: XRegister,
         rs1: XRegister,
@@ -1813,7 +1799,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicOr`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicOr`].
     pub(crate) fn new_x32_atomic_or(
         rd: XRegister,
         rs1: XRegister,
@@ -1854,7 +1840,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64RemUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X64RemUnsigned`].
     pub(crate) fn new_x64_rem_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1873,7 +1859,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32RemSigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32RemSigned`].
     pub(crate) fn new_x32_rem_signed(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1892,7 +1878,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32RemUnsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::X32RemUnsigned`].
     pub(crate) fn new_x32_rem_unsigned(
         rd: NonZeroXRegister,
         rs1: XRegister,
@@ -1911,7 +1897,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X32AtomicSwap`].
+    /// Create a new [`Instruction`] for [`OpCode::X32AtomicSwap`].
     pub(crate) fn new_x32_atomic_swap(
         rd: XRegister,
         rs1: XRegister,
@@ -1934,7 +1920,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::X64AtomicSwap`].
+    /// Create a new [`Instruction`] for [`OpCode::X64AtomicSwap`].
     pub(crate) fn new_x64_atomic_swap(
         rd: XRegister,
         rs1: XRegister,
@@ -1957,7 +1943,7 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] with the appropriate [`super::ArgsShape`] for [`OpCode::F64FromX64Unsigned`].
+    /// Create a new [`Instruction`] for [`OpCode::F64FromX64Unsigned`].
     pub(crate) fn new_f64_from_x64_unsigned(
         rd: FRegister,
         rs1: XRegister,
