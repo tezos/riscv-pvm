@@ -5,8 +5,8 @@
 use std::error::Error;
 use std::path::Path;
 
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
+use base64::Engine;
 use bincode::config::Configuration;
 use bincode::config::Fixint;
 use bincode::config::LittleEndian;

@@ -45,22 +45,22 @@ git fetch --quiet --depth 1 origin "+$ref"
 git checkout --quiet FETCH_HEAD
 
 # Build prerequisites ahead of time
-nix develop --command make -C src/riscv/jstz build-kernel &>/dev/null
+nix develop --command make -C kernels/jstz build-kernel &>/dev/null
 
 # Generate inbox file for benchmark runs
 inbox_file=$(mktemp)
-nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.toml --bin inbox-bench -- generate --transfers "$NUM_TXS" --inbox-file "$inbox_file"
+nix develop --command cargo run --quiet --manifest-path kernels/jstz/Cargo.toml --bin inbox-bench -- generate --transfers "$NUM_TXS" --inbox-file "$inbox_file"
 
 # Run the benchmark
 result_dir=$(mktemp -d)
 result_args=()
 for i in $(seq 1 $NUM_ITERS); do 
-  nix develop --command cargo run --release --quiet --manifest-path src/riscv/Cargo.toml --bin riscv-sandbox -- run --input src/riscv/jstz/target/riscv64gc-unknown-linux-musl/release/jstz --inbox-file "$inbox_file" --timings > $result_dir/$i.json
+  nix develop --command cargo run --release --quiet --manifest-path src/riscv/Cargo.toml --bin riscv-sandbox -- run --input kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz --inbox-file "$inbox_file" --timings > $result_dir/$i.json
   result_args+=("--log-file=$result_dir/$i.json")
 done
 
 # Collect results and display them
-nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.toml --bin inbox-bench -- results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}"
+nix develop --command cargo run --quiet --manifest-path kernels/jstz/Cargo.toml --bin inbox-bench -- results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}"
 
 # Clean up
 rm -rf "$inbox_file" "$dir" "$result_dir"
