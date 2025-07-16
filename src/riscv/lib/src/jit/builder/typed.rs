@@ -47,7 +47,7 @@ impl Type {
 }
 
 /// Trait for types that can be represented in Cranelift IR
-pub trait Typed {
+pub trait Typed: Sized {
     const TYPE: Type;
 }
 
@@ -154,6 +154,18 @@ impl<T> Value<T> {
 
         // SAFETY: `f` must produce a Cranelift value of type `T`.
         unsafe { Value::<T>::from_raw(raw) }
+    }
+
+    /// Cast this value to a different type `U`.
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that the type `U` is compatible with the underlying Cranelift value.
+    pub unsafe fn cast<U>(self) -> Value<U> {
+        Value {
+            value: self.value,
+            _pd: PhantomData,
+        }
     }
 }
 
