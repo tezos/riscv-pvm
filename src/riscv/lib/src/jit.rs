@@ -965,7 +965,6 @@ mod tests {
     fn test_x32_mul() {
         use crate::machine_state::registers::a0;
         use crate::machine_state::registers::a1;
-        use crate::machine_state::registers::a2;
 
         let test_x32_mul = |value1: i64,
                             value2: i64,
@@ -976,7 +975,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(nz::a0, value1, instruction_width),
                     I::new_li(nz::a1, value2, instruction_width),
-                    I::new_x32_mul(a2, a0, a1, instruction_width),
+                    I::new_x32_mul(nz::a2, a0, a1, instruction_width),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a2), expected_result);

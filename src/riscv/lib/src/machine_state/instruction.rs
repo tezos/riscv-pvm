@@ -13,17 +13,11 @@
 //! dispatching every time an instruction is run.
 
 mod constructors;
-pub(crate) mod tagged_instruction;
 
-use std::fmt;
 use std::fmt::Debug;
-use std::fmt::Formatter;
 
 use serde::Deserialize;
 use serde::Serialize;
-use tagged_instruction::ArgsShape;
-use tagged_instruction::TaggedInstruction;
-use tagged_instruction::opcode_to_argsshape;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -86,86 +80,14 @@ use crate::traps::Exception;
 /// This is preferred within the caches, as it enables 'pre-dispatch' of functions
 ///
 /// Instructions are constructable from [`InstrCacheable`] instructions.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(try_from = "TaggedInstruction", into = "TaggedInstruction")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct Instruction {
     /// The operation (over the machine state) that this instruction represents.
     pub opcode: OpCode,
+
     /// Arguments that are passed to the opcode-function. As a flat structure, it contains
     /// all possible arguments. Each instruction will only use a subset.
-    args: Args,
-}
-
-impl Debug for Instruction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        struct DebugArgs<'a>(&'a dyn Fn(&mut Formatter<'_>) -> fmt::Result);
-
-        impl Debug for DebugArgs<'_> {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                (self.0)(f)
-            }
-        }
-
-        let debug_args = |f: &mut Formatter<'_>| {
-            let mut debug_struct = f.debug_struct("Args");
-            // SAFETY: The variants used are validated on construction and deserialisation
-            // to be the opcode's associated register types, so this is safe.
-            unsafe {
-                match opcode_to_argsshape(&self.opcode) {
-                    ArgsShape::XSrcXDest => {
-                        debug_struct.field("rd", &self.args.rd.x);
-                        debug_struct.field("rs1", &self.args.rs1.x);
-                        debug_struct.field("rs2", &self.args.rs2.x);
-                    }
-                    ArgsShape::FSrcFDest => {
-                        debug_struct.field("rd", &self.args.rd.f);
-                        debug_struct.field("rs1", &self.args.rs1.f);
-                        debug_struct.field("rs2", &self.args.rs2.f);
-                    }
-                    ArgsShape::XSrcFDest => {
-                        debug_struct.field("rd", &self.args.rd.f);
-                        debug_struct.field("rs1", &self.args.rs1.x);
-                        debug_struct.field("rs2", &self.args.rs2.x);
-                    }
-                    ArgsShape::FSrcXDest => {
-                        debug_struct.field("rd", &self.args.rd.x);
-                        debug_struct.field("rs1", &self.args.rs1.f);
-                        debug_struct.field("rs2", &self.args.rs2.f);
-                    }
-                    ArgsShape::XSrcFSrc => {
-                        debug_struct.field("rd", &self.args.rd.x);
-                        debug_struct.field("rs1", &self.args.rs1.x);
-                        debug_struct.field("rs2", &self.args.rs2.f);
-                    }
-                    ArgsShape::NZXSrcNZXDest => {
-                        debug_struct.field("rd", &self.args.rd.nzx);
-                        debug_struct.field("rs1", &self.args.rs1.nzx);
-                        debug_struct.field("rs2", &self.args.rs2.nzx);
-                    }
-                    ArgsShape::XSrcNZXDest => {
-                        debug_struct.field("rd", &self.args.rd.nzx);
-                        debug_struct.field("rs1", &self.args.rs1.x);
-                        debug_struct.field("rs2", &self.args.rs2.x);
-                    }
-                }
-            }
-            debug_struct
-                .field("imm", &self.args.imm)
-                .field("csr", &self.args.csr)
-                .field("rs3f", &self.args.rs3f)
-                .field("rm", &self.args.rm)
-                .field("aq", &self.args.aq)
-                .field("rl", &self.args.rl)
-                .field("width", &self.args.width)
-                .finish()
-        };
-        let debug_args = DebugArgs(&debug_args);
-
-        f.debug_struct("Instruction")
-            .field("opcode", &self.opcode)
-            .field("args", &debug_args)
-            .finish()
-    }
+    pub args: Args,
 }
 
 impl Instruction {
@@ -187,14 +109,13 @@ impl ConstDefault for Instruction {
     };
 }
 
-/// alias for the function signature of an instruction run.
+/// Type alias for the function signature of an instruction execution function.
 ///
-/// SAFETY: This function must be called with an `Args` belonging to the same `OpCode` as
-/// the one used to dispatch this function.
-pub type RunInstr<MC, M> = unsafe fn(
-    &Args,
-    &mut MachineCoreState<MC, M>,
-) -> Result<ProgramCounterUpdate<Address>, Exception>;
+/// These functions take instruction arguments and a mutable reference to the machine state,
+/// and return either a program counter update or an exception. The `Args` parameter must
+/// correspond to the same `OpCode` as the one used to dispatch this function.
+pub type RunInstr<MC, M> =
+    fn(&Args, &mut MachineCoreState<MC, M>) -> Result<ProgramCounterUpdate<Address>, Exception>;
 
 /// Opcodes map to the operation performed over the state - allowing us to
 /// decouple these from the parsed instructions down the line.
@@ -419,10 +340,6 @@ pub enum OpCode {
 
 impl OpCode {
     /// Dispatch an opcode to the function that will run over the machine state.
-    ///
-    /// # SAFETY
-    /// Calling the returned function **must** correspond to an `Args` belonging to an
-    /// instruction where the `OpCode` is the same as the `OpCode` of the current instruction.
     #[inline(always)]
     pub(super) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
         match self {
@@ -611,10 +528,6 @@ impl OpCode {
     /// TODO (RV-394): this can be removed once all opcodes are supported, with [`OpCode::to_run`] being
     /// used instead.
     ///
-    /// # SAFETY
-    /// Calling the returned function **must** correspond to an `Args` belonging to an
-    /// instruction where the `OpCode` is the same as the `OpCode` of the current instruction.
-    ///
     /// [InstructionContextBuilder]: ICB
     #[inline(always)]
     pub(crate) fn to_lowering<I: ICB>(self) -> Option<IcbLoweringFn<I>> {
@@ -750,15 +663,13 @@ impl Instruction {
         &self,
         core: &mut MachineCoreState<MC, M>,
     ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-        // SAFETY: Unsafe accesses in this function are due to using the [Register] union,
-        // which is safe as the registers used are validated against the opcode.
-        unsafe { (self.opcode.to_run())(&self.args, core) }
+        (self.opcode.to_run())(&self.args, core)
     }
 }
 
-/// A union of the X and F registers, which are both represented as u8.
-#[derive(Clone, Copy)]
-pub union Register {
+/// A struct containing X and F registers, along with a non-zero X register variant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Register {
     pub x: XRegister,
     pub f: FRegister,
     pub nzx: NonZeroXRegister,
@@ -766,43 +677,37 @@ pub union Register {
 
 impl ConstDefault for Register {
     const DEFAULT: Self = Self {
+        x: XRegister::x1,
+        f: FRegister::f0,
         nzx: NonZeroXRegister::x1,
     };
 }
 
 impl From<XRegister> for Register {
     fn from(x: XRegister) -> Self {
-        Self { x }
+        Self { x, ..Self::DEFAULT }
     }
 }
 
 impl From<FRegister> for Register {
     fn from(f: FRegister) -> Self {
-        Self { f }
+        Self { f, ..Self::DEFAULT }
     }
 }
 
 impl From<NonZeroXRegister> for Register {
     fn from(nzx: NonZeroXRegister) -> Self {
-        Self { nzx }
-    }
-}
-
-impl PartialEq for Register {
-    fn eq(&self, other: &Self) -> bool {
-        // SAFETY: XRegister and FRegister are the same size as u8 and directly mappable to it.
-        unsafe {
-            std::mem::transmute::<&Self, &u8>(self) == std::mem::transmute::<&Self, &u8>(other)
+        Self {
+            nzx,
+            ..Self::DEFAULT
         }
     }
 }
 
-impl Eq for Register {}
-
 /// Contains all possible arguments used by opcode-functions.
 ///
 /// Each opcode will only touch a subset of these.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Args {
     pub rd: Register,
     pub rs1: Register,
@@ -833,90 +738,57 @@ impl ConstDefault for Args {
 
 macro_rules! impl_r_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .xregisters
-                .$fn(unsafe { self.rs1.x }, unsafe { self.rs2.x }, unsafe {
-                    self.rd.x
-                });
+            core.hart.xregisters.$fn(self.rs1.x, self.rs2.x, self.rd.x);
             Ok(Next(self.width))
         }
     };
 
     ($fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
                 .xregisters
-                .$fn(unsafe { self.rs1.nzx }, unsafe { self.rs2.nzx }, unsafe {
-                    self.rd.nzx
-                });
+                .$fn(self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
             Ok(Next(self.width))
         }
     };
 
     ($fn: ident, non_zero_rd) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
                 .xregisters
-                .$fn(unsafe { self.rs1.x }, unsafe { self.rs2.x }, unsafe {
-                    self.rd.nzx
-                });
+                .$fn(self.rs1.x, self.rs2.x, self.rd.nzx);
             Ok(Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(
-                icb,
-                unsafe { self.rs1.nzx },
-                unsafe { self.rs2.nzx },
-                unsafe { self.rd.nzx },
-            );
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
             let pcu = ProgramCounterUpdate::Next(self.width);
             icb.ok(pcu)
         }
     };
 
     ($impl: path, $fn: ident, non_zero_rd) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(icb, unsafe { self.rs1.x }, unsafe { self.rs2.x }, unsafe {
-                self.rd.nzx
-            });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.rs1.x, self.rs2.x, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
 
     ($fn: ident, $shift: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            integer::run_shift(
-                icb,
-                Shift::$shift,
-                unsafe { self.rs1.nzx },
-                unsafe { self.rs2.nzx },
-                unsafe { self.rd.nzx },
-            );
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            integer::run_shift(icb, Shift::$shift, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
@@ -924,23 +796,19 @@ macro_rules! impl_r_type {
 
 macro_rules! impl_x32_shift_type {
     ($shift: ident, $fn: ident, reg) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let rs1 = unsafe { self.rs1.x };
-            let rs2 = unsafe { self.rs2.x };
-            let rd = unsafe { self.rd.nzx };
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let rs1 = self.rs1.x;
+            let rs2 = self.rs2.x;
+            let rd = self.rd.nzx;
             integer::run_x32_shift(icb, Shift::$shift, rs1, rs2, rd);
             icb.ok(Next(self.width))
         }
     };
 
     ($shift: ident, $fn: ident, imm) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let rs1 = unsafe { self.rs1.nzx };
-            let rd = unsafe { self.rd.nzx };
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let rs1 = self.rs1.nzx;
+            let rd = self.rd.nzx;
             integer::run_x32_shift_immediate(icb, Shift::$shift, rs1, self.imm, rd);
             icb.ok(Next(self.width))
         }
@@ -949,14 +817,12 @@ macro_rules! impl_x32_shift_type {
 
 macro_rules! impl_x64_mul_high_type {
     ($fn: ident, $mul_high_type: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             integer::run_x64_mul_high(
                 icb,
-                unsafe { self.rs1.nzx },
-                unsafe { self.rs2.nzx },
-                unsafe { self.rd.nzx },
+                self.rs1.nzx,
+                self.rs2.nzx,
+                self.rd.nzx,
                 MulHighType::$mul_high_type,
             );
             icb.ok(Next(self.width))
@@ -966,60 +832,44 @@ macro_rules! impl_x64_mul_high_type {
 
 macro_rules! impl_i_type {
     ($fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
                 .xregisters
-                .$fn(self.imm, unsafe { self.rs1.nzx }, unsafe { self.rd.nzx });
+                .$fn(self.imm, self.rs1.nzx, self.rd.nzx);
             Ok(Next(self.width))
         }
     };
 
     ($fn: ident, non_zero_rd) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .xregisters
-                .$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rd.nzx });
+            core.hart.xregisters.$fn(self.imm, self.rs1.x, self.rd.nzx);
             Ok(Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(icb, self.imm, unsafe { self.rs1.nzx }, unsafe {
-                self.rd.nzx
-            });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.imm, self.rs1.nzx, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident, non_zero_rd) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(icb, self.imm, unsafe { self.rs1.x }, unsafe { self.rd.nzx });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.imm, self.rs1.x, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
 
     ($fn: ident, $shift: path) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            integer::run_shift_immediate(icb, $shift, self.imm, unsafe { self.rs1.nzx }, unsafe {
-                self.rd.nzx
-            });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            integer::run_shift_immediate(icb, $shift, self.imm, self.rs1.nzx, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
@@ -1027,38 +877,29 @@ macro_rules! impl_i_type {
 
 macro_rules! impl_fload_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rd.f })
+            core.$fn(self.imm, self.rs1.x, self.rd.f)
                 .map(|_| Next(self.width))
         }
     };
 }
 macro_rules! impl_load_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rd.x })
+            core.$fn(self.imm, self.rs1.x, self.rd.x)
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn: ident, $value: ty) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res =
-                load_store::run_load::<$value, I>(icb, self.imm, unsafe { self.rs1.x }, unsafe {
-                    self.rd.x
-                });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = load_store::run_load::<$value, I>(icb, self.imm, self.rs1.x, self.rd.x);
             I::map(res, |_| Next(self.width))
         }
     };
@@ -1066,52 +907,40 @@ macro_rules! impl_load_type {
 
 macro_rules! impl_cfload_sp_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rd.f })
-                .map(|_| Next(self.width))
+            core.$fn(self.imm, self.rd.f).map(|_| Next(self.width))
         }
     };
 }
 
 macro_rules! impl_store_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rs2.x })
+            core.$fn(self.imm, self.rs1.x, self.rs2.x)
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn: ident, $value: ty) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res =
-                load_store::run_store::<$value, I>(icb, self.imm, unsafe { self.rs1.x }, unsafe {
-                    self.rs2.x
-                });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = load_store::run_store::<$value, I>(icb, self.imm, self.rs1.x, self.rs2.x);
             I::map(res, |_| Next(self.width))
         }
     };
 }
 macro_rules! impl_fstore_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs1.x }, unsafe { self.rs2.f })
+            core.$fn(self.imm, self.rs1.x, self.rs2.f)
                 .map(|_| Next(self.width))
         }
     };
@@ -1119,15 +948,13 @@ macro_rules! impl_fstore_type {
 
 macro_rules! impl_branch {
     ($fn: ident, $predicate: expr) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let pcu = branching::run_branch(
                 icb,
                 $predicate,
                 self.imm,
-                unsafe { self.rs1.nzx },
-                unsafe { self.rs2.nzx },
+                self.rs1.nzx,
+                self.rs2.nzx,
                 self.width,
             );
             icb.ok(pcu)
@@ -1137,14 +964,12 @@ macro_rules! impl_branch {
 
 macro_rules! impl_branch_compare_zero {
     ($fn: ident, $predicate: expr) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let pcu = branching::run_branch_compare_zero(
                 icb,
                 $predicate,
                 self.imm,
-                unsafe { self.rs1.nzx },
+                self.rs1.nzx,
                 self.width,
             );
             icb.ok(pcu)
@@ -1154,17 +979,8 @@ macro_rules! impl_branch_compare_zero {
 
 macro_rules! impl_amo_type {
     ($impl: path, $fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res = $impl(
-                icb,
-                unsafe { self.rs1.x },
-                unsafe { self.rs2.x },
-                unsafe { self.rd.x },
-                self.rl,
-                self.aq,
-            );
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = $impl(icb, self.rs1.x, self.rs2.x, self.rd.x, self.rl, self.aq);
             I::map(res, |_| Next(self.width))
         }
     };
@@ -1172,34 +988,28 @@ macro_rules! impl_amo_type {
 
 macro_rules! impl_ci_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart.xregisters.$fn(self.imm, unsafe { self.rd.x });
+            core.hart.xregisters.$fn(self.imm, self.rd.x);
             Ok(ProgramCounterUpdate::Next(self.width))
         }
     };
 
     ($fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart.xregisters.$fn(self.imm, unsafe { self.rd.nzx });
+            core.hart.xregisters.$fn(self.imm, self.rd.nzx);
             Ok(ProgramCounterUpdate::Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident, non_zero) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(icb, self.imm, unsafe { self.rd.nzx });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.imm, self.rd.nzx);
             let pcu = ProgramCounterUpdate::Next(self.width);
             icb.ok(pcu)
         }
@@ -1208,10 +1018,8 @@ macro_rules! impl_ci_type {
 
 macro_rules! impl_cr_nz_type {
     ($impl: path, $fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            $impl(icb, unsafe { self.rd.nzx }, unsafe { self.rs2.nzx });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            $impl(icb, self.rd.nzx, self.rs2.nzx);
             let pcu = ProgramCounterUpdate::Next(self.width);
             icb.ok(pcu)
         }
@@ -1220,28 +1028,23 @@ macro_rules! impl_cr_nz_type {
 
 macro_rules! impl_fcss_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.$fn(self.imm, unsafe { self.rs2.f })
-                .map(|_| Next(self.width))
+            core.$fn(self.imm, self.rs2.f).map(|_| Next(self.width))
         }
     };
 }
 
 macro_rules! impl_csr_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(self.csr, unsafe { self.rs1.x }, unsafe { self.rd.x })
+                .$fn(self.csr, self.rs1.x, self.rd.x)
                 .map(|_| Next(self.width))
         }
     };
@@ -1249,14 +1052,12 @@ macro_rules! impl_csr_type {
 
 macro_rules! impl_csr_imm_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(self.csr, self.imm as u64, unsafe { self.rd.x })
+                .$fn(self.csr, self.imm as u64, self.rd.x)
                 .map(|_| Next(self.width))
         }
     };
@@ -1264,36 +1065,30 @@ macro_rules! impl_csr_imm_type {
 
 macro_rules! impl_f_x_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.x }, unsafe { self.rd.f })
+                .$fn(self.rs1.x, self.rd.f)
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn:ident, rm) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.x }, self.rm, unsafe { self.rd.f })
+                .$fn(self.rs1.x, self.rm, self.rd.f)
                 .map(|_| Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res = $impl(icb, unsafe { self.rs1.x }, self.rm, unsafe { self.rd.f });
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = $impl(icb, self.rs1.x, self.rm, self.rd.f);
             I::map(res, |_| Next(self.width))
         }
     };
@@ -1301,27 +1096,23 @@ macro_rules! impl_f_x_type {
 
 macro_rules! impl_x_f_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, unsafe { self.rd.x })
+                .$fn(self.rs1.f, self.rd.x)
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn:ident, rm) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, self.rm, unsafe { self.rd.x })
+                .$fn(self.rs1.f, self.rm, self.rd.x)
                 .map(|_| Next(self.width))
         }
     };
@@ -1329,53 +1120,45 @@ macro_rules! impl_x_f_type {
 
 macro_rules! impl_f_r_type {
     ($fn: ident) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, unsafe { self.rs2.f }, unsafe { self.rd.f })
+                .$fn(self.rs1.f , self.rs2.f , self.rd.f )
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn: ident, (rd, x)) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, unsafe { self.rs2.f }, unsafe { self.rd.x })
+                .$fn(self.rs1.f , self.rs2.f , self.rd.x )
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn: ident, rm) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, self.rm, unsafe { self.rd.f })
+                .$fn(self.rs1.f , self.rm, self.rd.f )
                 .map(|_| Next(self.width))
         }
     };
 
     ($fn: ident, (rs2, f), $($field: ident),+) => {
-        /// SAFETY: This function must only be called on an `Args` belonging
-        /// to the same OpCode as the OpCode used to derive this function.
-        unsafe fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
             core.hart
-                .$fn(unsafe { self.rs1.f }, unsafe { self.rs2.f }, $(self.$field,)* unsafe { self.rd.f })
+                .$fn(self.rs1.f , self.rs2.f , $(self.$field,)* self.rd.f )
                 .map(|_| Next(self.width))
         }
     };
@@ -1482,10 +1265,8 @@ impl Args {
     impl_branch_compare_zero!(run_branch_greater_than_zero, Predicate::GreaterThanSigned);
 
     // RV64I U-type instructions
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_add_immediate_to_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        branching::run_add_immediate_to_pc(icb, self.imm, unsafe { self.rd.nzx });
+    fn run_add_immediate_to_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        branching::run_add_immediate_to_pc(icb, self.imm, self.rd.nzx);
         icb.ok(Next(self.width))
     }
 
@@ -1660,59 +1441,47 @@ impl Args {
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let rs1 = unsafe { self.rs1.nzx };
+    fn run_jr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let rs1 = self.rs1.nzx;
         let addr = branching::run_jr(icb, rs1);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let rs1 = unsafe { self.rs1.nzx };
+    fn run_jr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let rs1 = self.rs1.nzx;
         let addr = branching::run_jr_imm(icb, self.imm, rs1);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jump_and_link_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+    fn run_jump_and_link_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         // link the return address to the program counter
-        let rd = unsafe { self.rd.nzx };
+        let rd = self.rd.nzx;
         branching::run_add_immediate_to_pc(icb, self.width as i64, rd);
 
         let pcu = ProgramCounterUpdate::Relative(self.imm);
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jalr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let rd = unsafe { self.rd.nzx };
-        let rs1 = unsafe { self.rs1.nzx };
+    fn run_jalr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let rd = self.rd.nzx;
+        let rs1 = self.rs1.nzx;
         let addr = branching::run_jalr(icb, rd, rs1, self.width);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jalr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let rs1 = unsafe { self.rs1.nzx };
-        let rd = unsafe { self.rd.nzx };
+    fn run_jalr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let rs1 = self.rs1.nzx;
+        let rd = self.rd.nzx;
         let addr = branching::run_jalr_imm(icb, self.imm, rs1, rd, self.width);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
     }
 
-    /// SAFETY: This function must only be called on an `Args` belonging
-    /// to the same OpCode as the OpCode used to derive this function.
-    unsafe fn run_jalr_absolute<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let rd = unsafe { self.rd.nzx };
+    fn run_jalr_absolute<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        let rd = self.rd.nzx;
         let addr = branching::run_jalr_absolute(icb, self.imm, rd, self.width);
         let pcu = ProgramCounterUpdate::Set(addr);
         icb.ok(pcu)
@@ -2075,9 +1844,7 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Mulh(args) => Instruction::from_ic_mulh(args),
             InstrCacheable::Mulhsu(args) => Instruction::from_ic_mulhsu(args),
             InstrCacheable::Mulhu(args) => Instruction::from_ic_mulhu(args),
-            InstrCacheable::Mulw(args) => {
-                Instruction::new_x32_mul(args.rd, args.rs1, args.rs2, InstrWidth::Uncompressed)
-            }
+            InstrCacheable::Mulw(args) => Instruction::from_ic_mulw(args),
 
             // RV64F instructions
             InstrCacheable::Flw(args) => Instruction {
@@ -2831,46 +2598,14 @@ impl From<&FCmpArgs> for Args {
 
 #[cfg(test)]
 mod test {
-    use super::Register;
     use crate::backend_test;
-    use crate::default::ConstDefault;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::ProgramCounterUpdate;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::registers::FRegister;
     use crate::machine_state::registers::NonZeroXRegister;
-    use crate::machine_state::registers::XRegister;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
-
-    // Ensure no undefined behaviour when reading any field from `Register::DEFAULT`
-    #[test]
-    #[cfg(miri)]
-    fn miri_test_register_default_safety() {
-        let default = Register::DEFAULT;
-
-        assert_eq!(XRegister::x1, unsafe { default.x });
-        assert_eq!(NonZeroXRegister::x1, unsafe { default.nzx });
-        // FRegisters are not offset by one as f0 is stored in state, unlike x0
-        assert_eq!(FRegister::f0, unsafe { default.f });
-    }
-
-    // The default register should be valid for all variants
-    #[test]
-    fn miri_test_register_default() {
-        let default = Register::DEFAULT;
-
-        assert!(default == Register { x: XRegister::x1 });
-        assert!(
-            default
-                == Register {
-                    nzx: NonZeroXRegister::x1
-                }
-        );
-        // FRegisters are not offset by one as f0 is stored in state, unlike x0
-        assert!(default == Register { f: FRegister::f0 });
-    }
 
     // Test that the run_jump_pc function produces a ProgramCounterUpdate::Relative
     // with the correct value, and that the PC does not change in the state.
@@ -2918,7 +2653,7 @@ mod test {
 
             state.hart.pc.write(init_pc);
             let jump = Instruction::new_jump_and_link_pc(rd, imm, width);
-            let pcupdate = unsafe { jump.args.run_jump_and_link_pc(&mut state) };
+            let pcupdate = jump.args.run_jump_and_link_pc(&mut state);
 
             assert_eq!(state.hart.pc.read(), init_pc);
             assert_eq!(pcupdate, res_pcupdate);

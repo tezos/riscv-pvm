@@ -614,13 +614,12 @@ mod tests {
     use super::block_cache::block::InterpretedBlockBuilder;
     use super::instruction::Instruction;
     use super::instruction::OpCode;
-    use super::instruction::tagged_instruction::TaggedArgs;
-    use super::instruction::tagged_instruction::TaggedInstruction;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::machine_state::block_cache::BlockCache;
     use crate::machine_state::block_cache::DefaultCacheConfig;
     use crate::machine_state::block_cache::TestCacheConfig;
+    use crate::machine_state::instruction::Args;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -887,16 +886,15 @@ mod tests {
 
         let uncompressed_bytes = 0x5307b3;
 
-        let uncompressed = Instruction::try_from(TaggedInstruction {
+        let uncompressed = Instruction {
             opcode: OpCode::Add,
-            args: TaggedArgs {
+            args: Args {
                 rd: nz::a5.into(),
                 rs1: nz::t1.into(),
                 rs2: nz::t0.into(),
-                ..TaggedArgs::DEFAULT
+                ..Args::DEFAULT
             },
-        })
-        .unwrap();
+        };
 
         let start_ram = memory::FIRST_ADDRESS;
 
@@ -949,38 +947,38 @@ mod tests {
 
         const CODE1_RESULT: u64 = 15358;
 
-        let code1_instrs: &[TaggedInstruction] = &[
-            TaggedInstruction {
+        let code1_instrs: &[Instruction] = &[
+            Instruction {
                 opcode: OpCode::Addi,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::a0.into(),
                     rs1: nz::a0.into(),
                     imm: 1,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::Li,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::t0.into(),
                     imm: 2,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::Mul,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::a0.into(),
                     rs1: nz::a0.into(),
                     rs2: nz::t0.into(),
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::JumpPC,
-                args: TaggedArgs {
+                args: Args {
                     imm: -12,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
         ];
@@ -994,38 +992,38 @@ mod tests {
 
         const CODE2_RESULT: u64 = 856209;
 
-        let code2_instrs: &[TaggedInstruction] = &[
-            TaggedInstruction {
+        let code2_instrs: &[Instruction] = &[
+            Instruction {
                 opcode: OpCode::Addi,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::a0.into(),
                     rs1: nz::a0.into(),
                     imm: 1,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::Li,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::t0.into(),
                     imm: 3,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::Mul,
-                args: TaggedArgs {
+                args: Args {
                     rd: nz::a0.into(),
                     rs1: nz::a0.into(),
                     rs2: nz::t0.into(),
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
-            TaggedInstruction {
+            Instruction {
                 opcode: OpCode::JumpPC,
-                args: TaggedArgs {
+                args: Args {
                     imm: -12,
-                    ..TaggedArgs::DEFAULT
+                    ..Args::DEFAULT
                 },
             },
         ];
@@ -1057,15 +1055,7 @@ mod tests {
             assert_eq!(param0, CODE1_RESULT);
 
             assert!(state.block_cache.get_block(0x100).is_some());
-            assert_eq!(
-                state
-                    .block_cache
-                    .get_block_instr(0x100)
-                    .into_iter()
-                    .map(From::from)
-                    .collect::<Vec<TaggedInstruction>>(),
-                code1_instrs
-            );
+            assert_eq!(state.block_cache.get_block_instr(0x100), code1_instrs);
         }
 
         // Replace the instructions in memory with different ones.
@@ -1094,15 +1084,7 @@ mod tests {
             assert_eq!(param0, CODE1_RESULT);
 
             assert!(state.block_cache.get_block(0x100).is_some());
-            assert_eq!(
-                state
-                    .block_cache
-                    .get_block_instr(0x100)
-                    .into_iter()
-                    .map(From::from)
-                    .collect::<Vec<TaggedInstruction>>(),
-                code1_instrs
-            );
+            assert_eq!(state.block_cache.get_block_instr(0x100), code1_instrs);
         }
 
         // Flush the block cache.
@@ -1124,15 +1106,7 @@ mod tests {
             assert_eq!(param0, CODE2_RESULT);
 
             assert!(state.block_cache.get_block(0x100).is_some());
-            assert_eq!(
-                state
-                    .block_cache
-                    .get_block_instr(0x100)
-                    .into_iter()
-                    .map(From::from)
-                    .collect::<Vec<TaggedInstruction>>(),
-                code2_instrs
-            );
+            assert_eq!(state.block_cache.get_block_instr(0x100), code2_instrs);
         }
     });
 }

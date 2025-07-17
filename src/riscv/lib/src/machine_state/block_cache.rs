@@ -153,7 +153,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICall<MC, M> {
         args: &Args,
         core: &mut MachineCoreState<MC, M>,
     ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-        unsafe { (self.run_instr)(args, core) }
+        (self.run_instr)(args, core)
     }
 }
 

@@ -71,8 +71,8 @@ ifneq ($(NATIVE_TARGET),)
 	@rustup target add $(NATIVE_TARGET)
 endif
 
-	# Install Nightly for formatting with its Rustfmt, and running Miri
-	@rustup toolchain install $(NIGHTLY_VERSION) -c rustfmt -c miri -c rust-src
+	# Install Nightly for formatting with its Rustfmt
+	@rustup toolchain install $(NIGHTLY_VERSION) -c rustfmt -c rust-src
 
 	# Iterate through all the toolchains. 'rustup show' (before Rustup 1.28) and
 	# 'rustup toolchain install' (Rustup 1.28+) will install the toolchain.
@@ -95,10 +95,6 @@ test: build
 .PHONY: test-long
 test-long:
 	@cargo test --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs -- test_jstz_determinism test_jstz_proofs_one_step --nocapture --ignored --test-threads=1
-
-.PHONY: test-miri
-test-miri:
-	@cargo +$(NIGHTLY_VERSION) miri test $(EXTRA_FLAGS) --lib -- miri
 
 .PHONY: coverage
 coverage:

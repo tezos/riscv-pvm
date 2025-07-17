@@ -38,7 +38,7 @@ jobs:
             make-target: check build audit
             title: Linux Checks
           - runs-on: ubuntu-latest
-            make-target: test test-long test-miri
+            make-target: test test-long
             title: Linux Tests
           - runs-on: macos-latest
             make-target: check build
