@@ -67,6 +67,9 @@ impl<const LEN: usize> Layout for DynArray<LEN> {
 #[macro_export]
 macro_rules! struct_layout {
     (
+        $(
+            #[$attributes:meta]
+        )*
         $vis:vis struct $layout_t:ident $(< $($param:ident),+ >)? {
             $($field_vis:vis $field_name:ident: $cell_repr:ty),+
             $(,)?
@@ -74,6 +77,9 @@ macro_rules! struct_layout {
     ) => {
         paste::paste! {
             #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq)]
+            $(
+                #[$attributes]
+            )*
             $vis struct [<$layout_t F>]<
                 $(
                     [<$field_name:camel>]
