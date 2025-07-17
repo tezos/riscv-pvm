@@ -41,7 +41,6 @@ use cranelift_module::ModuleResult;
 
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
-use crate::instruction_context::LoadStoreWidth;
 use crate::instruction_context::StoreLoadInt;
 use crate::interpreter::float::RoundRDN;
 use crate::interpreter::float::RoundRMM;
@@ -108,10 +107,6 @@ register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
     ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
-    memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
-    memory_store_u16 => (memory_store::<u16, MC>, AbiCall<4>::args),
-    memory_store_u32 => (memory_store::<u32, MC>, AbiCall<4>::args),
-    memory_store_u64 => (memory_store::<u64, MC>, AbiCall<4>::args),
     f64_from_x64_unsigned_dynamic => (
         f64_from_x64_unsigned_dynamic::<MC>,
         AbiCall<4>::args
@@ -228,10 +223,6 @@ extern "C" fn ecall<MC: MemoryConfig>(
 ///
 /// If the store fails (due to out of bouds etc) then an exception will be written
 /// to `exception_out` and `true` returned to indicate exception handling will be necessary.
-///
-/// # Panics
-///
-/// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
 extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
     address: u64,
@@ -255,10 +246,6 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
 ///
 /// If the load fails (due to out of bouds etc) then an exception will be written
 /// to `exception_out` and `true` returned to indicate exception handling will be necessary.
-///
-/// # Panics
-///
-/// Panics if the `width` passed is not a supported [`LoadStoreWidth`].
 extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
     core: &MachineCoreState<MC, Owned>,
     address: u64,
@@ -318,10 +305,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
-    memory_store_u8: Option<FuncRef>,
-    memory_store_u16: Option<FuncRef>,
-    memory_store_u32: Option<FuncRef>,
-    memory_store_u64: Option<FuncRef>,
     f64_from_x64_unsigned_dynamic: Option<FuncRef>,
     f64_from_x64_unsigned_static: Option<FuncRef>,
 
@@ -376,10 +359,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             freg_read: None,
             freg_write: None,
             ecall_from_mode: None,
-            memory_store_u8: None,
-            memory_store_u16: None,
-            memory_store_u32: None,
-            memory_store_u64: None,
             f64_from_x64_unsigned_dynamic: None,
             f64_from_x64_unsigned_static: None,
             exception_ptr_slot: None,
@@ -515,41 +494,20 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let memory_store = match V::WIDTH {
-            LoadStoreWidth::Byte => self.memory_store_u8.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.memory_store_u8, builder.func)
-            }),
-            LoadStoreWidth::Half => self.memory_store_u16.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.memory_store_u16, builder.func)
-            }),
-            LoadStoreWidth::Word => self.memory_store_u32.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.memory_store_u32, builder.func)
-            }),
-            LoadStoreWidth::Double => self.memory_store_u64.get_or_insert_with(|| {
-                self.module
-                    .declare_func_in_func(self.imports.memory_store_u64, builder.func)
-            }),
-        };
+        let value = V::from_xvalue_ir(builder, value);
 
-        let value = match V::WIDTH {
-            LoadStoreWidth::Byte | LoadStoreWidth::Half | LoadStoreWidth::Word => {
-                builder.ins().ireduce(V::IR_TYPE, value.to_value())
-            }
-            LoadStoreWidth::Double => value.to_value(),
-        };
-
-        let call = builder.ins().call(*memory_store, &[
-            core_ptr.to_value(),
-            phys_address.to_value(),
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument
+        // - `exception_ptr` points to a stack slot within the JIT function
+        let is_exception = ext_calls::call4(
+            &self.target_config,
+            builder,
+            self::memory_store,
+            unsafe { core_ptr.as_mut() },
+            phys_address,
             value,
-            exception_ptr.to_value(),
-        ]);
-
-        // SAFETY: [`self::memory_store`] returns a `bool`.
-        let is_exception = unsafe { Value::<bool>::from_raw(builder.inst_results(call)[0]) };
+            unsafe { exception_ptr.as_mut() },
+        );
 
         ErrnoImpl::new(is_exception, exception_ptr, |_| {})
     }
