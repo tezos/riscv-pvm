@@ -83,7 +83,7 @@ fn run_steps_ladder<F>(
         assert_eq_struct(&stepper_lhs.struct_ref(), &stepper_rhs.struct_ref());
 
         let block_builder = InterpretedBlockBuilder;
-        stepper_lhs.rebind_via_serde(block_builder);
+        stepper_lhs.rebind_via_clone(block_builder);
     }
 
     assert_eq_struct_wrapper(stepper_lhs.struct_ref(), expected_refs);

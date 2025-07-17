@@ -16,6 +16,7 @@ use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
+use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -51,7 +52,7 @@ macro_rules! combined_buddy_branch {
             impl<B, M> PartialEq for [<$name Alloc>]<B, M>
             where
                 B: Layout,
-                M: ManagerSerialise,
+                M: ManagerRead,
                 AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: PartialEq,
             {
                 fn eq(&self, other: &Self) -> bool {
@@ -99,7 +100,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: Layout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-
             }
 
             impl<B: CommitmentLayout> CommitmentLayout for [<$name Layout>]<B> {
@@ -127,6 +127,13 @@ macro_rules! combined_buddy_branch {
                     proof: ProofTree,
                 ) -> Result<Hash, PartialHashError> {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::partial_state_hash(state.0, proof)
+                }
+            }
+
+            impl<B: CloneLayout> CloneLayout for [<$name Layout>]<B> {
+                fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::clone_allocated(space.0);
+                    [<$name Alloc>](inner)
                 }
             }
 

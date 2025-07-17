@@ -35,12 +35,14 @@ use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
+use crate::state_backend::clone_layout::CloneLayout;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
@@ -247,6 +249,17 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
             binary::deserialise(&data).unwrap()
         };
 
+        self.pvm = Pvm::bind(space, block_builder);
+    }
+
+    /// Re-bind the PVM type by cloning the underlying regions.
+    pub fn rebind_via_clone(&mut self, block_builder: B::BlockBuilder)
+    where
+        PvmLayout<MC, BCC>: CloneLayout,
+        M: ManagerClone,
+    {
+        let refs = self.pvm.struct_ref::<FnManagerIdent>();
+        let space = PvmLayout::<MC, BCC>::clone_allocated(refs);
         self.pvm = Pvm::bind(space, block_builder);
     }
 }

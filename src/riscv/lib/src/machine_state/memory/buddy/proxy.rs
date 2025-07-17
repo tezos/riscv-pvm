@@ -13,6 +13,7 @@ use super::leaf::BuddyLeafLayout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::state_backend::AllocatedOf;
+use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -68,6 +69,17 @@ where
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         <PickLayout<PAGES> as ProofLayout>::partial_state_hash(state, proof)
+    }
+}
+
+impl<const PAGES: usize> CloneLayout for BuddyLayoutProxy<PAGES>
+where
+    (): BuddyLayoutMatch<PAGES>,
+{
+    fn clone_allocated<M: crate::state_backend::ManagerClone>(
+        space: Self::Allocated<Ref<'_, M>>,
+    ) -> Self::Allocated<M> {
+        <PickLayout<PAGES> as CloneLayout>::clone_allocated(space)
     }
 }
 

@@ -320,7 +320,6 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerRead;
-    use crate::state_backend::test_helpers::assert_eq_struct;
 
     fn instructions<MC: MemoryConfig, M>(block: &Interpreted<MC, M>) -> Vec<Instruction>
     where
@@ -410,9 +409,9 @@ mod tests {
                 interpreted_res.steps
             );
 
-            assert_eq_struct(
-                &interpreted.struct_ref::<FnManagerIdent>(),
-                &jitted.struct_ref::<FnManagerIdent>(),
+            assert!(
+                interpreted.struct_ref::<FnManagerIdent>() == jitted.struct_ref::<FnManagerIdent>(),
+                "Interpreted and Jitted states should be equal"
             );
 
             // Only check steps against one state, as we know both interpreted/jit steps are equal.

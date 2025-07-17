@@ -638,9 +638,8 @@ mod tests {
     use crate::parser::instruction::SBTypeArgs;
     use crate::parser::instruction::SplitITypeArgs;
     use crate::parser::parse_block;
+    use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::test_helpers::assert_eq_struct;
-    use crate::state_backend::test_helpers::copy_via_serde;
     use crate::traps::EnvironException;
 
     backend_test!(test_step, F, {
@@ -818,7 +817,9 @@ mod tests {
         // Perform 2 steps consecutively in one backend.
         let state = {
             let mut state = LocalMachineState::<F>::bind(
-                copy_via_serde::<LocalLayout, _, _>(&base_state.struct_ref::<FnManagerIdent>()),
+                <LocalLayout as CloneLayout>::clone_allocated(
+                    base_state.struct_ref::<FnManagerIdent>(),
+                ),
                 InterpretedBlockBuilder,
             );
 
@@ -832,7 +833,9 @@ mod tests {
         let alt_state = {
             let alt_state = {
                 let mut state = LocalMachineState::<F>::bind(
-                    copy_via_serde::<LocalLayout, _, _>(&base_state.struct_ref::<FnManagerIdent>()),
+                    <LocalLayout as CloneLayout>::clone_allocated(
+                        base_state.struct_ref::<FnManagerIdent>(),
+                    ),
                     InterpretedBlockBuilder,
                 );
                 state.step().unwrap();
@@ -841,7 +844,9 @@ mod tests {
 
             {
                 let mut state = LocalMachineState::<F>::bind(
-                    copy_via_serde::<LocalLayout, _, _>(&alt_state.struct_ref::<FnManagerIdent>()),
+                    <LocalLayout as CloneLayout>::clone_allocated(
+                        alt_state.struct_ref::<FnManagerIdent>(),
+                    ),
                     InterpretedBlockBuilder,
                 );
                 state.step().unwrap();
@@ -855,9 +860,9 @@ mod tests {
             alt_state.core.hart.xregisters.read(t2)
         );
 
-        assert_eq_struct(
-            &state.struct_ref::<FnManagerIdent>(),
-            &alt_state.struct_ref::<FnManagerIdent>(),
+        assert!(
+            state.struct_ref::<FnManagerIdent>() == alt_state.struct_ref::<FnManagerIdent>(),
+            "State equality expected"
         );
     });
 
@@ -869,9 +874,9 @@ mod tests {
 
         let second = state.clone();
 
-        assert_eq_struct(
-            &state.struct_ref::<FnManagerIdent>(),
-            &second.struct_ref::<FnManagerIdent>(),
+        assert!(
+            state.struct_ref::<FnManagerIdent>() == second.struct_ref::<FnManagerIdent>(),
+            "State equality expected"
         );
     });
 
