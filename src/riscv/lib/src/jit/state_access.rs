@@ -107,7 +107,6 @@ macro_rules! register_jsa_functions {
 register_jsa_functions!(
     freg_read => (fregister_read::<MC>, AbiCall<2>::args),
     freg_write => (fregister_write::<MC>, AbiCall<3>::args),
-    raise_illegal_instruction_exception => (raise_illegal_instruction_exception, AbiCall<1>::args),
     ecall_from_mode => (ecall::<MC>, AbiCall<2>::args),
     memory_store_u8 => (memory_store::<u8, MC>, AbiCall<4>::args),
     memory_store_u16 => (memory_store::<u16, MC>, AbiCall<4>::args),
@@ -318,7 +317,6 @@ pub struct JsaCalls<'a, MC: MemoryConfig> {
     ptr_type: Type,
     freg_read: Option<FuncRef>,
     freg_write: Option<FuncRef>,
-    raise_illegal_instruction_exception: Option<FuncRef>,
     ecall_from_mode: Option<FuncRef>,
     memory_store_u8: Option<FuncRef>,
     memory_store_u16: Option<FuncRef>,
@@ -377,7 +375,6 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
             ptr_type,
             freg_read: None,
             freg_write: None,
-            raise_illegal_instruction_exception: None,
             ecall_from_mode: None,
             memory_store_u8: None,
             memory_store_u16: None,
@@ -439,18 +436,14 @@ impl<'a, MC: MemoryConfig> JsaCalls<'a, MC> {
         let exception_slot = self.exception_ptr_slot(builder);
         let exception_ptr = exception_slot.ptr(builder);
 
-        let raise_illegal = self
-            .raise_illegal_instruction_exception
-            .get_or_insert_with(|| {
-                self.module.declare_func_in_func(
-                    self.imports.raise_illegal_instruction_exception,
-                    builder.func,
-                )
-            });
-
-        builder
-            .ins()
-            .call(*raise_illegal, &[exception_ptr.to_value()]);
+        // SAFETY: The exception pointer reference is scoped to the JIT function. Hence it is safe
+        // to pass it to the external function which is called within the JIT function scope.
+        ext_calls::call1(
+            &self.target_config,
+            builder,
+            self::raise_illegal_instruction_exception,
+            unsafe { exception_ptr.as_mut() },
+        );
 
         // SAFETY: The `raise_illegal_instruction_exception` function writes to the exception slot
         // unconditionally.
