@@ -514,7 +514,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     }
 
     fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>> {
-        let exception_ptr = self.ext_calls.ecall(self.builder, self.core_param);
+        let exception_ptr = self.ext_calls.ecall(self.builder);
         self.handle_exception(exception_ptr)
     }
 
