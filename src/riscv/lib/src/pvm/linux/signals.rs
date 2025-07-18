@@ -25,9 +25,9 @@ pub const SIGSET_SIZE: u64 = 8;
 
 /// A signal passed to a thread, see `tkill(2)`
 #[derive(Debug, Clone, Copy)]
-pub struct Signal(u7);
+pub struct TkillSignal(u7);
 
-impl Signal {
+impl TkillSignal {
     /// Extract the exit code from the signal stored in this type
     pub fn exit_code(&self) -> u64 {
         // Setting bit 2^7 of the exit code indicates that the process was killed by a signal
@@ -37,11 +37,11 @@ impl Signal {
     }
 }
 
-impl TryFrom<u64> for Signal {
+impl TryFrom<u64> for TkillSignal {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Ok(Signal(u7::try_new(value.try_into()?)?))
+        Ok(TkillSignal(u7::try_new(value.try_into()?)?))
     }
 }
 
