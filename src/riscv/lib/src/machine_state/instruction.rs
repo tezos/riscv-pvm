@@ -129,7 +129,7 @@ pub enum OpCode {
     X64Xor,
     X64Or,
     X64And,
-    ShiftLeft,
+    X64ShiftLeft,
     ShiftRightUnsigned,
     ShiftRightSigned,
     SetLessThanSigned,
@@ -349,7 +349,7 @@ impl OpCode {
             Self::X64Xor => Args::run_x64_xor,
             Self::X64Or => Args::run_x64_or,
             Self::X64And => Args::run_x64_and,
-            Self::ShiftLeft => Args::run_shift_left,
+            Self::X64ShiftLeft => Args::run_x64_shift_left,
             Self::ShiftRightUnsigned => Args::run_shift_right_unsigned,
             Self::ShiftRightSigned => Args::run_shift_right_signed,
             Self::SetLessThanSigned => Args::run_set_less_than_signed,
@@ -594,7 +594,7 @@ impl OpCode {
             Self::BranchGreaterThanOrEqualZero => Some(Args::run_branch_greater_than_or_equal_zero),
             Self::BranchGreaterThanZero => Some(Args::run_branch_greater_than_zero),
 
-            Self::ShiftLeft => Some(Args::run_shift_left),
+            Self::X64ShiftLeft => Some(Args::run_x64_shift_left),
             Self::ShiftRightUnsigned => Some(Args::run_shift_right_unsigned),
             Self::ShiftRightSigned => Some(Args::run_shift_right_signed),
             Self::ShiftLeftImmediate => Some(Args::run_shift_left_immediate),
@@ -788,7 +788,7 @@ macro_rules! impl_r_type {
 
     ($fn: ident, $shift: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            integer::run_shift(icb, Shift::$shift, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
+            integer::run_x64_shift(icb, Shift::$shift, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
             icb.ok(Next(self.width))
         }
     };
@@ -1171,7 +1171,7 @@ impl Args {
     impl_r_type!(integer::run_x64_xor, run_x64_xor, non_zero);
     impl_r_type!(integer::run_x64_and, run_x64_and, non_zero);
     impl_r_type!(integer::run_x64_or, run_x64_or, non_zero);
-    impl_r_type!(run_shift_left, Left);
+    impl_r_type!(run_x64_shift_left, Left);
     impl_r_type!(run_shift_right_unsigned, RightUnsigned);
     impl_r_type!(run_shift_right_signed, RightSigned);
     impl_r_type!(

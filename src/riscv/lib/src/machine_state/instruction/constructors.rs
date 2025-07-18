@@ -557,15 +557,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::ShiftLeft`].
-    pub(crate) fn new_shift_left(
+    /// Create a new [`Instruction`] for [`OpCode::X64ShiftLeft`].
+    pub(crate) fn new_x64_shift_left(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::ShiftLeft,
+            opcode: OpCode::X64ShiftLeft,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2358,14 +2358,16 @@ impl Instruction {
     /// [`InstrCacheable::Sll`]: crate::parser::instruction::InstrCacheable::Sll
     pub(super) fn from_ic_sll(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
-        match (split_x0(args.rs1), split_x0(args.rs2)) {
+        match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
-            (X::X0, _) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
-            // Shifting by 0 and storing in rd is equivalent to moving the value to rd.
-            (X::NonZero(rs1), X::X0) => Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed),
-            (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_shift_left(args.rd, rs1, rs2, InstrWidth::Uncompressed)
-            }
+            X::X0 => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
+            X::NonZero(rs1) => match split_x0(args.rs2) {
+                // Shifting by 0 and storing in rd is equivalent to moving the value to rd.
+                X::X0 => Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed),
+                X::NonZero(rs2) => {
+                    Instruction::new_x64_shift_left(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                }
+            },
         }
     }
 

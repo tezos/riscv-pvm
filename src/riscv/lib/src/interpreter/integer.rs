@@ -506,13 +506,8 @@ pub fn run_x32_div_unsigned(
 
 /// Shift bits in `rs1` by `shift_amount = val(rs2)\[5:0\]` in the method specified by `shift`
 /// saving the result in `rd`.
-///
-/// Relevant opcodes:
-/// - `SLL`
-/// - `SRL`
-/// - `SRA`
 #[inline]
-pub fn run_shift(
+pub fn run_x64_shift(
     icb: &mut impl ICB,
     shift: Shift,
     rs1: NonZeroXRegister,
@@ -903,7 +898,7 @@ mod tests {
         }
     });
 
-    macro_rules! test_shift_instr {
+    macro_rules! test_x64_shift_imm_instr {
         ($state:ident, $shift:expr, $imm:expr,
             $rs1:ident, $r1_val:expr,
             $rd:ident, $expected_val:expr
@@ -915,7 +910,7 @@ mod tests {
         };
     }
 
-    macro_rules! test_shift_reg_instr {
+    macro_rules! test_x64_shift_reg_instr {
         ($state:ident, $shift:expr,
             $rs2:ident, $r2_val:expr,
             $rs1:ident, $r1_val:expr,
@@ -923,19 +918,19 @@ mod tests {
         ) => {
             $state.hart.xregisters.write($rs2, $r2_val);
             $state.hart.xregisters.write($rs1, $r1_val);
-            run_shift(&mut $state, $shift, nz::$rs1, nz::$rs2, nz::$rd);
+            run_x64_shift(&mut $state, $shift, nz::$rs1, nz::$rs2, nz::$rd);
             let new_val = $state.hart.xregisters.read($rd);
             assert_eq!(new_val, $expected_val);
         };
     }
 
-    macro_rules! test_both_shift_instr {
+    macro_rules! test_both_x64_shift_instr {
         ($state:ident, $shift_reg:expr,
             $rs2:ident, $r2_val:expr,
             $rs1:ident, $r1_val:expr,
             $rd:ident, $expected_val:expr
         ) => {
-            test_shift_instr!(
+            test_x64_shift_imm_instr!(
                 $state,
                 $shift_reg,
                 $r2_val,
@@ -944,7 +939,7 @@ mod tests {
                 $rd,
                 $expected_val
             );
-            test_shift_reg_instr!(
+            test_x64_shift_reg_instr!(
                 $state,
                 $shift_reg,
                 $rs2,
@@ -957,12 +952,12 @@ mod tests {
         };
     }
 
-    backend_test!(test_shift, F, {
+    backend_test!(test_x64_shift, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
 
         // imm = 0
-        test_both_shift_instr!(state, Shift::Left, t0, 0, a0, 0x1234_ABEF, a1, 0x1234_ABEF);
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(state, Shift::Left, t0, 0, a0, 0x1234_ABEF, a1, 0x1234_ABEF);
+        test_both_x64_shift_instr!(
             state,
             Shift::RightUnsigned,
             t1,
@@ -972,7 +967,7 @@ mod tests {
             a0,
             0x1234_ABEF
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightSigned,
             t3,
@@ -984,7 +979,7 @@ mod tests {
         );
 
         // small imm (< 32))
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::Left,
             a2,
@@ -994,7 +989,7 @@ mod tests {
             a1,
             0x1_234A_BEF0_0000
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightUnsigned,
             a2,
@@ -1004,7 +999,7 @@ mod tests {
             a1,
             0x1104_8D2A
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightUnsigned,
             a2,
@@ -1014,7 +1009,7 @@ mod tests {
             a0,
             0x0003_FFFF_FFFF_FFFF
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightSigned,
             t0,
@@ -1026,7 +1021,7 @@ mod tests {
         );
 
         // big imm (>= 32))
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::Left,
             t0,
@@ -1036,7 +1031,7 @@ mod tests {
             a0,
             0x34AB_EF00_0000_0000
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightUnsigned,
             a1,
@@ -1046,7 +1041,7 @@ mod tests {
             a0,
             0x0
         );
-        test_both_shift_instr!(
+        test_both_x64_shift_instr!(
             state,
             Shift::RightSigned,
             a2,
@@ -1058,7 +1053,7 @@ mod tests {
         );
 
         // Use same register for shift and source
-        test_shift_reg_instr!(
+        test_x64_shift_reg_instr!(
             state,
             Shift::Left,
             a1,
@@ -1069,7 +1064,7 @@ mod tests {
             0x12A0_0000
         );
         // Use same register for shift and destination
-        test_shift_reg_instr!(
+        test_x64_shift_reg_instr!(
             state,
             Shift::Left,
             a1,
@@ -1080,7 +1075,7 @@ mod tests {
             0x1AA0_0000
         );
         // Use same register for shift, source and destination
-        test_shift_reg_instr!(
+        test_x64_shift_reg_instr!(
             state,
             Shift::Left,
             a1,
@@ -1092,7 +1087,7 @@ mod tests {
         );
     });
 
-    macro_rules! test_shift_word_imm_instr {
+    macro_rules! test_x32_shift_imm_instr {
         ($state:ident, $shift:expr, $imm:expr,
             $rs1:ident, $r1_val:expr,
             $rd:ident, $expected_val:expr
@@ -1104,7 +1099,7 @@ mod tests {
         };
     }
 
-    macro_rules! test_shift_word_reg_instr {
+    macro_rules! test_x32_shift_reg_instr {
         ($state:ident, $shift:expr,
             $rs2:ident, $r2_val:expr,
             $rs1:ident, $r1_val:expr,
@@ -1118,14 +1113,14 @@ mod tests {
         };
     }
 
-    macro_rules! test_both_shift_word_instr {
+    macro_rules! test_both_x32_shift_instr {
         ($state:ident, $shift:expr,
             $rs2:ident, $r2_val:expr,
             $rs1:ident, $r1_val:expr,
             $rd:ident, $expected_val:expr
         ) => {
-            test_shift_word_imm_instr!($state, $shift, $r2_val, $rs1, $r1_val, $rd, $expected_val);
-            test_shift_word_reg_instr!(
+            test_x32_shift_imm_instr!($state, $shift, $r2_val, $rs1, $r1_val, $rd, $expected_val);
+            test_x32_shift_reg_instr!(
                 $state,
                 $shift,
                 $rs2,
@@ -1138,10 +1133,10 @@ mod tests {
         };
     }
 
-    backend_test!(test_shift_word, F, {
+    backend_test!(test_x32_shift, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
 
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::Left,
             t0,
@@ -1151,7 +1146,7 @@ mod tests {
             a1,
             0x1234_ABEF
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightUnsigned,
             t0,
@@ -1161,7 +1156,7 @@ mod tests {
             a0,
             0x1234_ABEF
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightSigned,
             a2,
@@ -1171,7 +1166,7 @@ mod tests {
             a1,
             0x1234_ABEF
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::Left,
             a3,
@@ -1181,7 +1176,7 @@ mod tests {
             a0,
             0xFFFF_FFFF_FFF0_0000
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightUnsigned,
             t0,
@@ -1191,7 +1186,7 @@ mod tests {
             a1,
             0x4_8D2A
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightUnsigned,
             a1,
@@ -1201,7 +1196,7 @@ mod tests {
             a0,
             0xFFFF
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightSigned,
             a1,
@@ -1211,7 +1206,7 @@ mod tests {
             a0,
             0xFFFF_FFFF_FFFF_FC3F
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::Left,
             t0,
@@ -1221,7 +1216,7 @@ mod tests {
             a0,
             0xFFFF_FFFF_8000_0000
         );
-        test_both_shift_word_instr!(
+        test_both_x32_shift_instr!(
             state,
             Shift::RightSigned,
             t2,
@@ -1231,7 +1226,7 @@ mod tests {
             a1,
             0xFFFF_FFFF_FFFF_FFFF
         );
-        test_shift_word_reg_instr!(
+        test_x32_shift_reg_instr!(
             state,
             Shift::Left,
             a1,
@@ -1241,7 +1236,7 @@ mod tests {
             a2,
             0x12A0_0000
         );
-        test_shift_word_reg_instr!(
+        test_x32_shift_reg_instr!(
             state,
             Shift::Left,
             a1,
@@ -1251,7 +1246,7 @@ mod tests {
             a1,
             0x1AA0_0000
         );
-        test_shift_word_reg_instr!(
+        test_x32_shift_reg_instr!(
             state,
             Shift::Left,
             a1,

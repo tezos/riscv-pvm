@@ -1816,15 +1816,15 @@ mod tests {
     fn test_shift_reg() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let shift_reg = |constructor: fn(
+        let x64_shift_reg = |constructor: fn(
             NonZeroXRegister,
             NonZeroXRegister,
             NonZeroXRegister,
             InstrWidth,
         ) -> I,
-                         lhs: (NonZeroXRegister, i64),
-                         rhs: (NonZeroXRegister, i64),
-                         expected: u64|
+                             lhs: (NonZeroXRegister, i64),
+                             rhs: (NonZeroXRegister, i64),
+                             expected: u64|
          -> Scenario {
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(|core| {
@@ -1842,7 +1842,7 @@ mod tests {
                 .build()
         };
 
-        let shift_reg_word =
+        let x32_shift_reg =
             |constructor: fn(NonZeroXRegister, XRegister, XRegister, InstrWidth) -> I,
              lhs: (XRegister, i64),
              rhs: (XRegister, i64),
@@ -1865,106 +1865,116 @@ mod tests {
             };
 
         let scenarios: &[Scenario] = &[
-            shift_reg(I::new_shift_left, (x1, 1), (x3, 1), 2),
-            shift_reg(I::new_shift_left, (x1, 1), (x3, 63), 0x8000_0000_0000_0000),
-            shift_reg(I::new_shift_left, (x1, 2), (x3, 63), 0),
-            shift_reg(I::new_shift_left, (x1, 1), (x3, 126), 0x4000_0000_0000_0000),
-            shift_reg(I::new_shift_left, (x1, -16), (x3, 2), -64_i64 as u64),
-            shift_reg(I::new_shift_right_unsigned, (x1, 2), (x3, 1), 1),
-            shift_reg(I::new_shift_right_unsigned, (x1, !0), (x3, 63), 1),
-            shift_reg(
+            x64_shift_reg(I::new_x64_shift_left, (x1, 1), (x3, 1), 2),
+            x64_shift_reg(
+                I::new_x64_shift_left,
+                (x1, 1),
+                (x3, 63),
+                0x8000_0000_0000_0000,
+            ),
+            x64_shift_reg(I::new_x64_shift_left, (x1, 2), (x3, 63), 0),
+            x64_shift_reg(
+                I::new_x64_shift_left,
+                (x1, 1),
+                (x3, 126),
+                0x4000_0000_0000_0000,
+            ),
+            x64_shift_reg(I::new_x64_shift_left, (x1, -16), (x3, 2), -64_i64 as u64),
+            x64_shift_reg(I::new_shift_right_unsigned, (x1, 2), (x3, 1), 1),
+            x64_shift_reg(I::new_shift_right_unsigned, (x1, !0), (x3, 63), 1),
+            x64_shift_reg(
                 I::new_shift_right_unsigned,
                 (x1, 0x7FFF_FFFF_FFFF_FFFF),
                 (x3, 63),
                 0,
             ),
-            shift_reg(I::new_shift_right_unsigned, (x1, !0), (x3, 126), 3),
-            shift_reg(
+            x64_shift_reg(I::new_shift_right_unsigned, (x1, !0), (x3, 126), 3),
+            x64_shift_reg(
                 I::new_shift_right_unsigned,
                 (x1, -8),
                 (x3, 2),
                 0x3FFF_FFFF_FFFF_FFFE,
             ),
-            shift_reg(I::new_shift_right_signed, (x1, 2), (x3, 1), 1),
-            shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 63), !0),
-            shift_reg(
+            x64_shift_reg(I::new_shift_right_signed, (x1, 2), (x3, 1), 1),
+            x64_shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 63), !0),
+            x64_shift_reg(
                 I::new_shift_right_signed,
                 (x1, 0x7FFF_FFFF_FFFF_FFFF),
                 (x3, 62),
                 1,
             ),
-            shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 126), !0),
-            shift_reg(I::new_shift_right_signed, (x1, -8), (x3, 2), -2_i64 as u64),
+            x64_shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 126), !0),
+            x64_shift_reg(I::new_shift_right_signed, (x1, -8), (x3, 2), -2_i64 as u64),
             // X32ShiftLeft tests
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_left,
                 (XRegister::x1, 1),
                 (XRegister::x3, 1),
                 2,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_left,
                 (XRegister::x1, 1),
                 (XRegister::x3, 31),
                 0xFFFF_FFFF_8000_0000,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_left,
                 (XRegister::x1, 2),
                 (XRegister::x3, 31),
                 0,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_left,
                 (XRegister::x1, 1),
                 (XRegister::x3, 95),
                 0xFFFF_FFFF_8000_0000,
             ),
             // X32ShiftRightUnsigned tests
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
                 (XRegister::x1, 2),
                 (XRegister::x3, 1),
                 1,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
                 (XRegister::x1, 0x80000000),
                 (XRegister::x3, 31),
                 1,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
                 (XRegister::x1, 1),
                 (XRegister::x3, 31),
                 0,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
                 (XRegister::x1, 0x80000000),
                 (XRegister::x3, 95),
                 1,
             ),
             // X32ShiftRightSigned tests
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_signed,
                 (XRegister::x1, 2),
                 (XRegister::x3, 1),
                 1,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_signed,
                 (XRegister::x1, 0x80000000),
                 (XRegister::x3, 31),
                 0xFFFF_FFFF_FFFF_FFFF,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_signed,
                 (XRegister::x1, 0x40000000),
                 (XRegister::x3, 31),
                 0,
             ),
-            shift_reg_word(
+            x32_shift_reg(
                 I::new_x32_shift_right_signed,
                 (XRegister::x1, 0x80000000),
                 (XRegister::x3, 95),
