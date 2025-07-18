@@ -823,7 +823,7 @@ pub(crate) mod tests {
         test_dynregion_oob_2,
         F,
         {
-            const LEN: usize = 8;
+            const LEN: usize = 4096;
 
             let mut state = DynCells::<LEN, F>::new();
 
@@ -835,7 +835,7 @@ pub(crate) mod tests {
 
     backend_test!(test_dynregion_stored_format, F, {
         // Writing to one item of the region must convert to stored format.
-        let mut region = DynCells::<1024, F>::new();
+        let mut region = DynCells::<4096, F>::new();
 
         region.write(0, Flipper { a: 13, b: 37 });
         assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });

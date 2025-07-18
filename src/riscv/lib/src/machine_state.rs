@@ -615,6 +615,7 @@ pub(crate) mod test_helpers {
     use crate::state_backend::ManagerBase;
     use crate::state_backend::owned_backend::Owned;
     use crate::state_backend::proof_backend::ProofGen;
+    use crate::state_backend::verify_backend::Verifier;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
     pub enum RefMutOrOwned<'a, T> {
@@ -685,10 +686,18 @@ pub(crate) mod test_helpers {
             RefMutOrOwned::RefMut(dirty_state)
         }
     }
+
     impl ReinitMachine<ProofGen<Owned>> for TestMachineOf<ProofGen<Owned>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
             let new_state = MachineState::new(InterpretedBlockBuilder);
             RefMutOrOwned::Owned(new_state)
+        }
+    }
+
+    impl ReinitMachine<Verifier> for TestMachineOf<Verifier> {
+        fn reinit_machine_state(mut dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
+            dirty_state.reset();
+            RefMutOrOwned::RefMut(dirty_state)
         }
     }
 }
