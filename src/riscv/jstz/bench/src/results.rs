@@ -27,6 +27,7 @@ pub fn handle_results(
     inbox: Box<Path>,
     all_logs: Vec<Box<Path>>,
     expected_transfers: usize,
+    collapsible_results: bool,
 ) -> Result<()> {
     let inbox = InboxFile::load(&inbox)?;
 
@@ -85,9 +86,6 @@ pub fn handle_results(
         ]);
     }
 
-    println!();
-    println!("{all_results}");
-
     if all_metrics.len() > 1 {
         let mut aggregate_result = comfy_table::Table::new();
         aggregate_result.load_preset(comfy_table::presets::ASCII_MARKDOWN);
@@ -131,6 +129,20 @@ pub fn handle_results(
 
         println!();
         println!("{aggregate_result}");
+    }
+
+    println!();
+
+    if collapsible_results {
+        println!("<details>");
+        println!("<summary>Full results</summary>");
+        println!()
+    }
+
+    println!("{all_results}");
+
+    if collapsible_results {
+        println!("</details>");
     }
 
     Ok(())
