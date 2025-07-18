@@ -30,7 +30,7 @@ pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
 impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
     type Suspended<R> = OwnedParserComb<'t, R>;
 
-    type DeserialiserNode<R> = OwnedBranchComb<'t, R, Self>;
+    type DeserialiserNode<R> = OwnedBranchComb<R, Self>;
 
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         self.deserialise_as_leaf()?
@@ -44,13 +44,13 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
                         })?;
                 Ok(bytes)
             })
-            .map(OwnedParserComb::new)
+            .map(|data| OwnedParserComb::new(Ok(data)))
     }
 
     fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         self.deserialise_as_leaf()?
             .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
-            .map(OwnedParserComb::new)
+            .map(|data| OwnedParserComb::new(Ok(data)))
     }
 
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
@@ -103,12 +103,12 @@ impl ProofTreeDeserialiser<'_> {
 
 /// Suspended computation combinator for [`ProofTreeDeserialiser`] deserialiser.
 pub struct OwnedParserComb<'t, R> {
-    result: R,
+    result: Result<R>,
     _pd: PhantomData<fn(ProofTreeDeserialiser<'t>)>,
 }
 
 impl<R> OwnedParserComb<'_, R> {
-    fn new(result: R) -> Self {
+    fn new(result: Result<R>) -> Self {
         Self {
             result,
             _pd: PhantomData,
@@ -117,12 +117,12 @@ impl<R> OwnedParserComb<'_, R> {
 }
 
 /// Branch deserialiser combinator for [`ProofTreeDeserialiser`] deserialiser.
-pub struct OwnedBranchComb<'p, R, B> {
-    f: OwnedParserComb<'p, R>,
+pub struct OwnedBranchComb<R, B> {
+    f: Result<R>,
     node_data: Partial<VecDeque<B>>,
 }
 
-impl<B> OwnedBranchComb<'_, Partial<()>, B> {
+impl<B> OwnedBranchComb<Partial<()>, B> {
     /// Create a new [`OwnedBranchComb`] with the given branches,
     /// preserving the absent/blind/present information from the given [`Partial`].
     fn new(branches: Partial<Vec<B>>) -> Self {
@@ -136,13 +136,13 @@ impl<B> OwnedBranchComb<'_, Partial<()>, B> {
         };
 
         Self {
-            f: OwnedParserComb::new(f_comb),
+            f: Ok(f_comb),
             node_data: branches.map_present(VecDeque::from),
         }
     }
 }
 
-impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser<'t>> {
+impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>> {
     type Parent = ProofTreeDeserialiser<'t>;
 
     fn next_branch<T>(
@@ -171,7 +171,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
         let br_comb = branch_deserialiser(next_branch)?;
 
         Ok(OwnedBranchComb {
-            f: OwnedParserComb::new((self.f.result, br_comb.result)),
+            f: self.f.and_then(|res| Ok((res, br_comb.result?))),
             node_data: self.node_data,
         })
     }
@@ -201,7 +201,10 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<'t, R, ProofTreeDeserialiser
             }
         }
 
-        Ok(self.f)
+        Ok(OwnedParserComb {
+            result: self.f,
+            _pd: PhantomData,
+        })
     }
 }
 
@@ -217,12 +220,12 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
     where
         Self::Output: 'static,
     {
-        OwnedParserComb::new(f(self.result))
+        OwnedParserComb::new(self.result.map(f))
     }
 }
 
 impl<R> OwnedParserComb<'_, R> {
-    pub fn into_result(self) -> R {
+    pub fn into_result(self) -> Result<R> {
         self.result
     }
 }
@@ -230,7 +233,7 @@ impl<R> OwnedParserComb<'_, R> {
 /// Given a [`ProofTree`] deserialise it into an allocated [`Verifier`] backend.
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
-) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart), DeserError> {
+) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
     let comp_fn = L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?;
-    Ok(comp_fn.into_result())
+    comp_fn.into_result()
 }
