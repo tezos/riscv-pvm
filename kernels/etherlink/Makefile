@@ -1,4 +1,5 @@
-# SPDX-FileCopyrightText: 2023-2025 TriliTech <contact@trili.tech>
+# SPDX-FileCopyrightText: 2023 TriliTech <contact@trili.tech>
+# SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 #
 # SPDX-License-Identifier: MIT
 
@@ -7,12 +8,9 @@ ifneq ($(NATIVE_TARGET),)
 NATIVE_OPT := --target "$(NATIVE_TARGET)"
 endif
 
-INBOX_FILE ?= $(shell mktemp)
+INBOX_FILE ?= "../../../../src/riscv/assets/etherlink-erc20-inbox.json"
 
-all: build test check inbox-bench
-
-print-native-target:
-	$(info $(NATIVE_TARGET))
+all: check build test inbox-bench
 
 build-deps:
 ifneq ($(NATIVE_TARGET),)
@@ -27,12 +25,9 @@ build-kernel-static: cargo-build-kernel-static
 
 build-kernel-native: cargo-build-kernel-native
 
-test: cargo-test test-bench-script
-
-test-bench-script: build
-	@../../scripts/jstz-bench.sh -t 1
-	@../../scripts/jstz-bench.sh -t 1 -s
-	@../../scripts/jstz-bench.sh -t 1 -sn
+test: build-kernel build-kernel-native
+	@../../scripts/etherlink-bench.sh
+	@../../scripts/etherlink-bench.sh -sn
 
 check: cargo-format cargo-check cargo-clippy cargo-check-docs
 
@@ -57,19 +52,16 @@ cargo-check-docs:
 	@INBOX_FILE=$(INBOX_FILE) cargo doc --all-features --document-private-items --no-deps
 
 cargo-build-kernel:
-	@cargo build --package jstz --release
+	@cargo build --package etherlink --release
+
+cargo-build-kernel-static:
+	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features static-inbox
+
+cargo-build-kernel-native:
+	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features static-inbox $(NATIVE_OPT)
 
 cargo-build-inbox-bench:
 	@cargo build $(NATIVE_OPT) --bin inbox-bench --release
-
-cargo-test:
-	@cargo test --no-default-features $(NATIVE_OPT)
-
-cargo-build-kernel-static:
-	@INBOX_FILE=$(INBOX_FILE) cargo build -p jstz --release --features static-inbox
-
-cargo-build-kernel-native:
-	@INBOX_FILE=$(INBOX_FILE) cargo build -p jstz --release --features static-inbox $(NATIVE_OPT)
 
 # Mark all targets as phony to make sure they're always executed
 .PHONY: all $(MAKECMDGOALS)
