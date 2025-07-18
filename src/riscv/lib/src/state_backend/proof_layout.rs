@@ -47,9 +47,6 @@ use crate::storage::binary;
 /// Errors that may occur when parsing a Merkle proof
 #[derive(Debug, thiserror::Error)]
 pub enum FromProofError {
-    #[error("Error during hashing: {0}")]
-    Hash(#[from] HashError),
-
     #[error("Error during deserialisation: {0}")]
     Deserialise(#[from] DecodeError),
 
