@@ -9,6 +9,7 @@ mod fs;
 mod memory;
 mod parameters;
 mod rng;
+pub(crate) mod signals;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
@@ -845,84 +846,12 @@ impl<M: ManagerBase> SupervisorState<M> {
         })
     }
 
-    /// Handle `sigaltstack` system call. The new signal stack configuration is discarded. If the
-    /// old signal stack configuration is requested, it will be zeroed out.
-    fn handle_sigaltstack(
-        &mut self,
-        core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
-        old: parameters::SignalAction,
-    ) -> Result<u64, Error>
-    where
-        M: ManagerReadWrite,
-    {
-        /// `sizeof(struct sigaltstack)` on the Kernel side
-        const SIZE_SIGALTSTACK: usize = 24;
-
-        if let Some(old) = old.address() {
-            core.main_memory.write(old, [0u8; SIZE_SIGALTSTACK])?;
-        }
-
-        // Return 0 as an indicator of success
-        Ok(0)
-    }
-
-    /// Handle `rt_sigaction` system call. This does nothing effectively. It does not support
-    /// retrieving the previous handler for a signal - it just zeroes out the memory.
-    ///
-    /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigaction.2.html>
-    fn handle_rt_sigaction(
-        &mut self,
-        core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
-        _: u64,
-        old: parameters::SignalAction,
-        _: parameters::SigsetTSizeEightBytes,
-    ) -> Result<u64, Error>
-    where
-        M: ManagerReadWrite,
-    {
-        /// `sizeof(struct sigaction)` on the Kernel side
-        const SIZE_SIGACTION: usize = 32;
-
-        if let Some(old) = old.address() {
-            // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
-        }
-
-        // Return 0 as an indicator of success
-        Ok(0)
-    }
-
-    /// Handle `rt_sigprocmask` system call. This does nothing effectively. If the previous mask is
-    /// requested, it will simply be zeroed out.
-    fn handle_rt_sigprocmask(
-        &mut self,
-        core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
-        _: u64,
-        old: parameters::SignalAction,
-        _: parameters::SigsetTSizeEightBytes,
-    ) -> Result<u64, Error>
-    where
-        M: ManagerReadWrite,
-    {
-        if let Some(old) = old.address() {
-            // As we don't store the previous mask, we just zero out the memory
-            core.main_memory
-                .write(old, [0u8; parameters::SIGSET_SIZE as usize])?;
-        }
-
-        // Return 0 as an indicator of success
-        Ok(0)
-    }
-
     /// Handle `tkill` system call. As there is only one thread at the moment, this system call
     /// will return an error if the thread ID is not the main thread ID.
     fn handle_tkill(
         &mut self,
         _: parameters::MainThreadId,
-        signal: parameters::Signal,
+        signal: signals::Signal,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
         M: ManagerReadWrite,
