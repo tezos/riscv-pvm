@@ -48,6 +48,7 @@ use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
@@ -283,7 +284,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 
     type XValue32 = Value<XValue32>;
 
-    type FValue = Value<f64>;
+    type FValue = Value<FValue>;
 
     type Bool = Value<bool>;
 

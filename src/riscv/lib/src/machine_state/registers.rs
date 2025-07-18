@@ -580,9 +580,9 @@ impl ConstDefault for FValue {
 }
 
 impl FValue {
-    /// Convert to [`f64`] bitwise.
-    pub(crate) fn bits(self) -> f64 {
-        f64::from_bits(self.0)
+    /// Extract the raw bits of FValue to [`u64`].
+    pub(crate) fn bits(self) -> u64 {
+        self.0
     }
 }
 

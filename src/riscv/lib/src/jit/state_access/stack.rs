@@ -48,13 +48,13 @@ use cranelift::codegen::ir::StackSlotKind;
 use cranelift::codegen::ir::Type;
 use cranelift::codegen::ir::types::I64;
 use cranelift::frontend::FunctionBuilder;
-use cranelift::prelude::types::F64;
 use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
+use crate::machine_state::registers::FValue;
 use crate::traps::Exception;
 
 /// Any value of type `T: StackAddressable` may be placed on the stack, and
@@ -134,12 +134,12 @@ impl_stackable_int!(16);
 impl_stackable_int!(32);
 impl_stackable_int!(64);
 
-impl StackAddressable for f64 {
-    type Underlying = f64;
+impl StackAddressable for FValue {
+    type Underlying = FValue;
 }
 
-impl Stackable for f64 {
-    const IR_TYPE: Type = F64;
+impl Stackable for FValue {
+    const IR_TYPE: Type = I64;
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.

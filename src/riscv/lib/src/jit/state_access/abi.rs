@@ -12,7 +12,6 @@ use cranelift::codegen::ir::types::I16;
 use cranelift::codegen::ir::types::I32;
 use cranelift::codegen::ir::types::I64;
 use cranelift::prelude::isa::CallConv;
-use cranelift::prelude::types::F64;
 use cranelift_jit::JITModule;
 use cranelift_module::FuncId;
 use cranelift_module::Linkage;
@@ -20,6 +19,7 @@ use cranelift_module::Module;
 use cranelift_module::ModuleResult;
 
 use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 
 /// This struct is used to produce and declare function signatures for external function calls.
@@ -159,8 +159,8 @@ impl ToCraneliftRepr for FRegister {
     const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I8);
 }
 
-impl ToCraneliftRepr for f64 {
-    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(F64);
+impl ToCraneliftRepr for FValue {
+    const CRANELIFT_TYPE: CraneliftRepr = CraneliftRepr::Value(I64);
 }
 
 /// A valid return type for an external function call.
