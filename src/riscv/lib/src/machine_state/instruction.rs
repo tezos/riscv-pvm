@@ -124,7 +124,7 @@ pub enum OpCode {
     Unknown,
 
     // RV64I R-type instructions
-    Add,
+    X64Add,
     Sub,
     X64Xor,
     Or,
@@ -343,7 +343,7 @@ impl OpCode {
     #[inline(always)]
     pub(super) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
         match self {
-            Self::Add => Args::run_add,
+            Self::X64Add => Args::run_x64_add,
             Self::Sub => Args::run_sub,
             Self::Neg => Args::run_neg,
             Self::X64Xor => Args::run_x64_xor,
@@ -535,7 +535,7 @@ impl OpCode {
             Self::Mv => Some(Args::run_mv),
             Self::Neg => Some(Args::run_neg),
             Self::Nop => Some(Args::run_nop),
-            Self::Add => Some(Args::run_add),
+            Self::X64Add => Some(Args::run_x64_add),
             Self::AddWord => Some(Args::run_add_word),
             Self::AddWordImmediate => Some(Args::run_add_word_immediate),
             Self::Sub => Some(Args::run_sub),
@@ -1166,7 +1166,7 @@ macro_rules! impl_f_r_type {
 
 impl Args {
     // RV64I R-type instructions
-    impl_r_type!(integer::run_add, run_add, non_zero);
+    impl_r_type!(integer::run_x64_add, run_x64_add, non_zero);
     impl_r_type!(integer::run_sub, run_sub, non_zero);
     impl_r_type!(integer::run_x64_xor, run_x64_xor, non_zero);
     impl_r_type!(integer::run_and, run_and, non_zero);
@@ -2194,7 +2194,7 @@ impl From<&InstrCacheable> for Instruction {
                 Instruction::new_mv(args.rd_rs1, args.rs2, InstrWidth::Compressed)
             }
             InstrCacheable::CAdd(args) => {
-                Instruction::new_add(args.rd_rs1, args.rd_rs1, args.rs2, InstrWidth::Compressed)
+                Instruction::new_x64_add(args.rd_rs1, args.rd_rs1, args.rs2, InstrWidth::Compressed)
             }
             InstrCacheable::CAnd(args) => Instruction::from_ic_cand(args),
             InstrCacheable::CXor(args) => Instruction::from_ic_cxor(args),

@@ -63,11 +63,7 @@ pub fn run_mv(icb: &mut impl ICB, rd_rs1: NonZeroXRegister, rs2: NonZeroXRegiste
 pub fn run_nop(_icb: &mut impl ICB) {}
 
 /// Perform `val(rs1) + val(rs2)` and store the result in `rd`
-///
-/// Relevant RISC-V opcodes:
-/// - ADD
-/// - C.ADD
-pub fn run_add(
+pub fn run_x64_add(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -790,7 +786,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_add_mv, F, {
+    backend_test!(test_x64_add_mv, F, {
         let imm_rs1_res = [
             (0_i64, 0_u64, 0_u64),
             (0, 0xFFF0_0420, 0xFFF0_0420),
@@ -806,7 +802,7 @@ mod tests {
             state.hart.xregisters.write_nz(nz::a3, rs1);
             state.hart.xregisters.write_nz(nz::a4, imm as u64);
 
-            run_add(&mut state, nz::a3, nz::a4, nz::a3);
+            run_x64_add(&mut state, nz::a3, nz::a4, nz::a3);
             assert_eq!(state.hart.xregisters.read_nz(nz::a3), res);
             run_mv(&mut state, nz::a4, nz::a3);
             assert_eq!(state.hart.xregisters.read_nz(nz::a4), res);
@@ -840,7 +836,7 @@ mod tests {
             state.hart.xregisters.write_nz(nz::t0, imm as u64);
             run_addi(&mut state, imm, nz::a0, rd);
             assert_eq!(state.hart.xregisters.read_nz(rd), res);
-            run_add(&mut state, nz::a0, nz::t0, nz::a0);
+            run_x64_add(&mut state, nz::a0, nz::t0, nz::a0);
             assert_eq!(state.hart.xregisters.read_nz(nz::a0), res);
             // test sub with: res - imm = rs1 and res - rs1 = imm
             state.hart.xregisters.write_nz(nz::a0, res);

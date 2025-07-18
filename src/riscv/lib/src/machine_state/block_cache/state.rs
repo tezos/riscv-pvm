@@ -922,7 +922,7 @@ mod tests {
         let populate_block = |block: &mut TestState<Owned>| {
             for i in 0..TestCacheConfig::CACHE_SIZE {
                 block.push_instr_uncompressed(i as Address, Instruction {
-                    opcode: OpCode::Add,
+                    opcode: OpCode::X64Add,
                     args: Args {
                         rd: nz::a1.into(),
                         rs1: nz::a1.into(),

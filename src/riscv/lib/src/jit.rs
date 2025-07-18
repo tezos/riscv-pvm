@@ -598,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn test_jit_x64_add() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let assert_x1_is_five = assert_hook!(|core| {
@@ -608,10 +608,10 @@ mod tests {
         let scenario: Scenario = ScenarioBuilder::default()
             .set_instructions(&[
                 I::new_li(x1, 1, Uncompressed),
-                I::new_add(x2, x2, x1, Compressed),
-                I::new_add(x1, x1, x2, Uncompressed),
-                I::new_add(x2, x2, x1, Uncompressed),
-                I::new_add(x1, x1, x2, Compressed),
+                I::new_x64_add(x2, x2, x1, Compressed),
+                I::new_x64_add(x1, x1, x2, Uncompressed),
+                I::new_x64_add(x2, x2, x1, Uncompressed),
+                I::new_x64_add(x1, x1, x2, Compressed),
             ])
             .set_assert_hook(assert_x1_is_five)
             .build();

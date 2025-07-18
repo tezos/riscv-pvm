@@ -25,15 +25,15 @@ use crate::parser::instruction::UJTypeArgs;
 use crate::parser::split_x0;
 
 impl Instruction {
-    /// Create a new [`Instruction`] for [`OpCode::Add`].
-    pub(crate) fn new_add(
+    /// Create a new [`Instruction`] for [`OpCode::X64Add`].
+    pub(crate) fn new_x64_add(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Add,
+            opcode: OpCode::X64Add,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1975,7 +1975,7 @@ impl Instruction {
                 Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_add(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_add(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
