@@ -90,12 +90,8 @@ pub fn run_add_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZ
     write_xregister_nz(icb, rd, res)
 }
 
-/// Perform [`val(rs1) - val(rs2)`] and store the result in `rd`
-///
-/// Relevant RISC-V opcodes:
-/// - SUB
-/// - C.SUB
-pub fn run_sub(
+/// Perform `val(rs1) - val(rs2)` and store the result in `rd`
+pub fn run_x64_sub(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -809,7 +805,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_add_sub, F, {
+    backend_test!(test_x64_add_sub, F, {
         let imm_rs1_rd_res = [
             (0_i64, 0_u64, nz::t3, 0_u64),
             (0, 0xFFF0_0420, nz::t2, 0xFFF0_0420),
@@ -841,10 +837,10 @@ mod tests {
             // test sub with: res - imm = rs1 and res - rs1 = imm
             state.hart.xregisters.write_nz(nz::a0, res);
             state.hart.xregisters.write_nz(nz::t0, imm as u64);
-            run_sub(&mut state, nz::a0, nz::t0, nz::a1);
+            run_x64_sub(&mut state, nz::a0, nz::t0, nz::a1);
             assert_eq!(state.hart.xregisters.read_nz(nz::a1), rs1);
             // now rs1 is in register a1
-            run_sub(&mut state, nz::a0, nz::a1, nz::a1);
+            run_x64_sub(&mut state, nz::a0, nz::a1, nz::a1);
             assert_eq!(state.hart.xregisters.read_nz(nz::a1), imm as u64);
         }
     });

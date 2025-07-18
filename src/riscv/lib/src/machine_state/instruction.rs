@@ -125,7 +125,7 @@ pub enum OpCode {
 
     // RV64I R-type instructions
     X64Add,
-    Sub,
+    X64Sub,
     X64Xor,
     Or,
     And,
@@ -344,7 +344,7 @@ impl OpCode {
     pub(super) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
         match self {
             Self::X64Add => Args::run_x64_add,
-            Self::Sub => Args::run_sub,
+            Self::X64Sub => Args::run_x64_sub,
             Self::Neg => Args::run_neg,
             Self::X64Xor => Args::run_x64_xor,
             Self::Or => Args::run_or,
@@ -538,7 +538,7 @@ impl OpCode {
             Self::X64Add => Some(Args::run_x64_add),
             Self::AddWord => Some(Args::run_add_word),
             Self::AddWordImmediate => Some(Args::run_add_word_immediate),
-            Self::Sub => Some(Args::run_sub),
+            Self::X64Sub => Some(Args::run_x64_sub),
             Self::SubWord => Some(Args::run_sub_word),
             Self::And => Some(Args::run_and),
             Self::Or => Some(Args::run_or),
@@ -1167,7 +1167,7 @@ macro_rules! impl_f_r_type {
 impl Args {
     // RV64I R-type instructions
     impl_r_type!(integer::run_x64_add, run_x64_add, non_zero);
-    impl_r_type!(integer::run_sub, run_sub, non_zero);
+    impl_r_type!(integer::run_x64_sub, run_x64_sub, non_zero);
     impl_r_type!(integer::run_x64_xor, run_x64_xor, non_zero);
     impl_r_type!(integer::run_and, run_and, non_zero);
     impl_r_type!(integer::run_or, run_or, non_zero);

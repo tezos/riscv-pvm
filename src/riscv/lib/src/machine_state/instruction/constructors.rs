@@ -82,15 +82,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::Sub`].
-    pub(crate) fn new_sub(
+    /// Create a new [`Instruction`] for [`OpCode::X64Sub`].
+    pub(crate) fn new_x64_sub(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Sub,
+            opcode: OpCode::X64Sub,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2007,7 +2007,7 @@ impl Instruction {
                 Instruction::new_neg(args.rd, rs2, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_sub(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_sub(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2021,7 +2021,7 @@ impl Instruction {
             // Storing anything in x0 or Subtracting 0 from anything is a NOP.
             (X::X0, _) | (_, X::X0) => Instruction::new_nop(InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_sub(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_sub(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }

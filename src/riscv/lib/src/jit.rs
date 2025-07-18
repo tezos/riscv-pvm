@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sub() {
+    fn test_jit_x64_sub() {
         use Instruction as I;
 
         use crate::machine_state::registers::NonZeroXRegister::*;
@@ -721,7 +721,7 @@ mod tests {
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x1, 10, Uncompressed),
-                    I::new_sub(x2, x1, x1, Compressed),
+                    I::new_x64_sub(x2, x1, x1, Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 0);
@@ -731,7 +731,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 10, Compressed),
                     I::new_li(x3, -10, Uncompressed),
-                    I::new_sub(x2, x1, x3, Uncompressed),
+                    I::new_x64_sub(x2, x1, x3, Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 20);
@@ -741,7 +741,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 10, Uncompressed),
                     I::new_li(x3, 100, Compressed),
-                    I::new_sub(x2, x1, x3, Compressed),
+                    I::new_x64_sub(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), (-90_i64) as u64);
