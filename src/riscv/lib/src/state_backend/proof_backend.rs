@@ -30,6 +30,9 @@ use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use crate::state_backend::Elem;
+use crate::state_backend::ManagerAlloc;
+use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::elem_bytes;
 
 pub mod merkle;
@@ -58,6 +61,16 @@ impl<M: ManagerBase> ManagerBase for ProofGen<M> {
 
     fn as_devalued_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> &Self::Region<V::E, 1> {
         &cell.underlying
+    }
+}
+
+impl<M: ManagerAlloc> ManagerAlloc for ProofGen<M> {
+    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
+        ProofRegion::bind(M::allocate_region::<E, LEN>(init_value))
+    }
+
+    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
+        ProofDynRegion::bind(M::allocate_dyn_region::<LEN>())
     }
 }
 
@@ -229,6 +242,50 @@ impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
     }
 }
 
+// TODO: RV-709 Remove this impl when `TestBackendFactory` bounds are relaxed.
+impl<M: ManagerDeserialise> ManagerDeserialise for ProofGen<M> {
+    fn deserialise_region<
+        'de,
+        E: serde::Deserialize<'de>,
+        const LEN: usize,
+        D: serde::Deserializer<'de>,
+    >(
+        deserializer: D,
+    ) -> Result<Self::Region<E, LEN>, D::Error> {
+        Ok(ProofRegion::bind(M::deserialise_region::<E, LEN, D>(
+            deserializer,
+        )?))
+    }
+
+    fn deserialise_dyn_region<'de, const LEN: usize, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self::DynRegion<LEN>, D::Error> {
+        Ok(ProofDynRegion::bind(M::deserialise_dyn_region::<LEN, D>(
+            deserializer,
+        )?))
+    }
+}
+
+impl<M: ManagerClone> ManagerClone for ProofGen<M> {
+    fn clone_region<E: 'static + Clone, const LEN: usize>(
+        region: &Self::Region<E, LEN>,
+    ) -> Self::Region<E, LEN> {
+        region.clone()
+    }
+
+    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
+        region.clone()
+    }
+
+    fn clone_enriched_cell<V>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
+    where
+        V: EnrichedValue,
+        V::E: Clone,
+    {
+        cell.clone()
+    }
+}
+
 /// Proof region which wraps a region managed by another manager.
 ///
 /// A [`ManagerBase::Region`] is never split across multiple leaves when Merkleised.
@@ -276,6 +333,17 @@ impl<M: ManagerRead, E: 'static, const LEN: usize> ProofRegion<E, LEN, M> {
             .unwrap_or_else(|| M::region_ref(&self.source, index))
     }
 }
+
+impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for ProofRegion<E, LEN, M> {
+    fn clone(&self) -> Self {
+        Self {
+            source: M::clone_region(&self.source),
+            writes: self.writes.clone(),
+            access: self.access.clone(),
+        }
+    }
+}
+
 /// Proof dynamic region which wraps a dynamic region managed by another manager.
 ///
 /// When Merkleising a [`ManagerBase::DynRegion`], its data can be split into multiple leaves.
@@ -350,6 +418,16 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
     }
 }
 
+impl<const LEN: usize, M: ManagerClone> Clone for ProofDynRegion<LEN, M> {
+    fn clone(&self) -> Self {
+        Self {
+            source: M::clone_dyn_region(&self.source),
+            reads: self.reads.clone(),
+            writes: self.writes.clone(),
+        }
+    }
+}
+
 /// Proof enriched cell which wraps an enriched cell managed by another manager.
 ///
 /// Similar to [`ManagerBase::Region`], a [`ManagerBase::EnrichedCell`] is never
@@ -374,8 +452,19 @@ impl<V: EnrichedValue, M: ManagerBase> ProofEnrichedCell<V, M> {
     }
 }
 
+impl<V: EnrichedValue, M: ManagerClone> Clone for ProofEnrichedCell<V, M>
+where
+    V::E: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            underlying: self.underlying.clone(),
+        }
+    }
+}
+
 /// A record of accessed addresses in a dynamic region
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct DynAccess(BTreeSet<usize>);
 
 impl DynAccess {

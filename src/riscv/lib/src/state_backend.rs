@@ -471,6 +471,7 @@ pub(crate) mod test_helpers {
     use super::ManagerAlloc;
     use super::ManagerClone;
     use super::ManagerReadWrite;
+    use crate::machine_state::test_helpers::ManagerTestInit;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -479,11 +480,16 @@ pub(crate) mod test_helpers {
             $(#[$m])*
             #[test]
             fn $name() {
-                fn inner<$fac_name: $crate::state_backend::test_helpers::TestBackendFactory>() {
+                use $crate::state_backend::owned_backend::Owned;
+                use $crate::state_backend::proof_backend::ProofGen;
+                use $crate::state_backend::test_helpers::TestBackendFactory;
+
+                fn inner<$fac_name: TestBackendFactory>() {
                     $expr
                 }
 
-                inner::<$crate::state_backend::owned_backend::Owned>();
+                inner::<Owned>();
+                inner::<ProofGen<Owned>>();
             }
         };
     }
@@ -494,7 +500,9 @@ pub(crate) mod test_helpers {
         /// Used for testing.
         pub trait TestBackendFactory = ManagerReadWrite
             + ManagerClone
-            + ManagerAlloc;
+            + ManagerAlloc
+            + ManagerTestInit
+            ;
     }
 }
 
