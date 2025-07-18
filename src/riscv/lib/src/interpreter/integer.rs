@@ -123,11 +123,7 @@ pub fn run_sub_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZ
     write_xregister_nz(icb, rd, res)
 }
 /// Saves in `rd` the bitwise AND between the value in `rs1` and `rs2`
-///
-/// Relevant RISC-V opcodes:
-/// - `AND`
-/// - `C.AND`
-pub fn run_and(
+pub fn run_x64_and(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -866,7 +862,7 @@ mod tests {
 
             state.hart.xregisters.write(a0, v1);
             state.hart.xregisters.write(t3, v2);
-            run_and(&mut state, nz::t3, nz::a0, nz::a1);
+            run_x64_and(&mut state, nz::t3, nz::a0, nz::a1);
             prop_assert_eq!(state.hart.xregisters.read(a1), v1 & v2);
 
             state.hart.xregisters.write(a0, v1);
@@ -876,7 +872,7 @@ mod tests {
 
             // Same register
             state.hart.xregisters.write(a0, v1);
-            run_and(&mut state, nz::a0, nz::a0, nz::a1);
+            run_x64_and(&mut state, nz::a0, nz::a0, nz::a1);
             prop_assert_eq!(state.hart.xregisters.read(a1), v1);
             run_x64_or(&mut state, nz::a0, nz::a0, nz::a1);
             prop_assert_eq!(state.hart.xregisters.read(a1), v1);

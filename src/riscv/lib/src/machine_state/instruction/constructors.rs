@@ -500,15 +500,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::And`].
-    pub(crate) fn new_and(
+    /// Create a new [`Instruction`] for [`OpCode::X64And`].
+    pub(crate) fn new_x64_and(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::And,
+            opcode: OpCode::X64And,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2271,7 +2271,7 @@ impl Instruction {
             // Bitwise AND with zero is zero: `x & 0 == 0`
             (X::X0, _) | (_, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_and(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_and(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2286,7 +2286,7 @@ impl Instruction {
             // Bitwise AND with zero is zero: `x & 0 == 0`
             (X::NonZero(rd_rs1), X::X0) => Instruction::new_li(rd_rs1, 0, InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_and(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_and(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }
