@@ -54,13 +54,13 @@ nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.tom
 # Run the benchmark
 result_dir=$(mktemp -d)
 result_args=()
-for i in $(seq 1 $NUM_ITERS); do 
+for i in $(seq 1 $NUM_ITERS); do
   nix develop --command cargo run --release --quiet --manifest-path src/riscv/Cargo.toml --bin riscv-sandbox -- run --input src/riscv/jstz/target/riscv64gc-unknown-linux-musl/release/jstz --inbox-file "$inbox_file" --timings > $result_dir/$i.json
   result_args+=("--log-file=$result_dir/$i.json")
 done
 
 # Collect results and display them
-nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.toml --bin inbox-bench -- results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}"
+nix develop --command cargo run --quiet --manifest-path src/riscv/jstz/Cargo.toml --bin inbox-bench -- results --collapsible-results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}"
 
 # Clean up
 rm -rf "$inbox_file" "$dir" "$result_dir"
