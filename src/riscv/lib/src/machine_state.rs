@@ -887,7 +887,7 @@ mod tests {
         let uncompressed_bytes = 0x5307b3;
 
         let uncompressed = Instruction {
-            opcode: OpCode::Add,
+            opcode: OpCode::X64Add,
             args: Args {
                 rd: nz::a5.into(),
                 rs1: nz::t1.into(),

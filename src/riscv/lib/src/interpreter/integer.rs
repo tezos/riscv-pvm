@@ -63,11 +63,7 @@ pub fn run_mv(icb: &mut impl ICB, rd_rs1: NonZeroXRegister, rs2: NonZeroXRegiste
 pub fn run_nop(_icb: &mut impl ICB) {}
 
 /// Perform `val(rs1) + val(rs2)` and store the result in `rd`
-///
-/// Relevant RISC-V opcodes:
-/// - ADD
-/// - C.ADD
-pub fn run_add(
+pub fn run_x64_add(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -94,12 +90,8 @@ pub fn run_add_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZ
     write_xregister_nz(icb, rd, res)
 }
 
-/// Perform [`val(rs1) - val(rs2)`] and store the result in `rd`
-///
-/// Relevant RISC-V opcodes:
-/// - SUB
-/// - C.SUB
-pub fn run_sub(
+/// Perform `val(rs1) - val(rs2)` and store the result in `rd`
+pub fn run_x64_sub(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -131,11 +123,7 @@ pub fn run_sub_word(icb: &mut impl ICB, rs1: XRegister, rs2: XRegister, rd: NonZ
     write_xregister_nz(icb, rd, res)
 }
 /// Saves in `rd` the bitwise AND between the value in `rs1` and `rs2`
-///
-/// Relevant RISC-V opcodes:
-/// - `AND`
-/// - `C.AND`
-pub fn run_and(
+pub fn run_x64_and(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -149,11 +137,7 @@ pub fn run_and(
 }
 
 /// Saves in `rd` the bitwise OR between the value in `rs1` and `rs2`
-///
-/// Relevant RISC-V opcodes:
-/// - `OR`
-/// - `C.OR`
-pub fn run_or(
+pub fn run_x64_or(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -790,7 +774,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_add_mv, F, {
+    backend_test!(test_x64_add_mv, F, {
         let imm_rs1_res = [
             (0_i64, 0_u64, 0_u64),
             (0, 0xFFF0_0420, 0xFFF0_0420),
@@ -806,14 +790,14 @@ mod tests {
             state.hart.xregisters.write_nz(nz::a3, rs1);
             state.hart.xregisters.write_nz(nz::a4, imm as u64);
 
-            run_add(&mut state, nz::a3, nz::a4, nz::a3);
+            run_x64_add(&mut state, nz::a3, nz::a4, nz::a3);
             assert_eq!(state.hart.xregisters.read_nz(nz::a3), res);
             run_mv(&mut state, nz::a4, nz::a3);
             assert_eq!(state.hart.xregisters.read_nz(nz::a4), res);
         }
     });
 
-    backend_test!(test_add_sub, F, {
+    backend_test!(test_x64_add_sub, F, {
         let imm_rs1_rd_res = [
             (0_i64, 0_u64, nz::t3, 0_u64),
             (0, 0xFFF0_0420, nz::t2, 0xFFF0_0420),
@@ -840,15 +824,15 @@ mod tests {
             state.hart.xregisters.write_nz(nz::t0, imm as u64);
             run_addi(&mut state, imm, nz::a0, rd);
             assert_eq!(state.hart.xregisters.read_nz(rd), res);
-            run_add(&mut state, nz::a0, nz::t0, nz::a0);
+            run_x64_add(&mut state, nz::a0, nz::t0, nz::a0);
             assert_eq!(state.hart.xregisters.read_nz(nz::a0), res);
             // test sub with: res - imm = rs1 and res - rs1 = imm
             state.hart.xregisters.write_nz(nz::a0, res);
             state.hart.xregisters.write_nz(nz::t0, imm as u64);
-            run_sub(&mut state, nz::a0, nz::t0, nz::a1);
+            run_x64_sub(&mut state, nz::a0, nz::t0, nz::a1);
             assert_eq!(state.hart.xregisters.read_nz(nz::a1), rs1);
             // now rs1 is in register a1
-            run_sub(&mut state, nz::a0, nz::a1, nz::a1);
+            run_x64_sub(&mut state, nz::a0, nz::a1, nz::a1);
             assert_eq!(state.hart.xregisters.read_nz(nz::a1), imm as u64);
         }
     });
@@ -869,6 +853,29 @@ mod tests {
                 state.hart.xregisters.read(a1),
                 v1_u32.wrapping_sub(v2_u32) as i32 as i64 as u64
             );
+        });
+    });
+
+    backend_test!(test_bitwise_reg, F, {
+        proptest!(|(v1 in any::<u64>(), v2 in any::<u64>())| {
+            let mut state = MachineCoreState::<M4K, F>::new();
+
+            state.hart.xregisters.write(a0, v1);
+            state.hart.xregisters.write(t3, v2);
+            run_x64_and(&mut state, nz::t3, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1 & v2);
+
+            state.hart.xregisters.write(a0, v1);
+            state.hart.xregisters.write(t3, v2);
+            run_x64_or(&mut state, nz::t3, nz::a0, nz::a0);
+            prop_assert_eq!(state.hart.xregisters.read(a0), v1 | v2);
+
+            // Same register
+            state.hart.xregisters.write(a0, v1);
+            run_x64_and(&mut state, nz::a0, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
+            run_x64_or(&mut state, nz::a0, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
         });
     });
 

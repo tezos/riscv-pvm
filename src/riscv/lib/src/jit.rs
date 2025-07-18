@@ -598,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add() {
+    fn test_jit_x64_add() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let assert_x1_is_five = assert_hook!(|core| {
@@ -608,10 +608,10 @@ mod tests {
         let scenario: Scenario = ScenarioBuilder::default()
             .set_instructions(&[
                 I::new_li(x1, 1, Uncompressed),
-                I::new_add(x2, x2, x1, Compressed),
-                I::new_add(x1, x1, x2, Uncompressed),
-                I::new_add(x2, x2, x1, Uncompressed),
-                I::new_add(x1, x1, x2, Compressed),
+                I::new_x64_add(x2, x2, x1, Compressed),
+                I::new_x64_add(x1, x1, x2, Uncompressed),
+                I::new_x64_add(x2, x2, x1, Uncompressed),
+                I::new_x64_add(x1, x1, x2, Compressed),
             ])
             .set_assert_hook(assert_x1_is_five)
             .build();
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sub() {
+    fn test_jit_x64_sub() {
         use Instruction as I;
 
         use crate::machine_state::registers::NonZeroXRegister::*;
@@ -721,7 +721,7 @@ mod tests {
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x1, 10, Uncompressed),
-                    I::new_sub(x2, x1, x1, Compressed),
+                    I::new_x64_sub(x2, x1, x1, Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 0);
@@ -731,7 +731,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 10, Compressed),
                     I::new_li(x3, -10, Uncompressed),
-                    I::new_sub(x2, x1, x3, Uncompressed),
+                    I::new_x64_sub(x2, x1, x3, Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 20);
@@ -741,7 +741,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 10, Uncompressed),
                     I::new_li(x3, 100, Compressed),
-                    I::new_sub(x2, x1, x3, Compressed),
+                    I::new_x64_sub(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), (-90_i64) as u64);
@@ -801,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn test_and() {
+    fn test_x64_and() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let assert_x1_and_x2_equal = assert_hook!(|core| {
@@ -817,7 +817,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 13872, Uncompressed),
                     I::new_li(x3, !0, Compressed),
-                    I::new_and(x2, x1, x3, Compressed),
+                    I::new_x64_and(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
@@ -825,7 +825,7 @@ mod tests {
                 // Bitwise and with itself is self.
                 .set_instructions(&[
                     I::new_li(x1, 49666, Uncompressed),
-                    I::new_and(x2, x1, x1, Compressed),
+                    I::new_x64_and(x2, x1, x1, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
@@ -834,7 +834,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 0, Uncompressed),
                     I::new_li(x3, 540921, Compressed),
-                    I::new_and(x2, x1, x3, Compressed),
+                    I::new_x64_and(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal)
                 .build(),
@@ -849,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn test_or() {
+    fn test_x64_or() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let assert_x1_and_x2_equal = assert_hook!(|core| {
@@ -865,7 +865,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, !0, Uncompressed),
                     I::new_li(x3, 13872, Compressed),
-                    I::new_or(x2, x1, x3, Compressed),
+                    I::new_x64_or(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
@@ -873,7 +873,7 @@ mod tests {
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x1, 49666, Uncompressed),
-                    I::new_or(x2, x1, x1, Compressed),
+                    I::new_x64_or(x2, x1, x1, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
@@ -882,7 +882,7 @@ mod tests {
                 .set_instructions(&[
                     I::new_li(x1, 540921, Uncompressed),
                     I::new_li(x3, 0, Compressed),
-                    I::new_or(x2, x1, x3, Compressed),
+                    I::new_x64_or(x2, x1, x3, Compressed),
                 ])
                 .set_assert_hook(assert_x1_and_x2_equal)
                 .build(),

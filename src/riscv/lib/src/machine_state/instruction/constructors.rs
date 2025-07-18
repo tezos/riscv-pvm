@@ -25,15 +25,15 @@ use crate::parser::instruction::UJTypeArgs;
 use crate::parser::split_x0;
 
 impl Instruction {
-    /// Create a new [`Instruction`] for [`OpCode::Add`].
-    pub(crate) fn new_add(
+    /// Create a new [`Instruction`] for [`OpCode::X64Add`].
+    pub(crate) fn new_x64_add(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Add,
+            opcode: OpCode::X64Add,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -82,15 +82,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::Sub`].
-    pub(crate) fn new_sub(
+    /// Create a new [`Instruction`] for [`OpCode::X64Sub`].
+    pub(crate) fn new_x64_sub(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Sub,
+            opcode: OpCode::X64Sub,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -500,15 +500,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::And`].
-    pub(crate) fn new_and(
+    /// Create a new [`Instruction`] for [`OpCode::X64And`].
+    pub(crate) fn new_x64_and(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::And,
+            opcode: OpCode::X64And,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -519,15 +519,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::Or`].
-    pub(crate) fn new_or(
+    /// Create a new [`Instruction`] for [`OpCode::X64Or`].
+    pub(crate) fn new_x64_or(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Or,
+            opcode: OpCode::X64Or,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -1975,7 +1975,7 @@ impl Instruction {
                 Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_add(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_add(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2007,7 +2007,7 @@ impl Instruction {
                 Instruction::new_neg(args.rd, rs2, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_sub(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_sub(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2021,7 +2021,7 @@ impl Instruction {
             // Storing anything in x0 or Subtracting 0 from anything is a NOP.
             (X::X0, _) | (_, X::X0) => Instruction::new_nop(InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_sub(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_sub(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }
@@ -2271,7 +2271,7 @@ impl Instruction {
             // Bitwise AND with zero is zero: `x & 0 == 0`
             (X::X0, _) | (_, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_and(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_and(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2286,7 +2286,7 @@ impl Instruction {
             // Bitwise AND with zero is zero: `x & 0 == 0`
             (X::NonZero(rd_rs1), X::X0) => Instruction::new_li(rd_rs1, 0, InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_and(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_and(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }
@@ -2302,7 +2302,7 @@ impl Instruction {
                 Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_or(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_or(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2317,7 +2317,7 @@ impl Instruction {
             // if rs2 is 0, it is the same as moving rs1 to rd, which are the same register.
             (X::X0, _) | (_, X::X0) => Instruction::new_nop(InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_or(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_or(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }
