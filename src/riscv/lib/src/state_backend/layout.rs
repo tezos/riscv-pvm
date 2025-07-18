@@ -343,7 +343,8 @@ mod tests {
     use crate::state_backend::ProofPart;
     use crate::state_backend::owned_backend::Owned;
     use crate::state_backend::proof_backend::ProofWrapper;
-    use crate::state_backend::proof_backend::proof::deserialise_owned;
+    use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
+    use crate::state_backend::proof_backend::proof::deserialiser::RunDeserialiser;
     use crate::state_backend::verify_backend::handle_stepper_panics;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -437,7 +438,7 @@ mod tests {
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
                 let mut verify_foo =
-                    deserialise_owned::deserialise::<Foo>(ProofPart::Present(&proof))
+                    ProofTreeDeserialiser::into_verifier_alloc::<Foo>(ProofPart::Present(&proof))
                         .unwrap()
                         .0;
                 assert_eq!(bar, verify_foo.bar.read());

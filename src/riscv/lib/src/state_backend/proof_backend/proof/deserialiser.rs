@@ -15,11 +15,14 @@
 
 use bincode::Decode;
 
+use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
+use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofLayoutError;
 use crate::state_backend::ProofParseError;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
+use crate::state_backend::verify_backend::Verifier;
 
 /// Result type used when deserialising with [`Deserialiser`] traits.
 pub(in crate::state_backend) type ProofLayoutResult<R, E = ProofLayoutError> =
@@ -186,6 +189,25 @@ pub trait Suspended {
     ) -> <Self::Parent as Deserialiser>::Suspended<T>
     where
         Self::Output: 'static;
+}
+
+/// Trait for common deserialisation functionality abstracting over the deserialiser type.
+pub trait RunDeserialiser: Deserialiser + Sized {
+    /// Data type consumed by the deserialiser.
+    type Data;
+
+    /// Run the deserialiser and obtain the result of the computation.
+    fn run<R>(
+        input_data: Self::Data,
+        deser_fn: impl FnOnce(Self) -> ProofLayoutResult<<Self as Deserialiser>::Suspended<R>>,
+    ) -> Result<R>;
+
+    /// Based on a [`ProofLayout`] obtain the corresponding [`AllocatedOf`] and [`OwnedProofPart`].
+    fn into_verifier_alloc<L: ProofLayout>(
+        input_data: Self::Data,
+    ) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
+        Self::run(input_data, L::into_verifier_alloc)
+    }
 }
 
 #[cfg(test)]

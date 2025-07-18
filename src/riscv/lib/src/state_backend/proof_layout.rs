@@ -1204,7 +1204,8 @@ mod tests {
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::state_backend::proof_backend::proof::deserialise_owned;
+    use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
+    use crate::state_backend::proof_backend::proof::deserialiser::RunDeserialiser;
 
     const CELLS_SIZE: usize = 32;
 
@@ -1240,7 +1241,7 @@ mod tests {
                 .to_merkle_proof()
                 .unwrap();
 
-            let verifier_state = deserialise_owned::deserialise::<TestLayout>(
+            let verifier_state = ProofTreeDeserialiser::into_verifier_alloc::<TestLayout>(
                 ProofTree::Present(&merkle_proof)
             ).unwrap();
 

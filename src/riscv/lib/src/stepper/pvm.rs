@@ -45,8 +45,9 @@ use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::proof_backend::proof::deserialise_owned;
-use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
+use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
+use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
+use crate::state_backend::proof_backend::proof::deserialiser::RunDeserialiser;
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::state_backend::verify_backend::Verifier;
@@ -270,7 +271,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
     {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).collect();
         let (space, merkle_tree) =
-            deserialise_stream::deserialise::<PvmLayout<MC, BCC>>(&tree_serialisation)
+            StreamDeserialiser::into_verifier_alloc::<PvmLayout<MC, BCC>>(&tree_serialisation)
                 .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
@@ -295,7 +296,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
     {
         let proof_tree = ProofTree::Present(proof.tree());
         let (space, deserialised_proof_tree) =
-            deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
+            ProofTreeDeserialiser::into_verifier_alloc::<PvmLayout<MC, BCC>>(proof_tree)
                 .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {

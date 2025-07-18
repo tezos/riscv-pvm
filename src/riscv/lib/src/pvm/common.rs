@@ -42,7 +42,8 @@ use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::proof_backend::proof::deserialise_owned;
+use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
+use crate::state_backend::proof_backend::proof::deserialiser::RunDeserialiser;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
@@ -455,9 +456,11 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BC
     where
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof))
-            .ok()?
-            .0;
+        let (space, _proof_tree) =
+            ProofTreeDeserialiser::into_verifier_alloc::<PvmLayout<MC, BCC>>(ProofTree::Present(
+                proof,
+            ))
+            .ok()?;
         Some(Self::bind(space, block_builder))
     }
 }
