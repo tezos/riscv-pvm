@@ -53,6 +53,8 @@ enum Commands {
         log_file: Vec<Box<Path>>,
         #[arg(long)]
         expected_transfers: usize,
+        #[arg(long)]
+        collapsible_results: bool,
     },
 }
 
@@ -72,7 +74,13 @@ fn main() -> Result<()> {
             inbox_file,
             log_file,
             expected_transfers,
-        } => handle_results(inbox_file, log_file, expected_transfers)?,
+            collapsible_results,
+        } => handle_results(
+            inbox_file,
+            log_file,
+            expected_transfers,
+            collapsible_results,
+        )?,
     }
 
     Ok(())
