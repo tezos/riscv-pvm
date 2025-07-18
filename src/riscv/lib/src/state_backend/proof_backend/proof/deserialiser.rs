@@ -29,6 +29,23 @@ pub(in crate::state_backend) type ProofLayoutResult<R, E = ProofLayoutError> =
 pub(in crate::state_backend) type ProofParseResult<R, E = ProofParseError> =
     std::result::Result<R, E>;
 
+/// Error type used when deserialising a proof - including both the layout and contents of the
+/// proof.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum Error {
+    /// Error during usage of [`Deserialiser`] traits.
+    #[error("{0}")]
+    Deserialise(#[from] ProofLayoutError),
+
+    /// Error during parsing a proof's content - running a deserialisation's [`Suspended`] computation.
+    #[error("{0}")]
+    ParseProof(#[from] ProofParseError),
+}
+
+/// Result type used when deserialising a proof - including both the layout and contents of the
+/// proof.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
 /// where the leaf is assumed to have type `T`.
 #[derive(Clone)]
@@ -209,7 +226,7 @@ mod tests {
         // Node (root)
         // ├── Leaf (type: Hash)
         // └── Node
-        //     └── Leaf (type: i32)
+        //     └── Leaf (type: T)
 
         // Computation: return the value of the nested leaf
 
@@ -226,11 +243,10 @@ mod tests {
             })?
             .done()?;
 
-        Ok(r.map(|(_left, right)| match right {
-            Partial::Absent => 0,
-            // This blinded hash can be of the nested leaf or the root
-            Partial::Blinded(_hash) => -1,
+        Ok(r.map(move |(_left, right)| match right {
             Partial::Present((nr, _)) => nr,
+            Partial::Absent => 0,
+            Partial::Blinded(_hash) => -1,
         }))
     }
 
@@ -276,8 +292,8 @@ mod tests {
         bytes: &'t [u8],
     ) -> ProofLayoutResult<ProofParseResult<i32>> {
         let tags = Rc::new(RefCell::new(TagIter::new(bytes)));
-        let comp_fn = deser(StreamDeserialiser::new_present(tags.clone()));
-        comp_fn.map(|f| f.into_result(&mut tags.borrow().remaining_to_stream_input()))
+        let comp_fn = deser(StreamDeserialiser::new_present(tags.clone()))?;
+        Ok(comp_fn.into_result(&mut tags.borrow_mut().remaining_to_stream_input()))
     }
 
     #[test]
@@ -294,7 +310,7 @@ mod tests {
         ]);
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0);
+        assert_eq!(comp_fn.into_result(), Ok(0));
     }
 
     #[test]
@@ -332,14 +348,14 @@ mod tests {
 
         let res = comp_fn.unwrap().into_result();
 
-        assert_eq!(res.unwrap(), -1);
+        assert_eq!(res, Ok(-1));
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
         let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), -1);
+        assert_eq!(comp_fn.into_result(), Ok(-1));
     }
 
     fn raw_tags_to_bytes<const LEN: usize>(tags: [u8; LEN]) -> Vec<u8> {
@@ -371,7 +387,7 @@ mod tests {
         let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), -1);
+        assert_eq!(comp_fn.into_result(), Ok(-1));
     }
 
     #[test]
@@ -445,7 +461,8 @@ mod tests {
             )))
         ));
 
-        // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
+        // First 2 children of root are ok in shape (blinded) but because the extra byte in tags
+        // will be counted towards the blinded hashes a RemainingBytes error will occur.
         let bytes = &[tag_shape_2.as_slice(), data_shape_2.as_ref()].concat();
         let res = run_stream_deserialiser(computation, bytes);
         assert!(matches!(res, Ok(Err(ProofParseError::RemainingBytes))));
@@ -476,7 +493,7 @@ mod tests {
 
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0x140A_0000 + 0xC0005);
+        assert_eq!(comp_fn.into_result(), Ok(0x140A_0000 + 0xC0005));
     }
 
     #[test]

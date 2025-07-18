@@ -46,42 +46,17 @@ use crate::state_backend::proof_backend::proof::deserialiser::ProofLayoutResult;
 use crate::state_backend::verify_backend::PageId;
 use crate::storage::binary;
 
-// TODO: Specialise ProofParseError & ProofLayoutError
-/// Errors occurring when parsing the contents of the proof.
-pub type ProofParseError = ProofLayoutError;
-
 /// Errors occurring when parsing the layout of a Merkle proof
 #[derive(Debug, thiserror::Error)]
-pub enum ProofLayoutError {
+pub enum ProofParseError {
     #[error("Error during deserialisation: {0}")]
     Deserialise(#[from] DecodeError),
 
-    #[error("Error during tag deserialisation: {0}")]
-    TagDeserialise(#[from] TagError),
-
-    #[error("Proof tree is absent")]
-    AbsentProof,
-
-    #[error("Deserialising as a stream and not all bytes are parsed")]
-    RemainingBytes,
-
     #[error("Not enough bytes")]
-    NotEnoughBytes,
+    NotEnoughBytes(#[from] NotEnoughBytesError),
 
-    #[error("Encountered an invalid hash in a blinded node or leaf")]
-    InvalidHash,
-
-    #[error("Encountered a node with a bad number of branches: expected {expected}, got {got}")]
-    BadNumberOfBranches { expected: usize, got: usize },
-
-    #[error("Expected a leaf of size {expected}, got {got}")]
-    UnexpectedLeafSize { expected: usize, got: usize },
-
-    #[error("Encountered a leaf where a node was expected")]
-    UnexpectedLeaf,
-
-    #[error("Encountered a node where a leaf was expected")]
-    UnexpectedNode,
+    #[error("Deserialising as a stream and not all bytes were consumed")]
+    RemainingBytes,
 }
 
 // bincode::Error does not implement `PartialEq`, so we implement it manually.
@@ -91,33 +66,8 @@ impl PartialEq for ProofParseError {
             (ProofParseError::Deserialise(e1), ProofParseError::Deserialise(e2)) => {
                 e1.to_string() == e2.to_string()
             }
-            (ProofParseError::TagDeserialise(e1), ProofParseError::TagDeserialise(e2)) => e1 == e2,
-            (ProofParseError::AbsentProof, ProofParseError::AbsentProof) => true,
+            (ProofParseError::NotEnoughBytes(e1), ProofParseError::NotEnoughBytes(e2)) => e1 == e2,
             (ProofParseError::RemainingBytes, ProofParseError::RemainingBytes) => true,
-            (ProofParseError::NotEnoughBytes, ProofParseError::NotEnoughBytes) => true,
-            (ProofParseError::InvalidHash, ProofParseError::InvalidHash) => true,
-            (
-                ProofParseError::BadNumberOfBranches {
-                    expected: e1,
-                    got: g1,
-                },
-                ProofParseError::BadNumberOfBranches {
-                    expected: e2,
-                    got: g2,
-                },
-            ) => e1 == e2 && g1 == g2,
-            (
-                ProofParseError::UnexpectedLeafSize {
-                    expected: e1,
-                    got: g1,
-                },
-                ProofParseError::UnexpectedLeafSize {
-                    expected: e2,
-                    got: g2,
-                },
-            ) => e1 == e2 && g1 == g2,
-            (ProofParseError::UnexpectedLeaf, ProofParseError::UnexpectedLeaf) => true,
-            (ProofParseError::UnexpectedNode, ProofParseError::UnexpectedNode) => true,
             _ => false,
         }
     }
@@ -131,6 +81,28 @@ pub enum TagError {
 
     #[error("Not enough bytes available")]
     NotEnoughBytes(#[from] NotEnoughBytesError),
+}
+
+/// Errors occurring when parsing the layout of a Merkle proof
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum ProofLayoutError {
+    #[error("Error during tag deserialisation: {0}")]
+    TagDeserialise(#[from] TagError),
+
+    #[error("Proof tree is absent")]
+    AbsentProof,
+
+    #[error("Encountered a node with a bad number of branches: expected {expected}, got {got}")]
+    BadNumberOfBranches { expected: usize, got: usize },
+
+    #[error("Expected a leaf of size {expected}, got {got}")]
+    UnexpectedLeafSize { expected: usize, got: usize },
+
+    #[error("Encountered a leaf where a node was expected")]
+    UnexpectedLeaf,
+
+    #[error("Encountered a node where a leaf was expected")]
+    UnexpectedNode,
 }
 
 /// Common result type for parsing a Merkle proof.

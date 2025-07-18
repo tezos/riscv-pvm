@@ -288,19 +288,6 @@ pub fn serialise_merkle_tree(tree: &MerkleProof) -> impl Iterator<Item = u8> + '
     tags_encoding.chain(nodes_encoding)
 }
 
-/// The raw byte representation of a tag is invalid.
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum DeserialiseError {
-    #[error("Expected a leaf tag, but got a node tag")]
-    UnexpectedNode,
-    #[error("Invalid tag")]
-    InvalidTag,
-    #[error("Not enough bytes")]
-    NotEnoughBytes,
-    #[error("Too many bytes")]
-    TooManyBytes,
-}
-
 /// The tag is invalid.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("Invalid tag")]
@@ -329,7 +316,7 @@ fn deserialise_final_hash(
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> Result<(Proof, NodePvm<Verifier>), ProofLayoutError> {
+) -> deserialiser::Result<(Proof, NodePvm<Verifier>)> {
     let final_state_hash = deserialise_final_hash(&mut bytes)
         .map_err(|e| ProofLayoutError::TagDeserialise(e.into()))?;
 
@@ -337,7 +324,7 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
         deserialise_stream::deserialise::<NodePvmLayout>(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
-        OwnedProofPart::Absent => return Err(ProofLayoutError::AbsentProof),
+        OwnedProofPart::Absent => return Err(ProofLayoutError::AbsentProof.into()),
         OwnedProofPart::Present(tree) => tree,
     };
 

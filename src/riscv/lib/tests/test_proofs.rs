@@ -20,7 +20,9 @@ use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
+use octez_riscv::state_backend::proof_backend::proof::deserialiser;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
+use octez_riscv::state_backend::verify_backend::NotFound;
 use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
 use octez_riscv::state_backend::verify_backend::Verifier;
 use octez_riscv::stepper::Stepper;
@@ -187,22 +189,24 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
     // in the state is written to and proof compression were to optimise
     // for this case.
     let fully_blinded_proof = proof_helpers::fully_blinded(state_hash);
-    assert!(
-        verify_fn(stepper, fully_blinded_proof)
-            .is_err_and(|e| matches!(e, ProofVerificationFailure::AbsentDataAccess(_)))
-    );
+    assert!(matches!(
+        verify_fn(stepper, fully_blinded_proof),
+        Err(ProofVerificationFailure::AbsentDataAccess(NotFound))
+    ));
 
     let empty_proof = proof_helpers::empty(state_hash);
-    assert!(
-        verify_fn(stepper, empty_proof)
-            .is_err_and(|e| matches!(e, ProofVerificationFailure::UnexpectedProofShape))
-    );
+    assert!(matches!(
+        verify_fn(stepper, empty_proof),
+        Err(ProofVerificationFailure::BadDeserialisation(
+            deserialiser::Error::Deserialise(_)
+        ))
+    ));
 
     let invalid_final_hash_proof = proof_helpers::with_final_hash(proof, state_hash);
-    assert!(
-        verify_fn(stepper, invalid_final_hash_proof)
-            .is_err_and(|e| matches!(e, ProofVerificationFailure::FinalHashMismatch { .. }))
-    );
+    assert!(matches!(
+        verify_fn(stepper, invalid_final_hash_proof),
+        Err(ProofVerificationFailure::FinalHashMismatch { .. })
+    ));
 }
 
 mod proof_helpers {

@@ -16,10 +16,10 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofLayoutError;
-use crate::state_backend::ProofParseError;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
+use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::state_backend::proof_backend::proof::deserialiser::ProofParseResult;
 use crate::state_backend::proof_backend::tree::Tree;
 use crate::state_backend::verify_backend::Verifier;
@@ -49,10 +49,13 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             })
             .map(|data| OwnedParserComb::new(Ok(data)))
     }
+
     fn into_leaf<T: Decode<()>>(self) -> ProofLayoutResult<Self::Suspended<Partial<(T, Vec<u8>)>>> {
-        self.deserialise_as_leaf()?
-            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
-            .map(|data| OwnedParserComb::new(Ok(data)))
+        let leaf_data = self
+            .deserialise_as_leaf()?
+            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)));
+
+        Ok(OwnedParserComb::new(leaf_data))
     }
 
     fn into_node(self) -> ProofLayoutResult<Self::DeserialiserNode<Partial<()>>> {
@@ -236,7 +239,7 @@ impl<R> OwnedParserComb<'_, R> {
 /// Given a [`ProofTree`] deserialise it into an allocated [`Verifier`] backend.
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
-) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart), ProofParseError> {
+) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
     let comp_fn = L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?;
-    comp_fn.into_result()
+    Ok(comp_fn.into_result()?)
 }

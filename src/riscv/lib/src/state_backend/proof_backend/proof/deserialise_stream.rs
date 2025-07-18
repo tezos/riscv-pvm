@@ -25,6 +25,7 @@ use crate::state_backend::ProofParseError;
 use crate::state_backend::TagError;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
+use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::state_backend::proof_backend::proof::deserialiser::ProofParseResult;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
@@ -99,7 +100,8 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));
             }
-            Some(tag) => tag?,
+            Some(Err(err)) => return Err(err.into()),
+            Some(Ok(tag)) => tag,
         };
         Ok(StreamParserComb::new(match tag {
             Tag::Node => return Err(ProofLayoutError::UnexpectedNode),
@@ -109,7 +111,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
                     let mut data = Box::new([0_u8; LEN]);
                     match input.cursor.read_exact(data.as_mut()) {
                         Ok(()) => Ok(Partial::Present(data)),
-                        Err(_eof) => Err(ProofParseError::NotEnoughBytes),
+                        Err(_eof) => Err(NotEnoughBytesError.into()),
                     }
                 }
             },
@@ -121,7 +123,8 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));
             }
-            Some(tag) => tag?,
+            Some(Err(err)) => return Err(err.into()),
+            Some(Ok(tag)) => tag,
         };
         Ok(StreamParserComb::new(match tag {
             Tag::Node => return Err(ProofLayoutError::UnexpectedNode),
@@ -177,7 +180,7 @@ impl<'t> StreamDeserialiser<'t> {
         StreamDeserialiser::Present { tags }
     }
 
-    /// Obtain next tag.
+    /// Obtain next tag based on the current state of the deserialiser.
     ///
     /// Return [`None`] if the parent node is absent / blinded - making it nonsensical
     /// to obtain any tags.  
@@ -188,10 +191,12 @@ impl<'t> StreamDeserialiser<'t> {
         // this guarantees the sequential use of mutable borrows.
         match self {
             StreamDeserialiser::Absent => None,
-            StreamDeserialiser::Present { tags } => Some(match tags.borrow_mut().next() {
-                None => Err(NotEnoughBytesError.into()),
-                Some(tag) => tag.map_err(|e| e.into()),
-            }),
+            StreamDeserialiser::Present { tags } => Some(
+                tags.borrow_mut()
+                    .next()
+                    .ok_or(TagError::NotEnoughBytes(NotEnoughBytesError))
+                    .and_then(|tag| tag.map_err(TagError::InvalidTag)),
+            ),
         }
     }
 }
@@ -317,8 +322,8 @@ impl<R> StreamParserComb<'_, R> {
         // tracking issue: <https://github.com/rust-lang/rust/issues/86423>
         let mut next_byte = [0_u8];
         match input.cursor.read_exact(&mut next_byte) {
-            Err(_eof) => result,
             Ok(()) => Err(ProofParseError::RemainingBytes),
+            Err(_eof) => Ok(result?),
         }
     }
 }
@@ -328,11 +333,11 @@ impl<R> StreamParserComb<'_, R> {
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
 pub fn deserialise<L: ProofLayout>(
     proof_tree_raw_bytes: &[u8],
-) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart), ProofParseError> {
+) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
     let tags_rc = Rc::new(RefCell::new(TagIter::new(proof_tree_raw_bytes)));
     let comp_fn = L::into_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation
-    (comp_fn.f)(&mut tags_rc.borrow_mut().remaining_to_stream_input())
+    Ok(comp_fn.into_result(&mut tags_rc.borrow_mut().remaining_to_stream_input())?)
 }
