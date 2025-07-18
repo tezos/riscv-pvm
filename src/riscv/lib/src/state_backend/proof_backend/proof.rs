@@ -16,7 +16,6 @@
 
 use itertools::Itertools;
 
-use super::proof::deserialiser::Result;
 use super::tree::ModifyResult;
 use super::tree::Tree;
 use super::tree::impl_modify_map_collect;
@@ -24,8 +23,8 @@ use crate::bits::ones;
 use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::OwnedProofPart;
+use crate::state_backend::ProofLayoutError;
 use crate::state_backend::hash::Hash;
-use crate::state_backend::proof_backend::proof::deserialiser::DeserError;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
 use crate::storage::HashError;
@@ -330,15 +329,15 @@ fn deserialise_final_hash(
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> Result<(Proof, NodePvm<Verifier>)> {
+) -> Result<(Proof, NodePvm<Verifier>), ProofLayoutError> {
     let final_state_hash = deserialise_final_hash(&mut bytes)
-        .map_err(|_: NotEnoughBytesError| DeserialiseError::NotEnoughBytes)?;
+        .map_err(|e| ProofLayoutError::TagDeserialise(e.into()))?;
 
     let (space, proof_tree) =
         deserialise_stream::deserialise::<NodePvmLayout>(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
-        OwnedProofPart::Absent => return Err(DeserError::AbsentProof),
+        OwnedProofPart::Absent => return Err(ProofLayoutError::AbsentProof),
         OwnedProofPart::Present(tree) => tree,
     };
 

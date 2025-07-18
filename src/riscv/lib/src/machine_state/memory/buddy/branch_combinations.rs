@@ -39,7 +39,6 @@ use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
-use crate::state_backend::proof_backend::proof::deserialiser::Result;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;

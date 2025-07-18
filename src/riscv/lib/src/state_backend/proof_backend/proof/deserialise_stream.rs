@@ -10,21 +10,22 @@ use std::rc::Rc;
 
 use bincode::Decode;
 
-use super::DeserialiseError;
 use super::LeafTag;
 use super::Tag;
-use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
 use super::deserialiser::Partial;
-use super::deserialiser::Result;
+use super::deserialiser::ProofLayoutResult;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
+use crate::state_backend::ProofLayoutError;
+use crate::state_backend::ProofParseError;
 use crate::state_backend::TagError;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
+use crate::state_backend::proof_backend::proof::deserialiser::ProofParseResult;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 
@@ -74,7 +75,7 @@ pub struct StreamInput<'cd> {
 
 impl StreamInput<'_> {
     /// Interpret the next bytes as `T` using [`Decode`].
-    fn deserialise<T: Decode<()>>(&mut self) -> Result<T> {
+    fn deserialise<T: Decode<()>>(&mut self) -> ProofParseResult<T> {
         Ok(crate::storage::binary::deserialise_from(&mut self.cursor)?)
     }
 }
@@ -91,7 +92,9 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
 
     type DeserialiserNode<R> = StreamBranchComb<'t, R>;
 
-    fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
+    fn into_leaf_raw<const LEN: usize>(
+        self,
+    ) -> ProofLayoutResult<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         let tag = match self.next_tag() {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));
@@ -99,21 +102,21 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             Some(tag) => tag?,
         };
         Ok(StreamParserComb::new(match tag {
-            Tag::Node => return Err(DeserError::UnexpectedNode),
+            Tag::Node => return Err(ProofLayoutError::UnexpectedNode),
             Tag::Leaf(leaf_type) => move |input: &mut StreamInput| match leaf_type {
                 LeafTag::Blind => Ok(Partial::Blinded(input.deserialise::<Hash>()?)),
                 LeafTag::Read => {
                     let mut data = Box::new([0_u8; LEN]);
                     match input.cursor.read_exact(data.as_mut()) {
                         Ok(()) => Ok(Partial::Present(data)),
-                        Err(_eof) => Err(DeserialiseError::NotEnoughBytes.into()),
+                        Err(_eof) => Err(ProofParseError::NotEnoughBytes),
                     }
                 }
             },
         }))
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
+    fn into_leaf<T: Decode<()>>(self) -> ProofLayoutResult<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         let tag = match self.next_tag() {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));
@@ -121,7 +124,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             Some(tag) => tag?,
         };
         Ok(StreamParserComb::new(match tag {
-            Tag::Node => return Err(DeserError::UnexpectedNode),
+            Tag::Node => return Err(ProofLayoutError::UnexpectedNode),
             Tag::Leaf(leaf_type) => move |input: &mut StreamInput| match leaf_type {
                 LeafTag::Blind => Ok(Partial::Blinded(input.deserialise::<Hash>()?)),
                 LeafTag::Read => Ok({
@@ -135,7 +138,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         }))
     }
 
-    fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
+    fn into_node(self) -> ProofLayoutResult<Self::DeserialiserNode<Partial<()>>> {
         let tags = match self {
             StreamDeserialiser::Absent => {
                 return Ok(StreamBranchComb {
@@ -149,11 +152,11 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         let tag = tags
             .borrow_mut()
             .next()
-            .ok_or(DeserialiseError::NotEnoughBytes)?
-            .map_err(|_: InvalidTagError| DeserialiseError::InvalidTag)?;
+            .ok_or(TagError::NotEnoughBytes(NotEnoughBytesError))?
+            .map_err(TagError::InvalidTag)?;
 
         match tag {
-            Tag::Leaf(LeafTag::Read) => Err(DeserError::UnexpectedLeaf),
+            Tag::Leaf(LeafTag::Read) => Err(ProofLayoutError::UnexpectedLeaf),
             Tag::Leaf(LeafTag::Blind) => Ok(StreamBranchComb {
                 f: Box::new(move |input: &mut StreamInput| {
                     Ok(Partial::Blinded(input.deserialise()?))
@@ -199,7 +202,7 @@ pub struct StreamParserComb<'t, R> {
         clippy::type_complexity,
         reason = "FnOnce is a trait and trait aliases are not stable yet"
     )]
-    f: Box<dyn FnOnce(&mut StreamInput) -> Result<R, DeserError> + 'static>,
+    f: Box<dyn FnOnce(&mut StreamInput) -> ProofParseResult<R> + 'static>,
     _pd: PhantomData<fn(StreamInput<'t>)>,
 }
 
@@ -224,7 +227,7 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
 
 impl<R> StreamParserComb<'_, R> {
     /// Create a new [`StreamParserComb`] with the given function.
-    pub fn new(f: impl FnOnce(&mut StreamInput) -> Result<R, DeserError> + 'static) -> Self {
+    pub fn new(f: impl FnOnce(&mut StreamInput) -> ProofParseResult<R> + 'static) -> Self {
         StreamParserComb {
             f: Box::new(f),
             _pd: PhantomData,
@@ -238,7 +241,7 @@ pub struct StreamBranchComb<'t, R> {
         clippy::type_complexity,
         reason = "FnOnce is a trait and trait aliases are not stable yet"
     )]
-    f: Box<dyn FnOnce(&mut StreamInput) -> Result<R, DeserError> + 'static>,
+    f: Box<dyn FnOnce(&mut StreamInput) -> ProofParseResult<R> + 'static>,
     /// The none case represents that the father node was blind or absent.
     node_state: Option<Rc<RefCell<TagIter<'t>>>>,
 }
@@ -250,9 +253,10 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
         self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
-        )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
+        ) -> ProofLayoutResult<
+            <Self::Parent as Deserialiser>::Suspended<T>,
+        >,
+    ) -> ProofLayoutResult<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
         T: 'static,
         R: 'static,
@@ -292,7 +296,7 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
         }
     }
 
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
+    fn done(self) -> ProofLayoutResult<<Self::Parent as Deserialiser>::Suspended<R>> {
         Ok(StreamParserComb {
             f: self.f,
             _pd: PhantomData,
@@ -302,7 +306,7 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
 
 impl<R> StreamParserComb<'_, R> {
     /// Deserialise the input and return the result if all bytes have been consumed.  
-    pub fn into_result(self, input: &mut StreamInput) -> Result<R> {
+    pub fn into_result(self, input: &mut StreamInput) -> ProofParseResult<R> {
         let result = (self.f)(input);
 
         // A correct deserialisation makes sure all bytes are consumed.
@@ -313,8 +317,8 @@ impl<R> StreamParserComb<'_, R> {
         // tracking issue: <https://github.com/rust-lang/rust/issues/86423>
         let mut next_byte = [0_u8];
         match input.cursor.read_exact(&mut next_byte) {
-            Ok(()) => Err(DeserError::RemainingBytes),
             Err(_eof) => result,
+            Ok(()) => Err(ProofParseError::RemainingBytes),
         }
     }
 }
@@ -324,7 +328,7 @@ impl<R> StreamParserComb<'_, R> {
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
 pub fn deserialise<L: ProofLayout>(
     proof_tree_raw_bytes: &[u8],
-) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
+) -> Result<(AllocatedOf<L, Verifier>, OwnedProofPart), ProofParseError> {
     let tags_rc = Rc::new(RefCell::new(TagIter::new(proof_tree_raw_bytes)));
     let comp_fn = L::into_verifier_alloc(StreamDeserialiser::new_present(tags_rc.clone()))?;
 
