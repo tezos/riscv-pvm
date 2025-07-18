@@ -519,15 +519,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::Or`].
-    pub(crate) fn new_or(
+    /// Create a new [`Instruction`] for [`OpCode::X64Or`].
+    pub(crate) fn new_x64_or(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         rs2: NonZeroXRegister,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::Or,
+            opcode: OpCode::X64Or,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2302,7 +2302,7 @@ impl Instruction {
                 Instruction::new_mv(args.rd, rs1, InstrWidth::Uncompressed)
             }
             (X::NonZero(rs1), X::NonZero(rs2)) => {
-                Instruction::new_or(args.rd, rs1, rs2, InstrWidth::Uncompressed)
+                Instruction::new_x64_or(args.rd, rs1, rs2, InstrWidth::Uncompressed)
             }
         }
     }
@@ -2317,7 +2317,7 @@ impl Instruction {
             // if rs2 is 0, it is the same as moving rs1 to rd, which are the same register.
             (X::X0, _) | (_, X::X0) => Instruction::new_nop(InstrWidth::Compressed),
             (X::NonZero(rd_rs1), X::NonZero(rs2)) => {
-                Instruction::new_or(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
+                Instruction::new_x64_or(rd_rs1, rd_rs1, rs2, InstrWidth::Compressed)
             }
         }
     }

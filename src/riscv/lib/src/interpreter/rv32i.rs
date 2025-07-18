@@ -51,9 +51,7 @@ mod tests {
     use proptest::proptest;
 
     use crate::backend_test;
-    use crate::interpreter::integer::run_and;
     use crate::interpreter::integer::run_andi;
-    use crate::interpreter::integer::run_or;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
@@ -63,7 +61,6 @@ mod tests {
     use crate::machine_state::registers::fa0;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t1;
-    use crate::machine_state::registers::t3;
     use crate::parser::instruction::FenceSet;
     use crate::state::NewState;
     use crate::traps::Exception;
@@ -85,30 +82,6 @@ mod tests {
             run_andi(&mut state, positive_imm as i64, nz::a1, nz::a2);
             prop_assert_eq!(state.hart.xregisters.read(a2), val & positive_imm);
         })
-    });
-
-    backend_test!(test_bitwise_reg, F, {
-        // TODO: RV-512: move to integer.rs once all are supported.
-        proptest!(|(v1 in any::<u64>(), v2 in any::<u64>())| {
-            let mut state = MachineCoreState::<M4K, F>::new();
-
-            state.hart.xregisters.write(a0, v1);
-            state.hart.xregisters.write(t3, v2);
-            run_and(&mut state, nz::t3, nz::a0, nz::a1);
-            prop_assert_eq!(state.hart.xregisters.read(a1), v1 & v2);
-
-            state.hart.xregisters.write(a0, v1);
-            state.hart.xregisters.write(t3, v2);
-            run_or(&mut state, nz::t3, nz::a0, nz::a0);
-            prop_assert_eq!(state.hart.xregisters.read(a0), v1 | v2);
-
-            // Same register
-            state.hart.xregisters.write(a0, v1);
-            run_and(&mut state, nz::a0, nz::a0, nz::a1);
-            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
-            run_or(&mut state, nz::a0, nz::a0, nz::a1);
-            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
-        });
     });
 
     backend_test!(test_ebreak, F, {

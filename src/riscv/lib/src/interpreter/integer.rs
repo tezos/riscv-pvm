@@ -141,11 +141,7 @@ pub fn run_and(
 }
 
 /// Saves in `rd` the bitwise OR between the value in `rs1` and `rs2`
-///
-/// Relevant RISC-V opcodes:
-/// - `OR`
-/// - `C.OR`
-pub fn run_or(
+pub fn run_x64_or(
     icb: &mut impl ICB,
     rs1: NonZeroXRegister,
     rs2: NonZeroXRegister,
@@ -861,6 +857,29 @@ mod tests {
                 state.hart.xregisters.read(a1),
                 v1_u32.wrapping_sub(v2_u32) as i32 as i64 as u64
             );
+        });
+    });
+
+    backend_test!(test_bitwise_reg, F, {
+        proptest!(|(v1 in any::<u64>(), v2 in any::<u64>())| {
+            let mut state = MachineCoreState::<M4K, F>::new();
+
+            state.hart.xregisters.write(a0, v1);
+            state.hart.xregisters.write(t3, v2);
+            run_and(&mut state, nz::t3, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1 & v2);
+
+            state.hart.xregisters.write(a0, v1);
+            state.hart.xregisters.write(t3, v2);
+            run_x64_or(&mut state, nz::t3, nz::a0, nz::a0);
+            prop_assert_eq!(state.hart.xregisters.read(a0), v1 | v2);
+
+            // Same register
+            state.hart.xregisters.write(a0, v1);
+            run_and(&mut state, nz::a0, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
+            run_x64_or(&mut state, nz::a0, nz::a0, nz::a1);
+            prop_assert_eq!(state.hart.xregisters.read(a1), v1);
         });
     });
 
