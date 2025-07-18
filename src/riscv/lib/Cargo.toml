@@ -40,6 +40,7 @@ range-collections.workspace = true
 elf.workspace = true
 trait-set.workspace = true
 memmap2.workspace = true
+blake3.workspace = true
 
 [dependencies.__tracing_do_not_use_directly]
 workspace = true

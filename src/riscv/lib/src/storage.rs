@@ -85,7 +85,7 @@ impl Store {
     /// Store data and return its hash. The data is written to disk only if
     /// previously unseen.
     pub fn store(&self, data: &[u8]) -> Result<Hash, StorageError> {
-        let hash = Hash::blake2b_hash_bytes(data)?;
+        let hash = Hash::blake3_hash_bytes(data)?;
         let file_name = self.path_of_hash(&hash);
         self.write_data_if_new(file_name, data)?;
         Ok(hash)

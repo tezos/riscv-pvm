@@ -37,7 +37,7 @@ where
     T: serde::Serialize + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        Hash::blake2b_hash(state)
+        Hash::blake3_hash(state)
     }
 }
 
@@ -46,7 +46,7 @@ where
     T: serde::Serialize + Copy + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        Hash::blake2b_hash(state)
+        Hash::blake3_hash(state)
     }
 }
 
