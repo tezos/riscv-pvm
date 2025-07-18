@@ -25,7 +25,7 @@
 # Manually Testing
 
 ```
-make -C src/riscv all
+make all
 ```
 
 # Regressions

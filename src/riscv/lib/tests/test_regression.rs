@@ -67,7 +67,7 @@ fn regression_frozen_dummy_kernel() {
 fn regression_dummy_kernel() {
     test_regression(
         "tests/expected/dummy-volatile",
-        "../riscv-dummy.elf",
+        "../../../kernels/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy",
         "../assets/dummy-kernel-inbox.json",
         false,
     )

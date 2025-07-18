@@ -177,9 +177,10 @@ mod tests {
 
     #[test]
     fn test_program_from_elf() {
-        const PATH: &str = "../riscv-dummy.elf";
+        const PATH: &str =
+            "../../../kernels/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy";
         let contents =
-            fs::read(PATH).expect("Failed read dummy RISC-V kernel (try: make -C src/riscv build)");
+            fs::read(PATH).expect("Failed read dummy RISC-V kernel (try: make dummy/build)");
 
         let mut buffer = Cursor::new(Vec::new());
         kernel_loader::load_elf(&mut buffer, memory::FIRST_ADDRESS, &contents).unwrap();

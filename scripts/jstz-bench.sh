@@ -21,11 +21,11 @@ SAMPLY_OUT="riscv-sandbox-profile.json"
 METRICS=""
 METRICS_ARGS=()
 NATIVE=""
-JSTZ_SANDBOX_PARAMS=("--input" "jstz/target/riscv64gc-unknown-linux-musl/release/jstz")
+JSTZ_SANDBOX_PARAMS=("--input" "kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz")
 
 CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
-cd "$RISCV_DIR/src/riscv"
+cd "$RISCV_DIR"
 
 while getopts "i:t:m:spnj:" OPTION; do
   case "$OPTION" in
@@ -43,7 +43,7 @@ while getopts "i:t:m:spnj:" OPTION; do
     PROFILING_WRAPPER="samply record -s -o $SAMPLY_OUT"
     ;;
   n)
-    NATIVE=$(make --silent -C jstz print-native-target | grep -wv make)
+    NATIVE=$(make --silent -C kernels/jstz print-native-target | grep -wv make)
     ;;
   j)
     case "$OPTARG" in
@@ -93,16 +93,16 @@ if [ -n "$NATIVE" ] && [ -z "$STATIC_INBOX" ]; then
 fi
 
 echo "[INFO]: building sandbox"
-make "SANDBOX_ENABLE_FEATURES=${SANDBOX_ENABLE_FEATURES[*]}" "$SANDBOX_BIN" &> /dev/null
+make -C src/riscv "SANDBOX_ENABLE_FEATURES=${SANDBOX_ENABLE_FEATURES[*]}" "$SANDBOX_BIN" &> /dev/null
 echo "[INFO]: building bench tool"
-make -C jstz inbox-bench &> /dev/null
+make -C kernels/jstz inbox-bench &> /dev/null
 
 DATA_DIR=${DATA_DIR:=$(mktemp -d)}
 
 echo "[INFO]: generating $TX transfers"
 INBOX_FILE="${DATA_DIR}/inbox.json"
 RUN_INBOX="$INBOX_FILE"
-./jstz/inbox-bench generate --inbox-file "$INBOX_FILE" --transfers "$TX"
+kernels/jstz/inbox-bench generate --inbox-file "$INBOX_FILE" --transfers "$TX"
 
 log_file_args=()
 
@@ -116,17 +116,17 @@ fi
 ##########
 build_jstz_riscv() {
   if [ "$STATIC_INBOX" = "y" ]; then
-    INBOX_FILE="$INBOX_FILE" make -C jstz build-kernel-static &> /dev/null
+    INBOX_FILE="$INBOX_FILE" make -C kernels/jstz build-kernel-static &> /dev/null
     RUN_INBOX="$DATA_DIR"/empty.json
     echo "[]" > "$RUN_INBOX"
   else
-    make -C jstz build-kernel &> /dev/null
+    make -C kernels/jstz build-kernel &> /dev/null
   fi
 }
 
 run_jstz_riscv() {
   LOG="$DATA_DIR/log.$1.log"
-  $PROFILING_WRAPPER "./$SANDBOX_BIN" run \
+  $PROFILING_WRAPPER "src/riscv/$SANDBOX_BIN" run \
     "${JSTZ_SANDBOX_PARAMS[@]}" \
     --inbox-file "$RUN_INBOX" \
     --address "$DEFAULT_ROLLUP_ADDRESS" \
@@ -139,12 +139,12 @@ run_jstz_riscv() {
 # Native #
 ##########
 build_jstz_native() {
-  INBOX_FILE=$INBOX_FILE make -C jstz build-kernel-native &> /dev/null
+  INBOX_FILE=$INBOX_FILE make -C kernels/jstz build-kernel-native &> /dev/null
 }
 
 run_jstz_native() {
   LOG="$DATA_DIR/log.$1.log"
-  $PROFILING_WRAPPER ./jstz/target/"$NATIVE"/release/jstz \
+  $PROFILING_WRAPPER kernels/jstz/target/"$NATIVE"/release/jstz \
     --timings > "$LOG" 2> /dev/null
   log_file_args+=("--log-file=$LOG")
 }
@@ -180,7 +180,7 @@ run_jstz() {
 
 collect() {
   echo -e "\033[1m"
-  ./jstz/inbox-bench results --inbox-file "$INBOX_FILE" "${log_file_args[@]}" --expected-transfers "$TX"
+  kernels/jstz/inbox-bench results --inbox-file "$INBOX_FILE" "${log_file_args[@]}" --expected-transfers "$TX"
   echo -e "\033[0m"
 }
 
