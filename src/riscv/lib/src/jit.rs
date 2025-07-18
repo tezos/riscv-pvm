@@ -46,10 +46,6 @@ use crate::traps::EnvironException;
 /// thin-references to the actual variables passed.
 ///
 /// [`DispatchFn`]: crate::machine_state::block_cache::block::DispatchFn
-#[expect(
-    improper_ctypes_definitions,
-    reason = "The receiving functions know the layout of the referenced types"
-)]
 pub type JitFn<MC> = unsafe extern "C" fn(
     // ignored
     *const c_void,
