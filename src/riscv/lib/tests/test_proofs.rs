@@ -194,6 +194,8 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
         Err(ProofVerificationFailure::AbsentDataAccess(NotFound))
     ));
 
+    // The empty proof is not actually an absent proof. Because there is a root node, the tag
+    // deserialisation will fail because it will expect at least two tags.
     let empty_proof = proof_helpers::empty(state_hash);
     assert!(matches!(
         verify_fn(stepper, empty_proof),
