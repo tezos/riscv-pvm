@@ -40,6 +40,8 @@ use super::verify_backend::PartialState;
 use super::verify_backend::Verifier;
 use super::verify_backend::{self};
 use crate::array_utils::boxed_array;
+use crate::state_backend::proof_backend::proof::InvalidTagError;
+use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser::Partial;
 use crate::state_backend::verify_backend::PageId;
 use crate::storage::binary;
@@ -73,6 +75,33 @@ pub enum FromProofError {
 
     #[error("Encountered a node where a leaf was expected")]
     UnexpectedNode,
+}
+
+/// Errors occurring when parsing the tag structure of a Merkle proof.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum TagError {
+    #[error("Invalid tag encountered: {0}")]
+    InvalidTag(#[from] InvalidTagError),
+
+    #[error("Not enough bytes available")]
+    NotEnoughBytes(#[from] NotEnoughBytesError),
+}
+
+// TODO: Remove this impl when refactoring deserialisation error types
+impl From<TagError> for DeserialiseError {
+    fn from(error: TagError) -> Self {
+        match error {
+            TagError::InvalidTag(_) => DeserialiseError::InvalidTag,
+            TagError::NotEnoughBytes(_) => DeserialiseError::NotEnoughBytes,
+        }
+    }
+}
+
+// TODO: Remove this impl when refactoring deserialisation error types
+impl From<TagError> for FromProofError {
+    fn from(error: TagError) -> Self {
+        FromProofError::TagDeserialise(error.into())
+    }
 }
 
 type Result<T, E = FromProofError> = std::result::Result<T, E>;

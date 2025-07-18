@@ -22,17 +22,20 @@ use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
+use crate::state_backend::TagError;
+use crate::state_backend::proof_backend::proof::InvalidTagError;
+use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 
 /// Wrapper type over the raw byte data to parse tags.
 pub struct TagIter<'i> {
-    buffered_tags: VecDeque<Result<Tag, DeserialiseError>>,
+    buffered_tags: VecDeque<Result<Tag, InvalidTagError>>,
     raw_data_iter: std::io::Cursor<&'i [u8]>,
 }
 
 impl Iterator for TagIter<'_> {
-    type Item = Result<Tag, DeserialiseError>;
+    type Item = Result<Tag, InvalidTagError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.buffered_tags.is_empty() {
             // We have to consume the next byte
@@ -146,7 +149,8 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         let tag = tags
             .borrow_mut()
             .next()
-            .ok_or(DeserialiseError::NotEnoughBytes)??;
+            .ok_or(DeserialiseError::NotEnoughBytes)?
+            .map_err(|_: InvalidTagError| DeserialiseError::InvalidTag)?;
 
         match tag {
             Tag::Leaf(LeafTag::Read) => Err(DeserError::UnexpectedLeaf),
@@ -174,7 +178,7 @@ impl<'t> StreamDeserialiser<'t> {
     ///
     /// Return [`None`] if the parent node is absent / blinded - making it nonsensical
     /// to obtain any tags.  
-    fn next_tag(&self) -> Option<Result<Tag, DeserialiseError>> {
+    fn next_tag(&self) -> Option<Result<Tag, TagError>> {
         // Panic: Never actually panics because the mutable borrow is first used only while deserialising,
         // Only after all tags are parsed the mutable borrow is used when running the Suspended computation.
         // Since the deserialiser & suspended traits never expose a way for running the suspended computation
@@ -182,8 +186,8 @@ impl<'t> StreamDeserialiser<'t> {
         match self {
             StreamDeserialiser::Absent => None,
             StreamDeserialiser::Present { tags } => Some(match tags.borrow_mut().next() {
-                None => Err(DeserialiseError::NotEnoughBytes),
-                Some(tag) => tag,
+                None => Err(NotEnoughBytesError.into()),
+                Some(tag) => tag.map_err(|e| e.into()),
             }),
         }
     }
