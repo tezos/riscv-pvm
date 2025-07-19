@@ -189,6 +189,14 @@ where
     }
 }
 
+impl<E: std::fmt::Debug, M: ManagerRead> std::fmt::Debug for Cell<E, M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cell")
+            .field("value", self.as_ref())
+            .finish()
+    }
+}
+
 /// Single element of type `E`
 #[repr(transparent)]
 pub struct Cell<E: 'static, M: ManagerBase> {

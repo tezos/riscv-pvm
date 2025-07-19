@@ -1,0 +1,52 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types:
+      # TODO: Review these event types, as they could trigger Claude quite often.
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude PR Action
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          timeout_minutes: "60"
+          use_sticky_comment: true
+          direct_prompt: |
+            <role>
+            You are an expert software engineer acting as a code reviewer for this GitHub Pull Request.
+            </role>
+
+            <task>
+            Conduct a thorough review of the provided Pull Request.
+            </task>
+
+            <guidelines>
+            - Be constructive and specific in your feedback
+            - Explain the "why" behind your suggestions
+            - Consider the project's existing patterns and conventions
+            - Balance thoroughness with practicality
+            - Use clear, professional language
+            - Provide actionable recommendations
+            </guidelines>
