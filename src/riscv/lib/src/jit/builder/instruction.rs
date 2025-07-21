@@ -616,41 +616,9 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         }
     }
 
-    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
-        let errno =
-            self.ext_calls
-                .f64_from_x64_unsigned_dynamic(self.builder, self.core_param, xval);
-
-        let exception_block = self.builder.create_block();
-        let success_block = self.builder.create_block();
-
-        let is_exception = errno.code.is_exception(self.builder);
-        self.ins().brif(
-            is_exception.to_value(),
-            exception_block,
-            [],
-            success_block,
-            [],
-        );
-
-        // All inputs to these blocks are already known, so we can seal them immediately.
-        self.builder.seal_block(exception_block);
-        self.builder.seal_block(success_block);
-
-        // Code for when an exception was raised.
-        {
-            self.builder.switch_to_block(exception_block);
-
-            self.handle_exception::<()>(errno.code);
-        }
-
-        // Code for when the conversion succeeded.
-        {
-            self.builder.switch_to_block(success_block);
-
-            let return_value = (errno.on_ok)(self.builder);
-            InstructionResult::HasNext(return_value)
-        }
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::FValue {
+        self.ext_calls
+            .f64_from_x64_unsigned_dynamic(self.builder, self.core_param, xval)
     }
 
     fn f64_from_x64_unsigned_static(

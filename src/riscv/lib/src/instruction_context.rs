@@ -188,7 +188,7 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
 
     /// Take an `XValue` and convert it to a 64-bit float with the dynamic rounding mode in the `frm` field of the
     /// `fcsr` register, returning the result as an `FValue`.
-    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue>;
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::FValue;
 
     /// Take an `XValue` and a static rounding mode, and convert it to a 64-bit float
     /// with the given rounding mode, returning the resulting `FValue`.
@@ -394,7 +394,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         value.into()
     }
 
-    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
+    fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::FValue {
         let extended = xval as u128;
         let rm: RoundingMode = self.hart.csregisters.frm.read();
 
@@ -404,7 +404,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
             self.hart.csregisters.import_float_exception_flags(status);
         }
 
-        Ok(value.into())
+        FValue::from(value)
     }
 }
 

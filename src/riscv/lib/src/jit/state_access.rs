@@ -226,16 +226,8 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
 extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Owned>,
     xval: XValue,
-    fvalue_out: &mut MaybeUninit<FValue>,
-) -> ExceptionCode {
-    match MachineCoreState::f64_from_x64_unsigned_dynamic(core, xval) {
-        Ok(fval) => {
-            fvalue_out.write(fval);
-            ExceptionCode::NoException
-        }
-
-        Err(e) => ExceptionCode::from_exception(e),
-    }
+) -> FValue {
+    MachineCoreState::f64_from_x64_unsigned_dynamic(core, xval)
 }
 
 /// Convert an unsigned 64-bit `XValue` to a 64-bit `FValue` using the given static rounding mode.
@@ -255,9 +247,6 @@ pub struct JsaCalls<MC: MemoryConfig> {
     /// Reusable stack slot for the PC value
     pc_slot: Option<stack::Slot<MaybeUninit<Address>>>,
 
-    /// Reusable stack slot for an FValue.
-    fvalue_ptr_slot: Option<stack::Slot<MaybeUninit<FValue>>>,
-
     _pd: PhantomData<MC>,
 }
 
@@ -269,22 +258,11 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             .clone()
     }
 
-    /// Get the stack slot for an FValue.
-    fn fvalue_ptr_slot(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> stack::Slot<MaybeUninit<FValue>> {
-        self.fvalue_ptr_slot
-            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
-            .clone()
-    }
-
     /// Construct a new `JsaCalls` instance with the given target configuration.
     pub(super) fn new(target_config: TargetFrontendConfig) -> Self {
         Self {
             target_config,
             pc_slot: None,
-            fvalue_ptr_slot: None,
             _pd: PhantomData,
         }
     }
@@ -389,34 +367,22 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
 
     /// Emit the required IR to call `f64_from_x64_unsigned_dynamic`.
     ///
-    /// Returns `errno` - on success, the new FValue is returned.
+    /// Returns the converted FValue.
     pub(super) fn f64_from_x64_unsigned_dynamic(
         &mut self,
         builder: &mut FunctionBuilder,
         core_ptr: Pointer<MachineCoreState<MC, Owned>>,
         xval: Value<XValue>,
-    ) -> ErrnoImpl<Value<FValue>, impl FnOnce(&mut FunctionBuilder) -> Value<FValue> + 'static>
-    {
-        let fvalue_slot = self.fvalue_ptr_slot(builder);
-        let fvalue_ptr = fvalue_slot.ptr(builder);
-
+    ) -> Value<FValue> {
         // SAFETY: The reference argument lifetimes are valid for the duration of the call:
         // - `core_ptr` is a JIT function argument, therefore valid for the entire function
-        // - `fvalue_ptr` also points to a stack slot
-        let exception = ext_calls::call3(
+        ext_calls::call2(
             &self.target_config,
             builder,
             self::f64_from_x64_unsigned_dynamic,
             unsafe { core_ptr.as_mut() },
             xval,
-            unsafe { fvalue_ptr.as_mut() },
-        );
-
-        ErrnoImpl::new(exception, move |builder| {
-            // SAFETY: This closure runs after the success case of the call, where the fvalue_slot
-            // is guaranteed to have been initialised with an fvalue.
-            unsafe { fvalue_slot.assume_init().load(builder) }
-        })
+        )
     }
 
     /// Emit the required IR to call `f64_from_x64_unsigned_static`.
