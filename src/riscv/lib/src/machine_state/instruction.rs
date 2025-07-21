@@ -147,7 +147,7 @@ pub enum OpCode {
     X64OrImm,
     Andi,
     X64ShiftLeftImm,
-    ShiftRightImmediateUnsigned,
+    X64ShiftRightImmUnsigned,
     ShiftRightImmediateSigned,
     X32ShiftLeftImm,
     X32ShiftRightImmSigned,
@@ -365,7 +365,7 @@ impl OpCode {
             Self::X64OrImm => Args::run_x64_or_immediate,
             Self::Andi => Args::run_andi,
             Self::X64ShiftLeftImm => Args::run_x64_shift_left_imm,
-            Self::ShiftRightImmediateUnsigned => Args::run_shift_right_immediate_unsigned,
+            Self::X64ShiftRightImmUnsigned => Args::run_x64_shift_right_imm_unsigned,
             Self::ShiftRightImmediateSigned => Args::run_shift_right_immediate_signed,
             Self::X32ShiftLeftImm => Args::run_x32_shift_left_imm,
             Self::X32ShiftRightImmUnsigned => Args::run_x32_shift_right_imm_unsigned,
@@ -598,7 +598,7 @@ impl OpCode {
             Self::X64ShiftRightUnsigned => Some(Args::run_x64_shift_right_unsigned),
             Self::X64ShiftRightSigned => Some(Args::run_x64_shift_right_signed),
             Self::X64ShiftLeftImm => Some(Args::run_x64_shift_left_imm),
-            Self::ShiftRightImmediateUnsigned => Some(Args::run_shift_right_immediate_unsigned),
+            Self::X64ShiftRightImmUnsigned => Some(Args::run_x64_shift_right_imm_unsigned),
             Self::ShiftRightImmediateSigned => Some(Args::run_shift_right_immediate_signed),
             Self::X32ShiftLeft => Some(Args::run_x32_shift_left),
             Self::X32ShiftRightUnsigned => Some(Args::run_x32_shift_right_unsigned),
@@ -1209,7 +1209,7 @@ impl Args {
     );
     impl_i_type!(integer::run_andi, run_andi, non_zero);
     impl_i_type!(run_x64_shift_left_imm, Shift::Left);
-    impl_i_type!(run_shift_right_immediate_unsigned, Shift::RightUnsigned);
+    impl_i_type!(run_x64_shift_right_imm_unsigned, Shift::RightUnsigned);
     impl_i_type!(run_shift_right_immediate_signed, Shift::RightSigned);
     impl_x32_shift_type!(Left, run_x32_shift_left_imm, imm);
     impl_x32_shift_type!(RightUnsigned, run_x32_shift_right_imm_unsigned, imm);
