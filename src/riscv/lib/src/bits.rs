@@ -3,8 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fmt;
-
 macro_rules! bits_builtin {
     ($t:tt, $size:expr) => {
         #[allow(clippy::allow_attributes, reason = "As the macro generates methods regardless of whether they're used or not, we need to be able to silence some warnings")]
@@ -32,6 +30,7 @@ macro_rules! bits_builtin {
             }
 
             /// Returns the [bit] of `v` as a boolean.
+            #[allow(dead_code, reason = "This is generated in a macro and is not guaranteed to be used")]
             #[inline(always)]
             pub const fn bit(v: $t, bit: usize) -> bool {
                 ((v >> bit) & 1) != 0
@@ -39,6 +38,7 @@ macro_rules! bits_builtin {
 
             /// Returns a strict subset of bits of `v`.
             /// Panics if the range covers the whole value.
+            #[allow(dead_code, reason = "This is generated in a macro and is not guaranteed to be used")]
             #[inline(always)]
             pub const fn bits_subset(v: $t, start: usize, end: usize) -> $t {
                 (v & mask_subset(start, end)) >> end
@@ -67,97 +67,6 @@ macro_rules! bits_builtin {
 
 bits_builtin!(u16, 16);
 bits_builtin!(u64, 64);
-
-/// Implementations can be converted to and from a binary [prim@u64] representation
-pub trait Bits64 {
-    const WIDTH: usize;
-
-    /// Convert from the [prim@u64] binary representation.
-    fn from_bits(value: u64) -> Self;
-
-    /// Serialise to the [prim@u64] binary representation.
-    fn to_bits(&self) -> u64;
-}
-
-impl Bits64 for bool {
-    const WIDTH: usize = 1;
-
-    #[inline(always)]
-    fn from_bits(value: u64) -> Self {
-        u64::bit(value, 0)
-    }
-
-    #[inline(always)]
-    fn to_bits(&self) -> u64 {
-        if *self { 1 } else { 0 }
-    }
-}
-
-macro_rules! bits64_builtin {
-    ( $t:ty ) => {
-        impl Bits64 for $t {
-            const WIDTH: usize = { <$t>::BITS as usize };
-
-            #[inline(always)]
-            fn from_bits(value: u64) -> Self {
-                value as $t
-            }
-
-            #[inline(always)]
-            fn to_bits(&self) -> u64 {
-                *self as u64
-            }
-        }
-    };
-}
-
-bits64_builtin!(u8);
-bits64_builtin!(u16);
-bits64_builtin!(u32);
-bits64_builtin!(u64);
-
-bits64_builtin!(i8);
-bits64_builtin!(i16);
-bits64_builtin!(i32);
-bits64_builtin!(i64);
-
-/// Helper type for [Bits64] that always inhabits a default value of `WIDTH` bits
-#[derive(Copy, Clone)]
-pub struct ConstantBits<const WIDTH: usize, const VALUE: u64 = 0>;
-
-impl<const WIDTH: usize, const VALUE: u64> Bits64 for ConstantBits<WIDTH, VALUE> {
-    const WIDTH: usize = WIDTH;
-
-    fn from_bits(_value: u64) -> Self {
-        Self
-    }
-
-    fn to_bits(&self) -> u64 {
-        VALUE
-    }
-}
-
-impl<const WIDTH: usize, const VALUE: u64> fmt::Debug for ConstantBits<WIDTH, VALUE> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0b{VALUE:b}/0x{VALUE:x}")
-    }
-}
-
-/// Like [prim@u64] but limited in width
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FixedWidthBits<const WIDTH: usize>(u64);
-
-impl<const WIDTH: usize> Bits64 for FixedWidthBits<WIDTH> {
-    const WIDTH: usize = WIDTH;
-
-    fn from_bits(value: u64) -> Self {
-        Self(u64::bits_subset(value, WIDTH - 1, 0))
-    }
-
-    fn to_bits(&self) -> u64 {
-        u64::bits_subset(self.0, WIDTH - 1, 0)
-    }
-}
 
 /// Get the bitmask formed of `n` ones.
 pub const fn ones(n: u64) -> u64 {

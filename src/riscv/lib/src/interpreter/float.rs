@@ -463,10 +463,7 @@ where
     pub(crate) fn f_rounding_mode(&self, rm: InstrRoundingMode) -> Result<Round, Exception> {
         let rm = match rm {
             InstrRoundingMode::Static(rm) => rm,
-            InstrRoundingMode::Dynamic => self
-                .csregisters
-                .read::<CSRRepr>(CSRegister::frm)
-                .try_into()?,
+            InstrRoundingMode::Dynamic => self.csregisters.read(CSRegister::frm).try_into()?,
         };
 
         Ok(rm.into())
@@ -728,7 +725,7 @@ mod test {
             let fval = match rm {
                 InstrRoundingMode::Static(rm) => Double::from_u128_r(r1_val as u128, rm.into()),
                 InstrRoundingMode::Dynamic => {
-                    let rm: RoundingMode = state.hart.csregisters.read::<CSRRepr>(CSRegister::frm).try_into()?;
+                    let rm: RoundingMode = state.hart.csregisters.read(CSRegister::frm).try_into()?;
                     Double::from_u128_r(r1_val as u128, rm.into())
                 }
             };

@@ -25,7 +25,6 @@ use crate::interpreter::atomics::reset_reservation_set;
 use crate::interpreter::float::RoundingMode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
-use crate::machine_state::csregisters::CSRRepr;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::instruction::Args;
 use crate::machine_state::memory::Address;
@@ -405,11 +404,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
 
     fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::IResult<Self::FValue> {
         let extended = xval as u128;
-        let rm: RoundingMode = self
-            .hart
-            .csregisters
-            .read::<CSRRepr>(CSRegister::frm)
-            .try_into()?;
+        let rm: RoundingMode = self.hart.csregisters.read(CSRegister::frm).try_into()?;
 
         let StatusAnd { status, value } = Double::from_u128_r(extended, rm.into());
 
