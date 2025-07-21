@@ -257,15 +257,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::ShiftLeftImmediate`].
-    pub(crate) fn new_shift_left_immediate(
+    /// Create a new [`Instruction`] for [`OpCode::X64ShiftLeftImm`].
+    pub(crate) fn new_x64_shift_left_imm(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         imm: i64,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::ShiftLeftImmediate,
+            opcode: OpCode::X64ShiftLeftImm,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2129,7 +2129,7 @@ impl Instruction {
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
             X::X0 => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
-            X::NonZero(rs1) => Instruction::new_shift_left_immediate(
+            X::NonZero(rs1) => Instruction::new_x64_shift_left_imm(
                 args.rd,
                 rs1,
                 args.imm,

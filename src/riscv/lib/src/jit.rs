@@ -2021,15 +2021,15 @@ mod tests {
             };
 
         let scenarios: &[Scenario] = &[
-            shift_imm(I::new_shift_left_immediate, (x1, 1), 1, 2),
+            shift_imm(I::new_x64_shift_left_imm, (x1, 1), 1, 2),
             shift_imm(
-                I::new_shift_left_immediate,
+                I::new_x64_shift_left_imm,
                 (x1, 1),
                 63,
                 0x8000_0000_0000_0000,
             ),
-            shift_imm(I::new_shift_left_immediate, (x1, 2), 63, 0),
-            shift_imm(I::new_shift_left_immediate, (x1, -16), 2, -64_i64 as u64),
+            shift_imm(I::new_x64_shift_left_imm, (x1, 2), 63, 0),
+            shift_imm(I::new_x64_shift_left_imm, (x1, -16), 2, -64_i64 as u64),
             shift_imm(I::new_shift_right_immediate_unsigned, (x1, 2), 1, 1),
             shift_imm(I::new_shift_right_immediate_unsigned, (x1, !0), 63, 1),
             shift_imm(

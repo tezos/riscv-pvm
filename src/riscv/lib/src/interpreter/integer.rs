@@ -526,16 +526,8 @@ pub fn run_x64_shift(
 
 /// Shift bits in `rs1` by `shift_amount = imm` in the method specified by `shift`
 /// saving the result in `rd`.
-///
-/// Relevant opcodes:
-/// - `SLLI`
-/// - `SRLI`
-/// - `SRAI`
-/// - `C.SLLI`
-/// - `C.SRLI`
-/// - `C.SRAI`
 #[inline]
-pub fn run_shift_immediate(
+pub fn run_x64_shift_imm(
     icb: &mut impl ICB,
     shift: Shift,
     imm: i64,
@@ -574,7 +566,7 @@ pub fn run_x32_shift(
 
 /// Shift only lowest 32 bits in `rs1` by `shift_amount = imm` in the method specified by `shift`
 /// saving the result in `rd`.
-pub fn run_x32_shift_immediate(
+pub fn run_x32_shift_imm(
     icb: &mut impl ICB,
     shift: Shift,
     rs1: NonZeroXRegister,
@@ -904,7 +896,7 @@ mod tests {
             $rd:ident, $expected_val:expr
         ) => {
             $state.hart.xregisters.write_nz(nz::$rs1, $r1_val);
-            run_shift_immediate(&mut $state, $shift, $imm, nz::$rs1, nz::$rd);
+            run_x64_shift_imm(&mut $state, $shift, $imm, nz::$rs1, nz::$rd);
             let new_val = $state.hart.xregisters.read($rd);
             assert_eq!(new_val, $expected_val);
         };
@@ -1093,7 +1085,7 @@ mod tests {
             $rd:ident, $expected_val:expr
         ) => {
             $state.hart.xregisters.write_nz(nz::$rs1, $r1_val);
-            run_x32_shift_immediate(&mut $state, $shift, nz::$rs1, $imm, nz::$rd);
+            run_x32_shift_imm(&mut $state, $shift, nz::$rs1, $imm, nz::$rd);
             let new_val = $state.hart.xregisters.read($rd);
             assert_eq!(new_val, $expected_val);
         };
