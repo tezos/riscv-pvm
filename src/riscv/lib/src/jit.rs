@@ -1895,16 +1895,21 @@ mod tests {
                 (x3, 2),
                 0x3FFF_FFFF_FFFF_FFFE,
             ),
-            x64_shift_reg(I::new_shift_right_signed, (x1, 2), (x3, 1), 1),
-            x64_shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 63), !0),
+            x64_shift_reg(I::new_x64_shift_right_signed, (x1, 2), (x3, 1), 1),
+            x64_shift_reg(I::new_x64_shift_right_signed, (x1, !0), (x3, 63), !0),
             x64_shift_reg(
-                I::new_shift_right_signed,
+                I::new_x64_shift_right_signed,
                 (x1, 0x7FFF_FFFF_FFFF_FFFF),
                 (x3, 62),
                 1,
             ),
-            x64_shift_reg(I::new_shift_right_signed, (x1, !0), (x3, 126), !0),
-            x64_shift_reg(I::new_shift_right_signed, (x1, -8), (x3, 2), -2_i64 as u64),
+            x64_shift_reg(I::new_x64_shift_right_signed, (x1, !0), (x3, 126), !0),
+            x64_shift_reg(
+                I::new_x64_shift_right_signed,
+                (x1, -8),
+                (x3, 2),
+                -2_i64 as u64,
+            ),
             // X32ShiftLeft tests
             x32_shift_reg(
                 I::new_x32_shift_left,
