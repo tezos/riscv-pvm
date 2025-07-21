@@ -70,7 +70,7 @@ where
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
         let hashes = [A::state_hash(state.0)?, B::state_hash(state.1)?];
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 
@@ -86,7 +86,7 @@ where
             B::state_hash(state.1)?,
             C::state_hash(state.2)?,
         ];
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 
@@ -104,7 +104,7 @@ where
             C::state_hash(state.2)?,
             D::state_hash(state.3)?,
         ];
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 
@@ -124,7 +124,7 @@ where
             D::state_hash(state.3)?,
             E::state_hash(state.4)?,
         ];
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 
@@ -146,7 +146,7 @@ where
             E::state_hash(state.4)?,
             F::state_hash(state.5)?,
         ];
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 
@@ -159,7 +159,7 @@ where
             .into_iter()
             .map(T::state_hash)
             .collect::<Result<Vec<_>, _>>()?;
-        Hash::combine(&hashes)
+        Ok(Hash::combine(hashes))
     }
 }
 

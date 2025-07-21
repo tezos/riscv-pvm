@@ -144,7 +144,7 @@ impl MerkleProof {
                 MerkleProofLeaf::Blind(hash) => Ok(*hash),
                 MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data.as_slice()),
             },
-            |(), leaves| Hash::combine(&leaves),
+            |(), leaves| Ok(Hash::combine(leaves)),
         )
     }
 }

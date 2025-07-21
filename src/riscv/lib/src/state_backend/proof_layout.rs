@@ -646,7 +646,7 @@ where
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![A::to_merkle_tree(state.0)?, B::to_merkle_tree(state.1)?];
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
@@ -683,7 +683,7 @@ where
             B::to_merkle_tree(state.1)?,
             C::to_merkle_tree(state.2)?,
         ];
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
@@ -724,7 +724,7 @@ where
             C::to_merkle_tree(state.2)?,
             D::to_merkle_tree(state.3)?,
         ];
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
@@ -769,7 +769,7 @@ where
             D::to_merkle_tree(state.3)?,
             E::to_merkle_tree(state.4)?,
         ];
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
@@ -817,7 +817,7 @@ where
             E::to_merkle_tree(state.4)?,
             F::to_merkle_tree(state.5)?,
         ];
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
@@ -854,7 +854,7 @@ where
             .map(T::to_merkle_tree)
             .collect::<Result<Vec<_>, _>>()?;
 
-        MerkleTree::make_merkle_node(children)
+        Ok(MerkleTree::make_merkle_node(children))
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
@@ -1080,7 +1080,7 @@ pub fn combine_partial_hashes(
 ) -> Result<Hash, PartialHashError> {
     let hash_results = hash_results.as_ref();
     if hash_results.is_empty() {
-        return Ok(Hash::combine(&[])?);
+        return Ok(Hash::combine::<Hash, _>([]));
     }
 
     // If the first result is a hash, all results need to be a hash in order to
@@ -1105,7 +1105,7 @@ pub fn combine_partial_hashes(
 
     if expect_ok {
         debug_assert_eq!(hashes.len(), hash_results_len);
-        return Ok(Hash::combine(hashes.as_slice())?);
+        return Ok(Hash::combine(hashes));
     };
 
     proof_hash.ok_or(PartialHashError::PotentiallyRecoverable)
