@@ -295,15 +295,15 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::ShiftRightImmediateSigned`].
-    pub(crate) fn new_shift_right_immediate_signed(
+    /// Create a new [`Instruction`] for [`OpCode::X64ShiftRightImmSigned`].
+    pub(crate) fn new_x64_shift_right_imm_signed(
         rd: NonZeroXRegister,
         rs1: NonZeroXRegister,
         imm: i64,
         width: InstrWidth,
     ) -> Self {
         Self {
-            opcode: OpCode::ShiftRightImmediateSigned,
+            opcode: OpCode::X64ShiftRightImmSigned,
             args: Args {
                 rd: rd.into(),
                 rs1: rs1.into(),
@@ -2179,7 +2179,7 @@ impl Instruction {
         match split_x0(args.rs1) {
             // shifting 0 by any amount is 0.
             X::X0 => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
-            X::NonZero(rs1) => Instruction::new_shift_right_immediate_signed(
+            X::NonZero(rs1) => Instruction::new_x64_shift_right_imm_signed(
                 args.rd,
                 rs1,
                 args.imm,
@@ -2195,7 +2195,7 @@ impl Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
-            X::NonZero(rd_rs1) => Instruction::new_shift_right_immediate_signed(
+            X::NonZero(rd_rs1) => Instruction::new_x64_shift_right_imm_signed(
                 rd_rs1,
                 rd_rs1,
                 args.imm,
