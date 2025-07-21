@@ -130,7 +130,7 @@ pub enum OpCode {
     X64Or,
     X64And,
     X64ShiftLeft,
-    ShiftRightUnsigned,
+    X64ShiftRightUnsigned,
     ShiftRightSigned,
     SetLessThanSigned,
     SetLessThanUnsigned,
@@ -350,7 +350,7 @@ impl OpCode {
             Self::X64Or => Args::run_x64_or,
             Self::X64And => Args::run_x64_and,
             Self::X64ShiftLeft => Args::run_x64_shift_left,
-            Self::ShiftRightUnsigned => Args::run_shift_right_unsigned,
+            Self::X64ShiftRightUnsigned => Args::run_x64_shift_right_unsigned,
             Self::ShiftRightSigned => Args::run_shift_right_signed,
             Self::SetLessThanSigned => Args::run_set_less_than_signed,
             Self::SetLessThanUnsigned => Args::run_set_less_than_unsigned,
@@ -595,7 +595,7 @@ impl OpCode {
             Self::BranchGreaterThanZero => Some(Args::run_branch_greater_than_zero),
 
             Self::X64ShiftLeft => Some(Args::run_x64_shift_left),
-            Self::ShiftRightUnsigned => Some(Args::run_shift_right_unsigned),
+            Self::X64ShiftRightUnsigned => Some(Args::run_x64_shift_right_unsigned),
             Self::ShiftRightSigned => Some(Args::run_shift_right_signed),
             Self::ShiftLeftImmediate => Some(Args::run_shift_left_immediate),
             Self::ShiftRightImmediateUnsigned => Some(Args::run_shift_right_immediate_unsigned),
@@ -1172,7 +1172,7 @@ impl Args {
     impl_r_type!(integer::run_x64_and, run_x64_and, non_zero);
     impl_r_type!(integer::run_x64_or, run_x64_or, non_zero);
     impl_r_type!(run_x64_shift_left, Left);
-    impl_r_type!(run_shift_right_unsigned, RightUnsigned);
+    impl_r_type!(run_x64_shift_right_unsigned, RightUnsigned);
     impl_r_type!(run_shift_right_signed, RightSigned);
     impl_r_type!(
         integer::run_set_less_than_signed,
