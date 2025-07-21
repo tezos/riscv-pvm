@@ -9,6 +9,8 @@ use std::ops::Shr;
 
 use num_enum::TryFromPrimitive;
 
+use crate::default::ConstDefault;
+use crate::interpreter::float::FloatExceptionFlags;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
@@ -163,14 +165,15 @@ const FFLAGS_MASK: CSRRepr = 0b11111;
 // Layout for [`CSRegisters`]
 struct_layout! {
     pub struct CSRegistersLayout {
-        fflags: Atom<u8>,
+        fflags: Atom<FloatExceptionFlags>,
         frm: Atom<u8>,
     }
 }
 
 /// Cntrol and State Registers (CSRs)
 pub struct CSRegisters<M: backend::ManagerBase> {
-    fflags: Cell<u8, M>,
+    /// Floating-point exception flags
+    pub fflags: Cell<FloatExceptionFlags, M>,
     frm: Cell<u8, M>,
 }
 
@@ -183,7 +186,8 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
     {
         match reg {
             CSRegister::fflags => {
-                let fflags = value.bitand(FFLAGS_MASK) as u8;
+                let fflags = value.bitand(FFLAGS_MASK);
+                let fflags = FloatExceptionFlags::from_csrrepr(fflags);
                 self.fflags.write(fflags);
             }
 
@@ -193,7 +197,8 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
             }
 
             CSRegister::fcsr => {
-                let fflags = value.bitand(FFLAGS_MASK) as u8;
+                let fflags = value.bitand(FFLAGS_MASK);
+                let fflags = FloatExceptionFlags::from_csrrepr(fflags);
                 self.fflags.write(fflags);
 
                 let frm = value.shr(FRM_SHIFT).bitand(FRM_MASK) as u8;
@@ -244,12 +249,12 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         M: backend::ManagerRead,
     {
         match reg {
-            CSRegister::fflags => self.fflags.read() as u64,
+            CSRegister::fflags => self.fflags.read().to_repr(),
 
             CSRegister::frm => self.frm.read() as u64,
 
             CSRegister::fcsr => {
-                let fflags = self.fflags.read() as u64;
+                let fflags = self.fflags.read().to_repr();
                 let frm = self.frm.read() as u64;
                 frm.shl(FRM_SHIFT).bitor(fflags)
             }
@@ -355,7 +360,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         M: backend::ManagerWrite,
     {
         // Resets accrued floating-point exceptions
-        self.fflags.write(0b00000);
+        self.fflags.write(FloatExceptionFlags::DEFAULT);
 
         // 000 = RNE aka "round to nearest, ties to even"
         self.frm.write(0b000);
