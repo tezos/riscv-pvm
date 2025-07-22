@@ -20,6 +20,7 @@ use cranelift::prelude::EntityRef;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::FunctionBuilderContext;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::IntCC::UnsignedGreaterThanOrEqual;
 use cranelift::prelude::Variable;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
@@ -27,8 +28,10 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use super::instruction::Outcome;
+use crate::jit::builder::instr_map::InstrId;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
+use crate::jit::builder::sequence::sequence_analysis::SequenceInfo;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
@@ -44,6 +47,8 @@ use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
 const STEPS_REMAINING_VAR_ID: usize = 0;
+
+mod sequence_analysis;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
@@ -253,6 +258,89 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             .def_var(self.steps_remaining, result_steps_remaining);
     }
 
+    fn manage_budget_check(
+        &mut self,
+        sequence_info: &SequenceInfo,
+        source_instr_id: InstrId,
+        dest_instr_id: InstrId,
+        exit_block: Block,
+    ) {
+        let in_block = self.builder.create_block();
+        let out_block = self.builder.create_block();
+
+        // Annotate the source instr_id with the destination's budget.
+        let budget = sequence_info.get_budget_instrs()[dest_instr_id]
+            .budget()
+            .unwrap();
+        let budget = budget + 1;
+
+        let steps_remaining = self.builder.use_var(self.steps_remaining);
+        let comparison =
+            self.builder
+                .ins()
+                .icmp_imm(UnsignedGreaterThanOrEqual, steps_remaining, budget as i64);
+        self.builder
+            .ins()
+            .brif(comparison, in_block, [], out_block, []);
+
+        // In the insufficient case, we jump to the exit block.
+        self.builder.switch_to_block(out_block);
+
+        // Set the program counter to the destination instruction's program counter.
+        let final_program_counter = sequence_info.get_addresses()[dest_instr_id];
+        let final_program_counter = self.builder.ins().iconst(I64, final_program_counter as i64);
+
+        // SAFETY: This is safe because we are constructing the value directly from an Address type.
+        let final_program_counter = unsafe { Value::<Address>::from_raw(final_program_counter) };
+
+        // This is a successful step, hence +1 step.
+        let steps_completed = sequence_info.get_su_instrs()[source_instr_id]
+            .step_update()
+            .unwrap();
+        let steps_completed = steps_completed as u64 + 1;
+
+        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+
+        // In the sufficient case, we switch to the remain-in block.
+        self.builder.switch_to_block(in_block);
+    }
+
+    fn intra_sequence_connections(&mut self, sequence_info: &SequenceInfo, exit_block: Block) {
+        for (source_instr_id, source_info) in sequence_info.get_bc_instrs().iter() {
+            for (dest_instr_id, is_budget_check, block) in source_info.outgoings() {
+                // Initiate the block for adding IR to the outgoing transition.
+                self.builder.switch_to_block(*block);
+
+                if *is_budget_check {
+                    self.manage_budget_check(
+                        &sequence_info,
+                        source_instr_id,
+                        *dest_instr_id,
+                        exit_block,
+                    );
+                }
+
+                // Now check if we need to handle a step update.
+                if sequence_info.get_graph()[*dest_instr_id].0.num_incomings() >= 2 {
+                    let source_steps = sequence_info.get_su_instrs()[*dest_instr_id]
+                        .step_update()
+                        .unwrap();
+
+                    // Increment by 1 as this involves a successful step to the destination.
+                    let step_update_val = self.builder.ins().iconst(I64, source_steps as i64 + 1);
+                    let steps_remaining = self.builder.use_var(self.steps_remaining);
+                    let result_steps_remaining =
+                        self.builder.ins().isub(steps_remaining, step_update_val);
+                    self.builder
+                        .def_var(self.steps_remaining, result_steps_remaining);
+                }
+
+                // Link the outgoing to the start of the destination instruction.
+                sequence_info.get_external_instrs()[*dest_instr_id].build_run(&mut self.builder);
+            }
+        }
+    }
+
     /// Finish building the sequence.
     pub fn finish(mut self, instrs: &[LoweredInstruction]) {
         let exit_block = self.builder.create_block();
@@ -278,13 +366,20 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             self.builder.ins().return_(&[steps]);
         }
 
-        let mut peekable_instrs = instrs.iter().enumerate().peekable();
+        let mut sequence_info = SequenceInfo::new(instrs);
+        sequence_info.populate_step_updates();
+        sequence_info.populate_budget_checks();
+        sequence_info.populate_budgets();
+
+        let mut peekable_instrs = sequence_info.get_external_instrs().iter().peekable();
 
         if let Some((_, first_instr)) = peekable_instrs.peek() {
             // Hook up the entry block to the first instruction.
             self.builder.switch_to_block(self.entry_block);
             first_instr.build_run(&mut self.builder);
         }
+
+        self.intra_sequence_connections(&sequence_info, exit_block);
 
         while let Some((instr_index, instr)) = peekable_instrs.next() {
             // Each instruction may have multiple outcomes. Each kind of outcome needs to be
@@ -295,38 +390,39 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                     Outcome::Next { hook } => {
                         self.builder.switch_to_block(*hook);
 
-                        if let Some((_, next_instr)) = peekable_instrs.peek() {
-                            // If there is a next instruction, we jump to its entry block.
-                            next_instr.build_run(&mut self.builder);
-                        } else {
-                            // This is a successful outcome, hence +1 step.
-                            let steps_completed = instr_index as u64 + 1;
+                        // This is a successful outcome, hence +1 step.
+                        let steps_completed = sequence_info.get_su_instrs()[instr_index]
+                            .step_update()
+                            .unwrap() as u64
+                            + 1;
 
-                            let final_program_counter = instr.next_instruction_address();
+                        let final_program_counter = sequence_info.get_addresses()[instr_index]
+                            .wrapping_add(instr.width() as u64);
 
-                            // SAFETY: We are constructing this value directly from an Address type.
-                            let final_program_counter = unsafe {
-                                Value::<Address>::from_discriminant(
-                                    &self.target_config,
-                                    &mut self.builder,
-                                    final_program_counter as i64,
-                                )
-                            };
+                        // SAFETY: We are constructing this value directly from an Address type.
+                        let final_program_counter = unsafe {
+                            Value::<Address>::from_discriminant(
+                                &self.target_config,
+                                &mut self.builder,
+                                final_program_counter as i64,
+                            )
+                        };
 
-                            // If there is no next instruction, we jump to the exit block.
-                            self.jump_to_exit(steps_completed, final_program_counter, exit_block);
-                        }
+                        // If there is no next instruction, we jump to the exit block.
+                        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
                     }
 
                     Outcome::Exception { hook } => {
                         self.builder.switch_to_block(*hook);
 
                         // Exception outcomes do not increment the step counter.
-                        let steps_completed = instr_index as u64;
+                        let steps_completed = sequence_info.get_su_instrs()[instr_index]
+                            .step_update()
+                            .unwrap() as u64;
 
                         // In the case of an exception, the program counter needs to refer to the
                         // instruction that caused the exception.
-                        let final_program_counter = instr.program_counter();
+                        let final_program_counter = sequence_info.get_addresses()[instr_index];
 
                         // SAFETY: We are constructing this value directly from an Address type.
                         let final_program_counter = unsafe {
@@ -346,10 +442,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                         self.builder.switch_to_block(*hook);
 
                         // This is a successful outcome, hence +1 step.
-                        let steps_completed = instr_index as u64 + 1;
+                        let steps_completed = sequence_info.get_su_instrs()[instr_index]
+                            .step_update()
+                            .unwrap() as u64
+                            + 1;
 
                         let final_program_counter: Address =
-                            instr.program_counter().wrapping_add_signed(*offset);
+                            sequence_info.get_addresses()[instr_index].wrapping_add_signed(*offset);
 
                         // SAFETY: We are constructing this value directly from an Address type.
                         let final_program_counter = unsafe {
@@ -367,7 +466,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                         self.builder.switch_to_block(*hook);
 
                         // This is a successful outcome, hence +1 step.
-                        let steps_completed = instr_index as u64 + 1;
+                        let steps_completed = sequence_info.get_su_instrs()[instr_index]
+                            .step_update()
+                            .unwrap() as u64
+                            + 1;
 
                         // The instruction wants to jump somewhere, so we take the destination.
                         let final_program_counter = *destination;

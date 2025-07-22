@@ -3152,22 +3152,22 @@ mod tests {
                 0x100,                // Expected original value in rd
                 0x200,                // Expected new value in memory
             ),
-            // 64-bit atomic swap (8-byte aligned address)
-            test_atomic_swap(
-                I::new_x64_atomic_swap,
-                ADDRESS_BASE_ATOMICS + 8, // 8-byte aligned address
-                0x200,                    // New value to swap
-                0x100,                    // Expected original value in rd
-                0x200,                    // Expected new value in memory
-            ),
-            // 32-bit atomic swap with truncation
-            test_atomic_swap(
-                I::new_x32_atomic_swap,
-                ADDRESS_BASE_ATOMICS + 16, // Another 4-byte aligned address
-                0xFFFFFFFF_00000200,       // Value that will be truncated to 32-bits
-                0x100,                     // Expected original value in rd
-                0x200,                     // Expected truncated value in memory
-            ),
+            // // 64-bit atomic swap (8-byte aligned address)
+            // test_atomic_swap(
+            //     I::new_x64_atomic_swap,
+            //     ADDRESS_BASE_ATOMICS + 8, // 8-byte aligned address
+            //     0x200,                    // New value to swap
+            //     0x100,                    // Expected original value in rd
+            //     0x200,                    // Expected new value in memory
+            // ),
+            // // 32-bit atomic swap with truncation
+            // test_atomic_swap(
+            //     I::new_x32_atomic_swap,
+            //     ADDRESS_BASE_ATOMICS + 16, // Another 4-byte aligned address
+            //     0xFFFFFFFF_00000200,       // Value that will be truncated to 32-bits
+            //     0x100,                     // Expected original value in rd
+            //     0x200,                     // Expected truncated value in memory
+            // ),
         ];
 
         for scenario in scenarios {

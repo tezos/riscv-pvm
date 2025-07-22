@@ -91,6 +91,20 @@ pub enum Outcome {
     },
 }
 
+impl Outcome {
+    /// Get the target address of the outcome, if applicable.
+    pub fn to_target(&self, pc: Address, width: InstrWidth) -> Option<(Address, Block)> {
+        match self {
+            Outcome::Next { hook } => Some((pc.wrapping_add(width as u64), hook.clone())),
+            Outcome::Exception { .. } => None,
+            Outcome::KnownBranch { offset, hook } => {
+                Some((pc.wrapping_add_signed(*offset), hook.clone()))
+            }
+            Outcome::UnknownBranch { .. } => None,
+        }
+    }
+}
+
 /// Lowered RISC-V instruction
 pub struct LoweredInstruction {
     /// Location of the instruction
@@ -112,19 +126,9 @@ impl LoweredInstruction {
         self.program_counter
     }
 
-    /// Return the address of the instruction following this one.
-    pub fn next_instruction_address(&self) -> Address {
-        self.program_counter.wrapping_add(self.width as u64)
-    }
-
     /// Access the outcomes of the instruction.
     pub fn outcomes(&self) -> &[Outcome] {
         &self.outcomes
-    }
-
-    /// Build a jump that effectively runs the instruction.
-    pub fn build_run(&self, builder: &mut FunctionBuilder) {
-        builder.ins().jump(self.run_block, []);
     }
 }
 
