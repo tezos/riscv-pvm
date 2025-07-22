@@ -129,11 +129,14 @@ fn run_steps_ladder<MC, BCC, F>(
             let start = Instant::now();
             let proof = stepper.produce_proof().unwrap();
             let time = start.elapsed();
+
             let serialisation: Vec<u8> = serialise_proof(&proof).collect();
-            eprintln!(
-                "> Proof of size {} KiB produced in {:?}",
-                serialisation.len() / 1024,
-                time
+            let proof_size_kib = serialisation.len() / 1024;
+
+            eprintln!("> Proof of size {proof_size_kib} KiB produced in {time:?}");
+            assert!(
+                proof_size_kib < 20,
+                "Proof size is too large ({proof_size_kib} KiB) when running {ladder:?}"
             );
 
             eprintln!("> Checking initial proof hash ...");
