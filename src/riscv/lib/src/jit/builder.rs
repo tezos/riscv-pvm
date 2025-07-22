@@ -10,6 +10,7 @@ pub(super) mod arithmetic;
 pub(super) mod comparable;
 pub(super) mod errno;
 pub(crate) mod ext_calls;
+mod instr_map;
 pub(crate) mod instruction;
 pub(crate) mod sequence;
 pub(crate) mod typed;
