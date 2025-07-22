@@ -46,6 +46,7 @@ use crate::state_context::projection::MachineCoreProjection;
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
 mod edge_processing;
+mod join_point_analysis;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {

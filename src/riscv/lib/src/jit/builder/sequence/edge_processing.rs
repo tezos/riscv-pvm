@@ -9,13 +9,10 @@ use crate::jit::builder::instruction::Outcome;
 pub(super) trait HookedOutgoing: Clone + Debug {
     fn new(index: usize, hook: Block) -> Self;
 
-    #[cfg(test)]
+    /// Get the index of the destination.
     fn index(&self) -> usize;
-    #[expect(
-        dead_code,
-        reason = "This function will be used in later stages of development for converting into further
-        enriched types."
-    )]
+
+    /// Get the hook to the destination block.
     fn hook(&self) -> Block;
 }
 
@@ -40,7 +37,6 @@ impl HookedOutgoing for IndexedOutgoing {
     }
 
     /// Get the index of the next instruction.
-    #[cfg(test)]
     fn index(&self) -> usize {
         self.index
     }
@@ -73,6 +69,21 @@ impl<T: HookedOutgoing> EdgeProcessedLI<T> {
             incomings: Vec::new(),
             outgoings: Vec::new(),
         }
+    }
+
+    /// Return the original LoweredInstruction.
+    pub(super) fn lowered_instr(&self) -> &LoweredInstruction {
+        &self.lowered_instr
+    }
+
+    /// Get the incomings for this instruction.
+    pub(super) fn incomings(&self) -> &[usize] {
+        &self.incomings
+    }
+
+    /// Get the outgoings for this instruction.
+    pub(super) fn outgoings(&self) -> &[T] {
+        &self.outgoings
     }
 
     /// Process the outcomes of the instruction to identify intra-sequence transitions.
@@ -170,9 +181,6 @@ pub(crate) mod tests {
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::instruction::OpCode;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::registers::nz;
-    use crate::machine_state::registers::*;
-    use crate::parser::instruction::InstrWidth;
 
     impl<T: HookedOutgoing> EdgeProcessedLI<T> {
         /// Return whether the instruction is a branch point
@@ -464,101 +472,5 @@ pub(crate) mod tests {
                 &expected_branch_points,
             );
         }
-    }
-
-    #[test]
-    fn test_basic_analysis() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_x64_add(nz::a1, nz::a2, nz::a3, InstrWidth::Uncompressed),
-            Instruction::new_x64_sub(nz::a4, nz::a5, nz::a6, InstrWidth::Uncompressed),
-            Instruction::new_x64_add(nz::a7, nz::t0, nz::t1, InstrWidth::Compressed),
-            Instruction::new_x64_sub(nz::t2, nz::t3, nz::t4, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[vec![], vec![0], vec![1], vec![2]],
-            &[vec![1], vec![2], vec![3], vec![]],
-            &[0, 0, 0, 1],
-            &[false, false, false, false],
-        );
-    }
-
-    #[test]
-    fn test_analysis_with_join_point() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_li(nz::a1, 1000, InstrWidth::Uncompressed),
-            Instruction::new_li(nz::a2, 1000, InstrWidth::Uncompressed),
-            Instruction::new_branch_equal(nz::a1, nz::a2, 8, InstrWidth::Uncompressed),
-            Instruction::new_jump_pc(-8, InstrWidth::Uncompressed),
-            Instruction::new_x64_store(a1, a2, 0, InstrWidth::Uncompressed),
-            Instruction::new_x64_add(nz::a3, nz::a4, nz::a5, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[vec![], vec![0, 3], vec![1], vec![2], vec![2], vec![4]],
-            &[vec![1], vec![2], vec![3, 4], vec![1], vec![5], vec![]],
-            &[0, 0, 0, 0, 1, 1],
-            &[false, false, true, false, false, false],
-        );
-    }
-
-    #[test]
-    fn test_analysis_two_join_points() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_li(nz::a1, 1000, InstrWidth::Uncompressed),
-            Instruction::new_li(nz::a2, 1000, InstrWidth::Uncompressed),
-            Instruction::new_branch_equal(nz::a1, nz::a2, 6, InstrWidth::Uncompressed),
-            Instruction::new_jump_pc(10, InstrWidth::Compressed),
-            Instruction::new_branch_not_equal(nz::a1, nz::a2, -10, InstrWidth::Uncompressed),
-            Instruction::new_x64_load_signed(a1, a2, 0, InstrWidth::Uncompressed),
-            Instruction::new_mul(nz::a3, nz::a4, nz::a5, InstrWidth::Uncompressed),
-            Instruction::new_add_word(nz::a6, a7, t0, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[
-                vec![],
-                vec![0, 4],
-                vec![1],
-                vec![2],
-                vec![2],
-                vec![4],
-                vec![3, 5],
-                vec![6],
-            ],
-            &[
-                vec![1],
-                vec![2],
-                vec![3, 4],
-                vec![6],
-                vec![1, 5],
-                vec![6],
-                vec![7],
-                vec![],
-            ],
-            &[0, 0, 0, 0, 0, 1, 0, 1],
-            &[false, false, true, false, true, false, false, false],
-        );
     }
 }
