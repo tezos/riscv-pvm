@@ -155,11 +155,7 @@ where
     T: CommitmentLayout,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        let hashes: Vec<Hash> = state
-            .into_iter()
-            .map(T::state_hash)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Hash::combine(hashes))
+        Hash::try_combine(state.into_iter().map(T::state_hash))
     }
 }
 
