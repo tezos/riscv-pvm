@@ -45,6 +45,8 @@ use crate::state_context::projection::MachineCoreProjection;
 
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
+mod sequence_analysis;
+
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     /// Target configuration for the JIT module
@@ -410,5 +412,39 @@ impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
             param,
             value,
         )
+    }
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use crate::machine_state::instruction::Instruction;
+    use crate::machine_state::memory::M4K;
+
+    /// Create lowered instructions from a list of instructions using the provided sequence
+    /// builder.
+    pub(super) fn create_lowered_instructions(
+        sequence_builder: &mut SequenceBuilder<M4K>,
+        instructions: Vec<Instruction>,
+    ) -> Vec<LoweredInstruction> {
+        let mut lowered_instrs = Vec::with_capacity(instructions.len());
+        for i in instructions.iter() {
+            let Some(lower) = i.opcode.to_lowering() else {
+                panic!("Opcode {:?} does not have a lowering function", i.opcode);
+            };
+
+            let mut instr_builder = sequence_builder.build_next_instruction(i.width());
+
+            let instr_result = unsafe {
+                // # SAFETY: lower is called with args from the same instruction that it
+                // was derived
+                (lower)(i.args(), &mut instr_builder)
+            };
+
+            let lowered_instr = instr_builder.finish(instr_result);
+            lowered_instrs.push(lowered_instr);
+        }
+
+        lowered_instrs
     }
 }

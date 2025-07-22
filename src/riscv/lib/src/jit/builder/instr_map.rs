@@ -140,6 +140,34 @@ mod tests {
 
     use super::*;
 
+    impl InstrId {
+        pub fn set(idx: usize) -> Self {
+            InstrId(idx)
+        }
+
+        pub fn id(&self) -> usize {
+            self.0
+        }
+    }
+
+    impl AddrMap {
+        pub fn addresses(&self) -> &Vec<Address> {
+            &self.addresses
+        }
+    }
+
+    impl<T> InstrMap<T> {
+        pub fn set(values: Vec<T>) -> Self {
+            InstrMap {
+                instructions: values,
+            }
+        }
+
+        pub fn instructions(&self) -> &Vec<T> {
+            &self.instructions
+        }
+    }
+
     proptest! {
         #[test]
         fn resolution(addresses: Vec<u64>) {

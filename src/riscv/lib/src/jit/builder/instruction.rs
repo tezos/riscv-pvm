@@ -56,7 +56,7 @@ use crate::state_context::projection::MachineCoreProjection;
 use crate::traps::Exception;
 
 /// Instruction execution outcome
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum Outcome {
     /// Continue execution
     Next {
@@ -91,7 +91,21 @@ pub enum Outcome {
     },
 }
 
+#[cfg(test)]
+impl Outcome {
+    /// Get the target address of the outcome, if applicable.
+    pub fn find_target(&self, pc: Address, width: InstrWidth) -> Option<(Address, Block)> {
+        match self {
+            Outcome::Next { hook } => Some((pc.wrapping_add(width as u64), *hook)),
+            Outcome::Exception { .. } => None,
+            Outcome::KnownBranch { offset, hook } => Some((pc.wrapping_add_signed(*offset), *hook)),
+            Outcome::UnknownBranch { .. } => None,
+        }
+    }
+}
+
 /// Lowered RISC-V instruction
+#[derive(Debug, Clone)]
 pub struct LoweredInstruction {
     /// Location of the instruction
     program_counter: Address,
@@ -120,6 +134,12 @@ impl LoweredInstruction {
     /// Access the outcomes of the instruction.
     pub fn outcomes(&self) -> &[Outcome] {
         &self.outcomes
+    }
+
+    /// Access the width of the instruction.
+    #[cfg(test)]
+    pub fn width(&self) -> InstrWidth {
+        self.width
     }
 
     /// Build a jump that effectively runs the instruction.
