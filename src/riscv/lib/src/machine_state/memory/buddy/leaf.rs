@@ -4,8 +4,12 @@
 
 //! Leaf of a tree that forms a Buddy-style memory manager
 
-use serde::Deserialize;
-use serde::Serialize;
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -238,23 +242,16 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
     }
 }
 
-impl<const PAGES: u64, M: ManagerSerialise> Serialize for BuddyLeaf<PAGES, M> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.set.serialize(serializer)
+impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.set.encode(encoder)
     }
 }
 
-impl<'de, const PAGES: u64, M: ManagerDeserialise> Deserialize<'de> for BuddyLeaf<PAGES, M> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self {
-            set: Deserialize::deserialize(deserializer)?,
-        })
+impl<const PAGES: u64, M: ManagerDeserialise> Decode<()> for BuddyLeaf<PAGES, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let set = Decode::decode(decoder)?;
+        Ok(Self { set })
     }
 }
 

@@ -4,8 +4,12 @@
 
 //! Branch of a tree that forms a Buddy-style memory manager
 
-use serde::Deserialize;
-use serde::Serialize;
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -26,7 +30,7 @@ use crate::state_backend::verify_backend::Verifier;
 use crate::struct_layout;
 
 /// Information about what is free in each buddy
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct FreeInfo {
     /// Length of the longest sequence of free pages in the left buddy
     left_longest_free_sequence: u64,
@@ -295,26 +299,20 @@ where
     }
 }
 
-impl<B: Serialize, M: ManagerSerialise> Serialize for BuddyBranch2<B, M> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        BuddyBranch2LayoutF {
+impl<B: Encode, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let values = BuddyBranch2LayoutF {
             free_info: &self.free_info,
             left: &self.left,
             right: &self.right,
-        }
-        .serialize(serializer)
+        };
+        Encode::encode(&values, encoder)
     }
 }
 
-impl<'de, B: Deserialize<'de>, M: ManagerDeserialise> Deserialize<'de> for BuddyBranch2<B, M> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let inner: BuddyBranch2LayoutF<_, _, _> = Deserialize::deserialize(deserializer)?;
+impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for BuddyBranch2<B, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let inner: BuddyBranch2LayoutF<_, _, _> = Decode::decode(decoder)?;
         Ok(Self {
             free_info: inner.free_info,
             left: inner.left,

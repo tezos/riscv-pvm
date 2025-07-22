@@ -58,7 +58,10 @@ fn run_steps_ladder<F>(
     let mut stepper_lhs = make_stepper();
     let mut stepper_rhs = make_stepper();
 
-    assert_eq_struct(&stepper_lhs.struct_ref(), &stepper_rhs.struct_ref());
+    assert!(
+        stepper_lhs.struct_ref() == stepper_rhs.struct_ref(),
+        "Stepper states have diverged before doing anything"
+    );
 
     let mut steps_done = 0;
     for &steps in ladder {
@@ -80,7 +83,11 @@ fn run_steps_ladder<F>(
             steps,
             result_lhs.steps()
         );
-        assert_eq_struct(&stepper_lhs.struct_ref(), &stepper_rhs.struct_ref());
+        assert!(
+            stepper_lhs.struct_ref() == stepper_rhs.struct_ref(),
+            "Stepper states have diverged after running {} steps",
+            steps
+        );
 
         let block_builder = InterpretedBlockBuilder;
         stepper_lhs.rebind_via_clone(block_builder);
@@ -89,29 +96,6 @@ fn run_steps_ladder<F>(
     assert_eq_struct_wrapper(stepper_lhs.struct_ref(), expected_refs);
     assert_eq!(stepper_lhs.hash(), expected_hash);
     assert_eq!(stepper_rhs.hash(), expected_hash);
-}
-
-fn assert_eq_struct<A, B>(lhs: &A, rhs: &B)
-where
-    A: serde::Serialize + PartialEq<B>,
-    B: serde::Serialize,
-{
-    if lhs != rhs {
-        eprintln!("> State mismatch, generating diff ...");
-
-        let (file_lhs, path_lhs) = tempfile::NamedTempFile::new().unwrap().keep().unwrap();
-        serde_json::to_writer(file_lhs, lhs).unwrap();
-        eprintln!("Lhs is located at {}", path_lhs.display());
-
-        let (file_rhs, path_rhs) = tempfile::NamedTempFile::new().unwrap().keep().unwrap();
-        serde_json::to_writer(file_rhs, rhs).unwrap();
-        eprintln!("Rhs is located at {}", path_rhs.display());
-
-        eprintln!("Run the following to diff them:");
-        eprintln!("jd {} {}", path_lhs.display(), path_rhs.display());
-
-        panic!("Assertion failed: values are different");
-    }
 }
 
 fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2>(
@@ -128,5 +112,5 @@ fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2>(
     // safe because lifetimes are not violated as dictated by the interface of this function.
     let refs: RefOwnedAlloc<'regions2, PvmLayout<M64M, DefaultCacheConfig>> =
         unsafe { std::mem::transmute(refs) };
-    assert_eq_struct(&refs, expected);
+    assert!(&refs == expected);
 }

@@ -5,6 +5,10 @@
 
 use std::collections::VecDeque;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::error::DecodeError;
+
 use super::AllocatedOf;
 use super::Array;
 use super::Atom;
@@ -45,7 +49,7 @@ pub enum FromProofError {
     Hash(#[from] HashError),
 
     #[error("Error during deserialisation: {0}")]
-    Deserialise(#[from] bincode::Error),
+    Deserialise(#[from] DecodeError),
 
     #[error("Error during tag deserialisation: {0}")]
     TagDeserialise(#[from] DeserialiseError),
@@ -322,7 +326,7 @@ where
 
 impl<T> ProofLayout for Atom<T>
 where
-    T: serde::Serialize + serde::de::DeserializeOwned + 'static,
+    T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         // The Merkle leaf must hold the serialisation of the initial state.
@@ -355,7 +359,7 @@ where
 
 impl<T, const LEN: usize> ProofLayout for Array<T, LEN>
 where
-    T: serde::Serialize + serde::de::DeserializeOwned + 'static,
+    T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         // RV-282: Break down into multiple leaves if the size of the `Cells`

@@ -3,12 +3,13 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Decode;
+use bincode::Encode;
+
 use crate::default::ConstDefault;
 
 /// Integer to keep track of the fence counter
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encode, Decode)]
 pub struct FenceCounter(pub u32);
 
 impl FenceCounter {

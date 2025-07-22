@@ -76,7 +76,7 @@ macro_rules! struct_layout {
         }
     ) => {
         paste::paste! {
-            #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq)]
+            #[derive(bincode::Encode, bincode::Decode, Debug, Clone, PartialEq, Eq)]
             $(
                 #[$attributes]
             )*
@@ -115,7 +115,7 @@ macro_rules! struct_layout {
 
             impl <
                 $(
-                    [<$field_name:camel>]: $crate::state_backend::proof_backend::merkle::AccessInfoAggregatable + serde::Serialize
+                    [<$field_name:camel>]: $crate::state_backend::proof_backend::merkle::AccessInfoAggregatable + bincode::Encode
                 ),+
             > $crate::state_backend::proof_backend::merkle::AccessInfoAggregatable for [<$layout_t F>]<
                 $(

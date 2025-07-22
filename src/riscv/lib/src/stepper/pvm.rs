@@ -8,9 +8,9 @@ mod reveals;
 use std::ops::Bound;
 use std::path::Path;
 
+use bincode::Decode;
+use bincode::Encode;
 use reveals::RevealRequestResponseMap;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
 use super::Stepper;
@@ -238,10 +238,10 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
     /// pvm.
     ///
     /// [`BlockBuilder`]: Block::BlockBuilder
-    pub fn rebind_via_serde(&mut self, block_builder: B::BlockBuilder)
+    pub fn rebind_via_bincode(&mut self, block_builder: B::BlockBuilder)
     where
-        for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Serialize,
-        AllocatedOf<PvmLayout<MC, BCC>, M>: DeserializeOwned,
+        for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Encode,
+        AllocatedOf<PvmLayout<MC, BCC>, M>: Decode<()>,
     {
         let space = {
             let refs = self.pvm.struct_ref::<FnManagerIdent>();

@@ -16,8 +16,8 @@ mod constructors;
 
 use std::fmt::Debug;
 
-use serde::Deserialize;
-use serde::Serialize;
+use bincode::Decode;
+use bincode::Encode;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -80,7 +80,7 @@ use crate::traps::Exception;
 /// This is preferred within the caches, as it enables 'pre-dispatch' of functions
 ///
 /// Instructions are constructable from [`InstrCacheable`] instructions.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct Instruction {
     /// The operation (over the machine state) that this instruction represents.
     pub opcode: OpCode,
@@ -119,7 +119,7 @@ pub type RunInstr<MC, M> =
 
 /// Opcodes map to the operation performed over the state - allowing us to
 /// decouple these from the parsed instructions down the line.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Encode, Decode, PartialEq, Eq)]
 pub enum OpCode {
     Unknown,
 
@@ -673,7 +673,7 @@ impl Instruction {
 }
 
 /// A struct containing X and F registers, along with a non-zero X register variant.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct Register {
     pub x: XRegister,
     pub f: FRegister,
@@ -712,7 +712,7 @@ impl From<NonZeroXRegister> for Register {
 /// Contains all possible arguments used by opcode-functions.
 ///
 /// Each opcode will only touch a subset of these.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct Args {
     pub rd: Register,
     pub rs1: Register,

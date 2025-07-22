@@ -11,6 +11,10 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 use thiserror::Error;
 
 pub use crate::state_backend::hash::DIGEST_SIZE;
@@ -25,7 +29,10 @@ pub enum StorageError {
     IoError(#[from] io::Error),
 
     #[error("Serialization error: {0}")]
-    CommitSerializationError(#[from] bincode::Error),
+    CommitSerializationError(#[from] EncodeError),
+
+    #[error("Deserialization error: {0}")]
+    CommitDeserializationError(#[from] DecodeError),
 
     #[error("Invalid repo")]
     InvalidRepo,
@@ -142,10 +149,7 @@ impl Repo {
     }
 
     /// Commit something serialisable and return the commit ID.
-    pub fn commit_serialised(
-        &mut self,
-        subject: &impl serde::Serialize,
-    ) -> Result<Hash, StorageError> {
+    pub fn commit_serialised(&mut self, subject: &impl Encode) -> Result<Hash, StorageError> {
         let chunk_hashes = {
             let mut writer = chunked_io::ChunkWriter::new(&mut self.backend);
             binary::serialise_into(subject, &mut writer)?;
@@ -176,12 +180,9 @@ impl Repo {
     }
 
     /// Checkout something deserialisable from the store.
-    pub fn checkout_serialised<S: serde::de::DeserializeOwned>(
-        &self,
-        id: &Hash,
-    ) -> Result<S, StorageError> {
-        let reader = chunked_io::ChunkedReader::new(&self.backend, id)?;
-        Ok(binary::deserialise_from(reader)?)
+    pub fn checkout_serialised<S: Decode<()>>(&self, id: &Hash) -> Result<S, StorageError> {
+        let mut reader = chunked_io::ChunkedReader::new(&self.backend, id)?;
+        Ok(binary::deserialise_from(&mut reader)?)
     }
 
     /// A snapshot is a new repo to which only `id` has been committed.

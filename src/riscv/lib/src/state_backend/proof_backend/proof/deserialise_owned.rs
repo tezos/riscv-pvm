@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
+use bincode::Decode;
 
 use super::deserialiser::DeserError;
 use super::deserialiser::Deserialiser;
@@ -47,7 +47,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         self.deserialise_as_leaf()?
             .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
             .map(OwnedParserComb::new)

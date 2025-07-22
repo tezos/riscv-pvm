@@ -232,14 +232,7 @@ impl NodePvm<Verifier> {
 
 impl<M: state_backend::ManagerSerialise> fmt::Debug for NodePvm<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let refs = self.state.struct_ref::<state_backend::FnManagerIdent>();
-        let rendered = if f.alternate() {
-            serde_json::to_string_pretty(&refs)
-        } else {
-            serde_json::to_string(&refs)
-        }
-        .expect("Could not serialize PVM state");
-        f.write_str(&rendered)
+        write!(f, "NodePvm(<unknown state>)")
     }
 }
 

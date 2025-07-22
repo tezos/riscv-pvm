@@ -7,8 +7,12 @@
 //! Introducing more types instead of composing [`BuddyBranch2`]/[`BuddyBranch2Layout`] makes type
 //! checking much faster.
 
-use serde::Deserialize;
-use serde::Serialize;
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -61,33 +65,28 @@ macro_rules! combined_buddy_branch {
             }
 
             // Passthrough implementation, default derive macro can't derive this ...
-            impl<B, M> Serialize for [<$name Alloc>]<B, M>
+            impl<B, M> Encode for [<$name Alloc>]<B, M>
             where
                 B: Layout,
                 M: ManagerSerialise,
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Serialize,
+                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Encode,
             {
-                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-                where
-                    S: serde::Serializer,
-                {
-                    self.0.serialize(serializer)
+
+                fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+                    self.0.encode(encoder)
                 }
             }
 
 
             // Passthrough implementation, default derive macro can't derive this ...
-            impl<'de, B, M> Deserialize<'de> for [<$name Alloc>]<B, M>
+            impl<B, M> Decode<()> for [<$name Alloc>]<B, M>
             where
                 B: Layout,
                 M: ManagerDeserialise,
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Deserialize<'de>,
+                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Decode<()>,
             {
-                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                where
-                    D: serde::Deserializer<'de>,
-                {
-                    Ok(Self(Deserialize::deserialize(deserializer)?))
+                fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+                    Ok(Self(Decode::decode(decoder)?))
                 }
             }
 
@@ -161,22 +160,16 @@ macro_rules! combined_buddy_branch {
         pub struct $name<B, M: ManagerBase>($buddy1<$buddy2<B, M>, M>);
 
         // Passthrough implementation, default derive macro can't derive this ...
-        impl<B: Serialize, M: ManagerSerialise> Serialize for $name<B, M> {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                Serialize::serialize(&self.0, serializer)
+        impl<B: Encode, M: ManagerSerialise> Encode for $name<B, M> {
+            fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+                self.0.encode(encoder)
             }
         }
 
         // Passthrough implementation, default derive macro can't derive this ...
-        impl<'de, B: Deserialize<'de>, M: ManagerDeserialise> Deserialize<'de> for $name<B, M> {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                Ok(Self(Deserialize::deserialize(deserializer)?))
+        impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for $name<B, M> {
+            fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+                Ok(Self(Decode::decode(decoder)?))
             }
         }
 

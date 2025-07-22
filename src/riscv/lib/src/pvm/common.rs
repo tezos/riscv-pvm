@@ -7,6 +7,8 @@ use std::convert::Infallible;
 use std::fmt;
 use std::ops::Bound;
 
+use bincode::Decode;
+use bincode::Encode;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::linux;
@@ -71,18 +73,7 @@ struct_layout! {
 }
 
 /// PVM status
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-    serde::Deserialize,
-    strum::EnumCount,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, strum::EnumCount)]
 #[repr(u8)]
 pub enum PvmStatus {
     Evaluating,

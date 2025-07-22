@@ -8,8 +8,10 @@ use std::collections::BTreeMap;
 use std::ops::Index;
 use std::panic::resume_unwind;
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use range_collections::RangeSet2;
-use serde::ser::SerializeTuple;
 
 use super::Cell;
 use super::EnrichedValue;
@@ -314,36 +316,17 @@ pub struct CompleteRegionRef<'a, E, const LEN: usize> {
     region: &'a [Option<E>; LEN],
 }
 
-impl<E: serde::Serialize, const LEN: usize> serde::Serialize for CompleteRegionRef<'_, E, LEN> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Replicate [`<Owned as ManagerSerialise>::serialise_region`]
+impl<T: Encode, const LEN: usize> Encode for CompleteRegionRef<'_, T, LEN> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        for elem in self.region {
+            let Some(elem) = elem.as_ref() else {
+                return Err(EncodeError::Other("Region is not complete"));
+            };
 
-        // A special encoding for single-element regions helps clean up encoding for serialisation
-        // formats that contain structures. For example, JSON, where single-element regions would
-        // be represented as array singletons.
-        if LEN == 1 {
-            return self
-                .region
-                .first()
-                .and_then(Option::as_ref)
-                .ok_or_else(|| <S::Error as serde::ser::Error>::custom("Region is not complete"))?
-                .serialize(serializer);
+            elem.encode(encoder)?;
         }
 
-        // We're serialising this as a fixed-sized tuple because otherwise `bincode` would prefix
-        // the length of this array, which is not needed.
-        let mut serializer = serializer.serialize_tuple(LEN)?;
-
-        for item in self.region.iter() {
-            serializer.serialize_element(item.as_ref().ok_or_else(|| {
-                <S::Error as serde::ser::Error>::custom("Region is not complete")
-            })?)?;
-        }
-
-        serializer.end()
+        Ok(())
     }
 }
 

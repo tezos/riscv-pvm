@@ -85,6 +85,12 @@ pub mod verify_backend;
 
 use std::marker::PhantomData;
 
+use bincode::de::Decode;
+use bincode::de::Decoder;
+use bincode::enc::Encode;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 pub use clone_layout::*;
 pub use commitment_layout::*;
 pub use effects::*;
@@ -258,34 +264,29 @@ pub trait ManagerReadWrite: ManagerRead + ManagerWrite {
 /// Manager with the ability to serialise regions
 pub trait ManagerSerialise: ManagerRead {
     /// Serialise the contents of the region.
-    fn serialise_region<E: serde::Serialize, const LEN: usize, S: serde::Serializer>(
-        region: &Self::Region<E, LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>;
+    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
+        region: &Self::Region<T, LEN>,
+        encoder: E,
+    ) -> Result<(), EncodeError>;
 
     /// Serialise the contents of the dynamic region.
-    fn serialise_dyn_region<const LEN: usize, S: serde::Serializer>(
+    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
         region: &Self::DynRegion<LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>;
+        encoder: E,
+    ) -> Result<(), EncodeError>;
 }
 
 /// Manager with the ability to deserialise regions
 pub trait ManagerDeserialise: ManagerBase {
     /// Deserialise a region.
-    fn deserialise_region<
-        'de,
-        E: serde::Deserialize<'de>,
-        const LEN: usize,
-        D: serde::Deserializer<'de>,
-    >(
-        deserializer: D,
-    ) -> Result<Self::Region<E, LEN>, D::Error>;
+    fn deserialise_region<T: Decode<()>, const LEN: usize, D: Decoder<Context = ()>>(
+        decoder: D,
+    ) -> Result<Self::Region<T, LEN>, DecodeError>;
 
     /// Deserialise the dyanmic region.
-    fn deserialise_dyn_region<'de, const LEN: usize, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Self::DynRegion<LEN>, D::Error>;
+    fn deserialise_dyn_region<const LEN: usize, D: Decoder>(
+        decoder: D,
+    ) -> Result<Self::DynRegion<LEN>, DecodeError>;
 }
 
 /// Manager with the ability to clone regions
@@ -328,18 +329,18 @@ impl<'backend, M: ManagerBase> ManagerBase for Ref<'backend, M> {
 }
 
 impl<M: ManagerSerialise> ManagerSerialise for Ref<'_, M> {
-    fn serialise_region<E: serde::Serialize, const LEN: usize, S: serde::Serializer>(
-        region: &Self::Region<E, LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        M::serialise_region(region, serializer)
+    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
+        region: &Self::Region<T, LEN>,
+        encoder: E,
+    ) -> Result<(), EncodeError> {
+        M::serialise_region(region, encoder)
     }
 
-    fn serialise_dyn_region<const LEN: usize, S: serde::Serializer>(
+    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
         region: &Self::DynRegion<LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        M::serialise_dyn_region(region, serializer)
+        encoder: E,
+    ) -> Result<(), EncodeError> {
+        M::serialise_dyn_region(region, encoder)
     }
 }
 
@@ -516,6 +517,7 @@ mod tests {
     use crate::state_backend::Cells;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::owned_backend::Owned;
+    use crate::storage::binary;
 
     #[test]
     fn test_example_owned() {
@@ -539,7 +541,7 @@ mod tests {
         assert_eq!(instance.second.read_all(), second_value);
 
         let first_value_read = u64::from_le_bytes(
-            bincode::serialize(&instance.first.struct_ref::<FnManagerIdent>())
+            binary::serialise(instance.first.struct_ref::<FnManagerIdent>())
                 .unwrap()
                 .try_into()
                 .unwrap(),
@@ -547,7 +549,7 @@ mod tests {
         assert_eq!(first_value_read, first_value);
 
         let second_value_read = unsafe {
-            let data = bincode::serialize(&instance.second.struct_ref::<FnManagerIdent>()).unwrap();
+            let data = binary::serialise(instance.second.struct_ref::<FnManagerIdent>()).unwrap();
             data.as_ptr().cast::<[u32; 4]>().read().map(u32::from_le)
         };
         assert_eq!(second_value_read, second_value);
