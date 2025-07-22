@@ -45,6 +45,7 @@ use crate::state_context::projection::MachineCoreProjection;
 
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
+mod analysis_tests;
 mod budget_assignment;
 mod budget_check_analysis;
 mod edge_processing;
