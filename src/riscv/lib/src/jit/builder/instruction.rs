@@ -56,7 +56,7 @@ use crate::state_context::projection::MachineCoreProjection;
 use crate::traps::Exception;
 
 /// Instruction execution outcome
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Outcome {
     /// Continue execution
     Next {
@@ -92,6 +92,7 @@ pub enum Outcome {
 }
 
 /// Lowered RISC-V instruction
+#[derive(Clone, Debug)]
 pub struct LoweredInstruction {
     /// Location of the instruction
     program_counter: Address,
@@ -120,6 +121,13 @@ impl LoweredInstruction {
     /// Access the outcomes of the instruction.
     pub fn outcomes(&self) -> &[Outcome] {
         &self.outcomes
+    }
+
+    /// Remove an outcome from the instruction.
+    pub fn remove_outcome(&mut self, outcome: Outcome) {
+        if let Some(index) = self.outcomes.iter().position(|o| *o == outcome) {
+            self.outcomes.remove(index);
+        }
     }
 
     /// Build a jump that effectively runs the instruction.
