@@ -40,6 +40,14 @@ impl StepUpdatingOutgoing {
             step_update,
         }
     }
+
+    pub(crate) fn hook(&self) -> Block {
+        self.hook
+    }
+
+    pub(crate) fn get_step_update(&self) -> Option<u64> {
+        self.step_update
+    }
 }
 
 /// JoinPointAnalysedLI holds the information after the join-point analysis stage.
@@ -76,14 +84,9 @@ impl<T: HookedOutgoing> From<EdgeProcessedLI<T>> for JoinPointAnalysedLI {
 
 impl JoinPointAnalysedLI {
     /// Return the original LoweredInstruction.
-    #[expect(
-        dead_code,
-        reason = "Lowered instructions will be required for further stages of analysis."
-    )]
     pub(super) fn lowered_instr(&self) -> &LoweredInstruction {
         &self.lowered_instr
     }
-
     /// Return the list of incomings for the instruction.
     pub(super) fn incomings(&self) -> &[usize] {
         &self.incomings
@@ -115,6 +118,21 @@ impl JoinPointAnalysedLI {
     /// Return the number of incomings for the instruction.
     pub(super) fn incomings_count(&self) -> usize {
         self.incomings.len()
+    }
+
+    /// Return whether the instruction is a branch point instruction.
+    pub(super) fn is_branch_point(&self) -> bool {
+        self.outgoings.len() > 1
+    }
+
+    /// Return whether the instruction is at the end of the sequence AND has an outgoing transition.
+    pub(super) fn is_non_terminating(&self, is_final: bool) -> bool {
+        self.outgoings.len() == 1 && is_final
+    }
+
+    /// Return whether the instruction is a terminal instruction.
+    pub(super) fn is_terminal(&self) -> bool {
+        self.outgoings.is_empty()
     }
 }
 
@@ -173,16 +191,6 @@ pub(crate) mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::jit::JIT;
-    use crate::jit::builder::sequence::edge_processing::edge_processing;
-    use crate::jit::builder::sequence::edge_processing::tests::MockHookedOutgoing;
-    use crate::jit::builder::sequence::edge_processing::tests::validate_edge_processing;
-    use crate::jit::builder::sequence::tests::create_lowered_instructions;
-    use crate::machine_state::instruction::Instruction;
-    use crate::machine_state::memory::M4K;
-    use crate::machine_state::registers::nz;
-    use crate::machine_state::registers::*;
-    use crate::parser::instruction::InstrWidth;
 
     pub(crate) fn validate_jp_analysis(
         result: &[JoinPointAnalysedLI],
@@ -207,155 +215,5 @@ pub(crate) mod tests {
                 outgoing_set.remove(expected_outgoing);
             }
         }
-    }
-
-    #[test]
-    fn test_basic_analysis() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_x64_add(nz::a1, nz::a2, nz::a3, InstrWidth::Uncompressed),
-            Instruction::new_x64_sub(nz::a4, nz::a5, nz::a6, InstrWidth::Uncompressed),
-            Instruction::new_x64_add(nz::a7, nz::t0, nz::t1, InstrWidth::Compressed),
-            Instruction::new_x64_sub(nz::t2, nz::t3, nz::t4, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[vec![], vec![0], vec![1], vec![2]],
-            &[vec![1], vec![2], vec![3], vec![]],
-            &[0, 0, 0, 1],
-            &[false, false, false, false],
-        );
-
-        let jp_analysed_instrs = join_point_analysis::<MockHookedOutgoing>(&edge_processed_instrs);
-
-        let expected_outgoings = vec![
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(1, None)]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(2, None)]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(3, None)]),
-            HashSet::new(),
-        ];
-
-        validate_jp_analysis(&jp_analysed_instrs, &[0, 1, 2, 3], &expected_outgoings);
-    }
-
-    #[test]
-    fn test_analysis_with_join_point() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_li(nz::a1, 1000, InstrWidth::Uncompressed),
-            Instruction::new_li(nz::a2, 1000, InstrWidth::Uncompressed),
-            Instruction::new_branch_equal(nz::a1, nz::a2, 8, InstrWidth::Uncompressed),
-            Instruction::new_jump_pc(-8, InstrWidth::Uncompressed),
-            Instruction::new_x64_store(a1, a2, 0, InstrWidth::Uncompressed),
-            Instruction::new_x64_add(nz::a3, nz::a4, nz::a5, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[vec![], vec![0, 3], vec![1], vec![2], vec![2], vec![4]],
-            &[vec![1], vec![2], vec![3, 4], vec![1], vec![5], vec![]],
-            &[0, 0, 0, 0, 1, 1],
-            &[false, false, true, false, false, false],
-        );
-
-        let jp_analysed_instrs = join_point_analysis::<MockHookedOutgoing>(&edge_processed_instrs);
-
-        let expected_outgoings = vec![
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(1, Some(1))]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(2, None)]),
-            HashSet::from_iter(vec![
-                StepUpdatingOutgoing::new(3, None),
-                StepUpdatingOutgoing::new(4, None),
-            ]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(1, Some(3))]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(5, None)]),
-            HashSet::new(),
-        ];
-        validate_jp_analysis(
-            &jp_analysed_instrs,
-            &[0, 0, 1, 2, 2, 3],
-            &expected_outgoings,
-        );
-    }
-
-    #[test]
-    fn test_analysis_two_join_points() {
-        let mut jit = JIT::<M4K>::new().unwrap();
-
-        let initial_pc = 0;
-        let mut sequence_builder = jit.start(initial_pc);
-
-        let lowered_instrs = create_lowered_instructions(&mut sequence_builder, vec![
-            Instruction::new_li(nz::a1, 1000, InstrWidth::Uncompressed),
-            Instruction::new_li(nz::a2, 1000, InstrWidth::Uncompressed),
-            Instruction::new_branch_equal(nz::a1, nz::a2, 6, InstrWidth::Uncompressed),
-            Instruction::new_jump_pc(10, InstrWidth::Compressed),
-            Instruction::new_branch_not_equal(nz::a1, nz::a2, -10, InstrWidth::Uncompressed),
-            Instruction::new_x64_load_signed(a1, a2, 0, InstrWidth::Uncompressed),
-            Instruction::new_mul(nz::a3, nz::a4, nz::a5, InstrWidth::Uncompressed),
-            Instruction::new_add_word(nz::a6, a7, t0, InstrWidth::Uncompressed),
-        ]);
-
-        let edge_processed_instrs = edge_processing::<MockHookedOutgoing>(&lowered_instrs);
-        validate_edge_processing(
-            &edge_processed_instrs,
-            &[
-                vec![],
-                vec![0, 4],
-                vec![1],
-                vec![2],
-                vec![2],
-                vec![4],
-                vec![3, 5],
-                vec![6],
-            ],
-            &[
-                vec![1],
-                vec![2],
-                vec![3, 4],
-                vec![6],
-                vec![1, 5],
-                vec![6],
-                vec![7],
-                vec![],
-            ],
-            &[0, 0, 0, 0, 0, 1, 0, 1],
-            &[false, false, true, false, true, false, false, false],
-        );
-
-        let jp_analysed_instrs = join_point_analysis::<MockHookedOutgoing>(&edge_processed_instrs);
-
-        let expected_outgoings = vec![
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(1, Some(1))]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(2, None)]),
-            HashSet::from_iter(vec![
-                StepUpdatingOutgoing::new(3, None),
-                StepUpdatingOutgoing::new(4, None),
-            ]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(6, Some(3))]),
-            HashSet::from_iter(vec![
-                StepUpdatingOutgoing::new(1, Some(3)),
-                StepUpdatingOutgoing::new(5, None),
-            ]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(6, Some(4))]),
-            HashSet::from_iter(vec![StepUpdatingOutgoing::new(7, None)]),
-            HashSet::new(),
-        ];
-        validate_jp_analysis(
-            &jp_analysed_instrs,
-            &[0, 0, 1, 2, 2, 3, 0, 1],
-            &expected_outgoings,
-        );
     }
 }
