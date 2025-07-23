@@ -340,8 +340,7 @@ pub enum OpCode {
 
 impl OpCode {
     /// Dispatch an opcode to the function that will run over the machine state.
-    #[inline(always)]
-    pub(super) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
+    pub(crate) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
         match self {
             Self::X64Add => Args::run_x64_add,
             Self::X64Sub => Args::run_x64_sub,

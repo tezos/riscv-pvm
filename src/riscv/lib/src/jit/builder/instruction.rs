@@ -26,9 +26,13 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::IntCC;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
+use cranelift_jit::JITModule;
+use cranelift_module::DataDescription;
+use cranelift_module::Module;
 
 use crate::instruction_context::ICB;
 use crate::instruction_context::MulHighType;
@@ -40,11 +44,16 @@ use crate::instruction_context::value::PhiValue;
 use crate::interpreter::atomics;
 use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::float::RoundingMode;
+use crate::jit::builder::ext_calls;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::JsaCalls;
+use crate::jit::state_access::stack;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::instruction::Args;
+use crate::machine_state::instruction::Instruction;
+use crate::machine_state::instruction::RunInstr;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
@@ -134,6 +143,9 @@ pub enum InstructionResult<T> {
 
 /// Builder for a single RISC-V instruction
 pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
+    /// TODO
+    module: &'seq mut JITModule,
+
     /// IR builder
     builder: &'seq mut FunctionBuilder<'jit>,
 
@@ -159,6 +171,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
 impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
     pub(super) fn new(
+        module: &'seq mut JITModule,
         builder: &'seq mut FunctionBuilder<'jit>,
         ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
@@ -167,6 +180,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         result_param: Pointer<Result<(), EnvironException>>,
     ) -> Self {
         Self {
+            module,
             builder,
             ext_calls,
             entry_block,
@@ -234,6 +248,142 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         self.builder.seal_block(unknown_branch_block);
 
         InstructionResult::NoNext
+    }
+
+    /// TODO
+    pub fn import_instruction<Any>(
+        &mut self,
+        instr: &Instruction,
+    ) -> InstructionResult<ProgramCounterUpdate<Any>> {
+        let target_config = self.module.target_config();
+
+        let args_ptr = {
+            let mut args_data = DataDescription::new();
+            args_data.set_align(std::mem::align_of::<Args>() as u64);
+            args_data.define({
+                let mut data = vec![0u8; std::mem::size_of::<Args>()].into_boxed_slice();
+                let ptr = std::ptr::addr_of!(instr.args).cast::<u8>();
+
+                unsafe {
+                    data.as_mut_ptr().copy_from_nonoverlapping(ptr, data.len());
+                }
+
+                data
+            });
+
+            let args_data_id = self.module.declare_anonymous_data(false, false).unwrap();
+            self.module.define_data(args_data_id, &args_data).unwrap();
+
+            let args_global = self
+                .module
+                .declare_data_in_func(args_data_id, self.builder.func);
+
+            let raw = self
+                .builder
+                .ins()
+                .global_value(target_config.pointer_type(), args_global);
+            unsafe { Pointer::<Args>::from_raw(raw) }
+        };
+
+        let runner_value = {
+            let runner = instr.opcode.to_run::<MC, Owned>();
+            let raw_value = self.builder.ins().iconst(I64, runner as usize as i64);
+            unsafe { Value::<RunInstr<MC, Owned>>::from_raw(raw_value) }
+        };
+
+        let pc_slot = stack::Slot::new(target_config.pointer_type(), self.builder);
+        let pc_value = self.pc_read();
+        let pc_slot = pc_slot.init(self.builder, pc_value);
+        let pc_slot_ptr = pc_slot.ptr(self.builder);
+
+        extern "C" fn ext_runner<MC: MemoryConfig>(
+            core: &mut MachineCoreState<MC, Owned>,
+            runner: u64,
+            args: &Args,
+            current_pc: &mut Address,
+            result: &mut Result<(), EnvironException>,
+        ) -> i64 {
+            let runner = unsafe { std::mem::transmute::<u64, RunInstr<MC, Owned>>(runner) };
+
+            // We need to write the current program counter to the state because the JIT function
+            // only does it at its exit. If we wouldn't do this instructions which operate on the
+            // program counter would use the one from the beggining of the JIT function.
+            core.hart.pc.write(*current_pc);
+
+            match (runner)(args, core) {
+                Ok(ProgramCounterUpdate::Set(abs)) => {
+                    *current_pc = abs;
+                    1
+                }
+
+                Ok(ProgramCounterUpdate::Relative(offset)) => {
+                    *current_pc = current_pc.wrapping_add_signed(offset);
+                    1
+                }
+
+                Ok(ProgramCounterUpdate::Next(_width)) => 0,
+
+                Err(exception) => match core.address_on_exception(exception, *current_pc) {
+                    Ok(abs) => {
+                        *current_pc = abs;
+                        1
+                    }
+
+                    Err(env_exception) => {
+                        *result = Err(env_exception);
+                        -1
+                    }
+                },
+            }
+        }
+
+        let result = ext_calls::call5(
+            &target_config,
+            self.builder,
+            ext_runner,
+            unsafe { self.core_param.as_mut() },
+            unsafe { runner_value.cast() },
+            unsafe { args_ptr.as_ref() },
+            unsafe { pc_slot_ptr.as_mut() },
+            unsafe { self.result_param.as_mut() },
+        );
+
+        let pc_value = pc_slot.load(self.builder);
+
+        let exit_block = self.builder.create_block();
+        let next_block = self.builder.create_block();
+
+        let is_next = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, result.to_value(), 0);
+        self.builder
+            .ins()
+            .brif(is_next, next_block, [], exit_block, []);
+        self.builder.seal_block(exit_block);
+        self.builder.seal_block(next_block);
+
+        // Code for when the instruction exits
+        {
+            self.builder.switch_to_block(exit_block);
+
+            let unknown_branch_block = self.create_unknown_branch_outcome(pc_value);
+            let exception_block = self.create_exception_outcome();
+
+            let is_exception =
+                self.builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedLessThan, result.to_value(), 0);
+            self.builder
+                .ins()
+                .brif(is_exception, exception_block, [], unknown_branch_block, []);
+            self.builder.seal_block(exception_block);
+            self.builder.seal_block(unknown_branch_block);
+        }
+
+        self.builder.switch_to_block(next_block);
+
+        InstructionResult::HasNext(ProgramCounterUpdate::Next(instr.width()))
     }
 
     /// Finalise the instruction building and produce an instruction.
