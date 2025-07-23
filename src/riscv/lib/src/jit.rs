@@ -144,19 +144,16 @@ impl<MC: MemoryConfig> JIT<MC> {
 
         // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
         for i in instr {
-            let Some(lower) = i.opcode.to_lowering() else {
-                builder.abandon();
-                self.clear();
-                self.cache.insert(hash, None);
-                return None;
-            };
-
             let mut instr_builder = builder.build_next_instruction(i.width());
 
-            let instr_result = unsafe {
-                // # SAFETY: lower is called with args from the same instruction that it
-                // was derived
-                (lower)(i.args(), &mut instr_builder)
+            let instr_result = match i.opcode.to_lowering() {
+                Some(lower) => unsafe {
+                    // # SAFETY: lower is called with args from the same instruction that it
+                    // was derived
+                    (lower)(i.args(), &mut instr_builder)
+                },
+
+                None => instr_builder.run_instruction(i),
             };
 
             let lowered_instr = instr_builder.finish(instr_result);
@@ -1690,70 +1687,6 @@ mod tests {
         let mut interpreted_bb = InterpretedBlockBuilder;
 
         scenario.run(&mut jit, &mut interpreted_bb);
-    }
-
-    #[test]
-    fn test_jit_recovers_from_compilation_failure() {
-        use crate::machine_state::registers::NonZeroXRegister::*;
-
-        // Arrange
-        let failure_scenarios: &[&[I]] = &[
-            &[
-                // does not currently support lowering.
-                I::new_fadds(x1, x1, x1, Uncompressed),
-            ],
-            &[
-                I::new_nop(Uncompressed),
-                // does not currently support lowering.
-                I::new_fadds(x1, x1, x1, Uncompressed),
-            ],
-        ];
-
-        let success: &[I] = &[I::new_nop(Compressed)];
-
-        for failure in failure_scenarios.iter() {
-            let mut jit = JIT::<M4K>::new().unwrap();
-
-            let mut jitted = MachineCoreState::<M4K, _>::new();
-            let mut block = Interpreted::<M4K, Owned>::new();
-
-            block.start_block();
-            for instr in failure.iter() {
-                block.push_instr(*instr);
-            }
-
-            let initial_pc = 0;
-            jitted.hart.pc.write(initial_pc);
-
-            jitted.hart.xregisters.write_nz(x1, 1);
-
-            // Act
-            let res = jit.compile(instructions(&block).as_slice());
-
-            assert!(
-                res.is_none(),
-                "Compilation of unsupported instruction should fail"
-            );
-
-            block.start_block();
-            for instr in success.iter() {
-                block.push_instr(*instr);
-            }
-
-            let fun = jit
-                .compile(instructions(&block).as_slice())
-                .expect("Compilation of subsequent functions should succeed");
-
-            let mut jitted_res = Ok(());
-            let jitted_steps = unsafe {
-                // # Safety - the jit is not dropped until after we
-                //            exit the block.
-                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
-            };
-
-            assert!(jitted_res.is_ok());
-            assert_eq!(jitted_steps, success.len());
-        }
     }
 
     #[test]

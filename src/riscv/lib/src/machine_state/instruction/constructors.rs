@@ -1345,27 +1345,6 @@ impl Instruction {
         }
     }
 
-    /// Create a new [`Instruction`] for [`OpCode::Fadds`].
-    /// The fadds instruction has not been lowered yet, and this function is only used for testing.
-    #[cfg(test)]
-    pub(crate) fn new_fadds(
-        rd: NonZeroXRegister,
-        rs1: NonZeroXRegister,
-        rs2: NonZeroXRegister,
-        width: InstrWidth,
-    ) -> Self {
-        Self {
-            opcode: OpCode::Fadds,
-            args: Args {
-                rd: rd.into(),
-                rs1: rs1.into(),
-                rs2: rs2.into(),
-                width,
-                ..Args::DEFAULT
-            },
-        }
-    }
-
     /// Create a new [`Instruction`] for [`OpCode::X64AtomicAdd`].
     pub(crate) fn new_x64_atomic_add(
         rd: XRegister,
