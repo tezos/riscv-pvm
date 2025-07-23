@@ -42,6 +42,9 @@ use crate::traps::EnvironException;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
+    /// TODO
+    module: &'jit mut JITModule,
+
     /// IR builder
     builder: FunctionBuilder<'jit>,
 
@@ -135,6 +138,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         builder.ins().jump(entry_block, []);
 
         Self {
+            module,
             builder,
             ext_calls,
             entry_block,
@@ -186,6 +190,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         };
 
         let instr_builder = InstructionBuilder::new(
+            self.module,
             &mut self.builder,
             &mut self.ext_calls,
             entry_block,

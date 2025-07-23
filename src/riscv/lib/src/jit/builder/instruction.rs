@@ -26,9 +26,11 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::IntCC;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
+use cranelift_jit::JITModule;
 
 use crate::instruction_context::ICB;
 use crate::instruction_context::MulHighType;
@@ -43,8 +45,10 @@ use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::JsaCalls;
+use crate::jit::state_access::RunInstructionResult;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
@@ -134,6 +138,9 @@ pub enum InstructionResult<T> {
 
 /// Builder for a single RISC-V instruction
 pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
+    /// TODO
+    module: &'seq mut JITModule,
+
     /// IR builder
     builder: &'seq mut FunctionBuilder<'jit>,
 
@@ -159,6 +166,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
 impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
     pub(super) fn new(
+        module: &'seq mut JITModule,
         builder: &'seq mut FunctionBuilder<'jit>,
         ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
@@ -167,6 +175,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         result_param: Pointer<Result<(), EnvironException>>,
     ) -> Self {
         Self {
+            module,
             builder,
             ext_calls,
             entry_block,
@@ -234,6 +243,67 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         self.builder.seal_block(unknown_branch_block);
 
         InstructionResult::NoNext
+    }
+
+    /// Run an arbitrary instruction.
+    ///
+    /// # Note
+    ///
+    /// This method of running an instruction is intended for instructions that are not lowered
+    /// yet, but we require them to be lowered in the interim.
+    ///
+    /// Instructions run using this method are significantly slower than hand-lowered instructions.
+    pub fn run_instruction<Any>(
+        &mut self,
+        instr: &Instruction,
+    ) -> InstructionResult<ProgramCounterUpdate<Any>> {
+        let (pc_value, result) = self.ext_calls.run_instruction(
+            self.module,
+            self.builder,
+            self.core_param,
+            self.result_param,
+            self.instruction_pc,
+            instr,
+        );
+
+        let exit_block = self.builder.create_block();
+        let next_block = self.builder.create_block();
+
+        let is_next = self.builder.ins().icmp_imm(
+            IntCC::Equal,
+            result.to_value(),
+            RunInstructionResult::Next as i64,
+        );
+        self.builder
+            .ins()
+            .brif(is_next, next_block, [], exit_block, []);
+        self.builder.seal_block(exit_block);
+        self.builder.seal_block(next_block);
+
+        // Code for when the instruction wants to exit.
+        {
+            self.builder.switch_to_block(exit_block);
+
+            let unknown_branch_block = self.create_unknown_branch_outcome(pc_value);
+            let exception_block = self.create_exception_outcome();
+
+            let is_exception = self.builder.ins().icmp_imm(
+                IntCC::Equal,
+                result.to_value(),
+                RunInstructionResult::EnvironException as i64,
+            );
+
+            self.builder
+                .ins()
+                .brif(is_exception, exception_block, [], unknown_branch_block, []);
+            self.builder.seal_block(exception_block);
+            self.builder.seal_block(unknown_branch_block);
+        }
+
+        // Point the cursor at the block which continues execition with the next instruction.
+        self.builder.switch_to_block(next_block);
+
+        InstructionResult::HasNext(ProgramCounterUpdate::Next(instr.width()))
     }
 
     /// Finalise the instruction building and produce an instruction.

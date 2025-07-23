@@ -8,6 +8,7 @@
 
 pub(super) mod arithmetic;
 pub(super) mod comparable;
+pub(crate) mod data;
 pub(super) mod errno;
 pub(crate) mod ext_calls;
 pub(crate) mod instruction;

@@ -13,7 +13,10 @@ use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use cranelift::frontend::FunctionBuilder;
+use cranelift::prelude::InstBuilder;
 use cranelift::prelude::isa::TargetFrontendConfig;
+use cranelift::prelude::types::I64;
+use cranelift_jit::JITModule;
 
 use super::builder::errno::ErrnoImpl;
 use crate::instruction_context::ICB;
@@ -25,10 +28,18 @@ use crate::interpreter::float::RoundRTZ;
 use crate::interpreter::float::RoundRUP;
 use crate::interpreter::float::RoundingMode;
 use crate::interpreter::float::StaticRoundingMode;
+use crate::jit::builder::data::define_function_data;
 use crate::jit::builder::ext_calls;
+use crate::jit::builder::typed::FunctionPointer;
 use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Type;
+use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::instruction::Args;
+use crate::machine_state::instruction::Instruction;
+use crate::machine_state::instruction::RunInstr;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
@@ -191,6 +202,66 @@ extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryCon
     xval: XValue,
 ) -> FValue {
     MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND)
+}
+
+/// Result of running an instruction
+#[repr(i64)]
+pub enum RunInstructionResult {
+    /// Run the next instruction
+    Next = 0,
+
+    /// Jump to an unknown branch
+    UnknownBranch = 1,
+
+    /// Running the instruction resulted in an environment exception
+    EnvironException = -1,
+}
+
+impl Typed for RunInstructionResult {
+    const TYPE: Type = Type::Basic(I64);
+}
+
+/// Run the given instruction using the provided runner function pointer.
+extern "C" fn run_instruction<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
+    runner: FunctionPointer<RunInstr<MC, Owned>>,
+    args: &Args,
+    current_pc: &mut Address,
+    result: &mut Result<(), EnvironException>,
+) -> RunInstructionResult {
+    // SAFETY: The `runner` is a valid function pointer.
+    let runner = unsafe { runner.to_inner() };
+
+    // We need to write the current program counter to the state because the JIT function
+    // only does it at its exit. If we wouldn't do this instructions which operate on the
+    // program counter would use the one from the beggining of the JIT function.
+    core.hart.pc.write(*current_pc);
+
+    match (runner)(args, core) {
+        Ok(ProgramCounterUpdate::Set(abs)) => {
+            *current_pc = abs;
+            RunInstructionResult::UnknownBranch
+        }
+
+        Ok(ProgramCounterUpdate::Relative(offset)) => {
+            *current_pc = current_pc.wrapping_add_signed(offset);
+            RunInstructionResult::UnknownBranch
+        }
+
+        Ok(ProgramCounterUpdate::Next(_width)) => RunInstructionResult::Next,
+
+        Err(exception) => match core.address_on_exception(exception, *current_pc) {
+            Ok(abs) => {
+                *current_pc = abs;
+                RunInstructionResult::UnknownBranch
+            }
+
+            Err(env_exception) => {
+                *result = Err(env_exception);
+                RunInstructionResult::EnvironException
+            }
+        },
+    }
 }
 
 /// External function call registry for state accesses
@@ -540,6 +611,45 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             reg_value,
             value,
         );
+    }
+
+    /// Run the given instruction, returning the new program counter and the result of the
+    /// instruction.
+    pub(super) fn run_instruction(
+        &mut self,
+        module: &mut JITModule,
+        builder: &mut FunctionBuilder,
+        core_param: Pointer<MachineCoreState<MC, Owned>>,
+        result_param: Pointer<Result<(), EnvironException>>,
+        current_pc: Value<Address>,
+        instr: &Instruction,
+    ) -> (Value<Address>, Value<RunInstructionResult>) {
+        let args_ptr = define_function_data(module, builder, &instr.args).unwrap();
+
+        let runner_value = {
+            let runner = instr.opcode.to_run::<MC, Owned>();
+            let raw_value = builder.ins().iconst(I64, runner as usize as i64);
+            unsafe { Value::<FunctionPointer<RunInstr<MC, Owned>>>::from_raw(raw_value) }
+        };
+
+        let pc_slot = self.pc_slot(builder);
+        let pc_slot = pc_slot.init(builder, current_pc);
+        let pc_slot_ptr = pc_slot.ptr(builder);
+
+        let result = ext_calls::call5(
+            &self.target_config,
+            builder,
+            run_instruction,
+            unsafe { core_param.as_mut() },
+            runner_value,
+            unsafe { args_ptr.as_ref() },
+            unsafe { pc_slot_ptr.as_mut() },
+            unsafe { result_param.as_mut() },
+        );
+
+        let pc_value = pc_slot.load(builder);
+
+        (pc_value, result)
     }
 }
 
