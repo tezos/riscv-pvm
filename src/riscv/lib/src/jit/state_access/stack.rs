@@ -143,7 +143,7 @@ impl Stackable for FValue {
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.
-pub(super) struct Slot<T> {
+pub(crate) struct Slot<T> {
     slot: StackSlot,
     ptr_type: Type,
     _pd: PhantomData<T>,
@@ -151,7 +151,7 @@ pub(super) struct Slot<T> {
 
 impl<T: StackAddressable> Slot<MaybeUninit<T>> {
     /// Create a new slot on the stack, to hold a value of the underlying type of T.
-    pub(super) fn new(ptr_type: Type, builder: &mut FunctionBuilder) -> Self {
+    pub(crate) fn new(ptr_type: Type, builder: &mut FunctionBuilder) -> Self {
         let slot = builder.create_sized_stack_slot(T::STACK_SLOT_DATA);
 
         Self {
@@ -177,7 +177,7 @@ impl<T: StackAddressable> Slot<MaybeUninit<T>> {
 
 impl<T: Stackable> Slot<MaybeUninit<T>> {
     /// Emit IR to initialise the stack slot.
-    pub(super) fn init(self, builder: &mut FunctionBuilder, value: Value<T>) -> Slot<T> {
+    pub(crate) fn init(self, builder: &mut FunctionBuilder, value: Value<T>) -> Slot<T> {
         builder.ins().stack_store(value.to_value(), self.slot, 0);
         Slot {
             slot: self.slot,
@@ -189,7 +189,7 @@ impl<T: Stackable> Slot<MaybeUninit<T>> {
 
 impl<T: StackAddressable> Slot<T> {
     /// Get a pointer to the memory of the slot.
-    pub(super) fn ptr(&self, builder: &mut FunctionBuilder) -> Pointer<T> {
+    pub(crate) fn ptr(&self, builder: &mut FunctionBuilder) -> Pointer<T> {
         let raw_value = builder.ins().stack_addr(self.ptr_type, self.slot, 0);
 
         // SAFETY: If `T` is the type of the slot, then the pointer to that slot is `NonNull<T>`.
@@ -199,7 +199,7 @@ impl<T: StackAddressable> Slot<T> {
 
 impl<T: Stackable> Slot<T> {
     /// Emit IR to load a value from the current stack slot.
-    pub(super) fn load(&self, builder: &mut FunctionBuilder) -> Value<T> {
+    pub(crate) fn load(&self, builder: &mut FunctionBuilder) -> Value<T> {
         let raw_value = builder.ins().stack_load(T::IR_TYPE, self.slot, 0);
 
         // SAFETY: `T` is the slot value type.
