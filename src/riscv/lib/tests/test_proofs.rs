@@ -11,7 +11,6 @@ use std::time::Instant;
 
 use common::*;
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;
-use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory::M64M;
@@ -32,32 +31,32 @@ use rand::Rng;
 #[test]
 #[ignore]
 fn test_jstz_proofs_one_step() {
-    test_jstz_proofs(false, PvmStepper::verify_proof)
+    test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_one_step_stream() {
-    test_jstz_proofs(false, PvmStepper::verify_proof_using_raw_bytes)
+    test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full() {
-    test_jstz_proofs(true, PvmStepper::verify_proof)
+    test_jstz_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full_stream() {
-    test_jstz_proofs(true, PvmStepper::verify_proof_using_raw_bytes)
+    test_jstz_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes)
 }
 
 #[test]
 fn test_jstz_initial_proof_regression() {
     // Configuring the stepper with `TestCachelayouts` to match the node PVM
     // and make the test run faster.
-    let make_stepper = make_stepper_factory::<TestCacheConfig>();
+    let make_stepper = make_stepper_factory::<M64M, TestCacheConfig>();
     let mut stepper = make_stepper();
 
     eprintln!("> Producing proof ...");
@@ -72,8 +71,12 @@ fn test_jstz_initial_proof_regression() {
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_jstz_proofs(full: bool, verify_fn: StepperVerifyFn<M64M, DefaultCacheConfig, Owned>) {
-    let make_stepper = make_stepper_factory::<DefaultCacheConfig>();
+fn test_jstz_proofs<MC, BCC>(full: bool, verify_fn: StepperVerifyFn<MC, BCC, Owned>)
+where
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig + 'static,
+{
+    let make_stepper = make_stepper_factory::<MC, BCC>();
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);
@@ -95,13 +98,15 @@ fn test_jstz_proofs(full: bool, verify_fn: StepperVerifyFn<M64M, DefaultCacheCon
     }
 }
 
-fn run_steps_ladder<F>(
+fn run_steps_ladder<MC, BCC, F>(
     make_stepper: F,
     ladder: &[usize],
     expected_hash: Option<hash::Hash>,
-    verify_fn: StepperVerifyFn<M64M, DefaultCacheConfig, Owned>,
+    verify_fn: StepperVerifyFn<MC, BCC, Owned>,
 ) where
-    F: Fn() -> PvmStepper<NoHooks, M64M, DefaultCacheConfig>,
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig + 'static,
+    F: Fn() -> PvmStepper<NoHooks, MC, BCC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper = make_stepper();
