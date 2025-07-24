@@ -271,3 +271,28 @@ impl<T> Ord for Value<T> {
 
 /// IR pointer to a value of type `T`
 pub type Pointer<T> = Value<NonNull<T>>;
+
+/// Wrapper for a function pointer
+#[repr(transparent)]
+pub struct FunctionPointer<T>(usize, PhantomData<T>);
+
+// The [`std::fmt::Pointer`] trait is not fool-proof, but it makes it a little harder to misuse.
+impl<T: std::fmt::Pointer> FunctionPointer<T> {
+    /// Unwrap the function pointer.
+    ///
+    /// # Safety
+    ///
+    /// You must ensure that `T` is a valid function pointer.
+    pub unsafe fn to_inner(&self) -> T {
+        assert_eq!(
+            std::mem::size_of::<T>(),
+            std::mem::size_of::<usize>(),
+            "Function pointer size mismatch"
+        );
+        unsafe { std::mem::transmute_copy::<usize, T>(&self.0) }
+    }
+}
+
+impl<T> Typed for FunctionPointer<T> {
+    const TYPE: Type = Type::Pointer;
+}
