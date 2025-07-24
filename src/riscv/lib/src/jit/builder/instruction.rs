@@ -260,8 +260,14 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
                 // need to insert this jump instruction to ensure that the block is not empty -
                 // otherwise we can't switch away from it.
 
-                let hook = self.builder.create_block();
-                self.builder.ins().jump(hook, []);
+                // While retrieving the current block can fail if have never moved the instruction
+                // inserter cursor to a block. In practice, this should never happen as that means
+                // the instruction builder was never used. However, it pays off to be defensive and
+                // crash instead of producing nonsense.
+                let hook = self
+                    .builder
+                    .current_block()
+                    .expect("We must be in a block by now");
 
                 let outcome = match update {
                     ProgramCounterUpdate::Set(address) => Outcome::UnknownBranch {
