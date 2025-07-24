@@ -417,8 +417,11 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, 
 impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, Owned>>>>
     Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
 {
-    /// Produce a proof.
-    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError>
+    /// Extract the proof corresponding to the difference in states between now and the last call of
+    /// [`PvmStepper::start_proof_mode`].
+    ///
+    /// [`PvmStepper::start_proof_mode`]: crate::stepper::pvm::PvmStepper::start_proof_mode
+    pub(crate) fn extract_proof(&self) -> Result<Proof, HashError>
     where
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {

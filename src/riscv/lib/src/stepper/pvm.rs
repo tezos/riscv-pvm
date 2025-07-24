@@ -134,7 +134,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<H, MC, BCC, Owned> {
 
         proof_stepper.try_step().then_some(())?;
 
-        let proof = proof_stepper.pvm.produce_proof().ok()?;
+        let proof = proof_stepper.pvm.extract_proof().ok()?;
         Some(proof)
     }
 }

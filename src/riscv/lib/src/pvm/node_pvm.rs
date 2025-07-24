@@ -193,7 +193,7 @@ impl NodePvm {
             }
         }
 
-        let proof = proof_state.produce_proof().ok()?;
+        let proof = proof_state.extract_proof().ok()?;
         Some(proof)
     }
 }

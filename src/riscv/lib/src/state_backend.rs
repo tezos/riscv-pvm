@@ -76,6 +76,7 @@ mod effects;
 mod elems;
 pub mod hash;
 mod layout;
+pub mod metrics_backend;
 pub mod owned_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
