@@ -32,7 +32,6 @@ use super::ManagerWrite;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::elem_bytes;
 
 pub mod merkle;
@@ -239,30 +238,6 @@ impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
         let mut values = vec![0u8; LEN];
         region.unrecorded_read_all(0, &mut values);
         serializer.serialize_bytes(values.as_slice())
-    }
-}
-
-// TODO: RV-709 Remove this impl when `TestBackendFactory` bounds are relaxed.
-impl<M: ManagerDeserialise> ManagerDeserialise for ProofGen<M> {
-    fn deserialise_region<
-        'de,
-        E: serde::Deserialize<'de>,
-        const LEN: usize,
-        D: serde::Deserializer<'de>,
-    >(
-        deserializer: D,
-    ) -> Result<Self::Region<E, LEN>, D::Error> {
-        Ok(ProofRegion::bind(M::deserialise_region::<E, LEN, D>(
-            deserializer,
-        )?))
-    }
-
-    fn deserialise_dyn_region<'de, const LEN: usize, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Self::DynRegion<LEN>, D::Error> {
-        Ok(ProofDynRegion::bind(M::deserialise_dyn_region::<LEN, D>(
-            deserializer,
-        )?))
     }
 }
 
