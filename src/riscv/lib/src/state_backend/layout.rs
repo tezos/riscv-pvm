@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 
 pub mod clone_layout;
 pub mod commitment_layout;
+pub mod metrics_layout;
 pub mod proof_layout;
 
 /// Structural description of a state type

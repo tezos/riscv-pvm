@@ -11,6 +11,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 
+pub mod metered_pvm;
 pub mod pvm;
 #[cfg(test)]
 mod test;

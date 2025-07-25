@@ -44,6 +44,7 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::clone_layout::CloneLayout;
 use crate::state_backend::hash::Hash;
+use crate::state_backend::metrics_backend::Metrics;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -138,6 +139,8 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<H, MC, BCC, Owned> {
         Some(proof)
     }
 }
+
+impl<H, MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<H, MC, BCC, Metrics> {}
 
 impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWrite>
     PvmStepper<H, MC, BCC, M, B>
