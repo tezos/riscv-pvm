@@ -70,8 +70,6 @@
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
-pub mod clone_layout;
-mod commitment_layout;
 mod effects;
 mod elems;
 pub mod hash;
@@ -79,7 +77,6 @@ mod layout;
 pub mod metrics_backend;
 pub mod owned_backend;
 pub mod proof_backend;
-pub(crate) mod proof_layout;
 mod region;
 mod trans;
 pub mod verify_backend;

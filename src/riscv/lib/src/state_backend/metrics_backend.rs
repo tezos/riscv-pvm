@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 
-use crate::log;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
@@ -8,7 +7,6 @@ use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::metrics_backend::merkle_tracker::MerkleTracker;
 use crate::state_backend::owned_backend::Owned;
-use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
 mod merkle_tracker;
 

@@ -5,6 +5,10 @@
 
 use std::marker::PhantomData;
 
+pub mod clone_layout;
+pub mod commitment_layout;
+pub mod proof_layout;
+
 /// Structural description of a state type
 pub trait Layout {
     /// Representation of the allocated regions in the state backend
