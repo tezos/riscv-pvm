@@ -277,12 +277,12 @@ mod tests {
         // We expect to get the Absent case since the father of the nested node is blinded
         let merkle_proof = MerkleProof::Node(vec![
             MerkleProof::leaf_read(
-                Hash::blake2b_hash_bytes(&[0, 1, 2])
+                Hash::blake3_hash_bytes(&[0, 1, 2])
                     .unwrap()
                     .as_ref()
                     .to_vec(),
             ),
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[3, 4, 5]).unwrap()),
         ]);
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation(proof).unwrap();
@@ -304,7 +304,7 @@ mod tests {
         // Expect absent case in the computed result
         let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_BLIND << 2];
         let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
-        let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap().into();
+        let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).unwrap().into();
         let proof_bytes = [tag_bytes.as_ref(), leaf_read.as_ref(), leaf_blind.as_ref()].concat();
         let res = run_stream_deserialiser(computation, &proof_bytes);
         assert_eq!(res.unwrap().unwrap(), 0);
@@ -314,9 +314,9 @@ mod tests {
     fn test_blind_computation() {
         // The nested leaf is blinded
         let absent_shape = MerkleProof::Node(vec![
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap()),
             MerkleProof::Node(vec![MerkleProof::leaf_blind(
-                Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap(),
+                Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap(),
             )]),
         ]);
         let comp_fn =
@@ -328,7 +328,7 @@ mod tests {
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
-        let merkle_proof = MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[6, 7, 8]).unwrap());
+        let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]).unwrap());
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_2(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
@@ -342,8 +342,8 @@ mod tests {
     fn test_blind_computation_stream() {
         // The nested leaf is blinded
         let raw_bytes_tags = raw_tags_to_bytes([TAG_NODE, TAG_BLIND, TAG_NODE, TAG_BLIND]);
-        let b1: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
-        let b2: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let b1: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let b2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap().into();
         let raw_bytes_content = [raw_bytes_tags.as_ref(), b1.as_ref(), b2.as_ref()].concat();
 
         let rc = Rc::new(RefCell::new(TagIter::new(&raw_bytes_content)));
@@ -360,7 +360,7 @@ mod tests {
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
-        let merkle_proof = MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[6, 7, 8]).unwrap());
+        let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]).unwrap());
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_2(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
@@ -370,15 +370,15 @@ mod tests {
     fn test_bad_structure() {
         let bad_shape_1 = MerkleProof::Node(vec![]);
         let bad_shape_2 = MerkleProof::Node(vec![
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap()),
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap()),
             MerkleProof::Node(vec![]),
             MerkleProof::Node(vec![]),
             MerkleProof::Node(vec![]),
         ]);
         let bad_shape_3 = MerkleProof::Node(vec![
             MerkleProof::Node(vec![]),
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap()),
         ]);
         let bad_shape_4 = MerkleProof::Node(vec![
             MerkleProof::leaf_read([42_u8; 32].to_vec()),
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_bad_structure_stream() {
-        let hash: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[0, 1, 2]).unwrap().into();
+        let hash: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).unwrap().into();
         // Place an invalid second tag
         let tag_shape_1 = [TAG_NODE << tag_offset(0) | 0b01 << tag_offset(1)];
         let tag_shape_2 =
@@ -459,9 +459,9 @@ mod tests {
     fn test_valid_computation() {
         let merkleproof = MerkleProof::Node(vec![
             MerkleProof::leaf_read(0x140A_0000_i32.to_le_bytes().to_vec()),
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[3, 4, 5]).unwrap()),
             MerkleProof::leaf_read(0xC0005_i32.to_le_bytes().to_vec()),
-            MerkleProof::leaf_blind(Hash::blake2b_hash_bytes(&[9, 10, 11]).unwrap()),
+            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[9, 10, 11]).unwrap()),
         ]);
 
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
@@ -472,9 +472,9 @@ mod tests {
     #[test]
     fn test_valid_computation_stream() {
         let h1 = 0x140A_0000_i32.to_le_bytes();
-        let h2: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[3, 4, 5]).unwrap().into();
+        let h2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).unwrap().into();
         let h3 = 0xC0005_i32.to_le_bytes();
-        let h4: [u8; DIGEST_SIZE] = Hash::blake2b_hash_bytes(&[9, 10, 11]).unwrap().into();
+        let h4: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[9, 10, 11]).unwrap().into();
 
         let tags = raw_tags_to_bytes([TAG_NODE, TAG_READ, TAG_BLIND, TAG_READ, TAG_BLIND]);
 

@@ -131,7 +131,7 @@ impl<MC: MemoryConfig> JIT<MC> {
     /// Not all instructions are currently supported. For blocks containing
     /// unsupported instructions, `None` will be returned.
     pub fn compile(&mut self, instr: &[Instruction]) -> Option<JitFn<MC>> {
-        let Ok(hash) = Hash::blake2b_hash(instr) else {
+        let Ok(hash) = Hash::blake3_hash(instr) else {
             return None;
         };
 

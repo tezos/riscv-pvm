@@ -50,7 +50,7 @@ impl MerkleTree {
     /// Make a Merkle tree consisting of a single leaf; representing
     /// the given data and its access pattern.
     pub fn make_merkle_leaf(data: Vec<u8>, access_info: bool) -> Result<Self, HashError> {
-        let hash = Hash::blake2b_hash_bytes(&data)?;
+        let hash = Hash::blake3_hash_bytes(&data)?;
         Ok(MerkleTree::Leaf(hash, access_info, data))
     }
 
@@ -343,7 +343,7 @@ impl MerkleTree {
         while let Some(node) = deque.pop_front() {
             let is_valid_hash = match node {
                 Self::Leaf(hash, _, data) => {
-                    Hash::blake2b_hash_bytes(data).is_ok_and(|h| h == *hash)
+                    Hash::blake3_hash_bytes(data).is_ok_and(|h| h == *hash)
                 }
                 Self::Node(hash, children) => {
                     let children_hashes: Vec<Hash> = children
@@ -431,7 +431,7 @@ mod tests {
                     Self::Leaf(hash, access_info) => match access_info {
                         CompressedAccessInfo::NoAccess => true,
                         CompressedAccessInfo::ReadWrite(data) => {
-                            Hash::blake2b_hash_bytes(data).is_ok_and(|h| h == *hash)
+                            Hash::blake3_hash_bytes(data).is_ok_and(|h| h == *hash)
                         }
                     },
                     Self::Node(hash, children) => {
@@ -455,7 +455,7 @@ mod tests {
     }
 
     fn m_l(data: &[u8], access: bool) -> Result<MerkleTree, HashError> {
-        let hash = Hash::blake2b_hash_bytes(data)?;
+        let hash = Hash::blake3_hash_bytes(data)?;
         Ok(MerkleTree::Leaf(hash, access, data.to_vec()))
     }
 
@@ -512,7 +512,7 @@ mod tests {
 
             let merkle_proof_leaf =
                 |data: &Vec<u8>, access: bool| -> Result<MerkleProof, HashError> {
-                    let hash = Hash::blake2b_hash_bytes(data)?;
+                    let hash = Hash::blake3_hash_bytes(data)?;
                     Ok(MerkleProof::Leaf(if access {
                         MerkleProofLeaf::Read(data.clone())
                     } else {
@@ -527,10 +527,10 @@ mod tests {
 
             // The structure of the original subtree is compressed into a single leaf.
             let proof_no_access = MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine(&[
-                Hash::blake2b_hash_bytes(&l[2])?,
+                Hash::blake3_hash_bytes(&l[2])?,
                 Hash::combine(&[
-                    Hash::blake2b_hash_bytes(&l[3])?,
-                    Hash::blake2b_hash_bytes(&l[4])?,
+                    Hash::blake3_hash_bytes(&l[3])?,
+                    Hash::blake3_hash_bytes(&l[4])?,
                 ])?,
             ])?));
 
@@ -561,12 +561,12 @@ mod tests {
             let proof_mix = MerkleProof::Node(vec![
                 // The structure of the original subtree is compressed into a single leaf.
                 MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine(&[
-                    Hash::blake2b_hash_bytes(&l[12])?,
+                    Hash::blake3_hash_bytes(&l[12])?,
                     Hash::combine(&[
-                        Hash::blake2b_hash_bytes(&l[13])?,
+                        Hash::blake3_hash_bytes(&l[13])?,
                         Hash::combine(&[
-                            Hash::blake2b_hash_bytes(&l[14])?,
-                            Hash::blake2b_hash_bytes(&l[15])?,
+                            Hash::blake3_hash_bytes(&l[14])?,
+                            Hash::blake3_hash_bytes(&l[15])?,
                         ])?,
                     ])?,
                 ])?)),
@@ -574,8 +574,8 @@ mod tests {
                     MerkleProof::Node(vec![
                         merkle_proof_leaf(&l[16], true)?,
                         MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine(&[
-                            Hash::blake2b_hash_bytes(&l[17])?,
-                            Hash::blake2b_hash_bytes(&l[18])?,
+                            Hash::blake3_hash_bytes(&l[17])?,
+                            Hash::blake3_hash_bytes(&l[18])?,
                         ])?)),
                     ]),
                     merkle_proof_leaf(&l[19], true)?,
@@ -625,7 +625,7 @@ mod tests {
 
         let gen_hash_data = || {
             let data = rand::random::<[u8; 12]>().to_vec();
-            let hash = Hash::blake2b_hash_bytes(&data).unwrap();
+            let hash = Hash::blake3_hash_bytes(&data).unwrap();
             (data, hash)
         };
 
