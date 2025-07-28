@@ -13,6 +13,7 @@
   fswatch,
   inotify-tools,
   pkgsCross,
+  gh,
 }:
 mkShell {
   name = "tezos-shell";
@@ -37,6 +38,9 @@ mkShell {
     # These are needed for downloads and stuff
     cacert
     curl
+
+    # hacking
+    gh
   ]
   ++ (
     if stdenv.isDarwin then
