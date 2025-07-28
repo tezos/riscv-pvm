@@ -7,26 +7,9 @@
 //! Chapter 2 - Unprivileged spec
 
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::hart_state::HartState;
 use crate::machine_state::memory;
 use crate::parser::instruction::FenceSet;
 use crate::state_backend as backend;
-use crate::traps::Exception;
-
-impl<M> HartState<M>
-where
-    M: backend::ManagerReadWrite,
-{
-    /// `EBREAK` instruction
-    pub fn run_ebreak(&self) -> Exception {
-        Exception::Breakpoint
-    }
-
-    /// `ECALL` instruction
-    pub fn run_ecall(&self) -> Exception {
-        Exception::EnvCall
-    }
-}
 
 impl<MC, M> MachineCoreState<MC, M>
 where
@@ -53,7 +36,6 @@ mod tests {
     use crate::backend_test;
     use crate::interpreter::integer::run_andi;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
@@ -63,7 +45,6 @@ mod tests {
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::FenceSet;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     backend_test!(test_bitwise, F, {
         proptest!(|(val in any::<u64>(), imm in any::<u64>())| {
@@ -82,13 +63,6 @@ mod tests {
             run_andi(&mut state, positive_imm as i64, nz::a1, nz::a2);
             prop_assert_eq!(state.hart.xregisters.read(a2), val & positive_imm);
         })
-    });
-
-    backend_test!(test_ebreak, F, {
-        let state = MachineCoreState::<M4K, F>::new();
-
-        let ret_val = state.hart.run_ebreak();
-        assert_eq!(ret_val, Exception::Breakpoint);
     });
 
     backend_test!(test_fence, F, {
@@ -111,12 +85,5 @@ mod tests {
             assert_eq!(state.hart.xregisters.read(t1), 123);
             assert_eq!(state.hart.fregisters.read(fa0), 0.1_f64.to_bits().into());
         });
-    });
-
-    backend_test!(test_ecall, F, {
-        let state = HartState::<F>::new();
-
-        let instr_res = state.run_ecall();
-        assert!(instr_res == Exception::EnvCall);
     });
 }
