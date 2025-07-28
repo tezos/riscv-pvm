@@ -14,6 +14,7 @@
   pkgsCross,
   nodejs,
   pnpm,
+  gh,
 }:
 mkShell {
   name = "tezos-shell";
@@ -39,6 +40,9 @@ mkShell {
     # NodeJS stuff for documentation
     nodejs
     pnpm
+
+    # hacking
+    gh
   ]
   ++ (
     if stdenv.isDarwin then
