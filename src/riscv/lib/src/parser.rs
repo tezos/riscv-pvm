@@ -702,7 +702,7 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
             F3_0 => match funct7(instr) {
                 F7_0 => match (rs1_bits(instr), rs2_bits(instr)) {
                     (RS1_0, RS2_0) => Ecall,
-                    (RS1_0, RS2_1) => return Instr::Uncacheable(Ebreak),
+                    (RS1_0, RS2_1) => return Instr::Cacheable(Ebreak),
                     _ => Unknown { instr },
                 },
                 F7_8 => match (rs1_bits(instr), rs2_bits(instr)) {
@@ -1334,7 +1334,7 @@ const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
                 split_x0(c_rd_rs1(instr)),
                 split_x0(c_rs2(instr)),
             ) {
-                (true, X0, X0) => return Instr::Uncacheable(InstrUncacheable::CEbreak),
+                (true, X0, X0) => return Instr::Cacheable(CEbreak),
                 (_, X0, X0) => UnknownCompressed { instr },
                 (_, X0, NonZero(_)) => HintCompressed { instr },
                 (true, NonZero(rs1), X0) => CJalr(CRJTypeArgs { rs1 }),

@@ -829,6 +829,8 @@ pub enum InstrCacheable {
     Wfi,
 
     Ecall,
+    Ebreak,
+    CEbreak,
 }
 
 impl ConstDefault for InstrCacheable {
@@ -839,7 +841,6 @@ impl ConstDefault for InstrCacheable {
 /// breaking of the normal flow of execution.
 ///
 /// Namely, that may happen due:
-/// - interrupt control flow
 /// - cache invalidation
 /// - altering the mapping of virtual to physical memory
 ///
@@ -852,10 +853,6 @@ impl ConstDefault for InstrCacheable {
 pub enum InstrUncacheable {
     Fence(FenceArgs),
     FenceTso(FenceArgs),
-    Ebreak,
-
-    // RV32C compressed instructions
-    CEbreak,
 
     // Zifencei instructions
     FenceI,
@@ -1047,6 +1044,7 @@ impl InstrCacheable {
             | Unknown { instr: _ }
             | Wfi
             | Ecall
+            | Ebreak
             | Hint { instr: _ } => InstrWidth::Uncompressed,
 
             // 2 bytes instructions (compressed instructions)
@@ -1086,6 +1084,7 @@ impl InstrCacheable {
             | CFldsp(_)
             | CFsd(_)
             | CFsdsp(_)
+            | CEbreak
             | UnknownCompressed { instr: _ }
             | HintCompressed { instr: _ } => InstrWidth::Compressed,
         }
@@ -1098,9 +1097,7 @@ impl InstrUncacheable {
     pub const fn width(&self) -> InstrWidth {
         use InstrUncacheable::*;
         match self {
-            FenceI | Fence(_) | FenceTso(_) | Ebreak => InstrWidth::Uncompressed,
-
-            CEbreak => InstrWidth::Compressed,
+            FenceI | Fence(_) | FenceTso(_) => InstrWidth::Uncompressed,
         }
     }
 }
@@ -1541,7 +1538,10 @@ impl fmt::Display for InstrCacheable {
             HintCompressed { instr } => write!(f, "hint.c {:x}", instr),
             // Interrupt-management
             Wfi => write!(f, "wfi"),
+
             Ecall => write!(f, "ecall"),
+            Ebreak => write!(f, "ebreak"),
+            CEbreak => write!(f, "c.ebreak"),
         }
     }
 }
@@ -1553,13 +1553,8 @@ impl fmt::Display for InstrUncacheable {
             Fence(args) => fence_instr!(f, "fence", args),
             FenceTso(args) => fence_instr!(f, "fence.tso", args),
 
-            Ebreak => write!(f, "ebreak"),
-
             // Zifencei instructions
             FenceI => write!(f, "fence.i"),
-
-            // Compressed
-            CEbreak => write!(f, "c.ebreak"),
         }
     }
 }

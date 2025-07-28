@@ -333,9 +333,11 @@ pub enum OpCode {
     /// Jump to `pc + imm` if `val(rs2) > 0`.
     BranchGreaterThanZero,
 
-    /// Performs an environment call, from the current
-    /// machine mode.
+    /// Performs an environment call.
     ECall,
+
+    /// Raise a breakpoint exception.
+    EBreak,
 }
 
 impl OpCode {
@@ -518,6 +520,7 @@ impl OpCode {
             Self::CFsdsp => Args::run_cfsdsp,
             Self::Unknown => Args::run_illegal,
             Self::ECall => Args::run_ecall,
+            Self::EBreak => Args::run_ebreak,
         }
     }
 
@@ -652,6 +655,8 @@ impl OpCode {
             // Errors
             Self::Unknown => Some(Args::run_illegal),
             Self::ECall => Some(Args::run_ecall),
+            Self::EBreak => Some(Args::run_ebreak),
+
             _ => None,
         }
     }
@@ -1497,6 +1502,10 @@ impl Args {
         icb.raise_exception(Exception::EnvCall)
     }
 
+    fn run_ebreak<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        icb.raise_exception(Exception::Breakpoint)
+    }
+
     // RV64C compressed instructions
     impl_fload_type!(run_cfld);
     impl_cfload_sp_type!(run_cfldsp);
@@ -2277,6 +2286,8 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Wfi => Instruction::new_nop(InstrWidth::Uncompressed),
 
             InstrCacheable::Ecall => Instruction::new_ecall(),
+            InstrCacheable::Ebreak => Instruction::new_ebreak(InstrWidth::Uncompressed),
+            InstrCacheable::CEbreak => Instruction::new_ebreak(InstrWidth::Compressed),
         }
     }
 }
