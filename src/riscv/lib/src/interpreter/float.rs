@@ -14,6 +14,8 @@ use rustc_apfloat::Round;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
 
+use crate::bits;
+use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::machine_state::csregisters::CSRRepr;
 use crate::machine_state::csregisters::CSRegister;
@@ -89,7 +91,7 @@ where
         let rval2: F = self.fregisters.read(rs2).into();
 
         if rval1.is_signaling() || rval2.is_signaling() {
-            self.csregisters.set_exception_flag(Fflag::NV);
+            self.csregisters.set_invalid_float_operation();
         }
 
         let res = if rval1 == rval2 { 1 } else { 0 };
@@ -108,7 +110,7 @@ where
         let rval2: F = self.fregisters.read(rs2).into();
 
         if rval1.is_nan() || rval2.is_nan() {
-            self.csregisters.set_exception_flag(Fflag::NV);
+            self.csregisters.set_invalid_float_operation();
         }
 
         let res = if rval1 < rval2 { 1 } else { 0 };
@@ -127,7 +129,7 @@ where
         let rval2: F = self.fregisters.read(rs2).into();
 
         if rval1.is_nan() || rval2.is_nan() {
-            self.csregisters.set_exception_flag(Fflag::NV);
+            self.csregisters.set_invalid_float_operation();
         }
 
         let res = if rval1 <= rval2 { 1 } else { 0 };
@@ -307,7 +309,7 @@ where
         let StatusAnd { status, value } = cvt(rval, rm);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.fregisters.write(rd, value.into());
@@ -336,7 +338,7 @@ where
         let StatusAnd { status, value } = rval.convert_r(rm, &mut loses_info).map(T::canonicalise);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.fregisters.write(rd, value.into());
@@ -368,7 +370,7 @@ where
         let StatusAnd { status, value } = cvt(rval, rm);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.xregisters.write(rd, cast(value));
@@ -429,7 +431,7 @@ where
         let StatusAnd { status, value } = f(rval1, rval2, rval3, rm).map(F::canonicalise);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.fregisters.write(rd, value.into());
@@ -453,7 +455,7 @@ where
         let StatusAnd { status, value } = f(rval1, rval2, rm).map(F::canonicalise);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.fregisters.write(rd, value.into());
@@ -514,7 +516,7 @@ where
         };
 
         if (rval1_nan || rval2_nan) && (rval1.is_signaling() || rval2.is_signaling()) {
-            self.csregisters.set_exception_flag(Fflag::NV);
+            self.csregisters.set_invalid_float_operation();
         }
 
         self.fregisters.write(rd, res.into());
@@ -622,33 +624,75 @@ impl StaticRoundingMode for RoundRMM {
     const ROUND: RoundingMode = RoundingMode::RMM;
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "Only used in tests"))]
-pub enum Fflag {
-    /// Inexact
-    NX = 0,
-    /// Underflow
-    UF = 1,
-    /// Overflow
-    OF = 2,
-    /// Divide by Zero
-    DZ = 3,
-    /// Invalid Operation
-    NV = 4,
+/// Flags tracking floating-point exceptions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FloatExceptionFlags {
+    /// Inexact (`nx`)
+    inexact: bool,
+
+    /// Underflow (`uf`)
+    underflow: bool,
+
+    /// Overflow (`of`)
+    overflow: bool,
+
+    /// Divide by Zero (`dz`)
+    divide_by_zero: bool,
+
+    /// Invalid Operation (`nz`)
+    invalid_operation: bool,
+}
+
+impl FloatExceptionFlags {
+    /// Create a new `FloatFlags` instance from the raw CSR representation.
+    pub const fn from_csrrepr(value: CSRRepr) -> Self {
+        Self {
+            inexact: bits::u64::bit(value, 0),
+            underflow: bits::u64::bit(value, 1),
+            overflow: bits::u64::bit(value, 2),
+            divide_by_zero: bits::u64::bit(value, 3),
+            invalid_operation: bits::u64::bit(value, 4),
+        }
+    }
+
+    /// Convert the exception flags to a raw CSR representation.
+    pub const fn to_repr(self) -> CSRRepr {
+        let value = bits::u64::set_bit(0, 0, self.inexact);
+        let value = bits::u64::set_bit(value, 1, self.underflow);
+        let value = bits::u64::set_bit(value, 2, self.overflow);
+        let value = bits::u64::set_bit(value, 3, self.divide_by_zero);
+        bits::u64::set_bit(value, 4, self.invalid_operation)
+    }
+}
+
+impl ConstDefault for FloatExceptionFlags {
+    const DEFAULT: Self = Self {
+        inexact: false,
+        underflow: false,
+        overflow: false,
+        divide_by_zero: false,
+        invalid_operation: false,
+    };
 }
 
 impl<M: backend::ManagerReadWrite> CSRegisters<M> {
-    fn set_exception_flag(&mut self, mask: Fflag) {
-        self.set_bits(CSRegister::fflags, 1 << mask as usize);
+    /// Set the `invalid_operation` exception flag for floating-point operations.
+    fn set_invalid_float_operation(&mut self) {
+        let mut fflags = self.fflags.read();
+        fflags.invalid_operation = true;
+        self.fflags.write(fflags);
     }
 
-    pub(crate) fn set_exception_flag_status(&mut self, status: Status) {
-        let bits = status_to_bits(status);
-        self.set_bits(CSRegister::fflags, bits as u64);
+    /// Import the floating-point exception flags from a soft-float [`Status`] value.
+    pub(crate) fn import_float_exception_flags(&mut self, status: Status) {
+        self.fflags.write(FloatExceptionFlags {
+            inexact: status.contains(Status::INEXACT),
+            underflow: status.contains(Status::UNDERFLOW),
+            overflow: status.contains(Status::OVERFLOW),
+            divide_by_zero: status.contains(Status::DIV_BY_ZERO),
+            invalid_operation: status.contains(Status::INVALID_OP),
+        });
     }
-}
-
-const fn status_to_bits(status: Status) -> u8 {
-    status.bits().reverse_bits() >> 3
 }
 
 /// Convert 64-bit unsigned integer in `rs1` to a 64-bit float in `rd` with rounding mode `rm`.
@@ -691,16 +735,6 @@ mod test {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::state::NewState;
-
-    #[test]
-    fn test_status_to_bits() {
-        assert_eq!(0, status_to_bits(Status::OK));
-        assert_eq!(1 << Fflag::NX as usize, status_to_bits(Status::INEXACT));
-        assert_eq!(1 << Fflag::UF as usize, status_to_bits(Status::UNDERFLOW));
-        assert_eq!(1 << Fflag::OF as usize, status_to_bits(Status::OVERFLOW));
-        assert_eq!(1 << Fflag::DZ as usize, status_to_bits(Status::DIV_BY_ZERO));
-        assert_eq!(1 << Fflag::NV as usize, status_to_bits(Status::INVALID_OP));
-    }
 
     /// Generates a `proptest` [`Strategy`] for [`InstrRoundingMode`] values.
     /// In this case, "simplest" to "most complex" values have been chosen arbitrarily.

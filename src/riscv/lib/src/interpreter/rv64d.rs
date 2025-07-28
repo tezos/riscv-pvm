@@ -161,7 +161,7 @@ where
         let (StatusAnd { status, value }, _iterations) = ieee_apsqrt::sqrt_accurate(rval, rm);
 
         if status != Status::OK {
-            self.csregisters.set_exception_flag_status(status);
+            self.csregisters.import_float_exception_flags(status);
         }
 
         self.fregisters.write(rd, value.into());

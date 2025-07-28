@@ -396,7 +396,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         let StatusAnd { status, value } = Double::from_u128_r(extended, rm.into());
 
         if status != Status::OK {
-            self.hart.csregisters.set_exception_flag_status(status);
+            self.hart.csregisters.import_float_exception_flags(status);
         }
 
         value.into()
@@ -409,7 +409,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         let StatusAnd { status, value } = Double::from_u128_r(extended, rm.into());
 
         if status != Status::OK {
-            self.hart.csregisters.set_exception_flag_status(status);
+            self.hart.csregisters.import_float_exception_flags(status);
         }
 
         Ok(value.into())
