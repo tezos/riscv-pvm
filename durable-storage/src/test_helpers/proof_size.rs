@@ -43,6 +43,8 @@ use octez_riscv_data::components::vector::NODE_ARITY as VECTOR_NODE_ARITY;
 use octez_riscv_data::foldable::seq_tree::tree_depth;
 use octez_riscv_data::hash::Hash;
 
+use crate::avl::key::NODE_ARITY as KEY_NODE_ARITY;
+use crate::avl::key::PAGE_SIZE as KEY_PAGE_SIZE;
 use crate::key::KEY_MAX_SIZE;
 use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::DatabaseReferenceModel;
@@ -74,27 +76,88 @@ pub(crate) const LEN_LEAF: usize = TAG_BYTES + size_of::<u64>();
 /// encoding).
 pub(crate) const BALANCE_FACTOR_LEAF: usize = TAG_BYTES + size_of::<i8>();
 
-/// A `Read` leaf holding a node's [`Key`]: a one-byte length
-/// prefix plus the key bytes (see the `Encode` impl in `crate::key`).
+/// A `Read` leaf holding a key's `u8` length (see the `Encode` impl in
+/// `crate::key`).
+pub(crate) const KEY_LENGTH_LEAF: usize = TAG_BYTES + size_of::<u8>();
+
+/// A `Read` leaf holding one page of a key: a tag, the page's one-byte length
+/// prefix, and its bytes.
+const fn key_page_leaf(page_len: usize) -> usize {
+    TAG_BYTES + 1 + page_len
+}
+
+/// The depth of the page tree of a key of `pages` pages: `tree_depth` for
+/// [`KEY_NODE_ARITY`], which is not `const`. A single page is a bare leaf, at
+/// depth zero. Zero pages is the one case the two disagree on, and
+/// [`key_ordering`] handles it before reaching here.
+const fn page_tree_depth(pages: usize) -> usize {
+    if pages <= 1 {
+        return 0;
+    }
+
+    let (mut depth, mut span) = (1, KEY_NODE_ARITY);
+    while span < pages {
+        span *= KEY_NODE_ARITY;
+        depth += 1;
+    }
+
+    depth
+}
+
+/// What a node's key costs when the traversal orders it against a different key.
 ///
-/// [`Key`]: crate::key::Key
-pub(crate) const fn key_leaf(key_len: usize) -> usize {
+/// A key folds as a node of its `u8` length and a tree of [`KEY_PAGE_SIZE`]-byte
+/// pages. Two different keys are ordered within the first page on which they
+/// differ, so the proof carries that page's bytes, the length - which orders keys
+/// that agree on every page they share - and the path down to the page. Beside
+/// each node of that path sits the blinded subtree spanning the pages the path
+/// steps over, and it is against those that the verifier checks that the keys
+/// agree that far: one hash per layer of the page tree rather than one per page.
+///
+/// The worst case is a divergence in a full page, paying for every layer.
+///
+/// This charges for **one** comparison. A key compared against two different
+/// keys accumulates the pages of both, and can run to twice this. Every database
+/// operation compares each node's key against exactly one key - the one it is
+/// searching for - and the nodes a rotation touches are never compared at all
+/// (see [`avl_extra_node`]), so the bound holds; but it is an invariant of the
+/// AVL traversal rather than of this model, and a traversal that compared a node
+/// twice would break it.
+pub(crate) const fn key_ordering(key_len: usize) -> usize {
     assert!(key_len <= KEY_MAX_SIZE);
-    TAG_BYTES + 1 + key_len
+
+    let pages = key_len.div_ceil(KEY_PAGE_SIZE);
+
+    // A key too short to have a page at all has an empty page tree, which no
+    // comparison marks, so it blinds.
+    if pages == 0 {
+        return TAG_BYTES + KEY_LENGTH_LEAF + BLIND_LEAF;
+    }
+
+    let layers = page_tree_depth(pages) * (TAG_BYTES + (KEY_NODE_ARITY - 1) * BLIND_LEAF);
+    let page = key_page_leaf(if key_len < KEY_PAGE_SIZE {
+        key_len
+    } else {
+        KEY_PAGE_SIZE
+    });
+
+    TAG_BYTES + KEY_LENGTH_LEAF + layers + page
 }
 
 /// An accessed node on the search path: tree wrapper, node tag, balance factor
 /// and key leaves, blinded data and one blinded sibling subtree. The balance
 /// factor is shorter than a hash so it is always included directly. The key is
-/// also always included in full, never blinded: generating the proof reads
-/// every accessed node's key. The subtree the path continues into is charged
-/// by its own level; the terminal node's second child is charged
-/// via [`terminal_blind`].
+/// charged at [`key_ordering`]: steering the traversal past a node compares its
+/// key against a different key, which puts a page of it into the proof. The node
+/// the search stops on instead blinds its key whole, which
+/// [`database_operation_proof_size_bound`] refunds. The subtree the path continues into is charged by
+/// its own level; the terminal node's second child is charged via
+/// [`terminal_blind`].
 ///
 /// An operation that opens the value subtree refunds the blinded-data charge
 /// of the terminal node, which [`value_open`] then charges in full.
 pub(crate) const fn avl_path_node(key_len: usize) -> usize {
-    TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + key_leaf(key_len) + 2 * BLIND_LEAF
+    TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + key_ordering(key_len) + 2 * BLIND_LEAF
 }
 
 /// An accessed node off the search path (touched by a rebalancing rotation):
@@ -365,6 +428,14 @@ pub(crate) fn database_operation_proof_size_bound(
             cost += rotations * 2 * avl_extra_node();
         }
         _ => cost += avl_search_path(depth),
+    }
+
+    // The node the search stops on compared equal, and the verifier can redo an
+    // equality check against the key's hash, so that node's key is blinded whole
+    // rather than paged into the proof. `exists` implies a non-empty tree, so
+    // the path has a terminal node to refund.
+    if exists {
+        cost -= key_ordering(KEY_MAX_SIZE) - BLIND_LEAF;
     }
 
     // Only operations that open the value subtree pay for it. `Delete`
