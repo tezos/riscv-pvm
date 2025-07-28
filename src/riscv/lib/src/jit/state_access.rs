@@ -325,33 +325,6 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         ExceptionHandledOutcome { handled, new_pc }
     }
 
-    /// Emit the required IR to create an illegal instruction exception code.
-    ///
-    /// This returns the exception code value for an illegal instruction.
-    pub(super) fn raise_illegal_instruction_exception(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> Value<ExceptionCode> {
-        ExceptionCode::build_exception_code(builder, Exception::IllegalInstruction)
-    }
-
-    /// Emit the required IR to create a store/AMO access fault exception code.
-    ///
-    /// This returns the exception code value for a store/AMO access fault.
-    pub(super) fn raise_store_amo_access_fault_exception(
-        &mut self,
-        builder: &mut FunctionBuilder,
-    ) -> Value<ExceptionCode> {
-        ExceptionCode::build_exception_code(builder, Exception::StoreAMOAccessFault)
-    }
-
-    /// Emit the required IR to create an environment call exception code.
-    ///
-    /// This returns the exception code value for an environment call.
-    pub(super) fn ecall(&mut self, builder: &mut FunctionBuilder) -> Value<ExceptionCode> {
-        ExceptionCode::build_exception_code(builder, Exception::EnvCall)
-    }
-
     /// Emit the required IR to call `memory_store`.
     ///
     /// Returns `errno` - on success, no additional values are returned.
