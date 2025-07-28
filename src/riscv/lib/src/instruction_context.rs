@@ -20,13 +20,10 @@ use rustc_apfloat::ieee::Double;
 
 pub use self::value::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
-use crate::interpreter::atomics::ReservationSetOption;
-use crate::interpreter::atomics::reset_reservation_set;
 use crate::interpreter::float::RoundingMode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::instruction::Args;
-use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
@@ -156,14 +153,6 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
 
     /// Raise an exception, returning a fallible value.
     fn raise_exception<In>(&mut self, exception: Exception) -> Self::IResult<In>;
-
-    /// Raise an [`Exception::StoreAMOAccessFault`] error if `address` is not
-    /// aligned to the given [`LoadStoreWidth`].
-    fn atomic_access_fault_guard<V: StoreLoadInt>(
-        &mut self,
-        address: Self::XValue,
-        reservation_set_option: ReservationSetOption,
-    ) -> Self::IResult<()>;
 
     /// Map the fallible-value into a fallible-value of a different type.
     fn map<Value, Next, F>(res: Self::IResult<Value>, f: F) -> Self::IResult<Next>
@@ -323,26 +312,6 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
             true_branch(self)
         } else {
             false_branch(self)
-        }
-    }
-
-    #[inline(always)]
-    fn atomic_access_fault_guard<V: StoreLoadInt>(
-        &mut self,
-        address: Address,
-        reservation_set_option: ReservationSetOption,
-    ) -> Self::IResult<()> {
-        let width = self.xvalue_of_imm(V::WIDTH as i64);
-        let remainder = address.modulus_unsigned(width, self);
-        let zero = self.xvalue_of_imm(0);
-
-        if remainder.compare(zero, Predicate::NotEqual, self) {
-            if let ReservationSetOption::Reset = reservation_set_option {
-                reset_reservation_set(self);
-            }
-            Err(Exception::StoreAMOAccessFault)
-        } else {
-            Ok(())
         }
     }
 
