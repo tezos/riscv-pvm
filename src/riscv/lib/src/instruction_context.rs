@@ -124,6 +124,12 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
         instr_width: InstrWidth,
     ) -> ProgramCounterUpdate<Self::XValue>;
 
+    /// Run the IR code produced by the `true_branch` if `cond` is true. If the condition is false,
+    /// the IR code following this call will be executed instead.
+    fn if_then<OnTrue>(&mut self, cond: Self::Bool, true_branch: OnTrue) -> Self::IResult<()>
+    where
+        OnTrue: FnOnce(&mut Self) -> Self::IResult<()>;
+
     /// Take a branch based on the given condition and return to a common line of execution.
     ///
     /// This is used for situations where we have a common execution path following branching.
@@ -288,6 +294,18 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         } else {
             ProgramCounterUpdate::Next(instr_width)
         }
+    }
+
+    #[inline]
+    fn if_then<OnTrue>(&mut self, cond: Self::Bool, true_branch: OnTrue) -> Self::IResult<()>
+    where
+        OnTrue: FnOnce(&mut Self) -> Self::IResult<()>,
+    {
+        if cond {
+            return true_branch(self);
+        }
+
+        Ok(())
     }
 
     #[inline(always)]

@@ -406,6 +406,29 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         ProgramCounterUpdate::Next(instr_width)
     }
 
+    fn if_then<OnTrue>(&mut self, cond: Self::Bool, true_branch: OnTrue) -> Self::IResult<()>
+    where
+        OnTrue: FnOnce(&mut Self) -> Self::IResult<()>,
+    {
+        let true_block = self.builder.create_block();
+        let false_block = self.builder.create_block();
+
+        self.ins()
+            .brif(cond.to_value(), true_block, [], false_block, []);
+        self.builder.seal_block(true_block);
+        self.builder.seal_block(false_block);
+
+        // Code for true
+        {
+            self.builder.switch_to_block(true_block);
+            (true_branch)(self);
+        }
+
+        // Code for false
+        self.builder.switch_to_block(false_block);
+        InstructionResult::HasNext(())
+    }
+
     fn branch_merge<Phi: PhiValue, OnTrue, OnFalse>(
         &mut self,
         cond: Self::Bool,
@@ -478,35 +501,14 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let zero = self.xvalue_of_imm(0);
         let not_aligned = remainder.compare(zero, Predicate::NotEqual, self);
 
-        let exception_block = self.builder.create_block();
-        let success_block = self.builder.create_block();
-
-        self.ins().brif(
-            not_aligned.to_value(),
-            exception_block,
-            [],
-            success_block,
-            [],
-        );
-
-        self.builder.seal_block(exception_block);
-        self.builder.seal_block(success_block);
-
-        // Code for when the address is not aligned
-        {
-            self.builder.switch_to_block(exception_block);
-
+        self.if_then(not_aligned, |icb| {
             if let ReservationSetOption::Reset = reservation_set_option {
                 // If the atomic operation was a store_conditional, we reset the reservation.
-                atomics::reset_reservation_set(self);
+                atomics::reset_reservation_set(icb);
             }
 
-            self.raise_exception::<()>(Exception::StoreAMOAccessFault);
-        }
-
-        self.builder.switch_to_block(success_block);
-
-        InstructionResult::HasNext(())
+            icb.raise_exception(Exception::StoreAMOAccessFault)
+        })
     }
 
     fn main_memory_store<V: StoreLoadInt>(
