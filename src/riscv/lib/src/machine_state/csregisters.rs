@@ -9,7 +9,6 @@ use std::ops::Shr;
 
 use num_enum::TryFromPrimitive;
 
-use crate::bits::Bits64;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
@@ -178,26 +177,26 @@ pub struct CSRegisters<M: backend::ManagerBase> {
 impl<M: backend::ManagerBase> CSRegisters<M> {
     /// Write to a CSR.
     #[inline]
-    pub fn write<V: Bits64>(&mut self, reg: CSRegister, value: V)
+    pub fn write(&mut self, reg: CSRegister, value: CSRRepr)
     where
         M: backend::ManagerWrite,
     {
         match reg {
             CSRegister::fflags => {
-                let fflags = value.to_bits().bitand(FFLAGS_MASK) as u8;
+                let fflags = value.bitand(FFLAGS_MASK) as u8;
                 self.fflags.write(fflags);
             }
 
             CSRegister::frm => {
-                let frm = value.to_bits().bitand(FRM_MASK) as u8;
+                let frm = value.bitand(FRM_MASK) as u8;
                 self.frm.write(frm);
             }
 
             CSRegister::fcsr => {
-                let fflags = value.to_bits().bitand(FFLAGS_MASK) as u8;
+                let fflags = value.bitand(FFLAGS_MASK) as u8;
                 self.fflags.write(fflags);
 
-                let frm = value.to_bits().shr(FRM_SHIFT).bitand(FRM_MASK) as u8;
+                let frm = value.shr(FRM_SHIFT).bitand(FRM_MASK) as u8;
                 self.frm.write(frm);
             }
 
@@ -240,31 +239,24 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
 
     /// Read from a CSR.
     #[inline]
-    pub fn read<V: Bits64>(&self, reg: CSRegister) -> V
+    pub fn read(&self, reg: CSRegister) -> CSRRepr
     where
         M: backend::ManagerRead,
     {
         match reg {
-            CSRegister::fflags => {
-                let fflags = self.fflags.read() as u64;
-                V::from_bits(fflags)
-            }
+            CSRegister::fflags => self.fflags.read() as u64,
 
-            CSRegister::frm => {
-                let frm = self.frm.read() as u64;
-                V::from_bits(frm)
-            }
+            CSRegister::frm => self.frm.read() as u64,
 
             CSRegister::fcsr => {
                 let fflags = self.fflags.read() as u64;
                 let frm = self.frm.read() as u64;
-                let fcsr = frm.shl(FRM_SHIFT).bitor(fflags);
-                V::from_bits(fcsr)
+                frm.shl(FRM_SHIFT).bitor(fflags)
             }
 
             CSRegister::cycle | CSRegister::time | CSRegister::instret => {
                 // We don't count those at the moment.
-                V::from_bits(0)
+                0
             }
 
             CSRegister::hpmcounter3
@@ -298,18 +290,18 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
             | CSRegister::hpmcounter31 => {
                 // We assume that the M-level counters are all not enabled. There is no M-level, so
                 // we get to decide.
-                V::from_bits(0)
+                0
             }
         }
     }
 
     /// Replace the CSR value, returning the previous value.
     #[inline]
-    pub fn replace<V: Bits64>(&mut self, reg: CSRegister, value: V) -> V
+    pub fn replace(&mut self, reg: CSRegister, value: CSRRepr) -> CSRRepr
     where
         M: backend::ManagerReadWrite,
     {
-        let old = self.read::<V>(reg);
+        let old = self.read(reg);
         self.write(reg, value);
         old
     }
@@ -396,7 +388,6 @@ mod tests {
     use strum::IntoEnumIterator;
 
     use crate::backend_test;
-    use crate::machine_state::csregisters::CSRRepr;
     use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::csregisters::CSRegisters;
     use crate::machine_state::csregisters::Exception;
@@ -428,29 +419,29 @@ mod tests {
         let mut csrs = CSRegisters::<F>::new();
 
         // check starting values
-        assert_eq!(0, csrs.read::<CSRRepr>(CSRegister::fcsr));
-        assert_eq!(0, csrs.read::<CSRRepr>(CSRegister::frm));
-        assert_eq!(0, csrs.read::<CSRRepr>(CSRegister::fflags));
+        assert_eq!(0, csrs.read(CSRegister::fcsr));
+        assert_eq!(0, csrs.read(CSRegister::frm));
+        assert_eq!(0, csrs.read(CSRegister::fflags));
 
         // writing to fcsr is reflected in frm/fflags
         csrs.write(CSRegister::fcsr, 0b111_11111);
 
-        assert_eq!(0b111_11111, csrs.read::<CSRRepr>(CSRegister::fcsr));
-        assert_eq!(0b111, csrs.read::<CSRRepr>(CSRegister::frm));
-        assert_eq!(0b11111, csrs.read::<CSRRepr>(CSRegister::fflags));
+        assert_eq!(0b111_11111, csrs.read(CSRegister::fcsr));
+        assert_eq!(0b111, csrs.read(CSRegister::frm));
+        assert_eq!(0b11111, csrs.read(CSRegister::fflags));
 
         // writing to frm is reflected in fcsr
         csrs.write(CSRegister::frm, 0b010);
 
-        assert_eq!(0b010_11111, csrs.read::<CSRRepr>(CSRegister::fcsr));
-        assert_eq!(0b010, csrs.read::<CSRRepr>(CSRegister::frm));
-        assert_eq!(0b11111, csrs.read::<CSRRepr>(CSRegister::fflags));
+        assert_eq!(0b010_11111, csrs.read(CSRegister::fcsr));
+        assert_eq!(0b010, csrs.read(CSRegister::frm));
+        assert_eq!(0b11111, csrs.read(CSRegister::fflags));
 
         // writing to fflags is reflected in fcsr
         csrs.write(CSRegister::fflags, 0b01010);
 
-        assert_eq!(0b010_01010, csrs.read::<CSRRepr>(CSRegister::fcsr));
-        assert_eq!(0b010, csrs.read::<CSRRepr>(CSRegister::frm));
-        assert_eq!(0b01010, csrs.read::<CSRRepr>(CSRegister::fflags));
+        assert_eq!(0b010_01010, csrs.read(CSRegister::fcsr));
+        assert_eq!(0b010, csrs.read(CSRegister::frm));
+        assert_eq!(0b01010, csrs.read(CSRegister::fflags));
     });
 }

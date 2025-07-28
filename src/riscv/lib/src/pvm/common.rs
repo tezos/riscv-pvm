@@ -225,7 +225,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
         let csregs = &mut self.machine_state.core.hart.csregisters;
 
         // `fflags` is a writable CSR
-        let fflags = csregs.read::<u64>(CSRegister::fflags);
+        let fflags = csregs.read(CSRegister::fflags);
         csregs.write(CSRegister::fflags, fflags + 1);
     }
 
