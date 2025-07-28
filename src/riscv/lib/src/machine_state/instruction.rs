@@ -2280,6 +2280,9 @@ impl From<&InstrCacheable> for Instruction {
             InstrCacheable::Ecall => Instruction::new_ecall(),
             InstrCacheable::Ebreak => Instruction::new_ebreak(InstrWidth::Uncompressed),
             InstrCacheable::CEbreak => Instruction::new_ebreak(InstrWidth::Compressed),
+
+            InstrCacheable::Fence(_args) => Instruction::new_nop(InstrWidth::Uncompressed),
+            InstrCacheable::FenceTso => Instruction::new_nop(InstrWidth::Uncompressed),
         }
     }
 }
