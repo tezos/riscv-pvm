@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroUsize;
+
 use arbitrary_int::u7;
 use strum::EnumCount;
 use strum::FromRepr;
@@ -16,20 +18,133 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
+use crate::state_backend::Elem;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::Ref;
 use crate::struct_layout;
 
+#[repr(C)]
+#[derive(Clone, Debug)]
+/// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
+pub struct LinuxSigAction {
+    sa_handler: VirtAddr,
+    sa_sigaction: VirtAddr,
+    sa_mask: u32,
+    sa_flags: u32,
+    sa_restorer: VirtAddr,
+}
+
+#[cfg(test)]
+// Currently we only support the `sa_sigaction` field, so in tests it's useful to be able to
+// create a sigaction using only this field.
+impl LinuxSigAction {
+    pub(crate) fn new(sa_sigaction: VirtAddr) -> Self {
+        Self {
+            sa_handler: VirtAddr::new(0),
+            sa_sigaction,
+            sa_mask: 0,
+            sa_flags: 0,
+            sa_restorer: VirtAddr::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for LinuxSigAction {
+    fn default() -> Self {
+        Self {
+            sa_handler: VirtAddr::new(0),
+            sa_sigaction: VirtAddr::new(0),
+            sa_mask: 0,
+            sa_flags: 0,
+            sa_restorer: VirtAddr::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+impl PartialEq for LinuxSigAction {
+    fn eq(&self, other: &Self) -> bool {
+        self.sa_handler == other.sa_handler
+            && self.sa_sigaction == other.sa_sigaction
+            && self.sa_mask == other.sa_mask
+            && self.sa_flags == other.sa_flags
+            && self.sa_restorer == other.sa_restorer
+    }
+}
+
 /// `size_of(struct sigaction)` on the Kernel side
 const SIZE_SIGACTION: usize = 32;
 
-// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the linux sigaction
-// struct will have its own array of the primitives or wrappers around primitives (e.g.
-// [VirtAddr]) used for the member's type.
+impl Elem for LinuxSigAction {
+    const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(SIZE_SIGACTION).unwrap();
+
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        unsafe {
+            let sa_handler_bits = source.cast::<u64>().read();
+            let sa_sigaction_bits = source.add(size_of::<u64>()).cast::<u64>().read();
+            let sa_mask_bits = source
+                .add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .cast::<u32>()
+                .read();
+            let sa_flags_bits = source
+                .add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .add(size_of::<u32>())
+                .cast::<u32>()
+                .read();
+            let sa_restorer_bits = source
+                .add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .add(size_of::<u32>())
+                .add(size_of::<u32>())
+                .cast::<u64>()
+                .read();
+            Self {
+                sa_handler: VirtAddr::new(u64::from_le(sa_handler_bits)),
+                sa_sigaction: VirtAddr::new(u64::from_le(sa_sigaction_bits)),
+                sa_mask: u32::from_le(sa_mask_bits),
+                sa_flags: u32::from_le(sa_flags_bits),
+                sa_restorer: VirtAddr::new(u64::from_le(sa_restorer_bits)),
+            }
+        }
+    }
+
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        unsafe {
+            dest.cast::<u64>()
+                .write(self.sa_handler.to_machine_address().to_le());
+            dest.add(size_of::<u64>())
+                .cast::<u64>()
+                .write(self.sa_sigaction.to_machine_address().to_le());
+            dest.add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .cast::<u32>()
+                .write(self.sa_mask.to_le());
+            dest.add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .add(size_of::<u32>())
+                .cast::<u32>()
+                .write(self.sa_flags.to_le());
+            dest.add(size_of::<u64>())
+                .add(size_of::<u64>())
+                .add(size_of::<u32>())
+                .add(size_of::<u32>())
+                .cast::<u64>()
+                .write(self.sa_restorer.to_machine_address().to_le());
+        }
+    }
+}
+
+// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the [LinuxSigAction]
+// struct will have its own array of the primitives or wrappers around primitives (e.g. [VirtAddr])
+// used for the member's type.
 
 /// Information to support handling each supported signal
 pub struct SignalActions<M: ManagerBase> {
@@ -54,6 +169,32 @@ struct_layout! {
         masks: [Atom<u32>; SignalIndex::COUNT],
         flags: [Atom<u32>; SignalIndex::COUNT],
         restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
+    }
+}
+
+impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
+    fn signal_action(&self, signal: Signal) -> LinuxSigAction
+    where
+        M: ManagerRead,
+    {
+        let index = signal_index(signal);
+        let sa_sigaction = self.signal_actions.actions[index].read();
+
+        LinuxSigAction {
+            sa_handler: VirtAddr::new(0),
+            sa_sigaction,
+            sa_mask: 0,
+            sa_flags: 0,
+            sa_restorer: VirtAddr::new(0),
+        }
+    }
+
+    fn set_signal_action(&mut self, signal: Signal, action: LinuxSigAction)
+    where
+        M: ManagerReadWrite,
+    {
+        let index = signal_index(signal);
+        self.signal_actions.actions[index].write(action.sa_sigaction);
     }
 }
 
@@ -167,7 +308,6 @@ pub enum Signal {
     Sigsys = 31,
 }
 
-#[expect(dead_code, reason = "Used by divergent branches based on this PR")]
 fn signal_index(signal: Signal) -> usize {
     let signal_index: SignalIndex = signal.into();
     unsafe { std::mem::transmute::<SignalIndex, usize>(signal_index) }
@@ -307,8 +447,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_rt_sigaction(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: Signal,
-        _: u64,
+        signal: Signal,
+        action: SignalActionPtr,
         old: SignalActionPtr,
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
@@ -316,8 +456,13 @@ impl<M: ManagerBase> SupervisorState<M> {
         M: ManagerReadWrite,
     {
         if let Some(old) = old.address() {
-            // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
+            let old_action = core.signal_action(signal);
+            core.main_memory.write(old, old_action)?;
+        }
+
+        if let Some(action) = action.address() {
+            let new_action: LinuxSigAction = core.main_memory.read(action)?;
+            core.set_signal_action(signal, new_action);
         }
 
         // Return 0 as an indicator of success
