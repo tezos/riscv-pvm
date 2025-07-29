@@ -116,4 +116,6 @@ gen_memory_layout!(M1M = 1 MiB);
 gen_memory_layout!(M64M = 64 MiB);
 gen_memory_layout!(M1G = 1 GiB);
 gen_memory_layout!(M4G = 4 GiB);
+gen_memory_layout!(M16G = 16 GiB);
 gen_memory_layout!(M32G = 32 GiB);
+gen_memory_layout!(M64G = 64 GiB);
