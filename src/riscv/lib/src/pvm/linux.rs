@@ -1056,7 +1056,6 @@ impl<M: ManagerAlloc> Default for SupervisorState<M> {
 
 #[cfg(test)]
 mod tests {
-    use std::array;
     use std::num::NonZeroU64;
 
     use rand::Rng;
@@ -1192,8 +1191,8 @@ mod tests {
         }
     });
 
-    // Check that the `rt_sigaction` system call is working correctly for a basic case.
-    backend_test!(rt_sigaction_no_handler, F, {
+    // Check that the `rt_sigaction` system call is working correctly for basic cases.
+    backend_test!(rt_sigaction_with_handler, F, {
         type MemLayout = M4K;
 
         let mut machine_state =
@@ -1211,57 +1210,90 @@ mod tests {
 
         let mut supervisor_state = SupervisorState::<F>::new();
 
-        // System call number
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a7, RT_SIGACTION);
+        // The handler being stored will be written to this address
+        let action = VirtAddr::new(0x20);
 
-        // Signal is SIGPIPE
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a0, 13i32 as u64);
+        // The old handler will be written to this address
+        let old = VirtAddr::new(0x40);
 
-        // New handler is located at this address
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a1, 0x20);
-
-        // Old handler will be written to this address
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a2, 0x40);
+        let linux_sig_action = signals::LinuxSigAction::new(VirtAddr::new(0x60));
         machine_state
             .core
             .main_memory
-            .write(0x40, array::from_fn::<u8, 32, _>(|i| i as u8))
+            .write::<signals::LinuxSigAction>(action.to_machine_address(), linux_sig_action.clone())
             .unwrap();
 
-        // Size of sigset_t
-        machine_state.core.hart.xregisters.write(registers::a3, 8);
+        let mut do_sigaction =
+            |signal: u64, action: VirtAddr, old: VirtAddr| -> signals::LinuxSigAction {
+                // System call number
+                machine_state
+                    .core
+                    .hart
+                    .xregisters
+                    .write(registers::a7, RT_SIGACTION);
 
-        // Perform the system call
-        let result = supervisor_state.handle_system_call(
-            &mut machine_state,
-            StdoutDebugHooks,
-            default_on_tezos_handler,
-        );
-        assert!(result);
+                // Signum
+                machine_state
+                    .core
+                    .hart
+                    .xregisters
+                    .write(registers::a0, signal);
 
-        // Check if the location where the old handler was is now zeroed out
-        let old_action = machine_state
-            .core
-            .main_memory
-            .read::<[u8; 32]>(0x40)
-            .unwrap();
-        assert_eq!(old_action, [0u8; 32]);
+                // New handler is located at this address
+                machine_state
+                    .core
+                    .hart
+                    .xregisters
+                    .write(registers::a1, action.to_machine_address());
+
+                // Old handler will be located at this address
+                machine_state
+                    .core
+                    .hart
+                    .xregisters
+                    .write(registers::a2, old.to_machine_address());
+
+                // Size of sigset_t
+                machine_state
+                    .core
+                    .hart
+                    .xregisters
+                    .write(registers::a3, signals::SIGSET_SIZE);
+
+                // Perform the system call
+                let result = supervisor_state.handle_system_call(
+                    &mut machine_state,
+                    StdoutDebugHooks,
+                    default_on_tezos_handler,
+                );
+                assert!(result);
+
+                // Return the value stored in the old handler
+                machine_state
+                    .core
+                    .main_memory
+                    .read::<signals::LinuxSigAction>(old.to_machine_address())
+                    .unwrap()
+            };
+
+        const SIGPIPE: u64 = 13i32 as u64;
+        const SIGUSR1: u64 = 10i32 as u64;
+        let nullptr = signals::LinuxSigAction::new(VirtAddr::new(0x0));
+
+        // The sigactions are initialised to zero
+        // Check that the location of the old handler is zeroed out
+        assert_eq!(do_sigaction(SIGPIPE, action, old), nullptr);
+        assert_eq!(do_sigaction(SIGUSR1, action, old), nullptr);
+
+        // Then check that the new handlers can be read independently
+        // SIGUSR1[linux_sigaction], SIPIPE[linux_sigaction]
+        assert_eq!(do_sigaction(SIGUSR1, old, action), linux_sig_action);
+        // SIGUSR1[nullptr], SIPIPE[linux_sigaction]
+        assert_eq!(do_sigaction(SIGUSR1, old, action), nullptr);
+        // SIGUSR1[nullptr], SIPIPE[linux_sigaction]
+        assert_eq!(do_sigaction(SIGPIPE, old, action), linux_sig_action);
+        // SIGUSR1[nullptr], SIPIPE[nullptr]
+        assert_eq!(do_sigaction(SIGPIPE, old, action), nullptr);
     });
 
     // Check that the `sigaltstack` system call can accept 0 for the `old` parameter.
