@@ -18,7 +18,6 @@ use crate::bits;
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::machine_state::csregisters::CSRRepr;
-use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::csregisters::CSRegisters;
 use crate::machine_state::hart_state::HartState;
 use crate::machine_state::registers::FRegister;
@@ -304,7 +303,7 @@ where
         let rval = self.xregisters.read(rs1);
         let rval = cast(rval);
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         let StatusAnd { status, value } = cvt(rval, rm);
 
@@ -330,7 +329,7 @@ where
     ) -> Result<(), Exception> {
         let rval: F = self.fregisters.read(rs1).into();
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         // ignored - all information comes from status.
         let mut loses_info = false;
@@ -361,7 +360,7 @@ where
     ) -> Result<(), Exception> {
         let rval: F = self.fregisters.read(rs1).into();
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         // spec requires returning the same as for +ve infinity for nans,
         // which differs from impl in rustc_apfloat
@@ -426,7 +425,7 @@ where
         let rval2: F = self.fregisters.read(rs2).into();
         let rval3: F = self.fregisters.read(rs3).into();
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         let StatusAnd { status, value } = f(rval1, rval2, rval3, rm).map(F::canonicalise);
 
@@ -450,7 +449,7 @@ where
         let rval1: F = self.fregisters.read(rs1).into();
         let rval2: F = self.fregisters.read(rs2).into();
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         let StatusAnd { status, value } = f(rval1, rval2, rm).map(F::canonicalise);
 
@@ -462,13 +461,13 @@ where
         Ok(())
     }
 
-    pub(crate) fn f_rounding_mode(&self, rm: InstrRoundingMode) -> Result<Round, Exception> {
-        let rm = match rm {
+    /// Get the rounding mode for floating-point operations.
+    pub(crate) fn f_rounding_mode(&self, rm: InstrRoundingMode) -> Round {
+        let our_rm = match rm {
             InstrRoundingMode::Static(rm) => rm,
-            InstrRoundingMode::Dynamic => self.csregisters.read(CSRegister::frm).try_into()?,
+            InstrRoundingMode::Dynamic => self.csregisters.frm.read(),
         };
-
-        Ok(rm.into())
+        Round::from(our_rm)
     }
 
     fn f_sign_injection<F: FloatExt>(
@@ -523,33 +522,41 @@ where
     }
 }
 
-/// There are 5 supported rounding modes
+/// Rounding modes for floating-point operations
 #[expect(clippy::upper_case_acronyms, reason = "Matches the RISC-V spec")]
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, PartialEq, Eq, Clone, Copy, Hash, strum::EnumIter, serde::Serialize, serde::Deserialize,
+)]
+#[repr(u8)]
 pub enum RoundingMode {
     /// Round to Nearest, ties to Even
-    RNE,
+    RNE = 0b000,
     /// Round towards Zero
-    RTZ,
+    RTZ = 0b001,
     /// Round Down (towards -∞)
-    RDN,
+    RDN = 0b010,
     /// Round Up (towards +∞)
-    RUP,
+    RUP = 0b011,
     /// Round to Nearest, ties to Max Magnitude
-    RMM,
+    RMM = 0b100,
 }
 
 impl RoundingMode {
-    pub const fn from_csrrepr(value: CSRRepr) -> Result<Self, Exception> {
+    /// Convert from the CSR representation of the rounding mode.
+    pub const fn from_repr(value: CSRRepr) -> Self {
         match value {
-            0b000 => Ok(Self::RNE),
-            0b001 => Ok(Self::RTZ),
-            0b010 => Ok(Self::RDN),
-            0b011 => Ok(Self::RUP),
-            0b100 => Ok(Self::RMM),
-            _ => Err(Exception::IllegalInstruction),
+            0b000 => Self::RNE,
+            0b001 => Self::RTZ,
+            0b010 => Self::RDN,
+            0b011 => Self::RUP,
+            0b100 => Self::RMM,
+            _ => Self::DEFAULT,
         }
     }
+}
+
+impl ConstDefault for RoundingMode {
+    const DEFAULT: Self = Self::RNE;
 }
 
 impl Display for RoundingMode {
@@ -563,14 +570,6 @@ impl Display for RoundingMode {
         };
 
         f.write_str(res)
-    }
-}
-
-impl TryFrom<CSRRepr> for RoundingMode {
-    type Error = Exception;
-
-    fn try_from(value: CSRRepr) -> Result<Self, Self::Error> {
-        Self::from_csrrepr(value)
     }
 }
 
@@ -729,12 +728,21 @@ mod test {
     use proptest::prop_oneof;
     use proptest::proptest;
     use rustc_apfloat::ieee::Double;
+    use strum::IntoEnumIterator;
 
     use super::*;
     use crate::backend_test;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::state::NewState;
+
+    #[test]
+    fn test_rounding_mode_from_repr() {
+        for rm in RoundingMode::iter() {
+            let repr = rm as CSRRepr;
+            assert_eq!(RoundingMode::from_repr(repr), rm);
+        }
+    }
 
     /// Generates a `proptest` [`Strategy`] for [`InstrRoundingMode`] values.
     /// In this case, "simplest" to "most complex" values have been chosen arbitrarily.
@@ -759,7 +767,7 @@ mod test {
             let fval = match rm {
                 InstrRoundingMode::Static(rm) => Double::from_u128_r(r1_val as u128, rm.into()),
                 InstrRoundingMode::Dynamic => {
-                    let rm: RoundingMode = state.hart.csregisters.read(CSRegister::frm).try_into()?;
+                    let rm: RoundingMode = state.hart.csregisters.frm.read();
                     Double::from_u128_r(r1_val as u128, rm.into())
                 }
             };

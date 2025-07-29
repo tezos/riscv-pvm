@@ -162,7 +162,7 @@ where
         rd: FRegister,
     ) -> Result<(), Exception> {
         let rval = self.fregisters.read(rs1);
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         let rval = fvalue_to_f32_bits(rval);
 

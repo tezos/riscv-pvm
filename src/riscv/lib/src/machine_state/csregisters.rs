@@ -11,6 +11,7 @@ use num_enum::TryFromPrimitive;
 
 use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
+use crate::interpreter::float::RoundingMode;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
@@ -166,7 +167,7 @@ const FFLAGS_MASK: CSRRepr = 0b11111;
 struct_layout! {
     pub struct CSRegistersLayout {
         fflags: Atom<FloatExceptionFlags>,
-        frm: Atom<u8>,
+        frm: Atom<RoundingMode>,
     }
 }
 
@@ -174,7 +175,9 @@ struct_layout! {
 pub struct CSRegisters<M: backend::ManagerBase> {
     /// Floating-point exception flags
     pub fflags: Cell<FloatExceptionFlags, M>,
-    frm: Cell<u8, M>,
+
+    /// Floating-point dynamic rounding mode
+    pub frm: Cell<RoundingMode, M>,
 }
 
 impl<M: backend::ManagerBase> CSRegisters<M> {
@@ -192,7 +195,8 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
             }
 
             CSRegister::frm => {
-                let frm = value.bitand(FRM_MASK) as u8;
+                let frm = value.bitand(FRM_MASK);
+                let frm = RoundingMode::from_repr(frm);
                 self.frm.write(frm);
             }
 
@@ -201,7 +205,8 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
                 let fflags = FloatExceptionFlags::from_csrrepr(fflags);
                 self.fflags.write(fflags);
 
-                let frm = value.shr(FRM_SHIFT).bitand(FRM_MASK) as u8;
+                let frm = value.shr(FRM_SHIFT).bitand(FRM_MASK);
+                let frm = RoundingMode::from_repr(frm);
                 self.frm.write(frm);
             }
 
@@ -363,7 +368,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         self.fflags.write(FloatExceptionFlags::DEFAULT);
 
         // 000 = RNE aka "round to nearest, ties to even"
-        self.frm.write(0b000);
+        self.frm.write(RoundingMode::DEFAULT);
     }
 }
 
@@ -429,10 +434,10 @@ mod tests {
         assert_eq!(0, csrs.read(CSRegister::fflags));
 
         // writing to fcsr is reflected in frm/fflags
-        csrs.write(CSRegister::fcsr, 0b111_11111);
+        csrs.write(CSRegister::fcsr, 0b100_11111);
 
-        assert_eq!(0b111_11111, csrs.read(CSRegister::fcsr));
-        assert_eq!(0b111, csrs.read(CSRegister::frm));
+        assert_eq!(0b100_11111, csrs.read(CSRegister::fcsr));
+        assert_eq!(0b100, csrs.read(CSRegister::frm));
         assert_eq!(0b11111, csrs.read(CSRegister::fflags));
 
         // writing to frm is reflected in fcsr

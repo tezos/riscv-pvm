@@ -156,7 +156,7 @@ where
     ) -> Result<(), Exception> {
         let rval: u64 = self.fregisters.read(rs1).into();
 
-        let rm = self.f_rounding_mode(rm)?;
+        let rm = self.f_rounding_mode(rm);
 
         let (StatusAnd { status, value }, _iterations) = ieee_apsqrt::sqrt_accurate(rval, rm);
 
