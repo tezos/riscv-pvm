@@ -57,6 +57,7 @@ use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -500,20 +501,12 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
                 atomics::reset_reservation_set(self);
             }
 
-            let exception_ptr = self
-                .ext_calls
-                .raise_store_amo_access_fault_exception(self.builder);
-            self.handle_exception::<()>(exception_ptr);
+            self.raise_exception::<()>(Exception::StoreAMOAccessFault);
         }
 
         self.builder.switch_to_block(success_block);
 
         InstructionResult::HasNext(())
-    }
-
-    fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>> {
-        let exception = self.ext_calls.ecall(self.builder);
-        self.handle_exception(exception)
     }
 
     fn main_memory_store<V: StoreLoadInt>(
@@ -598,11 +591,9 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         InstructionResult::HasNext(val)
     }
 
-    fn err_illegal_instruction<In>(&mut self) -> Self::IResult<In> {
-        let exception_ptr = self
-            .ext_calls
-            .raise_illegal_instruction_exception(self.builder);
-        self.handle_exception(exception_ptr)
+    fn raise_exception<In>(&mut self, exception: Exception) -> Self::IResult<In> {
+        let code = ExceptionCode::build_exception_code(self.builder, exception);
+        self.handle_exception(code)
     }
 
     fn map<Value, Next, F>(res: Self::IResult<Value>, f: F) -> Self::IResult<Next>

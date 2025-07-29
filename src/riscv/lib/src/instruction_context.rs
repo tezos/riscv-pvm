@@ -148,8 +148,8 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
     /// Wrap a value as a fallible value.
     fn ok<Value>(&mut self, val: Value) -> Self::IResult<Value>;
 
-    /// Raise an [`Exception::IllegalInstruction`] error.
-    fn err_illegal_instruction<In>(&mut self) -> Self::IResult<In>;
+    /// Raise an exception, returning a fallible value.
+    fn raise_exception<In>(&mut self, exception: Exception) -> Self::IResult<In>;
 
     /// Raise an [`Exception::StoreAMOAccessFault`] error if `address` is not
     /// aligned to the given [`LoadStoreWidth`].
@@ -168,9 +168,6 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
     fn and_then<Value, Next, F>(res: Self::IResult<Value>, f: F) -> Self::IResult<Next>
     where
         F: FnOnce(Value) -> Self::IResult<Next>;
-
-    /// Exception to perform an ECall at the current mode
-    fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>>;
 
     /// Write value to main memory, at the given address.
     ///
@@ -338,9 +335,9 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         Ok(val)
     }
 
-    #[inline(always)]
-    fn err_illegal_instruction<In>(&mut self) -> Self::IResult<In> {
-        Err(Exception::IllegalInstruction)
+    #[inline]
+    fn raise_exception<In>(&mut self, exception: Exception) -> Self::IResult<In> {
+        Err(exception)
     }
 
     #[inline(always)]
@@ -357,10 +354,6 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         F: FnOnce(In) -> Self::IResult<Out>,
     {
         res.and_then(f)
-    }
-
-    fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>> {
-        Err(Exception::EnvCall)
     }
 
     #[inline(always)]

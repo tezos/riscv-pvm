@@ -1494,7 +1494,7 @@ impl Args {
     }
 
     fn run_ecall<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        icb.ecall()
+        icb.raise_exception(Exception::EnvCall)
     }
 
     // RV64C compressed instructions
@@ -1505,7 +1505,7 @@ impl Args {
 
     // Unknown
     fn run_illegal<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        icb.err_illegal_instruction()
+        icb.raise_exception(Exception::IllegalInstruction)
     }
 }
 
