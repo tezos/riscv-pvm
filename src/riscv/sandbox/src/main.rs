@@ -5,6 +5,7 @@
 
 mod cli;
 mod commands;
+mod memory_config;
 mod table;
 
 use std::error::Error;

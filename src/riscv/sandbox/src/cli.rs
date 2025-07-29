@@ -10,6 +10,8 @@ use clap::Parser;
 use clap::Subcommand;
 use clap::ValueEnum;
 
+use crate::memory_config::MemoryConfigValue;
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum Mode {
     /// Run a program using the RISC-V interpreter
@@ -243,6 +245,10 @@ pub struct CommonOptions {
 
     #[command(flatten)]
     pub preimage: PreimageOptions,
+
+    /// Memory configuration (e.g. 64M, 1G, 4G, 16G, 64G)
+    #[arg(long = "memory", default_value = "1G")]
+    pub memory_config: MemoryConfigValue,
 }
 
 #[derive(Debug, Clone, Parser)]

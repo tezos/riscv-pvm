@@ -12,6 +12,7 @@ use std::ops::Bound;
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::block_cache::block::Block;
+use octez_riscv::machine_state::memory;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -23,43 +24,40 @@ use tezos_smart_rollup_encoding::smart_rollup::SmartRollupAddress;
 
 use crate::cli::CommonOptions;
 use crate::cli::RunOptions;
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "huge-memory")] {
-        /// Memory configuration for a PVM with large virtual memory needs
-        type MemoryConfig = octez_riscv::machine_state::memory::M32G;
-    } else {
-        /// Memory configuration for a PVM with standard virtual memory needs
-        type MemoryConfig = octez_riscv::machine_state::memory::M1G;
-    }
-}
+use crate::memory_config::MemoryConfigValue;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Interpreted<MemoryConfig, Owned>;
+        type BlockImplInner<MC> = block::Interpreted<MC, Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Jitted<block::InlineCompiler<MemoryConfig>, MemoryConfig>;
+        type BlockImplInner<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
     } else {
         /// Inner execution strategy for blocks.
-        type BlockImplInner = block::Jitted<block::OutlineCompiler<MemoryConfig>, MemoryConfig>;
+        type BlockImplInner<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
     }
 }
 
 /// Executor of blocks
 #[cfg(not(feature = "metrics"))]
-pub type BlockImpl = BlockImplInner;
+pub type BlockImpl<MC> = BlockImplInner<MC>;
 
 /// Executor of blocks
 #[cfg(feature = "metrics")]
-pub type BlockImpl = octez_riscv::machine_state::block_cache::metrics::BlockMetrics<BlockImplInner>;
+pub type BlockImpl<MC> =
+    octez_riscv::machine_state::block_cache::metrics::BlockMetrics<BlockImplInner<MC>>;
 
-pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
+pub fn run_with_memory_config<MC: memory::MemoryConfig>(
+    opts: RunOptions,
+) -> Result<(), Box<dyn Error>> {
     let program = fs::read(&opts.input)?;
 
-    let stepper =
-        make_pvm_stepper::<BlockImpl>(program.as_slice(), &opts.common, Default::default())?;
+    let stepper = make_pvm_stepper::<MC, BlockImpl<MC>>(
+        program.as_slice(),
+        &opts.common,
+        Default::default(),
+    )?;
 
     let steps = run_stepper(stepper, opts.common.max_steps)?;
 
@@ -76,13 +74,24 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-type PvmStepperRunner<B> = PvmStepper<Console<'static>, MemoryConfig, DefaultCacheConfig, Owned, B>;
+pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
+    // Promote the memory configuration value to the appropriate type, then continue.
+    match opts.common.memory_config {
+        MemoryConfigValue::M64M => run_with_memory_config::<memory::M64M>(opts),
+        MemoryConfigValue::M1G => run_with_memory_config::<memory::M1G>(opts),
+        MemoryConfigValue::M4G => run_with_memory_config::<memory::M4G>(opts),
+        MemoryConfigValue::M16G => run_with_memory_config::<memory::M16G>(opts),
+        MemoryConfigValue::M64G => run_with_memory_config::<memory::M64G>(opts),
+    }
+}
 
-pub(crate) fn make_pvm_stepper<B: Block<MemoryConfig, Owned>>(
+type PvmStepperRunner<MC, B> = PvmStepper<Console<'static>, MC, DefaultCacheConfig, Owned, B>;
+
+pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
     program: &[u8],
     common: &CommonOptions,
     block_builder: B::BlockBuilder,
-) -> Result<PvmStepperRunner<B>, Box<dyn error::Error>> {
+) -> Result<PvmStepperRunner<MC, B>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -96,7 +105,7 @@ pub(crate) fn make_pvm_stepper<B: Block<MemoryConfig, Owned>>(
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MemoryConfig, DefaultCacheConfig, Owned, B>::new(
+    let stepper = PvmStepper::<_, MC, DefaultCacheConfig, Owned, B>::new(
         program,
         inbox.build(),
         console,

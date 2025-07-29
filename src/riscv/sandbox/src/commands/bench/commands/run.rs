@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use enum_tag::EnumTag;
 use octez_riscv::machine_state::memory::Address;
+use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::machine_state::memory::Memory;
 use octez_riscv::parser::instruction::Instr;
 use octez_riscv::parser::parse;
@@ -140,8 +141,11 @@ fn bench_simple<S: Stepper>(interpreter: &mut S, opts: &BenchRunOptions) -> Benc
 fn bench_iteration(path: &Path, opts: &BenchRunOptions) -> Result<BenchData, Box<dyn Error>> {
     let program = std::fs::read(path)?;
 
-    let mut stepper =
-        make_pvm_stepper::<BlockImpl>(program.as_slice(), &opts.common, Default::default())?;
+    let mut stepper = make_pvm_stepper::<M1G, BlockImpl<M1G>>(
+        program.as_slice(),
+        &opts.common,
+        Default::default(),
+    )?;
 
     Ok(match opts.mode {
         BenchMode::Simple => bench_simple(&mut stepper, opts),
