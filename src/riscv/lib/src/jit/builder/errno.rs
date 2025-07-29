@@ -10,30 +10,23 @@
 //! Any returned values are written via 'out-pointers' - and should only be
 //! loaded on success.
 
-use std::mem::MaybeUninit;
-
 use cranelift::frontend::FunctionBuilder;
 
-use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
-use crate::traps::Exception;
+use crate::jit::state_access::ExceptionCode;
 
 /// Helper type for ensuring fallible operations are handled correctly.
 ///
-/// The errno is constructed out of three pieces:
-/// - whether or not a failure occurred
-/// - if yes, the pointer to the exception in memory that has been written with the failure kind
-/// - if no, a handler to load any state that was returned in `out-params` that is now safe to
-///   access.
+/// The errno is constructed out of two pieces:
+/// - an exception code indicating whether an exception occurred and which type
+/// - a handler to load any state that was returned in `out-params` that is now safe to
+///   access on success.
 pub(crate) struct ErrnoImpl<T, F>
 where
     F: FnOnce(&mut FunctionBuilder) -> T,
 {
-    /// Boolean value indicating whether an exception occurred
-    pub(crate) is_exception: Value<bool>,
-
-    /// Pointer to the exception in memory, if an exception occurred
-    pub(crate) exception_ptr: Pointer<MaybeUninit<Exception>>,
+    /// Exception code, indicates whether an exception occurred and which
+    pub(crate) code: Value<ExceptionCode>,
 
     /// Retrieve the result in case of success
     pub(crate) on_ok: F,
@@ -44,15 +37,7 @@ where
     F: FnOnce(&mut FunctionBuilder) -> T,
 {
     /// Construct a new `Errno` that must be handled.
-    pub(crate) fn new(
-        is_exception: Value<bool>,
-        exception_ptr: Pointer<MaybeUninit<Exception>>,
-        on_ok: F,
-    ) -> Self {
-        Self {
-            is_exception,
-            exception_ptr,
-            on_ok,
-        }
+    pub(crate) fn new(code: Value<ExceptionCode>, on_ok: F) -> Self {
+        Self { code, on_ok }
     }
 }

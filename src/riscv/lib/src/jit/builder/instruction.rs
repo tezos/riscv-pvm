@@ -42,6 +42,7 @@ use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
+use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -56,7 +57,6 @@ use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 use crate::traps::EnvironException;
-use crate::traps::Exception;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -205,15 +205,12 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     }
 
     /// Handle an exception raised by the instruction.
-    fn handle_exception<Any>(
-        &mut self,
-        exception_ptr: Pointer<Exception>,
-    ) -> InstructionResult<Any> {
+    fn handle_exception<Any>(&mut self, exception: Value<ExceptionCode>) -> InstructionResult<Any> {
         let current_pc = self.pc_read();
         let outcome = self.ext_calls.handle_exception(
             self.builder,
             self.core_param,
-            exception_ptr,
+            exception,
             self.result_param,
             current_pc,
         );
@@ -505,7 +502,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 
             let exception_ptr = self
                 .ext_calls
-                .raise_store_amo_access_fault_exception(self.builder, address);
+                .raise_store_amo_access_fault_exception(self.builder);
             self.handle_exception::<()>(exception_ptr);
         }
 
@@ -515,8 +512,8 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     }
 
     fn ecall(&mut self) -> Self::IResult<ProgramCounterUpdate<Self::XValue>> {
-        let exception_ptr = self.ext_calls.ecall(self.builder);
-        self.handle_exception(exception_ptr)
+        let exception = self.ext_calls.ecall(self.builder);
+        self.handle_exception(exception)
     }
 
     fn main_memory_store<V: StoreLoadInt>(
@@ -531,8 +528,9 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
+        let is_exception = errno.code.is_exception(self.builder);
         self.ins().brif(
-            errno.is_exception.to_value(),
+            is_exception.to_value(),
             exception_block,
             [],
             success_block,
@@ -545,13 +543,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when the store failed
         {
             self.builder.switch_to_block(exception_block);
-
-            // SAFETY: When the memory store external function call encounters an error, it will
-            // write to the exception pointer. This block handles such a failure case, so we can
-            // assume that the pointee is initialised.
-            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
-
-            self.handle_exception::<()>(exception_ptr);
+            self.handle_exception::<()>(errno.code);
         }
 
         // Code for when the store succeeded
@@ -574,8 +566,9 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
+        let is_exception = errno.code.is_exception(self.builder);
         self.ins().brif(
-            errno.is_exception.to_value(),
+            is_exception.to_value(),
             exception_block,
             [],
             success_block,
@@ -589,12 +582,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         {
             self.builder.switch_to_block(exception_block);
 
-            // SAFETY: When the memory load external function call encounters an error, it will
-            // write to the exception pointer. This block handles such a failure case, so we can
-            // assume that the pointee is initialised.
-            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
-
-            self.handle_exception::<()>(exception_ptr);
+            self.handle_exception::<()>(errno.code);
         }
 
         // Code for when the load succeeded
@@ -645,8 +633,9 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         let exception_block = self.builder.create_block();
         let success_block = self.builder.create_block();
 
+        let is_exception = errno.code.is_exception(self.builder);
         self.ins().brif(
-            errno.is_exception.to_value(),
+            is_exception.to_value(),
             exception_block,
             [],
             success_block,
@@ -661,12 +650,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         {
             self.builder.switch_to_block(exception_block);
 
-            // SAFETY: When the external function call encounters an error, it will write to the
-            // exception pointer. This block handles such a failure case, so we can assume that the
-            // pointee is initialised.
-            let exception_ptr = unsafe { errno.exception_ptr.assume_init() };
-
-            self.handle_exception::<()>(exception_ptr);
+            self.handle_exception::<()>(errno.code);
         }
 
         // Code for when the conversion succeeded.

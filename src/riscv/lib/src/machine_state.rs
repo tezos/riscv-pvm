@@ -334,7 +334,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         self.core
             .main_memory
             .read_exec(phys_addr)
-            .map_err(|_: BadMemoryAccess| Exception::InstructionAccessFault(phys_addr))
+            .map_err(|_: BadMemoryAccess| Exception::InstructionAccessFault)
     }
 
     /// Fetch instruction from the address given by program counter
