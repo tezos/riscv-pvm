@@ -58,6 +58,11 @@ impl<T, MC: MemoryConfig> Arithmetic<InstructionBuilder<'_, '_, MC>> for Value<T
         unsafe { self.lift_unary(|value| builder.ins().ineg(value)) }
     }
 
+    fn not(self, builder: &mut InstructionBuilder<'_, '_, MC>) -> Self {
+        // SAFETY: `bnot` operation preserves the value type.
+        unsafe { self.lift_unary(|value| builder.ins().bnot(value)) }
+    }
+
     fn shift(
         self,
         shift: Shift,
