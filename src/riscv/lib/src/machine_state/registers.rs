@@ -18,6 +18,8 @@ use std::mem::Discriminant;
 use std::num::NonZeroUsize;
 
 use arbitrary_int::u5;
+use bincode::Decode;
+use bincode::Encode;
 
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
@@ -34,24 +36,17 @@ use crate::state_context::projection::impl_projection;
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
 #[repr(u8)]
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    strum::EnumIter,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, strum::EnumIter,
 )]
 pub enum XRegister {
     // The `usize` representation of these constructors shall be used as an
     // index into the 31-element array holding the registers.
     // x0 represents no entry in this array because it is handled separately.
     // Therefore we assign a dummy index to x0.
-    x0 = u8::MAX,
+    //
+    // XXX: The derivers for Encode/Decode don't seem to be able to parse expressions in variant
+    // discriminants correctly. Hence we're using `255u8` instead of `u8::MAX` as the value for `x0`.
+    x0 = 255u8,
     x1 = 0,
     x2,
     x3,
@@ -313,17 +308,7 @@ impl<M: backend::ManagerClone> Clone for XRegisters<M> {
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
 #[repr(u8)]
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    strum::EnumIter,
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode, strum::EnumIter,
 )]
 pub enum NonZeroXRegister {
     // This enum represents XRegisters known from the opcode to be `!=x0`, hence omitting
@@ -426,17 +411,7 @@ pub mod nz {
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
 #[repr(u8)]
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    strum::EnumIter,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::EnumIter, Hash, Encode, Decode,
 )]
 pub enum FRegister {
     f0 = 0,
@@ -582,8 +557,8 @@ impl typed::Typed for FRegister {
     Debug,
     derive_more::From,
     derive_more::Into,
-    serde::Serialize,
-    serde::Deserialize,
+    Encode,
+    Decode,
 )]
 pub struct FValue(u64);
 

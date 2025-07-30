@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Encode;
+
 use super::AllocatedOf;
 use super::Array;
 use super::Atom;
@@ -34,7 +36,7 @@ impl<T: CommitmentLayout> CommitmentLayout for Box<T> {
 
 impl<T> CommitmentLayout for Atom<T>
 where
-    T: serde::Serialize + 'static,
+    T: Encode + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
         Hash::blake3_hash(state)
@@ -43,7 +45,7 @@ where
 
 impl<T, const LEN: usize> CommitmentLayout for Array<T, LEN>
 where
-    T: serde::Serialize + Copy + 'static,
+    T: Encode + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
         Hash::blake3_hash(state)

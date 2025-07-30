@@ -2,6 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
+
 use super::Address;
 use crate::array_utils::boxed_from_fn;
 use crate::state::NewState;
@@ -138,25 +145,16 @@ impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, 
     }
 }
 
-impl<'de, const PAGES: usize, M: ManagerDeserialise> serde::Deserialize<'de>
-    for PagePermissions<PAGES, M>
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::bind(
-            <AllocatedOf<PagePermissionsLayout<PAGES>, M>>::deserialize(deserializer)?,
-        ))
+impl<const PAGES: usize, M: ManagerDeserialise> Decode<()> for PagePermissions<PAGES, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let pages: AllocatedOf<PagePermissionsLayout<PAGES>, M> = Decode::decode(decoder)?;
+        Ok(Self::bind(pages))
     }
 }
 
-impl<const PAGES: usize, M: ManagerSerialise> serde::Serialize for PagePermissions<PAGES, M> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.pages.serialize(serializer)
+impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.pages.encode(encoder)
     }
 }
 

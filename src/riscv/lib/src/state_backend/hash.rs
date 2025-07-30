@@ -7,6 +7,9 @@
 
 use std::num::NonZeroUsize;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::error::EncodeError;
 use thiserror::Error;
 
 use crate::storage::binary;
@@ -17,7 +20,7 @@ pub enum HashError {
     InvalidDigestSize,
 
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] bincode::Error),
+    SerializationError(#[from] EncodeError),
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
@@ -33,9 +36,7 @@ pub const DIGEST_SIZE: usize = 32;
 /// produced by a preset hash function, currently BLAKE2b. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(
-    Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash, PartialOrd, Ord,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord)]
 pub struct Hash {
     digest: [u8; DIGEST_SIZE],
 }
@@ -48,7 +49,7 @@ impl Hash {
     }
 
     /// Get the hash of a value that can be serialised by hashing its serialisation
-    pub fn blake3_hash<T: serde::Serialize>(data: T) -> Result<Self, HashError> {
+    pub fn blake3_hash<T: Encode>(data: T) -> Result<Self, HashError> {
         let mut hasher = blake3::Hasher::new();
         binary::serialise_into(&data, &mut hasher)?;
 

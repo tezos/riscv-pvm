@@ -12,6 +12,8 @@ use std::fmt::Formatter;
 
 use arbitrary_int::u3;
 use arbitrary_int::u5;
+use bincode::Decode;
+use bincode::Encode;
 use instruction::*;
 
 use crate::bits::u16;
@@ -1177,7 +1179,7 @@ const C_Q1_3: u16 = 0b11;
 
 /// Wrapper for splitting x0 from other XRegisters that can
 /// be represented by [`NonZeroXRegister`].
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Encode, Decode)]
 pub(crate) enum XRegisterParsed {
     X0,
     NonZero(NonZeroXRegister),

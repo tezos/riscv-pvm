@@ -8,7 +8,7 @@ use std::io::Read;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use serde::de::DeserializeOwned;
+use bincode::Decode;
 
 use super::DeserialiseError;
 use super::LeafTag;
@@ -70,8 +70,8 @@ pub struct StreamInput<'cd> {
 }
 
 impl StreamInput<'_> {
-    /// Interpret the next bytes as `T` using [`DeserializeOwned`].
-    fn deserialise<T: DeserializeOwned>(&mut self) -> Result<T> {
+    /// Interpret the next bytes as `T` using [`Decode`].
+    fn deserialise<T: Decode<()>>(&mut self) -> Result<T> {
         Ok(crate::storage::binary::deserialise_from(&mut self.cursor)?)
     }
 }
@@ -110,7 +110,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         }))
     }
 
-    fn into_leaf<T: DeserializeOwned>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         let tag = match self.next_tag() {
             None => {
                 return Ok(StreamParserComb::new(|_| Ok(Partial::Absent)));

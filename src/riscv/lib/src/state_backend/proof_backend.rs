@@ -19,7 +19,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use serde::ser::SerializeTuple;
+use bincode::enc::Encode;
+use bincode::enc::Encoder;
+use bincode::enc::write::Writer;
+use bincode::error::EncodeError;
 
 use super::EnrichedValue;
 use super::EnrichedValueLinked;
@@ -214,30 +217,76 @@ impl<M: ManagerRead> ManagerReadWrite for ProofGen<M> {
 /// via variants of [`ManagerRead`] functions which do not record access
 /// information.
 impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
-    fn serialise_region<E: serde::Serialize, const LEN: usize, S: serde::Serializer>(
-        region: &Self::Region<E, LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        if LEN == 1 {
-            let elem = region.unrecorded_ref(0);
-            return elem.serialize(serializer);
+    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
+        region: &Self::Region<T, LEN>,
+        mut encoder: E,
+    ) -> Result<(), EncodeError> {
+        if region.writes.is_empty() {
+            // If no writes were recorded, we can serialise the underlying region as is.
+            return M::serialise_region(&region.source, encoder);
         }
 
-        let mut serializer = serializer.serialize_tuple(LEN)?;
-        for i in 0..LEN {
-            let elem = region.unrecorded_ref(i);
-            serializer.serialize_element(elem)?;
+        // This variable keeps the index of the next item from the region that should be written.
+        let mut write_index = 0;
+
+        for (&index, value) in region.writes.iter() {
+            // There are items before the current index that have not been written yet.
+            if write_index < index {
+                for i in write_index..index {
+                    M::region_ref(&region.source, i).encode(&mut encoder)?;
+                }
+            }
+
+            value.encode(&mut encoder)?;
+
+            // Make sure we expect to write the next item after the current.
+            write_index = index.saturating_add(1);
         }
-        serializer.end()
+
+        // Write the remaining items from the region that were not written yet.
+        for i in write_index..LEN {
+            M::region_ref(&region.source, i).encode(&mut encoder)?;
+        }
+
+        Ok(())
     }
 
-    fn serialise_dyn_region<const LEN: usize, S: serde::Serializer>(
+    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
         region: &Self::DynRegion<LEN>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut values = vec![0u8; LEN];
-        region.unrecorded_read_all(0, &mut values);
-        serializer.serialize_bytes(values.as_slice())
+        mut encoder: E,
+    ) -> Result<(), EncodeError> {
+        if region.writes.is_empty() {
+            // If no writes were recorded, we can serialise the underlying dynamic region as is.
+            return M::serialise_dyn_region(&region.source, encoder);
+        }
+
+        // This variable keeps the index of the next item from the region that should be written.
+        let mut write_index = 0;
+
+        for (&index, value) in region.writes.iter() {
+            // There are items before the current index that have not been written yet.
+            if write_index < index {
+                let to_be_written = index - write_index;
+                let mut buffer = vec![0u8; to_be_written];
+                M::dyn_region_read_all(&region.source, write_index, &mut buffer);
+                encoder.writer().write(&buffer)?;
+            }
+
+            encoder.writer().write(&[*value])?;
+
+            // Make sure we expect to write the next item after the current.
+            write_index = index.saturating_add(1);
+        }
+
+        // Write the remaining items from the region that were not written yet.
+        let to_be_written = LEN.saturating_sub(write_index);
+        if to_be_written > 0 {
+            let mut buffer = vec![0u8; to_be_written];
+            M::dyn_region_read_all(&region.source, write_index, &mut buffer);
+            encoder.writer().write(&buffer)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -377,19 +426,6 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
 
         // SAFETY: The vector has been allocated with sufficient space.
         unsafe { E::read_unaligned(value_bytes.as_ptr()) }
-    }
-
-    /// Version of [`ManagerRead::dyn_region_read_all`] which does not record
-    /// the access as a read.
-    fn unrecorded_read_all<E: Elem>(&self, address: usize, values: &mut [E]) {
-        for (offset, value) in values.iter_mut().enumerate() {
-            *value = self.unrecorded_read(
-                E::STORED_SIZE
-                    .get()
-                    .wrapping_mul(offset)
-                    .wrapping_add(address),
-            );
-        }
     }
 }
 

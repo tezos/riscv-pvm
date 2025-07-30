@@ -6,6 +6,13 @@
 use std::marker::PhantomData;
 use std::ops::Deref;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
+
 use super::EnrichedValue;
 use super::EnrichedValueLinked;
 use super::FnManager;
@@ -150,40 +157,32 @@ where
     }
 }
 
-impl<V: EnrichedValue, M: ManagerSerialise> serde::Serialize for EnrichedCell<V, M>
-where
-    V::E: serde::Serialize,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let cell = self.cell_ref();
-        let region = M::as_devalued_cell(cell);
-        M::serialise_region(region, serializer)
-    }
-}
-
 impl<V: EnrichedValue, M: ManagerSerialise> AccessInfoAggregatable
     for EnrichedCell<V, Ref<'_, ProofGen<M>>>
-where
-    V::E: serde::Serialize,
 {
     fn aggregate_access_info(&self) -> bool {
         self.cell.get_access_info()
     }
 }
 
-impl<'de, V, M: ManagerDeserialise> serde::Deserialize<'de> for EnrichedCell<V, M>
+impl<V: EnrichedValue, M: ManagerSerialise> Encode for EnrichedCell<V, M>
+where
+    V::E: Encode,
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        let cell = self.cell_ref();
+        let region = M::as_devalued_cell(cell);
+        M::serialise_region(region, encoder)
+    }
+}
+
+impl<V, M: ManagerDeserialise> Decode<()> for EnrichedCell<V, M>
 where
     V: EnrichedValueLinked,
-    V::E: serde::Deserialize<'de>,
+    V::E: Decode<()>,
 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let region = M::deserialise_region(deserializer)?;
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let region = M::deserialise_region(decoder)?;
         let cell = M::enrich_cell(region);
         Ok(Self { cell })
     }
@@ -272,23 +271,15 @@ impl<E: 'static, M: ManagerBase> From<Cells<E, 1, M>> for Cell<E, M> {
     }
 }
 
-impl<E: serde::Serialize, M: ManagerSerialise> serde::Serialize for Cell<E, M> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.region.serialize(serializer)
+impl<T: Encode, M: ManagerSerialise> Encode for Cell<T, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.region.encode(encoder)
     }
 }
 
-impl<'de, E: serde::Deserialize<'de>, M: ManagerDeserialise> serde::Deserialize<'de>
-    for Cell<E, M>
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let region = Cells::deserialize(deserializer)?;
+impl<E: Decode<()>, M: ManagerDeserialise> Decode<()> for Cell<E, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let region = Decode::decode(decoder)?;
         Ok(Self { region })
     }
 }
@@ -299,9 +290,7 @@ impl<A: PartialEq<B>, B, M: ManagerRead, N: ManagerRead> PartialEq<Cell<B, N>> f
     }
 }
 
-impl<E: serde::Serialize, M: ManagerSerialise> AccessInfoAggregatable
-    for Cell<E, Ref<'_, ProofGen<M>>>
-{
+impl<E: Encode, M: ManagerSerialise> AccessInfoAggregatable for Cell<E, Ref<'_, ProofGen<M>>> {
     fn aggregate_access_info(&self) -> bool {
         self.region.region.get_access_info()
     }
@@ -485,25 +474,15 @@ impl<E: ConstDefault + 'static, const LEN: usize, M: ManagerBase> NewState<M> fo
     }
 }
 
-impl<E: serde::Serialize, const LEN: usize, M: ManagerSerialise> serde::Serialize
-    for Cells<E, LEN, M>
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        M::serialise_region(&self.region, serializer)
+impl<T: Encode, const LEN: usize, M: ManagerSerialise> Encode for Cells<T, LEN, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        M::serialise_region(&self.region, encoder)
     }
 }
 
-impl<'de, E: serde::Deserialize<'de>, const LEN: usize, M: ManagerDeserialise>
-    serde::Deserialize<'de> for Cells<E, LEN, M>
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let region = M::deserialise_region(deserializer)?;
+impl<E: Decode<()>, const LEN: usize, M: ManagerDeserialise> Decode<()> for Cells<E, LEN, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let region = M::deserialise_region(decoder)?;
         Ok(Self { region })
     }
 }
@@ -516,7 +495,7 @@ impl<A: PartialEq<B> + Copy, B: Copy, const LEN: usize, M: ManagerRead, N: Manag
     }
 }
 
-impl<E: serde::Serialize, const LEN: usize, M: ManagerSerialise> AccessInfoAggregatable
+impl<E: Encode, const LEN: usize, M: ManagerSerialise> AccessInfoAggregatable
     for Cells<E, LEN, Ref<'_, ProofGen<M>>>
 {
     fn aggregate_access_info(&self) -> bool {
@@ -649,21 +628,15 @@ impl<const LEN: usize, M: ManagerBase> NewState<M> for DynCells<LEN, M> {
     }
 }
 
-impl<const LEN: usize, M: ManagerSerialise> serde::Serialize for DynCells<LEN, M> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        M::serialise_dyn_region(&self.region, serializer)
+impl<const LEN: usize, M: ManagerSerialise> Encode for DynCells<LEN, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        M::serialise_dyn_region(&self.region, encoder)
     }
 }
 
-impl<'de, const LEN: usize, M: ManagerDeserialise> serde::Deserialize<'de> for DynCells<LEN, M> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let region = M::deserialise_dyn_region(deserializer)?;
+impl<const LEN: usize, M: ManagerDeserialise> Decode<()> for DynCells<LEN, M> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let region = M::deserialise_dyn_region(decoder)?;
         Ok(DynCells { region })
     }
 }
@@ -695,7 +668,9 @@ impl<const LEN: usize, M: ManagerClone> Clone for DynCells<LEN, M> {
 pub(crate) mod tests {
     use std::num::NonZeroUsize;
 
-    use serde::ser::SerializeTuple;
+    use bincode::Encode;
+    use bincode::enc::Encoder;
+    use bincode::error::EncodeError;
 
     use crate::backend_test;
     use crate::default::ConstDefault;
@@ -717,15 +692,11 @@ pub(crate) mod tests {
         const DEFAULT: Self = Self { a: 0, b: 0 };
     }
 
-    impl serde::Serialize for Flipper {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            let mut serializer = serializer.serialize_tuple(2)?;
-            serializer.serialize_element(&self.b)?;
-            serializer.serialize_element(&self.a)?;
-            serializer.end()
+    impl Encode for Flipper {
+        fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+            self.b.encode(encoder)?;
+            self.a.encode(encoder)?;
+            Ok(())
         }
     }
 

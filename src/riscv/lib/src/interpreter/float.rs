@@ -8,6 +8,8 @@ use std::fmt;
 use std::fmt::Display;
 use std::ops::Neg;
 
+use bincode::Decode;
+use bincode::Encode;
 use rustc_apfloat::Float;
 use rustc_apfloat::FloatConvert;
 use rustc_apfloat::Round;
@@ -493,9 +495,7 @@ where
 
 /// Rounding modes for floating-point operations
 #[expect(clippy::upper_case_acronyms, reason = "Matches the RISC-V spec")]
-#[derive(
-    Debug, PartialEq, Eq, Clone, Copy, Hash, strum::EnumIter, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, strum::EnumIter, Encode, Decode)]
 #[repr(u8)]
 pub enum RoundingMode {
     /// Round to Nearest, ties to Even
@@ -593,7 +593,7 @@ impl StaticRoundingMode for RoundRMM {
 }
 
 /// Flags tracking floating-point exceptions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub struct FloatExceptionFlags {
     /// Inexact (`nx`)
     inexact: bool,

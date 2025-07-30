@@ -8,21 +8,14 @@ use std::ops::Add;
 use std::ops::Deref;
 use std::ops::Sub;
 
+use bincode::Decode;
+use bincode::Encode;
+
 use crate::default::ConstDefault;
 use crate::machine_state;
 
 /// Virtual address
-#[derive(
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    serde::Serialize,
-    serde::Deserialize,
-    derive_more::From,
-)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, derive_more::From)]
 #[repr(transparent)]
 pub struct VirtAddr(u64);
 

@@ -13,7 +13,7 @@
 //!
 //! [`ProofTree`]: crate::state_backend::ProofTree
 
-use serde::de::DeserializeOwned;
+use bincode::Decode;
 
 use crate::state_backend::FromProofError;
 use crate::state_backend::OwnedProofPart;
@@ -109,9 +109,7 @@ pub trait Deserialiser {
         clippy::type_complexity,
         reason = "Adding an alias for Partial<(T, Vec<u8>)> would only decrease readability"
     )]
-    fn into_leaf<T: DeserializeOwned + 'static>(
-        self,
-    ) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
+    fn into_leaf<T: Decode<()> + 'static>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
