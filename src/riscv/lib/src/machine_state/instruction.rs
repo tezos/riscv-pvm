@@ -1074,9 +1074,8 @@ macro_rules! impl_f_x_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.x, self.rd.f)
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.x, self.rd.f);
+            Ok(Next(self.width))
         }
     };
 
@@ -1085,16 +1084,15 @@ macro_rules! impl_f_x_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.x, self.rm, self.rd.f)
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.x, self.rm, self.rd.f);
+            Ok(Next(self.width))
         }
     };
 
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-            let res = $impl(icb, self.rs1.x, self.rm, self.rd.f);
-            I::map(res, |_| Next(self.width))
+            $impl(icb, self.rs1.x, self.rm, self.rd.f);
+            icb.ok(Next(self.width))
         }
     };
 }
@@ -1105,9 +1103,8 @@ macro_rules! impl_x_f_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f, self.rd.x)
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rd.x);
+            Ok(Next(self.width))
         }
     };
 
@@ -1116,9 +1113,8 @@ macro_rules! impl_x_f_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f, self.rm, self.rd.x)
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rm, self.rd.x);
+            Ok(Next(self.width))
         }
     };
 }
@@ -1129,9 +1125,8 @@ macro_rules! impl_f_r_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f , self.rs2.f , self.rd.f )
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.f);
+            Ok(Next(self.width))
         }
     };
 
@@ -1140,9 +1135,8 @@ macro_rules! impl_f_r_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f , self.rs2.f , self.rd.x )
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.x);
+            Ok(Next(self.width))
         }
     };
 
@@ -1151,9 +1145,8 @@ macro_rules! impl_f_r_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f , self.rm, self.rd.f )
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rm, self.rd.f);
+            Ok(Next(self.width))
         }
     };
 
@@ -1162,9 +1155,8 @@ macro_rules! impl_f_r_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.rs1.f , self.rs2.f , $(self.$field,)* self.rd.f )
-                .map(|_| Next(self.width))
+            core.hart.$fn(self.rs1.f, self.rs2.f, $(self.$field,)* self.rd.f);
+            Ok(Next(self.width))
         }
     };
 }

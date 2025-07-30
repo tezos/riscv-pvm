@@ -26,7 +26,6 @@ use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::read_xregister;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 pub trait FloatExt: Float + Into<FValue> + Copy + Neg + From<FValue> {
     /// The canonical NaN has a positive sign and all
@@ -139,61 +138,53 @@ where
     /// `FADD.*` instruction.
     ///
     /// Adds `rs1` to `rs2`, writing the result in `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fadd<F: FloatExt>(
         &mut self,
         rs1: FRegister,
         rs2: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.f_arith_2(rs1, rs2, rm, rd, F::add_r)
+    ) {
+        self.f_arith_2(rs1, rs2, rm, rd, F::add_r);
     }
 
     /// `FSUB.*` instruction.
     ///
     /// Subtracts `rs2` from `rs1`, writing the result in `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fsub<F: FloatExt>(
         &mut self,
         rs1: FRegister,
         rs2: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.f_arith_2(rs1, rs2, rm, rd, F::sub_r)
+    ) {
+        self.f_arith_2(rs1, rs2, rm, rd, F::sub_r);
     }
 
     /// `FMUL.*` instruction.
     ///
     /// Multiplies `rs1` by `rs2`, writing the result in `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fmul<F: FloatExt>(
         &mut self,
         rs1: FRegister,
         rs2: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.f_arith_2(rs1, rs2, rm, rd, F::mul_r)
+    ) {
+        self.f_arith_2(rs1, rs2, rm, rd, F::mul_r);
     }
 
     /// `FDIV.*` instruction.
     ///
     /// Divides `rs1` by `rs2`, writing the result in `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fdiv<F: FloatExt>(
         &mut self,
         rs1: FRegister,
         rs2: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.f_arith_2(rs1, rs2, rm, rd, F::div_r)
+    ) {
+        self.f_arith_2(rs1, rs2, rm, rd, F::div_r);
     }
 
     /// `FMIN.*` instruction.
@@ -223,8 +214,6 @@ where
     /// `FMADD.*` instruction.
     ///
     /// `(rs1 x rs2) + rs3`, writing the result to `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fmadd<F: FloatExt>(
         &mut self,
         rs1: FRegister,
@@ -232,15 +221,13 @@ where
         rs3: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
-        self.f_arith_3(rs1, rs2, rs3, rm, rd, F::mul_add_r)
+    ) {
+        self.f_arith_3(rs1, rs2, rs3, rm, rd, F::mul_add_r);
     }
 
     /// `FMSUB.*` instruction.
     ///
     /// `(rs1 x rs2) - rs3`, writing the result to `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fmsub<F: FloatExt>(
         &mut self,
         rs1: FRegister,
@@ -248,16 +235,14 @@ where
         rs3: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
+    ) {
         let f = |rv1, rv2, rv3: F, rm| F::mul_add_r(rv1, rv2, -rv3, rm);
-        self.f_arith_3(rs1, rs2, rs3, rm, rd, f)
+        self.f_arith_3(rs1, rs2, rs3, rm, rd, f);
     }
 
     /// `FNMSUB.*` instruction.
     ///
     /// `- (rs1 x rs2) + rs3`, writing the result to `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fnmsub<F: FloatExt>(
         &mut self,
         rs1: FRegister,
@@ -265,16 +250,14 @@ where
         rs3: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
+    ) {
         let f = |rv1: F, rv2, rv3, rm| F::mul_add_r(-rv1, rv2, rv3, rm);
-        self.f_arith_3(rs1, rs2, rs3, rm, rd, f)
+        self.f_arith_3(rs1, rs2, rs3, rm, rd, f);
     }
 
     /// `FNMADD.*` instruction.
     ///
     /// `- (rs1 x rs2) - rs3`, writing the result to `rd`.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fnmadd<F: FloatExt>(
         &mut self,
         rs1: FRegister,
@@ -282,16 +265,14 @@ where
         rs3: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
+    ) {
         let f = |rv1: F, rv2, rv3: F, rm| F::mul_add_r(-rv1, rv2, -rv3, rm);
-        self.f_arith_3(rs1, rs2, rs3, rm, rd, f)
+        self.f_arith_3(rs1, rs2, rs3, rm, rd, f);
     }
 
     /// `FCVT.int.fmt` instruction.
     ///
     /// Converts a 32 or 64 bit integer, into a 32 or 64 bit float, with rounding.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub fn run_fcvt_int_fmt<F: FloatExt, T>(
         &mut self,
         rs1: XRegister,
@@ -299,7 +280,7 @@ where
         rd: FRegister,
         cast: fn(u64) -> T,
         cvt: fn(T, Round) -> StatusAnd<F>,
-    ) -> Result<(), Exception> {
+    ) {
         let rval = self.xregisters.read(rs1);
         let rval = cast(rval);
 
@@ -312,21 +293,17 @@ where
         }
 
         self.fregisters.write(rd, value.into());
-
-        Ok(())
     }
 
     /// `FCVT.fmt.fmt` instruction.
     ///
     /// Conversion between f32/f64 values.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fcvt_fmt_fmt<F: FloatExt + FloatConvert<T>, T: FloatExt>(
         &mut self,
         rs1: FRegister,
         rm: InstrRoundingMode,
         rd: FRegister,
-    ) -> Result<(), Exception> {
+    ) {
         let rval: F = self.fregisters.read(rs1).into();
 
         let rm = self.f_rounding_mode(rm);
@@ -341,15 +318,11 @@ where
         }
 
         self.fregisters.write(rd, value.into());
-
-        Ok(())
     }
 
     /// `FCVT.fmt.int` instruction.
     ///
     /// Converts a 32 or 64 bit float, into a 32 or 64 bit integer, with rounding.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     pub(super) fn run_fcvt_fmt_int<F: FloatExt, T>(
         &mut self,
         rs1: FRegister,
@@ -357,7 +330,7 @@ where
         rd: XRegister,
         cast: fn(T) -> u64,
         cvt: fn(F, Round) -> StatusAnd<T>,
-    ) -> Result<(), Exception> {
+    ) {
         let rval: F = self.fregisters.read(rs1).into();
 
         let rm = self.f_rounding_mode(rm);
@@ -373,8 +346,6 @@ where
         }
 
         self.xregisters.write(rd, cast(value));
-
-        Ok(())
     }
 
     /// `FSGNJ.*` instruction.
@@ -420,7 +391,7 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
         f: fn(F, F, F, Round) -> StatusAnd<F>,
-    ) -> Result<(), Exception> {
+    ) {
         let rval1: F = self.fregisters.read(rs1).into();
         let rval2: F = self.fregisters.read(rs2).into();
         let rval3: F = self.fregisters.read(rs3).into();
@@ -434,7 +405,6 @@ where
         }
 
         self.fregisters.write(rd, value.into());
-        Ok(())
     }
 
     // perform 2-argument floating-point arithmetic
@@ -445,7 +415,7 @@ where
         rm: InstrRoundingMode,
         rd: FRegister,
         f: fn(F, F, Round) -> StatusAnd<F>,
-    ) -> Result<(), Exception> {
+    ) {
         let rval1: F = self.fregisters.read(rs1).into();
         let rval2: F = self.fregisters.read(rs2).into();
 
@@ -458,7 +428,6 @@ where
         }
 
         self.fregisters.write(rd, value.into());
-        Ok(())
     }
 
     /// Get the rounding mode for floating-point operations.
@@ -695,27 +664,19 @@ impl<M: backend::ManagerReadWrite> CSRegisters<M> {
 }
 
 /// Convert 64-bit unsigned integer in `rs1` to a 64-bit float in `rd` with rounding mode `rm`.
-///
-/// Returns `I::IResult<()>` which is `Ok(())` on success, or an error if the conversion fails.
 pub fn run_f64_from_x64_unsigned<I: ICB>(
     icb: &mut I,
     rs1: XRegister,
     rm: InstrRoundingMode,
     rd: FRegister,
-) -> I::IResult<()> {
+) {
     let xval = read_xregister(icb, rs1);
 
-    let res = match rm {
-        InstrRoundingMode::Static(rm) => {
-            let fval = icb.f64_from_x64_unsigned_static(xval, rm);
-            icb.ok(fval)
-        }
+    let fval = match rm {
+        InstrRoundingMode::Static(rm) => icb.f64_from_x64_unsigned_static(xval, rm),
         InstrRoundingMode::Dynamic => icb.f64_from_x64_unsigned_dynamic(xval),
     };
-    I::and_then(res, |fval| {
-        icb.fregister_write(rd, fval);
-        icb.ok(())
-    })
+    icb.fregister_write(rd, fval);
 }
 
 #[cfg(test)]
@@ -774,8 +735,7 @@ mod test {
             let expected: FValue = fval.value.into();
 
             state.hart.xregisters.write(XRegister::x1, r1_val);
-            run_f64_from_x64_unsigned(&mut state, x1, rm, FRegister::f2)
-                .expect("run_f64_from_x64_unsigned failed");
+            run_f64_from_x64_unsigned(&mut state, x1, rm, FRegister::f2);
 
             let res = state.hart.fregisters.read(FRegister::f2);
             prop_assert_eq!(res, expected);

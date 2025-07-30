@@ -651,8 +651,6 @@ pub enum InstrCacheable {
     Fcvtdwu(XRegToFRegArgsWithRounding),
     Fcvtdl(XRegToFRegArgsWithRounding),
     /// `FCVT.D.LU` - Converts a 64 bit unsigned integer into a 64 bit float, with rounding.
-    ///
-    /// Returns `Exception::IllegalInstruction` on an invalid rounding mode.
     Fcvtdlu(XRegToFRegArgsWithRounding),
     Fcvtds(FR1ArgWithRounding),
     Fcvtsd(FR1ArgWithRounding),
