@@ -257,11 +257,6 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-/// Runs a syscall instruction (ecall, ebreak)
-macro_rules! run_syscall_instr {
-    ($state: ident, $run_fn: ident) => {{ Err($state.hart.$run_fn()) }};
-}
-
 /// Runs a no-arguments instruction (wfi, fenceI)
 macro_rules! run_no_args_instr {
     ($state: ident, $instr: ident, $run_fn: ident) => {{
@@ -393,18 +388,12 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         use ProgramCounterUpdate::Next;
 
-        let core = &mut self.core;
-
         match instr {
             InstrUncacheable::Fence(args) => {
                 self.core.run_fence(args.pred, args.succ);
                 Ok(Next(instr.width()))
             }
             InstrUncacheable::FenceTso(_args) => Err(Exception::IllegalInstruction),
-            InstrUncacheable::Ebreak => run_syscall_instr!(core, run_ebreak),
-
-            // RV32C compressed instructions
-            InstrUncacheable::CEbreak => run_syscall_instr!(core, run_cebreak),
 
             // Zifencei instructions
             InstrUncacheable::FenceI => run_no_args_instr!(self, instr, run_fencei),

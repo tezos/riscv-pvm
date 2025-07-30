@@ -1345,6 +1345,17 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] for [`OpCode::EBreak`].
+    pub(crate) fn new_ebreak(width: InstrWidth) -> Self {
+        Self {
+            opcode: OpCode::EBreak,
+            args: Args {
+                width,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] for [`OpCode::Fadds`].
     /// The fadds instruction has not been lowered yet, and this function is only used for testing.
     #[cfg(test)]
