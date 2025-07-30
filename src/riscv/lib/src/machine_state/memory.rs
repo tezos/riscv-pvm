@@ -288,7 +288,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 }
 
 /// Memory configuration
-pub trait MemoryConfig: 'static {
+pub trait MemoryConfig: Send + 'static {
     /// Number of bytes in the memory
     const TOTAL_BYTES: usize;
 
@@ -316,5 +316,7 @@ pub use config::M1M;
 pub use config::M4G;
 pub use config::M4K;
 pub use config::M8K;
+pub use config::M16G;
 pub use config::M32G;
+pub use config::M64G;
 pub use config::M64M;
