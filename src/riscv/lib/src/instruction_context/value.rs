@@ -134,7 +134,7 @@ impl_store_load_int!(64, LoadStoreWidth::Double);
 
 /// PhiValue allows the conversion of values to and from cranelift primitive
 /// [`ir::Value`] when in the context of [`JIT`] compilation. It represents a chosen
-/// correct value from multiple control flows possible in `ICB::branch_merge`.
+/// correct value from multiple control flows possible in `ICB::if_then_else`.
 ///
 /// These methods have no relevance in the context of interpreted mode.
 ///
@@ -219,7 +219,7 @@ impl PhiValue for XValue32 {
 impl<E> PhiValue for Result<(), E> {
     type IcbValue<I: ICB + ?Sized> = I::IResult<()>;
 
-    /// For handling an `IResult` output from a branch merge, we are only catering
+    /// For handling an `IResult` output from an if-then-else, we are only catering
     /// for the `Ok` case. `Err` is handled within the block, whilst we are continuing
     /// building IR for the `Ok` case.
     fn to_ir_vals<MC: MemoryConfig>(

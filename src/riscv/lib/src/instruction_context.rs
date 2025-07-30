@@ -138,7 +138,7 @@ pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
     ///
     /// Semantically, this function returns the caller into the context of the common
     /// execution path with the resulting value of the branch that was taken.
-    fn branch_merge<Phi: PhiValue, OnTrue, OnFalse>(
+    fn if_then_else<Phi: PhiValue, OnTrue, OnFalse>(
         &mut self,
         cond: Self::Bool,
         true_branch: OnTrue,
@@ -309,7 +309,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
     }
 
     #[inline(always)]
-    fn branch_merge<Phi: PhiValue, OnTrue, OnFalse>(
+    fn if_then_else<Phi: PhiValue, OnTrue, OnFalse>(
         &mut self,
         cond: Self::Bool,
         true_branch: OnTrue,

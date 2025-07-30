@@ -429,7 +429,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         InstructionResult::HasNext(())
     }
 
-    fn branch_merge<Phi: PhiValue, OnTrue, OnFalse>(
+    fn if_then_else<Phi: PhiValue, OnTrue, OnFalse>(
         &mut self,
         cond: Self::Bool,
         true_branch: OnTrue,

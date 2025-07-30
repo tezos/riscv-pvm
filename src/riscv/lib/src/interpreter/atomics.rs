@@ -423,7 +423,7 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     I::and_then(result, |_| {
         let cond = test_and_unset_reservation_set::<V, I>(icb, address_rs1);
 
-        icb.branch_merge::<Result<(), Exception>, _, _>(
+        icb.if_then_else::<Result<(), Exception>, _, _>(
             cond,
             |icb| {
                 // If the address in rs1 belongs to a valid reservation, write
