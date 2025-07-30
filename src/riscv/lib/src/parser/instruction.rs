@@ -101,7 +101,7 @@ pub struct CsriArgs {
     pub csr: CSRegister,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Encode, Decode)]
 pub struct FenceSet {
     pub i: bool,
     pub o: bool,
@@ -109,7 +109,7 @@ pub struct FenceSet {
     pub w: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Encode, Decode)]
 pub struct FenceArgs {
     pub pred: FenceSet,
     pub succ: FenceSet,
@@ -827,6 +827,9 @@ pub enum InstrCacheable {
     Ecall,
     Ebreak,
     CEbreak,
+
+    Fence(FenceArgs),
+    FenceTso,
 }
 
 impl ConstDefault for InstrCacheable {
@@ -837,19 +840,19 @@ impl ConstDefault for InstrCacheable {
 /// breaking of the normal flow of execution.
 ///
 /// Namely, that may happen due:
-/// - cache invalidation
+/// - instruction cache invalidation (e.g., `fence.i`)
 /// - altering the mapping of virtual to physical memory
 ///
 /// Any of these can result in breaking the 'default flow of execution',
 /// invalidating the assumptions that are required for the [`BlockCache`] to
 /// function.
 ///
+/// Note: Memory fence instructions (`fence`, `fence.tso`) are cacheable
+/// as they do not invalidate the instruction cache.
+///
 /// [`BlockCache`]: crate::machine_state::block_cache::BlockCache
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumTag, Hash)]
 pub enum InstrUncacheable {
-    Fence(FenceArgs),
-    FenceTso(FenceArgs),
-
     // Zifencei instructions
     FenceI,
 }
@@ -1041,6 +1044,8 @@ impl InstrCacheable {
             | Wfi
             | Ecall
             | Ebreak
+            | Fence(_)
+            | FenceTso
             | Hint { instr: _ } => InstrWidth::Uncompressed,
 
             // 2 bytes instructions (compressed instructions)
@@ -1093,7 +1098,7 @@ impl InstrUncacheable {
     pub const fn width(&self) -> InstrWidth {
         use InstrUncacheable::*;
         match self {
-            FenceI | Fence(_) | FenceTso(_) => InstrWidth::Uncompressed,
+            FenceI => InstrWidth::Uncompressed,
         }
     }
 }
@@ -1538,6 +1543,9 @@ impl fmt::Display for InstrCacheable {
             Ecall => write!(f, "ecall"),
             Ebreak => write!(f, "ebreak"),
             CEbreak => write!(f, "c.ebreak"),
+
+            Fence(args) => fence_instr!(f, "fence", args),
+            FenceTso => write!(f, "fence.tso rw,rw"),
         }
     }
 }
@@ -1546,9 +1554,6 @@ impl fmt::Display for InstrUncacheable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use InstrUncacheable::*;
         match self {
-            Fence(args) => fence_instr!(f, "fence", args),
-            FenceTso(args) => fence_instr!(f, "fence.tso", args),
-
             // Zifencei instructions
             FenceI => write!(f, "fence.i"),
         }

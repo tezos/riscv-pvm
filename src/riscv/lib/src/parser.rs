@@ -514,7 +514,6 @@ pub(crate) const SHIFT_BITMASK: i64 = 0b11_1111;
 #[inline]
 pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
     use InstrCacheable::*;
-    use InstrUncacheable::*;
     // RV64I (Chapter 5.4) and RV64C (Chapter 16.7) describe the code points associated
     // with HINT instructions. We do not implement any HINT logic, but decode all these
     // as `Hint` or `HintCompresssed` opcodes, which we translate to NOPs in `machine_state`.
@@ -692,9 +691,13 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
                 FM_0 => match (bits(instr, 20, 4), bits(instr, 24, 4)) {
                     (0, _) => Hint { instr },
                     (_, 0) => Hint { instr },
-                    (_, _) => return Instr::Uncacheable(fence_instr!(Fence, instr)),
+                    (_, _) => return Instr::Cacheable(fence_instr!(Fence, instr)),
                 },
-                FM_8 => return Instr::Uncacheable(fence_instr!(FenceTso, instr)),
+                FM_8 => match (bits(instr, 20, 4), bits(instr, 24, 4)) {
+                    // `fence.tso` is only defined for predecessor and successor set equal to RW.
+                    (0b0011, 0b0011) => return Instr::Cacheable(FenceTso),
+                    _ => Unknown { instr },
+                },
                 _ => Unknown { instr },
             },
             F3_1 => return Instr::Uncacheable(InstrUncacheable::FenceI),

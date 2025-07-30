@@ -257,7 +257,7 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-/// Runs a no-arguments instruction (wfi, fenceI)
+/// Runs a no-arguments instruction (wfi, fence.i)
 macro_rules! run_no_args_instr {
     ($state: ident, $instr: ident, $run_fn: ident) => {{
         $state.$run_fn();
@@ -389,12 +389,6 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         use ProgramCounterUpdate::Next;
 
         match instr {
-            InstrUncacheable::Fence(args) => {
-                self.core.run_fence(args.pred, args.succ);
-                Ok(Next(instr.width()))
-            }
-            InstrUncacheable::FenceTso(_args) => Err(Exception::IllegalInstruction),
-
             // Zifencei instructions
             InstrUncacheable::FenceI => run_no_args_instr!(self, instr, run_fencei),
         }
