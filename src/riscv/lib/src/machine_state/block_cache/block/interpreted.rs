@@ -5,6 +5,8 @@
 
 //! Interpreted blocks of instructions
 
+use perfect_derive::perfect_derive;
+
 use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
@@ -23,7 +25,6 @@ use crate::state_backend::EnrichedCell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
@@ -41,6 +42,7 @@ pub struct InterpretedBlockBuilder;
 /// dispatching on every 'instruction run'. See [`ICall`] for more information.
 ///
 /// [`ICall`]: super::super::ICall
+#[perfect_derive(Clone)]
 pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
     pub(super) instr: [EnrichedCell<ICallPlaced<MC, M>, M>; CACHE_INSTR],
     len_instr: Cell<u8, M>,
@@ -156,15 +158,6 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
         StepManyResult {
             steps: result.steps,
             error: None,
-        }
-    }
-}
-
-impl<MC: MemoryConfig, M: ManagerClone> Clone for Interpreted<MC, M> {
-    fn clone(&self) -> Self {
-        Self {
-            len_instr: self.len_instr.clone(),
-            instr: self.instr.clone(),
         }
     }
 }

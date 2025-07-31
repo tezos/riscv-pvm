@@ -8,6 +8,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::Address;
 use crate::array_utils::boxed_from_fn;
@@ -18,7 +19,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -31,6 +31,7 @@ use crate::state_backend::Ref;
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
 
 /// Tracks access permissions for each page
+#[perfect_derive(Clone)]
 pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
     pages: Box<[Cell<bool, M>; PAGES]>,
 }
@@ -155,13 +156,5 @@ impl<const PAGES: usize, M: ManagerDeserialise> Decode<()> for PagePermissions<P
 impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.pages.encode(encoder)
-    }
-}
-
-impl<const PAGES: usize, M: ManagerClone> Clone for PagePermissions<PAGES, M> {
-    fn clone(&self) -> Self {
-        Self {
-            pages: self.pages.clone(),
-        }
     }
 }

@@ -10,6 +10,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -102,6 +103,7 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
 }
 
 /// Leaf of a tree that forms a Buddy-style memory manager
+#[perfect_derive(PartialEq, Eq)]
 pub struct BuddyLeaf<const PAGES: u64, M: ManagerBase> {
     /// Each bit of the `u64` represents a page.
     /// The least significant bit is the page with index 0.
@@ -252,11 +254,5 @@ impl<const PAGES: u64, M: ManagerDeserialise> Decode<()> for BuddyLeaf<PAGES, M>
     fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let set = Decode::decode(decoder)?;
         Ok(Self { set })
-    }
-}
-
-impl<const PAGES: u64, M: ManagerRead> PartialEq for BuddyLeaf<PAGES, M> {
-    fn eq(&self, other: &Self) -> bool {
-        self.set.eq(&other.set)
     }
 }

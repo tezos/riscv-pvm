@@ -20,6 +20,7 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 use bincode::Decode;
 use bincode::Encode;
+use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
@@ -194,6 +195,7 @@ pub type XValue32 = u32;
 pub type XRegistersLayout = backend::Array<XValue, 31>;
 
 /// Integer registers
+#[perfect_derive(Clone)]
 pub struct XRegisters<M: backend::ManagerBase> {
     registers: backend::Cells<XValue, 31, M>,
 }
@@ -292,14 +294,6 @@ impl<M: backend::ManagerBase> NewState<M> for XRegisters<M> {
     {
         XRegisters {
             registers: backend::Cells::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> Clone for XRegisters<M> {
-    fn clone(&self) -> Self {
-        Self {
-            registers: self.registers.clone(),
         }
     }
 }
@@ -603,6 +597,7 @@ impl typed::Typed for FValue {
 pub type FRegistersLayout = backend::Array<FValue, 32>;
 
 /// Floating-point number registers
+#[perfect_derive(Clone)]
 pub struct FRegisters<M: backend::ManagerBase> {
     registers: backend::Cells<FValue, 32, M>,
 }
@@ -657,14 +652,6 @@ impl<M: backend::ManagerBase> NewState<M> for FRegisters<M> {
     {
         Self {
             registers: backend::Cells::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> Clone for FRegisters<M> {
-    fn clone(&self) -> Self {
-        Self {
-            registers: self.registers.clone(),
         }
     }
 }

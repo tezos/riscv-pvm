@@ -10,6 +10,7 @@ use std::ops::Shr;
 use bincode::Decode;
 use bincode::Encode;
 use num_enum::TryFromPrimitive;
+use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
@@ -174,6 +175,7 @@ struct_layout! {
 }
 
 /// Cntrol and State Registers (CSRs)
+#[perfect_derive(Clone)]
 pub struct CSRegisters<M: backend::ManagerBase> {
     /// Floating-point exception flags
     pub fflags: Cell<FloatExceptionFlags, M>,
@@ -382,15 +384,6 @@ impl<M: backend::ManagerBase> NewState<M> for CSRegisters<M> {
         Self {
             fflags: Cell::new(),
             frm: Cell::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> Clone for CSRegisters<M> {
-    fn clone(&self) -> Self {
-        Self {
-            fflags: self.fflags.clone(),
-            frm: self.frm.clone(),
         }
     }
 }

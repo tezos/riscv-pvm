@@ -23,6 +23,7 @@ use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::EnrichedValue;
 use super::EnrichedValueLinked;
@@ -445,6 +446,7 @@ impl<const LEN: usize, M: ManagerClone> Clone for ProofDynRegion<LEN, M> {
 /// split across multiple leaves when Merkleised.
 /// The underlying cell is never mutated, but written values are recorded
 /// in order to preserve the integrity of subsequent reads.
+#[perfect_derive(Clone)]
 pub struct ProofEnrichedCell<V: EnrichedValue, M: ManagerBase> {
     underlying: ProofRegion<V::E, 1, M>,
 }
@@ -460,17 +462,6 @@ impl<V: EnrichedValue, M: ManagerBase> ProofEnrichedCell<V, M> {
     /// Get a copy of the access log.
     pub fn get_access_info(&self) -> bool {
         self.underlying.access.get()
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerClone> Clone for ProofEnrichedCell<V, M>
-where
-    V::E: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            underlying: self.underlying.clone(),
-        }
     }
 }
 

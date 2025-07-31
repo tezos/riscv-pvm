@@ -12,6 +12,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::EnrichedValue;
 use super::EnrichedValueLinked;
@@ -189,6 +190,7 @@ where
 }
 
 /// Single element of type `E`
+#[perfect_derive(Clone)]
 #[repr(transparent)]
 pub struct Cell<E: 'static, M: ManagerBase> {
     region: Cells<E, 1, M>,
@@ -290,19 +292,11 @@ impl<A: PartialEq<B>, B, M: ManagerRead, N: ManagerRead> PartialEq<Cell<B, N>> f
     }
 }
 
+impl<E: Eq, M: ManagerRead> Eq for Cell<E, M> {}
+
 impl<E: Encode, M: ManagerSerialise> AccessInfoAggregatable for Cell<E, Ref<'_, ProofGen<M>>> {
     fn aggregate_access_info(&self) -> bool {
         self.region.region.get_access_info()
-    }
-}
-
-impl<E: Eq, M: ManagerRead> Eq for Cell<E, M> {}
-
-impl<E: Clone, M: ManagerClone> Clone for Cell<E, M> {
-    fn clone(&self) -> Self {
-        Self {
-            region: self.region.clone(),
-        }
     }
 }
 
