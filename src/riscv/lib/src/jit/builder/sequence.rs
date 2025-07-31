@@ -19,6 +19,7 @@ use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::FunctionBuilderContext;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
@@ -27,13 +28,13 @@ use super::instruction::Outcome;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::write_pc;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::registers::XValue;
 use crate::parser::instruction::InstrWidth;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
@@ -42,6 +43,9 @@ use crate::traps::EnvironException;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
+    /// Target configuration for the JIT module
+    target_config: TargetFrontendConfig,
+
     /// IR builder
     builder: FunctionBuilder<'jit>,
 
@@ -134,7 +138,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         let entry_block = builder.create_block();
         builder.ins().jump(entry_block, []);
 
+        let target_config = module.target_config();
+
         Self {
+            target_config,
             builder,
             ext_calls,
             entry_block,
@@ -186,6 +193,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         };
 
         let instr_builder = InstructionBuilder::new(
+            self.target_config,
             &mut self.builder,
             &mut self.ext_calls,
             entry_block,
@@ -331,18 +339,24 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 }
 
 impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
-    type X64 = Value<XValue>;
+    type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
+        P::Target: Typed,
     {
-        super::read_proj::<MC, P>(&mut self.builder, self.core_param, param)
+        super::read_proj::<MC, P>(
+            &self.target_config,
+            &mut self.builder,
+            self.core_param,
+            param,
+        )
     }
 
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
     {
         super::write_proj::<MC, P>(&mut self.builder, self.core_param, param, value)
     }

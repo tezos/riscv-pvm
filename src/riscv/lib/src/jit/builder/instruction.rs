@@ -26,6 +26,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
@@ -36,6 +37,7 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed::Pointer;
+use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
@@ -130,6 +132,9 @@ pub enum InstructionResult<T> {
 
 /// Builder for a single RISC-V instruction
 pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
+    /// Target configuration for the JIT module
+    target_config: TargetFrontendConfig,
+
     /// IR builder
     builder: &'seq mut FunctionBuilder<'jit>,
 
@@ -155,6 +160,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
 impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
     pub(super) fn new(
+        target_config: TargetFrontendConfig,
         builder: &'seq mut FunctionBuilder<'jit>,
         ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
@@ -163,6 +169,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         result_param: Pointer<Result<(), EnvironException>>,
     ) -> Self {
         Self {
+            target_config,
             builder,
             ext_calls,
             entry_block,
@@ -604,18 +611,19 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 }
 
 impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
-    type X64 = Value<XValue>;
+    type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
+        P::Target: Typed,
     {
-        super::read_proj::<MC, P>(self.builder, self.core_param, param)
+        super::read_proj::<MC, P>(&self.target_config, self.builder, self.core_param, param)
     }
 
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
     {
         super::write_proj::<MC, P>(self.builder, self.core_param, param, value)
     }

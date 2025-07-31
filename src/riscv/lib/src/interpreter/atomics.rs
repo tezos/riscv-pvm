@@ -671,12 +671,12 @@ impl_projection! {
 }
 
 /// Read the reservation set address from the machine state.
-pub(crate) fn read_reservation_set<SC: StateContext>(state: &mut SC) -> SC::X64 {
+pub(crate) fn read_reservation_set<SC: StateContext>(state: &mut SC) -> SC::Value<u64> {
     state.read_proj::<ReservationSetProj>(())
 }
 
 /// Write to the reservation set address in the machine state.
-pub(crate) fn write_reservation_set<SC: StateContext>(state: &mut SC, value: SC::X64) {
+pub(crate) fn write_reservation_set<SC: StateContext>(state: &mut SC, value: SC::Value<u64>) {
     state.write_proj::<ReservationSetProj>((), value);
 }
 

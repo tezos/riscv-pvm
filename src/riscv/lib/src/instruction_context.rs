@@ -47,7 +47,34 @@ pub type IcbFnResult<I> = <I as ICB>::IResult<ProgramCounterUpdate<<I as ICB>::X
 /// Instruction Context Builder contains operations required to
 /// execute RISC-V instructions.
 #[expect(clippy::upper_case_acronyms, reason = "ICB looks cooler than Icb")]
-pub(crate) trait ICB: StateContext<X64 = Self::XValue> {
+pub(crate) trait ICB
+where
+    // These contraints let us tie a type-equality knot.
+    //
+    // We want to allow handling of arbitrary value types via [`StateContext`]'s associated type
+    // `Value`, whilst adding functionality on a subset of those values (e.g. 64-bit and 32-bit
+    // integers, and floating-point numbers).
+    //
+    // There are two ways one can achieve this:
+    //
+    // 1. Define associated types with those additional constraints (those bring the additional
+    //    functionality into scope). Then force each specific `Self::Value<_>` to be equal to the
+    //    new associated types.
+    //
+    // 2. Constrain the instantiated `Self::Value<_>` directly.
+    //
+    // The second approach would be nicer, if it weren't for Rust's inability to express constraints
+    // on associated types like super-trait relationships. This means, if you use `ICB` as a
+    // constraint, you also need to express all its inherited constraints on the associated types
+    // of `StateContext` in the trait bounds. This results in massive amount of boilerplate being
+    // added everywhere. Imagine how many ICB-style instruction implementations there are that
+    // mention `ICB` in their trait bounds.
+    // Because of this, we use the first approach, which is more verbose with respect to the number
+    // of types being declared, but is equally as powerful.
+    Self: StateContext<Value<u64> = Self::XValue>
+        + StateContext<Value<u32> = Self::XValue32>
+        + StateContext<Value<FValue> = Self::FValue>,
+{
     /// A 64-bit value stored in [`XRegisters`].
     ///
     /// [`XRegisters`]: crate::machine_state::registers::XRegisters
