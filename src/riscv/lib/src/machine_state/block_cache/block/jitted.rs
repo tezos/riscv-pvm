@@ -71,7 +71,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             .map(|i| i.read_stored())
             .collect::<Vec<_>>();
 
-        let fun = block_builder.compile(&mut self.dispatch, instr);
+        let fun = block_builder.compile(&mut self.dispatch, instr, instr_pc);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block

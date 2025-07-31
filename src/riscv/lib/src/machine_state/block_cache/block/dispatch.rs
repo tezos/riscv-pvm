@@ -122,6 +122,7 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
         &mut self,
         target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
+        program_counter: Address,
     ) -> DispatchFn<Self, MC>;
 }
 
@@ -150,8 +151,9 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         &mut self,
         target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
+        program_counter: Address,
     ) -> DispatchFn<Self, MC> {
-        let fun = match self.jit.compile(&instr) {
+        let fun = match self.jit.compile(&instr, program_counter) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
                 // last parameters. These are both thin-pointers, and ignored by the JitFn.
@@ -227,7 +229,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
-                    if let Some(jitfn) = jit.compile(&msg.instr) {
+                    if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
                         debug_assert_eq!(
                             msg.fun.load(Ordering::Acquire),
                             Jitted::<Self, MC>::run_block_not_compiled as usize,
@@ -283,6 +285,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         &mut self,
         target: &mut DispatchTarget<Self, MC>,
         instr: Vec<Instruction>,
+        program_counter: Address,
     ) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_block_not_compiled;
         target.set(fun);
@@ -295,6 +298,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let request = CompilationRequest {
             instr,
             fun: target.fun.clone(),
+            program_counter,
         };
 
         // This will always succeed, unless the compilation thread has panicked
@@ -315,4 +319,5 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 struct CompilationRequest {
     instr: Vec<Instruction>,
     fun: Arc<AtomicUsize>,
+    program_counter: Address,
 }
