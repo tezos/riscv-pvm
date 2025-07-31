@@ -10,6 +10,8 @@
 //! different memory configurations and state backend managers.
 
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::immediates::Offset32;
@@ -46,6 +48,13 @@ pub trait TypeCons {
 
 /// Apply a type constructor `TC` to memory config `MC` and manager `M`.
 pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
+
+/// Type constructor [`Box`]
+pub struct BoxCons<T>(PhantomData<T>);
+
+impl<T: TypeCons> TypeCons for BoxCons<T> {
+    type Applied<MC: MemoryConfig, M: ManagerBase> = Box<ApplyCons<T, MC, M>>;
+}
 
 /// Type constructor [`ManagerBase::Region`]
 pub struct RegionCons<E, const LEN: usize>(PhantomData<E>);
@@ -213,6 +222,50 @@ pub trait Projection {
     /// value. This is exclusive to the [`crate::state_backend::owned_backend::Owned`] state
     /// backend.
     fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
+}
+
+/// A projection from [`Box`] to its inner type
+pub struct BoxProj<P>(P);
+
+impl<P: Projection> Projection for BoxProj<P> {
+    type Subject = BoxCons<P::Subject>;
+
+    type Target = P::Target;
+
+    type Parameter = P::Parameter;
+
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        P::project_ref::<MC, M>(state.deref(), param)
+    }
+
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        P::project_read::<MC, M>(state.deref(), param)
+    }
+
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        P::project_write::<MC, M>(state.deref_mut(), param, value);
+    }
+
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        let offset = P::owned_pointer_offset::<MC>(param);
+        ProjectionOffset::Indirect {
+            offset: 0,
+            inner: Box::new(offset),
+        }
+    }
 }
 
 /// Implement a projection by pre-composing a field access to an existing projection.
