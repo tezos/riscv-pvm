@@ -15,6 +15,7 @@ use perfect_derive::perfect_derive;
 use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
 use crate::interpreter::float::RoundingMode;
+use crate::jit::builder::typed;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
@@ -39,7 +40,7 @@ use crate::traps::Exception;
     Encode,
     Decode,
 )]
-#[repr(usize)]
+#[repr(u64)]
 pub enum CSRegister {
     // Unprivileged Floating-Point CSRs
     fflags = 0x001,
@@ -136,6 +137,10 @@ impl CSRegister {
             _ => None,
         }
     }
+}
+
+impl typed::Typed for CSRegister {
+    const TYPE: typed::Type = typed::Type::Basic(cranelift::prelude::types::I64);
 }
 
 /// Representation of a value in a CSR

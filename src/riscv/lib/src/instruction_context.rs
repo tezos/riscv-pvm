@@ -23,6 +23,7 @@ use crate::instruction_context::value::PhiValue;
 use crate::interpreter::float::RoundingMode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::instruction::Args;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
@@ -219,6 +220,12 @@ where
         xval: Self::XValue,
         rm: RoundingMode,
     ) -> Self::FValue;
+
+    /// Read the value from a Control and Status register.
+    fn csr_read(&mut self, reg: CSRegister) -> Self::XValue;
+
+    /// Write a value to a Control and Status register.
+    fn csr_write(&mut self, reg: CSRegister, value: Self::XValue);
 }
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
@@ -419,6 +426,14 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
         }
 
         FValue::from(value)
+    }
+
+    fn csr_read(&mut self, reg: CSRegister) -> Self::XValue {
+        self.hart.csregisters.read(reg)
+    }
+
+    fn csr_write(&mut self, reg: CSRegister, value: Self::XValue) {
+        self.hart.csregisters.write(reg, value);
     }
 }
 
