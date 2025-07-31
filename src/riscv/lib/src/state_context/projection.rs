@@ -11,6 +11,13 @@
 
 use std::marker::PhantomData;
 
+use cranelift::codegen::ir;
+use cranelift::codegen::ir::immediates::Offset32;
+use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::InstBuilder;
+use cranelift::prelude::MemFlags;
+use cranelift::prelude::isa::TargetFrontendConfig;
+
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::Cell;
@@ -74,9 +81,27 @@ impl TypeCons for MachineCoreCons {
 /// layered projections. All such additions will panic on overflowing the `i32` range.
 ///
 /// [projection's]: Projection
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ProjectionOffset {
-    offset: i32,
+#[derive(Debug, Clone)]
+pub enum ProjectionOffset {
+    /// Target value is directly accessible from the base pointer
+    ///
+    /// Adding the offset to the base pointer will yield the address of the target value.
+    Direct {
+        /// Offset from the base in bytes
+        offset: i32,
+    },
+
+    /// Target value is accessible via an indirection
+    ///
+    /// Adding the offset to the base pointer will yield the address of the next base pointer. The
+    /// `inner` projection then needs to proceed with the new base pointer.
+    Indirect {
+        /// Offset from the base in bytes
+        offset: i32,
+
+        /// Inner projection to be applied after resolving the indirection
+        inner: Box<ProjectionOffset>,
+    },
 }
 
 impl ProjectionOffset {
@@ -85,9 +110,36 @@ impl ProjectionOffset {
     /// # Panics
     ///
     /// Panics if the offset overflows the `i32` range.
-    pub fn new(offset: usize) -> Self {
-        Self {
-            offset: offset.try_into().expect("offset overflows i32 range"),
+    pub fn direct(offset: usize) -> Self {
+        let offset = offset
+            .try_into()
+            .expect("Projection offset overflows i32 range");
+        Self::Direct { offset }
+    }
+
+    /// Resolve the projection offset to a base pointer and an offset relative to the base. Adding
+    /// the offset to the base pointer will yield the address of the target value.
+    pub fn build_base_and_offset(
+        &self,
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        base: ir::Value,
+    ) -> (ir::Value, Offset32) {
+        match self {
+            ProjectionOffset::Direct { offset } => {
+                let offset = Offset32::new(*offset);
+                (base, offset)
+            }
+
+            ProjectionOffset::Indirect { offset, inner } => {
+                let new_base = builder.ins().load(
+                    target_config.pointer_type(),
+                    MemFlags::trusted(),
+                    base,
+                    *offset,
+                );
+                inner.build_base_and_offset(target_config, builder, new_base)
+            }
         }
     }
 }
@@ -95,34 +147,28 @@ impl ProjectionOffset {
 impl std::ops::Add<usize> for ProjectionOffset {
     type Output = Self;
 
-    fn add(self, other: usize) -> Self {
-        let other: i32 = other.try_into().expect("offset overflows i32 range");
+    fn add(self, offset: usize) -> Self {
+        let offset: u32 = offset
+            .try_into()
+            .expect("Projection offset overflows u32 range");
 
-        Self {
-            offset: self
-                .offset
-                .checked_add(other)
-                .expect("offset overflows i32 range on addition"),
+        match self {
+            ProjectionOffset::Direct { offset: raw_offset } => ProjectionOffset::Direct {
+                offset: raw_offset
+                    .checked_add_unsigned(offset)
+                    .expect("Projection offset overflow"),
+            },
+
+            ProjectionOffset::Indirect {
+                offset: base_offset,
+                inner,
+            } => ProjectionOffset::Indirect {
+                offset: base_offset
+                    .checked_add_unsigned(offset)
+                    .expect("Projection offset overflow"),
+                inner,
+            },
         }
-    }
-}
-
-impl std::ops::Add for ProjectionOffset {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            offset: self
-                .offset
-                .checked_add(other.offset)
-                .expect("offset overflows i32 range on addition"),
-        }
-    }
-}
-
-impl From<ProjectionOffset> for cranelift::codegen::ir::immediates::Offset32 {
-    fn from(value: ProjectionOffset) -> Self {
-        Self::new(value.offset)
     }
 }
 

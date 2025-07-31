@@ -459,11 +459,12 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
             param.0,
             LEN
         );
+
         let offset = std::mem::size_of::<E>()
             .checked_mul(param.0)
             .expect("Region offset exceeds usize range");
 
-        ProjectionOffset::new(offset)
+        ProjectionOffset::direct(offset)
     }
 }
 

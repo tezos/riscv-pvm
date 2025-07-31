@@ -407,6 +407,12 @@ impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
     where
         P: MachineCoreProjection,
     {
-        super::write_proj::<MC, P>(&mut self.builder, self.core_param, param, value)
+        super::write_proj::<MC, P>(
+            &self.target_config,
+            &mut self.builder,
+            self.core_param,
+            param,
+            value,
+        )
     }
 }
