@@ -45,7 +45,8 @@ fn run_x64_atomic<I: ICB>(
     let address_rs1 = read_xregister(icb, rs1);
 
     // Handle the case where the address is not aligned.
-    let result = icb.atomic_access_fault_guard::<u64>(address_rs1, ReservationSetOption::NoReset);
+    let result =
+        atomic_access_fault_guard::<u64, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
@@ -74,7 +75,8 @@ fn run_x32_atomic<I: ICB>(
     let address_rs1 = read_xregister(icb, rs1);
 
     // Handle the case where the address is not aligned.
-    let result = icb.atomic_access_fault_guard::<u32>(address_rs1, ReservationSetOption::NoReset);
+    let result =
+        atomic_access_fault_guard::<u32, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u32>(address_rs1));
@@ -380,7 +382,7 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     // 64-bit words and four-byte aligned for 32-bit words). If the address
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
+    let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned and load the value from address in rs1.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
@@ -418,12 +420,12 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
     // icb.reset_reservation_set();
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::Reset);
+    let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::Reset);
 
     I::and_then(result, |_| {
         let cond = test_and_unset_reservation_set::<V, I>(icb, address_rs1);
 
-        icb.branch_merge::<Result<(), Exception>, _, _>(
+        icb.if_then_else::<Result<(), Exception>, _, _>(
             cond,
             |icb| {
                 // If the address in rs1 belongs to a valid reservation, write
@@ -466,7 +468,7 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
     // 64-bit words and four-byte aligned for 32-bit words). If the address
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
-    let result = icb.atomic_access_fault_guard::<V>(address_rs1, ReservationSetOption::NoReset);
+    let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
     let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
@@ -594,6 +596,34 @@ pub fn run_x64_atomic_store<I: ICB>(
 }
 
 // Reservation Set Helper Functionss
+
+/// Raise an [`Exception::StoreAMOAccessFault`] error if `address` is not aligned to the width
+/// encoded by `V`.
+#[inline]
+fn atomic_access_fault_guard<V: StoreLoadInt, I: ICB>(
+    icb: &mut I,
+    address: I::XValue,
+    reservation_set_option: ReservationSetOption,
+) -> I::IResult<()> {
+    let width = icb.xvalue_of_imm(V::WIDTH as i64);
+    let remainder = address.modulus_unsigned(width, icb);
+
+    // The steps of taking the comparison are technically not needed, as cranelift will
+    // treat any non-zero value as a take-branch (i.e. raise exception) value, so we could
+    // pass the remainder directly. However for completeness and clarity, we are keeping the
+    // comparison here.
+    let zero = icb.xvalue_of_imm(0);
+    let not_aligned = remainder.compare(zero, Predicate::NotEqual, icb);
+
+    icb.if_then(not_aligned, |icb| {
+        if let ReservationSetOption::Reset = reservation_set_option {
+            // If the atomic operation was a store_conditional, we reset the reservation.
+            reset_reservation_set(icb);
+        }
+
+        icb.raise_exception(Exception::StoreAMOAccessFault)
+    })
+}
 
 /// Reset the reservation set to an unset state.
 pub(crate) fn reset_reservation_set<I: ICB>(icb: &mut I) {

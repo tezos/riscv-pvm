@@ -380,7 +380,7 @@ pub fn run_x64_div_signed(
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue, _, _>(
+    let result = icb.if_then_else::<XValue, _, _>(
         cond,
         |icb| icb.xvalue_of_imm(-1),
         |icb| {
@@ -391,7 +391,7 @@ pub fn run_x64_div_signed(
             let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
             let cond = icb.bool_and(cond1, cond2);
 
-            icb.branch_merge::<XValue, _, _>(
+            icb.if_then_else::<XValue, _, _>(
                 cond,
                 |icb| icb.xvalue_of_imm(i64::MIN),
                 |icb| rval1.div_signed(rval2, icb),
@@ -418,7 +418,7 @@ pub fn run_x64_div_unsigned(
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue, _, _>(
+    let result = icb.if_then_else::<XValue, _, _>(
         cond,
         |icb| icb.xvalue_of_imm(!0),
         |icb| rval1.div_unsigned(rval2, icb),
@@ -448,7 +448,7 @@ pub fn run_x32_div_signed(
     let zero = icb.xvalue32_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue32, _, _>(
+    let result = icb.if_then_else::<XValue32, _, _>(
         cond,
         |icb| icb.xvalue32_of_imm(-1),
         |icb| {
@@ -459,7 +459,7 @@ pub fn run_x32_div_signed(
             let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
             let cond = icb.bool_and(cond1, cond2);
 
-            icb.branch_merge::<XValue32, _, _>(
+            icb.if_then_else::<XValue32, _, _>(
                 cond,
                 |icb| icb.xvalue32_of_imm(i32::MIN),
                 |icb| rval1.div_signed(rval2, icb),
@@ -493,7 +493,7 @@ pub fn run_x32_div_unsigned(
     let zero = icb.xvalue32_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue32, _, _>(
+    let result = icb.if_then_else::<XValue32, _, _>(
         cond,
         |icb| icb.xvalue32_of_imm(!0),
         |icb| rval1.div_unsigned(rval2, icb),
@@ -604,7 +604,7 @@ pub fn run_x64_rem_signed(
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue, _, _>(
+    let result = icb.if_then_else::<XValue, _, _>(
         cond,
         |_icb| rval1,
         |icb| {
@@ -615,7 +615,7 @@ pub fn run_x64_rem_signed(
             let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
             let cond = icb.bool_and(cond1, cond2);
 
-            icb.branch_merge::<XValue, _, _>(
+            icb.if_then_else::<XValue, _, _>(
                 cond,
                 |_icb| zero,
                 |icb| rval1.modulus_signed(rval2, icb),
@@ -642,7 +642,7 @@ pub fn run_x64_rem_unsigned(
     let zero = icb.xvalue_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue, _, _>(
+    let result = icb.if_then_else::<XValue, _, _>(
         cond,
         |_icb| rval1,
         |icb| rval1.modulus_unsigned(rval2, icb),
@@ -670,7 +670,7 @@ pub fn run_x32_rem_signed(
     let zero = icb.xvalue32_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue32, _, _>(
+    let result = icb.if_then_else::<XValue32, _, _>(
         cond,
         |_icb| rval1,
         |icb| {
@@ -681,7 +681,7 @@ pub fn run_x32_rem_signed(
             let cond2 = rval1.compare(minimum, Predicate::Equal, icb);
             let cond = icb.bool_and(cond1, cond2);
 
-            icb.branch_merge::<XValue32, _, _>(
+            icb.if_then_else::<XValue32, _, _>(
                 cond,
                 |_icb| zero,
                 |icb| rval1.modulus_signed(rval2, icb),
@@ -712,7 +712,7 @@ pub fn run_x32_rem_unsigned(
     let zero = icb.xvalue32_of_imm(0);
     let cond = rval2.compare(zero, Predicate::Equal, icb);
 
-    let result = icb.branch_merge::<XValue32, _, _>(
+    let result = icb.if_then_else::<XValue32, _, _>(
         cond,
         |_icb| rval1,
         |icb| rval1.modulus_unsigned(rval2, icb),

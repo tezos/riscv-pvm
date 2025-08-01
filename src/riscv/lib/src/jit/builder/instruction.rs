@@ -32,13 +32,8 @@ use cranelift::prelude::types::I128;
 
 use crate::instruction_context::ICB;
 use crate::instruction_context::MulHighType;
-use crate::instruction_context::Predicate;
 use crate::instruction_context::StoreLoadInt;
-use crate::instruction_context::arithmetic::Arithmetic;
-use crate::instruction_context::comparable::Comparable;
 use crate::instruction_context::value::PhiValue;
-use crate::interpreter::atomics;
-use crate::interpreter::atomics::ReservationSetOption;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
@@ -406,7 +401,30 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         ProgramCounterUpdate::Next(instr_width)
     }
 
-    fn branch_merge<Phi: PhiValue, OnTrue, OnFalse>(
+    fn if_then<OnTrue>(&mut self, cond: Self::Bool, true_branch: OnTrue) -> Self::IResult<()>
+    where
+        OnTrue: FnOnce(&mut Self) -> Self::IResult<()>,
+    {
+        let true_block = self.builder.create_block();
+        let false_block = self.builder.create_block();
+
+        self.ins()
+            .brif(cond.to_value(), true_block, [], false_block, []);
+        self.builder.seal_block(true_block);
+        self.builder.seal_block(false_block);
+
+        // Code for true
+        {
+            self.builder.switch_to_block(true_block);
+            (true_branch)(self);
+        }
+
+        // Code for false
+        self.builder.switch_to_block(false_block);
+        InstructionResult::HasNext(())
+    }
+
+    fn if_then_else<Phi: PhiValue, OnTrue, OnFalse>(
         &mut self,
         cond: Self::Bool,
         true_branch: OnTrue,
@@ -461,52 +479,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
             let params = self.builder.block_params(continue_block).to_vec();
             Phi::from_ir_vals(params.as_slice(), self)
         }
-    }
-
-    fn atomic_access_fault_guard<V: StoreLoadInt>(
-        &mut self,
-        address: Self::XValue,
-        reservation_set_option: ReservationSetOption,
-    ) -> Self::IResult<()> {
-        let width = self.xvalue_of_imm(V::WIDTH as i64);
-        let remainder = address.modulus_unsigned(width, self);
-
-        // The steps of taking the comparison are technically not needed, as cranelift will
-        // treat any non-zero value as a take-branch (i.e. raise exception) value, so we could
-        // pass the remainder directly. However for completeness and clarity, we are keeping the
-        // comparison here.
-        let zero = self.xvalue_of_imm(0);
-        let not_aligned = remainder.compare(zero, Predicate::NotEqual, self);
-
-        let exception_block = self.builder.create_block();
-        let success_block = self.builder.create_block();
-
-        self.ins().brif(
-            not_aligned.to_value(),
-            exception_block,
-            [],
-            success_block,
-            [],
-        );
-
-        self.builder.seal_block(exception_block);
-        self.builder.seal_block(success_block);
-
-        // Code for when the address is not aligned
-        {
-            self.builder.switch_to_block(exception_block);
-
-            if let ReservationSetOption::Reset = reservation_set_option {
-                // If the atomic operation was a store_conditional, we reset the reservation.
-                atomics::reset_reservation_set(self);
-            }
-
-            self.raise_exception::<()>(Exception::StoreAMOAccessFault);
-        }
-
-        self.builder.switch_to_block(success_block);
-
-        InstructionResult::HasNext(())
     }
 
     fn main_memory_store<V: StoreLoadInt>(
