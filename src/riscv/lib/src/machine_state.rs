@@ -718,9 +718,7 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::memory::M8K;
     use crate::machine_state::memory::Memory;
-    use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
@@ -972,56 +970,6 @@ mod tests {
         assert!(
             state.struct_ref::<FnManagerIdent>() == second.struct_ref::<FnManagerIdent>(),
             "State equality expected"
-        );
-    });
-
-    backend_test!(test_block_cache_crossing_pages_creates_new_block, F, {
-        let mut state = MachineState::<M8K, TestCacheConfig, Interpreted<M8K, F>, F>::new(
-            InterpretedBlockBuilder,
-        );
-
-        let uncompressed_bytes = 0x5307b3;
-
-        let uncompressed = Instruction {
-            opcode: OpCode::X64Add,
-            args: Args {
-                rd: nz::a5.into(),
-                rs1: nz::t1.into(),
-                rs2: nz::t0.into(),
-                ..Args::DEFAULT
-            },
-        };
-
-        let start_ram = memory::FIRST_ADDRESS;
-
-        // Write the instructions to the beginning of the main memory and point the program
-        // counter at the first instruction.
-        let phys_addr = start_ram + PAGE_SIZE.get() - 6;
-
-        state.core.hart.pc.write(phys_addr);
-
-        for offset in 0..3 {
-            state
-                .core
-                .main_memory
-                .write_instruction_unchecked(phys_addr + offset * 4, uncompressed_bytes)
-                .unwrap();
-        }
-
-        state.step_max(Bound::Included(3));
-
-        assert!(state.block_cache.get_block(phys_addr).is_some());
-        assert_eq!(
-            vec![uncompressed],
-            state.block_cache.get_block_instr(phys_addr)
-        );
-
-        assert!(state.block_cache.get_block(phys_addr + 4).is_none());
-
-        assert!(state.block_cache.get_block(phys_addr + 8).is_some());
-        assert_eq!(
-            vec![uncompressed],
-            state.block_cache.get_block_instr(phys_addr + 8)
         );
     });
 

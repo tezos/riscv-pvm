@@ -3,8 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! The block cache maps certain physical addresses to contiguous sequences of instructions, or
-//! 'blocks'. These blocks will never cross page boundaries.
+//! The block cache maps certain addresses to contiguous sequences of instructions, or
+//! 'blocks'.
 //!
 //! Blocks are sets of instructions that are often - but not always - executed immediately after each
 //! other. The main exceptions to this are:
@@ -20,10 +20,6 @@
 //!
 //! Therefore, sets of instructions that form tight loops will naturally form a block, and
 //! sequences that may branch elsewhere - but normally fall-through - also form a block.
-//!
-//! Blocks must never cross page boundaries, as two pages that lie next to each other in physical
-//! memory have no guarantees of being consecutive in virtual memory - even if they are at one
-//! point.
 //!
 //! # Determinism
 //!
