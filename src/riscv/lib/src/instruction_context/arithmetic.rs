@@ -2,14 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Arithmetic operations required in the [`ICB`], including implementations for interpreted mode.
+//! Arithmetic operations required in the [`super::ICB`], including implementations for interpreted mode.
 
-use super::ICB;
 use super::Shift;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 
-/// Trait for arithmetic operations on **XValues** used in the [`ICB`].
+/// Trait for arithmetic operations on **XValues** used in the [`super::ICB`].
 pub trait Arithmetic<I: ?Sized>: Copy {
     /// Perform a wrapping add of two **XValues**, returning the new value.
     ///
@@ -71,7 +70,7 @@ pub trait Arithmetic<I: ?Sized>: Copy {
     fn max_unsigned(self, other: Self, icb: &mut I) -> Self;
 }
 
-impl<I: ICB> Arithmetic<I> for XValue {
+impl<I: ?Sized> Arithmetic<I> for XValue {
     fn add(self, other: Self, _: &mut I) -> Self {
         self.wrapping_add(other)
     }
@@ -141,7 +140,7 @@ impl<I: ICB> Arithmetic<I> for XValue {
     }
 }
 
-impl<I: ICB> Arithmetic<I> for XValue32 {
+impl<I: ?Sized> Arithmetic<I> for XValue32 {
     fn add(self, other: Self, _: &mut I) -> Self {
         self.wrapping_add(other)
     }
