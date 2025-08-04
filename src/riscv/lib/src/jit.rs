@@ -1664,7 +1664,10 @@ mod tests {
     #[test]
     fn test_unknown() {
         let scenarios: &[Scenario] = &[ScenarioBuilder::default()
-            .set_expected_steps(2)
+            .set_expected_steps(
+                // The unknown instruction raises an exception. This does not count as a full step.
+                1,
+            )
             .set_instructions(&[
                 I::new_nop(Uncompressed),
                 I::new_unknown(Compressed),
@@ -2147,7 +2150,10 @@ mod tests {
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 // the load will fail due to being out of bounds
-                .set_expected_steps(3)
+                .set_expected_steps(
+                    // A failed store does not count as a full step
+                    2,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.main_memory.read(MEMORY_SIZE - 8).unwrap();
 
@@ -2225,7 +2231,10 @@ mod tests {
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 // the load will fail due to being out of bounds
-                .set_expected_steps(2)
+                .set_expected_steps(
+                    // A failed load does not count as a full step
+                    1,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.hart.xregisters.read(x2);
                     assert_eq!(value, 0, "Found {value:x}, but expected load to fail");
@@ -2419,7 +2428,10 @@ mod tests {
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(3)
+                .set_expected_steps(
+                    // A failed atomic operation does not count as a full step
+                    2,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.hart.xregisters.read(x3);
                     assert_eq!(value as i64, 0);
@@ -2452,7 +2464,10 @@ mod tests {
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(3)
+                .set_expected_steps(
+                    // A failed atomic operation does not count as a full step
+                    2,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.hart.xregisters.read(x3);
                     assert_eq!(value, 0);
@@ -2645,7 +2660,10 @@ mod tests {
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(2)
+                .set_expected_steps(
+                    // A failed atomic load does not count as a full step
+                    1,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.hart.xregisters.read(x3);
                     assert_eq!(value, 0);
@@ -2669,7 +2687,10 @@ mod tests {
                     I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(5)
+                .set_expected_steps(
+                    // The failed atomic operation does not count as a full step
+                    4,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     // Failure due to unaligned address should not modify the value in `rd`.
                     let value: u64 = core.hart.xregisters.read(x3);
@@ -2792,7 +2813,10 @@ mod tests {
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(2)
+                .set_expected_steps(
+                    // A failed atomic load does not count as a full step
+                    1,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value: u64 = core.hart.xregisters.read(x3);
                     assert_eq!(value, 0);
@@ -2816,7 +2840,10 @@ mod tests {
                     I::new_x64_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(5)
+                .set_expected_steps(
+                    // The failed atomic operation does not count as a full step
+                    4,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     // Failure due to unaligned address should not modify the value in `rd`.
                     let value: u64 = core.hart.xregisters.read(x3);
@@ -3167,7 +3194,10 @@ mod tests {
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
-                .set_expected_steps(3)
+                .set_expected_steps(
+                    // A failed atomic operation does not count as a full step
+                    2,
+                )
                 .set_assert_hook(assert_hook!(|core| {
                     let value = core.hart.xregisters.read(x3);
                     assert_eq!(value, 0);
