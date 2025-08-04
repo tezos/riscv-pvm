@@ -103,6 +103,7 @@ pub use trans::*;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::Projection;
+use crate::state_context::projection::ProjectionOffset;
 use crate::state_context::projection::RegionCons;
 
 /// An enriched value may be stored in a [`ManagerBase::EnrichedCell`].
@@ -451,17 +452,18 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
         M::region_write(state, param.0, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> i32 {
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
         assert!(
             param.0 < LEN,
             "Region index out of bounds: {} >= {}",
             param.0,
             LEN
         );
-        std::mem::size_of::<E>()
-            .wrapping_mul(param.0)
-            .try_into()
-            .expect("Region offset exceeds i32 range")
+        let offset = std::mem::size_of::<E>()
+            .checked_mul(param.0)
+            .expect("Region offset exceeds usize range");
+
+        ProjectionOffset::new(offset)
     }
 }
 

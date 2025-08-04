@@ -38,6 +38,7 @@ use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
 use crate::state_context::projection::Projection;
+use crate::state_context::projection::ProjectionOffset;
 
 /// Link a stored value directly with a derived value -
 /// that would either be expensive to compute each time, or cannot
@@ -354,11 +355,10 @@ impl<E: 'static> Projection for CellProj<E> {
         state.write(value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> i32 {
-        let field_offset: i32 = std::mem::offset_of!(Cell<E, Owned>, region.region)
-            .try_into()
-            .expect("Field offset exceeds i32 range");
-        field_offset + RegionProj::<E, 1>::owned_pointer_offset::<MC>((0,))
+    fn owned_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
+        let field_offset = std::mem::offset_of!(Cell<E, Owned>, region.region);
+
+        RegionProj::<E, 1>::owned_pointer_offset::<MC>((0,)) + field_offset
     }
 }
 
@@ -543,11 +543,10 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
         RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> i32 {
-        let field_offset: i32 = std::mem::offset_of!(Cells<E, LEN, Owned>, region)
-            .try_into()
-            .expect("Field offset exceeds i32 range");
-        field_offset + RegionProj::<E, LEN>::owned_pointer_offset::<MC>(param)
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        let field_offset = std::mem::offset_of!(Cells<E, LEN, Owned>, region);
+
+        RegionProj::<E, LEN>::owned_pointer_offset::<MC>(param) + field_offset
     }
 }
 
