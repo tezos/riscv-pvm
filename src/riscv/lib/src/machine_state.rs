@@ -67,55 +67,18 @@ pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
 }
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
-    /// Handle an [`Exception`] if one was risen during execution
-    /// of an instruction (also known as synchronous exception) by taking a trap.
-    ///
-    /// Return the new address of the program counter, becoming the address of a trap handler.
-    /// Throw [`EnvironException`] if the exception needs to be treated by the execution enviroment.
-    pub(crate) fn address_on_exception(
-        &mut self,
-        exception: Exception,
-        current_pc: Address,
-    ) -> Result<Address, EnvironException>
-    where
-        M: backend::ManagerReadWrite,
-    {
-        if let Ok(exc) = EnvironException::try_from(&exception) {
-            // We need to commit the PC before returning because the caller (e.g.
-            // [step]) doesn't commit it eagerly.
-            self.hart.pc.write(current_pc);
-
-            return Err(exc);
-        }
-
-        // TODO: RV-653: Traps are no longer supported. In this place we would need to trigger a
-        // signal handler instead.
-        let trap_pc = 0;
-
-        Ok(trap_pc)
-    }
-
     #[inline]
-    fn handle_step_result(
-        &mut self,
-        instr_pc: Address,
-        result: Result<ProgramCounterUpdate<Address>, Exception>,
-    ) -> Result<Address, EnvironException>
+    fn update_pc(&mut self, instr_pc: Address, update: ProgramCounterUpdate<Address>)
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerWrite,
     {
-        let pc = match result {
-            Err(exc) => self.address_on_exception(exc, instr_pc)?,
-            Ok(update) => match update {
-                ProgramCounterUpdate::Set(address) => address,
-                ProgramCounterUpdate::Next(width) => instr_pc.wrapping_add(width as u64),
-                ProgramCounterUpdate::Relative(offset) => instr_pc.wrapping_add_signed(offset),
-            },
+        let pc = match update {
+            ProgramCounterUpdate::Set(address) => address,
+            ProgramCounterUpdate::Next(width) => instr_pc.wrapping_add(width as u64),
+            ProgramCounterUpdate::Relative(offset) => instr_pc.wrapping_add_signed(offset),
         };
 
         self.hart.pc.write(pc);
-
-        Ok(pc)
     }
 
     /// Bind the machine state to the given allocated space.
@@ -429,10 +392,9 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// Take an interrupt if available, and then
     /// perform precisely one [`Instr`] and handle the traps that may rise as a side-effect.
     ///
-    /// The [`Err`] case represents an [`Exception`] to be handled by
-    /// the execution environment, narrowed down by the type [`EnvironException`].
+    /// The [`Err`] case represents an [`Exception`] that ought to be handled at a higher level.
     #[inline]
-    pub fn step(&mut self) -> Result<(), EnvironException>
+    pub fn step(&mut self) -> Result<(), Exception>
     where
         M: ManagerReadWrite,
     {
@@ -442,18 +404,16 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         }
     }
 
-    fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<EnvironException>
+    fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
     where
         M: backend::ManagerReadWrite,
     {
-        let mut result = StepManyResult::ZERO;
-
-        let current_block_result = self
+        let mut result = self
             .block_cache
             .complete_current_block(&mut self.core, max_steps);
 
         // Executing the current block may fail
-        if result.merge_and_return(current_block_result) {
+        if result.error.is_some() {
             return result;
         }
 
@@ -461,7 +421,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();
 
-            let res = match self.block_cache.get_block(instr_pc) {
+            match self.block_cache.get_block(instr_pc) {
                 Some(mut block) => {
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(
@@ -475,19 +435,20 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     if result.merge_and_return(block_result) {
                         return result;
                     }
-
-                    continue;
                 }
 
-                None => self.run_instr_at(instr_pc),
-            };
+                None => match self.run_instr_at(instr_pc) {
+                    Ok(update) => {
+                        self.core.update_pc(instr_pc, update);
+                        result.steps += 1;
+                    }
 
-            if let Err(error) = self.core.handle_step_result(instr_pc, res) {
-                result.error = Some(error);
-                return result;
+                    Err(exc) => {
+                        result.error = Some(exc);
+                        return result;
+                    }
+                },
             }
-
-            result.steps += 1;
         }
 
         result
@@ -496,7 +457,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// Perform as many steps as the given `max_steps` bound allows. Returns the number of retired
     /// instructions.
     #[inline]
-    pub fn step_max(&mut self, max_steps: Bound<usize>) -> StepManyResult<EnvironException>
+    pub fn step_max(&mut self, max_steps: Bound<usize>) -> StepManyResult<Exception>
     where
         M: backend::ManagerReadWrite,
     {
@@ -543,16 +504,25 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     steps = steps.saturating_add(1);
                     step_bounds = bound_saturating_sub(step_bounds, 1);
 
-                    match handle(self, cause) {
-                        Ok(may_continue) => {
-                            if !may_continue {
-                                break None;
+                    match cause {
+                        Exception::EnvCall => match handle(self, EnvironException::EnvCall) {
+                            Ok(may_continue) => {
+                                if !may_continue {
+                                    break None;
+                                }
                             }
-                        }
 
-                        Err(error) => break Some(error),
+                            Err(error) => break Some(error),
+                        },
+
+                        _exception => {
+                            // TODO: RV-653: We trap to a "known" bad address right now. This will
+                            // change once synchronous signals are implemented.
+                            self.core.hart.pc.write(0);
+                        }
                     }
                 }
+
                 None => break None,
             }
         };
@@ -733,7 +703,7 @@ mod tests {
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
-    use crate::traps::EnvironException;
+    use crate::traps::Exception;
 
     backend_test!(test_step, F, {
         let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
@@ -802,20 +772,18 @@ mod tests {
             state.core.main_memory.write_instruction_unchecked(init_pc_addr, ECALL).unwrap();
             let e = state.step()
                 .expect_err("should raise Environment Exception");
-            assert_eq!(e, EnvironException::EnvCall);
+            assert_eq!(e, Exception::EnvCall);
             prop_assert_eq!(state.core.hart.pc.read(), init_pc_addr);
         });
     });
 
-    backend_test!(test_step_exc_us, F, {
+    backend_test!(test_step_access_exception, F, {
         let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
-
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
             pc_addr_offset in 0..200_u64,
         )| {
-            // Raise exception, take trap from U-mode to S-mode (test delegation takes place)
             let mut state = <F as ManagerTestInit>::reinit_machine_state(
                 state_cell.borrow_mut(),
             );
@@ -823,8 +791,9 @@ mod tests {
             let bad_address = memory::FIRST_ADDRESS.wrapping_sub((pc_addr_offset + 10) * 4);
             state.core.hart.pc.write(bad_address);
 
-            state.step().expect("should not raise environment exception");
-            assert_eq!(state.core.hart.pc.read(), 0);
+            let result = state.step();
+            assert_eq!(result, Err(Exception::InstructionAccessFault));
+            assert_eq!(state.core.hart.pc.read(), bad_address);
         });
     });
 

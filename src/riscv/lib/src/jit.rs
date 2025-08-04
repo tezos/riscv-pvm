@@ -22,6 +22,7 @@ use cranelift_module::ModuleError;
 use thiserror::Error;
 
 use crate::jit::builder::sequence::SequenceBuilder;
+use crate::jit::state_access::ExceptionCode;
 use crate::log;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::block_cache::metrics::block_metrics;
@@ -29,7 +30,6 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
 
 /// Alias for the function signature produced by the JIT compilation.
 ///
@@ -50,7 +50,7 @@ pub type JitFn<MC> = unsafe extern "C" fn(
     &mut MachineCoreState<MC, Owned>,
     u64,
     usize,
-    &mut Result<(), EnvironException>,
+    &mut ExceptionCode,
     // ignored
     *const c_void,
 ) -> usize;
@@ -374,7 +374,7 @@ mod tests {
                 block.run_block(&mut interpreted, initial_pc, max_steps, interpreted_bb)
             };
 
-            let mut jitted_res = Ok(());
+            let mut jitted_err = ExceptionCode::NoException;
             let jitted_steps = unsafe {
                 // # Safety - the block builder is alive for at least
                 //            the duration of the `run` function.
@@ -383,13 +383,13 @@ mod tests {
                     &mut jitted,
                     initial_pc,
                     max_steps,
-                    &mut jitted_res,
+                    &mut jitted_err,
                     null(),
                 )
             };
             let jitted_res = StepManyResult {
                 steps: jitted_steps,
-                error: jitted_res.err(),
+                error: jitted_err.to_exception(),
             };
 
             // Assert state equality.
@@ -1749,7 +1749,7 @@ mod tests {
                 .compile(instructions(&block).as_slice())
                 .expect("Compilation of subsequent functions should succeed");
 
-            let mut jitted_res = Ok(());
+            let mut jitted_err = ExceptionCode::NoException;
             let max_steps = usize::MAX;
             let jitted_steps = unsafe {
                 // # Safety - the jit is not dropped until after we
@@ -1759,12 +1759,12 @@ mod tests {
                     &mut jitted,
                     initial_pc,
                     max_steps,
-                    &mut jitted_res,
+                    &mut jitted_err,
                     null(),
                 )
             };
 
-            assert!(jitted_res.is_ok());
+            assert_eq!(jitted_err, ExceptionCode::NoException);
             assert_eq!(jitted_steps, success.len());
         }
     }

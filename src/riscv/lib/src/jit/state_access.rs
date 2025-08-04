@@ -42,7 +42,6 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// Exception codes used for efficient exception handling in JIT-compiled code
@@ -50,7 +49,7 @@ use crate::traps::Exception;
 /// This enum represents different types of exceptions that can occur during
 /// instruction execution, encoded as i64 values for easy transmission between
 /// JIT-compiled code and runtime handlers.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
 pub enum ExceptionCode {
     NoException = 0,
@@ -81,23 +80,20 @@ impl ExceptionCode {
         }
     }
 
-    /// Convert the exception code back to an [`Exception`].
-    ///
-    /// # Panics
-    ///
-    /// This function panics if called on `NoException`, as it is not a valid exception.
-    pub fn to_exception(self) -> Exception {
+    /// Convert the exception code back to an [`Exception`] if it represents an exception.
+    /// Otherwise it will return `None` for [`ExceptionCode::NoException`].
+    pub fn to_exception(self) -> Option<Exception> {
         match self {
-            Self::NoException => unreachable!(),
-            Self::InstructionAccessFault => Exception::InstructionAccessFault,
-            Self::IllegalInstruction => Exception::IllegalInstruction,
-            Self::Breakpoint => Exception::Breakpoint,
-            Self::LoadAccessFault => Exception::LoadAccessFault,
-            Self::StoreAMOAccessFault => Exception::StoreAMOAccessFault,
-            Self::EnvCall => Exception::EnvCall,
-            Self::InstructionPageFault => Exception::InstructionPageFault,
-            Self::LoadPageFault => Exception::LoadPageFault,
-            Self::StoreAMOPageFault => Exception::StoreAMOPageFault,
+            Self::NoException => None,
+            Self::InstructionAccessFault => Some(Exception::InstructionAccessFault),
+            Self::IllegalInstruction => Some(Exception::IllegalInstruction),
+            Self::Breakpoint => Some(Exception::Breakpoint),
+            Self::LoadAccessFault => Some(Exception::LoadAccessFault),
+            Self::StoreAMOAccessFault => Some(Exception::StoreAMOAccessFault),
+            Self::EnvCall => Some(Exception::EnvCall),
+            Self::InstructionPageFault => Some(Exception::InstructionPageFault),
+            Self::LoadPageFault => Some(Exception::LoadPageFault),
+            Self::StoreAMOPageFault => Some(Exception::StoreAMOPageFault),
         }
     }
 
@@ -131,39 +127,6 @@ impl Value<ExceptionCode> {
 
 impl typed::Typed for ExceptionCode {
     const TYPE: typed::Type = typed::Type::Basic(I64);
-}
-
-/// Handle an [`ExceptionCode`].
-///
-/// If the exception is succesfully handled, the
-/// `current_pc` is updated to the new value, and returns true. The `current_pc`
-/// remains initialised to its previous value otherwise.
-///
-/// If the exception needs to be treated by the execution environment,
-/// `result` is updated with the `EnvironException` and `false` is
-/// returned.
-///
-/// See [`MachineCoreState::address_on_exception`].
-extern "C" fn handle_exception<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-    current_pc: &mut Address,
-    exception: ExceptionCode,
-    result: &mut Result<(), EnvironException>,
-) -> bool {
-    let exception = exception.to_exception();
-    let res = core.address_on_exception(exception, *current_pc);
-
-    match res {
-        Err(e) => {
-            *result = Err(e);
-            false
-        }
-
-        Ok(address) => {
-            *current_pc = address;
-            true
-        }
-    }
 }
 
 /// Store the lowest `width` bytes of the given value to memory, at the physical address.
@@ -244,63 +207,16 @@ pub struct JsaCalls<MC: MemoryConfig> {
     /// pointer type and width
     target_config: TargetFrontendConfig,
 
-    /// Reusable stack slot for the PC value
-    pc_slot: Option<stack::Slot<MaybeUninit<Address>>>,
-
     _pd: PhantomData<MC>,
 }
 
 impl<MC: MemoryConfig> JsaCalls<MC> {
-    /// Get the stack slot for the PC value.
-    fn pc_slot(&mut self, builder: &mut FunctionBuilder) -> stack::Slot<MaybeUninit<Address>> {
-        self.pc_slot
-            .get_or_insert_with(|| stack::Slot::new(self.target_config.pointer_type(), builder))
-            .clone()
-    }
-
     /// Construct a new `JsaCalls` instance with the given target configuration.
     pub(super) fn new(target_config: TargetFrontendConfig) -> Self {
         Self {
             target_config,
-            pc_slot: None,
             _pd: PhantomData,
         }
-    }
-
-    /// Emit the required IR to call `handle_exception`.
-    ///
-    /// # Panics
-    ///
-    /// The call to `handle_exception` will panic (at runtime) if no exception
-    /// has occurred so-far in the JIT-compiled function, if the error-handling
-    /// code is triggerred.
-    pub(super) fn handle_exception(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-        exception: Value<ExceptionCode>,
-        result_ptr: Pointer<Result<(), EnvironException>>,
-        current_pc: Value<Address>,
-    ) -> ExceptionHandledOutcome {
-        let pc_slot = self.pc_slot(builder).init(builder, current_pc);
-        let pc_ptr = pc_slot.ptr(builder);
-
-        // SAFETY: Arguments get cast into references with valid lifetimes.
-        // - `core_ptr` is a JIT function argument
-        // - `pc_ptr` points to a stack slot which is valid for the duration of the JIT function
-        // - `result_ptr` is a JIT function argument
-        let handled = ext_calls::call4(
-            &self.target_config,
-            builder,
-            self::handle_exception,
-            unsafe { core_ptr.as_mut() },
-            unsafe { pc_ptr.as_mut() },
-            exception,
-            unsafe { result_ptr.as_mut() },
-        );
-
-        let new_pc = pc_slot.load(builder);
-        ExceptionHandledOutcome { handled, new_pc }
     }
 
     /// Emit the required IR to call `memory_store`.
@@ -464,17 +380,4 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             reg_value,
         )
     }
-}
-
-/// Outcome of handling an exception.
-pub(super) struct ExceptionHandledOutcome {
-    /// Whether the exception was succesfully handled.
-    ///
-    /// - If true, the exception was handled and the step is completed.
-    /// - If false, the exception must be instead handled by the environment.
-    ///   The step is not complete.
-    pub handled: Value<bool>,
-
-    /// The new value of the instruction pc, after exception handling.
-    pub new_pc: Value<Address>,
 }

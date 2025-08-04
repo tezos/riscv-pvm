@@ -7,22 +7,7 @@
 //! Certain information is occassionally required to be on the stack, when executing
 //! a JIT-compiled block.
 //!
-//! See for example [`handle_exception`]:
-//!
-//! ```ignore
-//! use crate::machine_state::MachineCoreState;
-//! use crate::machine_state::memory::Address;
-//! use crate::machine_state::memory::MemoryConfig;
-//! use crate::traps::EnvironException;
-//! use crate::traps::Exception;
-//!
-//! extern "C" fn handle_exception<MC: MemoryConfig>(
-//!     core: &mut MachineCoreState<MC, Owned>,
-//!     current_pc: &mut Address,
-//!     exception: &Option<Exception>,
-//!     result: &mut Result<(), EnvironException>,
-//! ) -> bool;
-//! ```
+//! See [`crate::jit::state_access`] for examples.
 //!
 //! The boolean return indicates whether the function has failed. If it has, then an exception will
 //! have been written to the place in memory specified by `exception`. `current_pc` is also an out
@@ -34,8 +19,6 @@
 //! Larger/more complex types cannot be moved between registers and the stack safely. Exceptions
 //! are a good example of this. For now, we choose to pass pointers from values created in rust
 //! code, for safety.
-//!
-//! [`handle_exception`]: super::handle_exception
 
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -169,18 +152,6 @@ impl<T: StackAddressable> Slot<MaybeUninit<T>> {
     ///
     /// You must ensure the slot is initialised before using it.
     pub(super) unsafe fn assume_init(self) -> Slot<T> {
-        Slot {
-            slot: self.slot,
-            ptr_type: self.ptr_type,
-            _pd: PhantomData,
-        }
-    }
-}
-
-impl<T: Stackable> Slot<MaybeUninit<T>> {
-    /// Emit IR to initialise the stack slot.
-    pub(super) fn init(self, builder: &mut FunctionBuilder, value: Value<T>) -> Slot<T> {
-        builder.ins().stack_store(value.to_value(), self.slot, 0);
         Slot {
             slot: self.slot,
             ptr_type: self.ptr_type,

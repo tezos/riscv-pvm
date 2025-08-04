@@ -31,7 +31,7 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 /// Layout of a partial block.
 pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
@@ -93,7 +93,7 @@ impl<M: ManagerBase> PartialBlock<M> {
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
@@ -110,7 +110,7 @@ impl<M: ManagerBase> PartialBlock<M> {
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
         entry: &mut Cached<MC, B, M>,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
@@ -157,18 +157,9 @@ impl<M: ManagerBase> PartialBlock<M> {
                     return result;
                 }
 
-                Err(e) => {
+                Err(exc) => {
                     self.reset();
-
-                    // Exceptions lead to a new address being set to handle it,
-                    // with no guarantee of it being the next instruction.
-                    if let Err(error) = core.handle_step_result(instr_pc, Err(e)) {
-                        result.error = Some(error);
-                        return result;
-                    }
-
-                    // If we succesfully handled an error, need to increment steps one more.
-                    result.steps += 1;
+                    result.error = Some(exc);
                     return result;
                 }
             }
@@ -532,7 +523,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
@@ -574,7 +565,7 @@ mod tests {
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
     use crate::state_backend::owned_backend::Owned;
-    use crate::traps::EnvironException;
+    use crate::traps::Exception;
 
     type TestState<M> = <TestCacheConfig as BlockCacheConfig>::State<M4K, Interpreted<M4K, M>, M>;
 
@@ -911,7 +902,7 @@ mod tests {
             .unwrap();
 
         let result = state.step();
-        assert_eq!(result, Err(EnvironException::EnvCall));
+        assert_eq!(result, Err(Exception::EnvCall));
     }
 
     /// The initialised block cache has an entry for address 0. The block at address 0 happens to

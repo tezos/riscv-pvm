@@ -29,7 +29,7 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 /// Interpreted blocks are built automatically, and require no additional context.
 #[derive(Debug, Default)]
@@ -135,30 +135,13 @@ impl<MC: MemoryConfig, M: ManagerBase> Block<MC, M> for Interpreted<MC, M> {
     unsafe fn run_block(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        mut instr_pc: Address,
+        instr_pc: Address,
         max_steps: usize,
         _block_builder: &mut Self::BlockBuilder,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
-        let mut result = run_block_inner(self.instr(), core, &mut instr_pc, max_steps);
-
-        if let Some(exc) = result.error {
-            if let Err(err) = core.handle_step_result(instr_pc, Err(exc)) {
-                return StepManyResult {
-                    steps: result.steps,
-                    error: Some(err),
-                };
-            }
-
-            // If we successfully handled an error, need to increment steps one more.
-            result.steps += 1;
-        }
-
-        StepManyResult {
-            steps: result.steps,
-            error: None,
-        }
+        run_block_inner(self.instr(), core, instr_pc, max_steps)
     }
 }

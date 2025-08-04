@@ -47,7 +47,6 @@ use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
 use crate::struct_layout;
-use crate::traps::EnvironException;
 
 /// Type of input that can be passed to the PVM
 pub enum PvmInput<'a> {
@@ -222,22 +221,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
         csregs.write(CSRegister::fflags, fflags + 1);
     }
 
-    /// Handle an exception using the defined Execution Environment.
-    fn handle_exception(&mut self, hooks: impl PvmHooks, _exception: EnvironException) -> bool
-    where
-        M: state_backend::ManagerReadWrite,
-    {
-        handle_system_call(
-            &mut self.machine_state,
-            &mut self.system_state,
-            &mut self.status,
-            &mut self.reveal_request,
-            hooks,
-        )
-    }
-
     /// Perform one evaluation step.
-    pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
+    pub(crate) fn eval_one(&mut self, mut hooks: impl PvmHooks)
     where
         M: state_backend::ManagerReadWrite,
     {
@@ -248,9 +233,19 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
             return self.provide_reveal_error_response();
         }
 
-        if let Err(exc) = self.machine_state.step() {
-            self.handle_exception(hooks, exc);
-        }
+        self.machine_state.step_max_handle::<Infallible>(
+            Bound::Included(1),
+            |machine_state, _exception| {
+                Ok(handle_system_call(
+                    machine_state,
+                    &mut self.system_state,
+                    &mut self.status,
+                    &mut self.reveal_request,
+                    &mut hooks,
+                ))
+            },
+        );
+
         self.tick.write(self.tick.read().wrapping_add(1u64));
     }
 
@@ -517,6 +512,29 @@ mod tests {
     use crate::pvm::linux;
     use crate::state_backend::owned_backend::Owned;
 
+    impl<
+        MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: block::Block<MC, M>,
+        M: state_backend::ManagerBase,
+    > Pvm<MC, BCC, B, M>
+    {
+        /// Handle an exception using the defined Execution Environment.
+        // The conditional compilation below causes some warnings.
+        fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
+        where
+            M: state_backend::ManagerReadWrite,
+        {
+            handle_system_call(
+                &mut self.machine_state,
+                &mut self.system_state,
+                &mut self.status,
+                &mut self.reveal_request,
+                hooks,
+            )
+        }
+    }
+
     #[test]
     fn test_read_input() {
         type MC = M1M;
@@ -568,7 +586,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for input
@@ -666,7 +684,7 @@ mod tests {
                 .xregisters
                 .write(a2, written.len() as u64);
 
-            pvm.handle_exception(&mut buffer, EnvironException::EnvCall);
+            pvm.handle_exception(&mut buffer);
 
             // Compare what characters have been passed to the hook versus what we
             // intended to write
@@ -713,7 +731,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for reveal
@@ -788,7 +806,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::Evaluating);
 
         // Handle the ECALL successfully
-        let outcome = pvm.handle_exception(StdoutDebugHooks, EnvironException::EnvCall);
+        let outcome = pvm.handle_exception(StdoutDebugHooks);
         assert!(!outcome);
 
         // After the ECALL we should be waiting for reveal
