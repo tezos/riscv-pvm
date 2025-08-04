@@ -161,7 +161,6 @@ fn calc_steps_since_last_jp(instr_index: usize, instrs: &[JoinPointAnalysedLI]) 
 
 /// Perform the join-point analysis on the edge-processed instructions.
 /// This pass enriches the instructions with the number of steps since the last join point.
-#[allow(dead_code)]
 pub(crate) fn join_point_analysis<T: HookedOutgoing>(
     instrs: &[EdgeProcessedLI<T>],
 ) -> Vec<JoinPointAnalysedLI> {

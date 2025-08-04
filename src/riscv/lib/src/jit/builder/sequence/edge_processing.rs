@@ -18,11 +18,6 @@ pub(super) trait HookedOutgoing: Clone + Debug {
 
 /// An outgoing transition from an instruction to another in the sequence with an annotated index and hook.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[expect(
-    dead_code,
-    reason = "This struct will be used in later stages of development for converting into further
-    enriched types."
-)]
 pub(super) struct IndexedOutgoing {
     /// The index of the next instruction in the sequence.
     index: usize,
@@ -141,11 +136,6 @@ impl<T: HookedOutgoing> EdgeProcessedLI<T> {
 
 /// Analyse outcomes over all instructions in a sequence to add incomings and outgoings
 /// to each instruction.
-#[allow(
-    dead_code,
-    reason = "This function will be used in later stages of development for converting into further
-    enriched types."
-)]
 pub(crate) fn edge_processing<T: HookedOutgoing>(
     instrs: &[LoweredInstruction],
 ) -> Vec<EdgeProcessedLI<T>> {

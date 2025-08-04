@@ -136,7 +136,6 @@ impl BudgetCheckedLI {
 
 /// Perform the budget-check analysis on the sequence of instructions.
 /// This pass enriches the instruction outgoings with classification of whether they require a budget check or not.
-#[allow(dead_code)]
 pub(super) fn budget_check_analysis(instrs: &mut [JoinPointAnalysedLI]) -> Vec<BudgetCheckedLI> {
     let mut enriched_instrs: Vec<BudgetCheckedLI> = instrs
         .iter_mut()
