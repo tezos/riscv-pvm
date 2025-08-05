@@ -14,6 +14,7 @@
 
 pub(crate) mod projection;
 
+use crate::jit::builder::typed::Typed;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerReadWrite;
@@ -21,35 +22,37 @@ use crate::state_context::projection::MachineCoreProjection;
 
 /// Context for accessing parts of the PVM state
 pub trait StateContext {
-    /// 64-bit integer type
-    type X64;
+    /// Value type for this context
+    type Value<R>;
 
     /// Read from a region of the machine core state.
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
     where
-        P: MachineCoreProjection<Target = u64>;
+        P: MachineCoreProjection,
+        P::Target: Copy + Typed;
 
     /// Write to a region of the machine core state.
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
     where
-        P: MachineCoreProjection<Target = u64>;
+        P: MachineCoreProjection;
 }
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> StateContext for MachineCoreState<MC, M> {
-    type X64 = u64;
+    type Value<R> = R;
 
     #[inline]
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::X64
+    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
+        P::Target: Copy,
     {
         P::project_read(self, param)
     }
 
     #[inline]
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::X64)
+    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
     where
-        P: MachineCoreProjection<Target = u64>,
+        P: MachineCoreProjection,
     {
         P::project_write(self, param, value);
     }

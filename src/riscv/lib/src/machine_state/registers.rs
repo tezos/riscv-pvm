@@ -669,7 +669,7 @@ impl_projection! {
 pub fn read_xregister_nz<SC: StateContext + ?Sized>(
     state: &mut SC,
     reg: NonZeroXRegister,
-) -> SC::X64 {
+) -> SC::Value<XValue> {
     state.read_proj::<XRegisterProj>((reg as usize,))
 }
 
@@ -678,7 +678,7 @@ pub fn read_xregister_nz<SC: StateContext + ?Sized>(
 pub fn write_xregister_nz<SC: StateContext + ?Sized>(
     state: &mut SC,
     reg: NonZeroXRegister,
-    value: SC::X64,
+    value: SC::Value<XValue>,
 ) {
     state.write_proj::<XRegisterProj>((reg as usize,), value)
 }

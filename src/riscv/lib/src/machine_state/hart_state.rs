@@ -112,6 +112,6 @@ impl_projection! {
 
 /// Update the program counter in the given state context.
 #[inline]
-pub(crate) fn write_pc<SC: StateContext + ?Sized>(state: &mut SC, value: SC::X64) {
+pub(crate) fn write_pc<SC: StateContext + ?Sized>(state: &mut SC, value: SC::Value<XValue>) {
     state.write_proj::<ProgramCounterProj>((), value);
 }
