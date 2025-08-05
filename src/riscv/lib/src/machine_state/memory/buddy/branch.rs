@@ -10,6 +10,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -86,6 +87,7 @@ where
 }
 
 /// Branch in a Buddy-style memory manager tree
+#[perfect_derive(PartialEq, Eq)]
 pub struct BuddyBranch2<B, M: ManagerBase> {
     free_info: Cell<FreeInfo, M>,
     left: Box<B>,
@@ -318,13 +320,5 @@ impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for BuddyBranch2<B, M> {
             left: inner.left,
             right: inner.right,
         })
-    }
-}
-
-impl<B: PartialEq, M: ManagerRead> PartialEq for BuddyBranch2<B, M> {
-    fn eq(&self, other: &Self) -> bool {
-        self.free_info.eq(&other.free_info)
-            && self.left.eq(&other.left)
-            && self.right.eq(&other.right)
     }
 }

@@ -86,6 +86,8 @@ mod state;
 
 use std::marker::PhantomData;
 
+use perfect_derive::perfect_derive;
+
 use self::block::Block;
 pub use self::config::DefaultCacheConfig;
 pub use self::config::TestCacheConfig;
@@ -132,17 +134,10 @@ impl<MC: MemoryConfig, M: ManagerBase> EnrichedValue for ICallPlaced<MC, M> {
 /// rather than for each instruction, during each block execution.
 ///
 /// [OpCode]: super::instruction::OpCode
+#[perfect_derive(Copy, Clone)]
 pub struct ICall<MC: MemoryConfig, M: ManagerBase> {
     run_instr: RunInstr<MC, M>,
 }
-
-impl<MC: MemoryConfig, M: ManagerBase> Clone for ICall<MC, M> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> Copy for ICall<MC, M> {}
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> ICall<MC, M> {
     // SAFETY: This function must be called with an `Args` belonging to the same `OpCode` as

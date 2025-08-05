@@ -9,6 +9,7 @@ use std::ops::Bound;
 
 use bincode::Decode;
 use bincode::Encode;
+use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::linux;
@@ -110,6 +111,7 @@ pub(crate) type PvmProofGen<'a, MC, CL, M> = Pvm<
 >;
 
 /// Proof-generating virtual machine
+#[perfect_derive(Clone)]
 pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: ManagerBase> {
     pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, M>,
     reveal_request: RevealRequest<M>,
@@ -466,28 +468,6 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BC
             .ok()?
             .0;
         Some(Self::bind(space, block_builder))
-    }
-}
-
-impl<
-    MC: MemoryConfig,
-    BCC: BlockCacheConfig,
-    B: block::Block<MC, M> + Clone,
-    M: state_backend::ManagerClone,
-> Clone for Pvm<MC, BCC, B, M>
-{
-    fn clone(&self) -> Self {
-        Self {
-            machine_state: self.machine_state.clone(),
-            reveal_request: self.reveal_request.clone(),
-            system_state: self.system_state.clone(),
-            version: self.version.clone(),
-            tick: self.tick.clone(),
-            message_counter: self.message_counter.clone(),
-            level: self.level.clone(),
-            level_is_set: self.level_is_set.clone(),
-            status: self.status.clone(),
-        }
     }
 }
 

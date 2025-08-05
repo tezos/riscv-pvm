@@ -9,6 +9,8 @@
 
 use std::ops::BitAnd;
 
+use perfect_derive::perfect_derive;
+
 use crate::machine_state::backend;
 /// Executing a LR.x instructions registers a reservation set on the address
 /// from which data was loaded. The success of a SC.x instruction is conditional
@@ -23,6 +25,7 @@ use crate::machine_state::backend;
 use crate::machine_state::backend::Cell;
 use crate::state::NewState;
 
+#[perfect_derive(Clone)]
 pub struct ReservationSet<M: backend::ManagerBase> {
     pub(crate) start_addr: Cell<u64, M>,
 }
@@ -112,14 +115,6 @@ impl<M: backend::ManagerBase> NewState<M> for ReservationSet<M> {
     {
         ReservationSet {
             start_addr: Cell::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> Clone for ReservationSet<M> {
-    fn clone(&self) -> Self {
-        Self {
-            start_addr: self.start_addr.clone(),
         }
     }
 }

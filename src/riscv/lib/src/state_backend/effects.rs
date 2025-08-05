@@ -4,13 +4,14 @@
 
 use std::marker::PhantomData;
 
+use perfect_derive::perfect_derive;
+
 use super::AllocatedOf;
 use super::Atom;
 use super::Cell;
 use super::FnManager;
 use super::ManagerAlloc;
 use super::ManagerBase;
-use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerReadWrite;
 use super::ManagerWrite;
@@ -29,6 +30,7 @@ pub trait EffectGetter {
 
 pub type EffectCellLayout<T> = Atom<T>;
 
+#[perfect_derive(Clone)]
 pub struct EffectCell<T: 'static, EG, M: ManagerBase> {
     inner: Cell<T, M>,
     _pd: PhantomData<EG>,
@@ -87,15 +89,6 @@ impl<T: ConstDefault, EG, M: ManagerBase> NewState<M> for EffectCell<T, EG, M> {
     {
         Self {
             inner: Cell::new(),
-            _pd: PhantomData,
-        }
-    }
-}
-
-impl<T: Copy, EG, M: ManagerClone> Clone for EffectCell<T, EG, M> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
             _pd: PhantomData,
         }
     }

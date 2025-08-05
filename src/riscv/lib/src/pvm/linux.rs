@@ -15,6 +15,7 @@ use std::convert::Infallible;
 use std::ffi::CStr;
 use std::ops::Range;
 
+use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 
 use self::addr::VirtAddr;
@@ -41,7 +42,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
@@ -447,6 +447,7 @@ struct_layout! {
 }
 
 /// Linux supervisor state
+#[perfect_derive(Clone)]
 pub struct SupervisorState<M: ManagerBase> {
     /// Thread lock address
     tid_address: Cell<VirtAddr, M>,
@@ -1047,16 +1048,9 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 }
 
-impl<M: ManagerClone> Clone for SupervisorState<M> {
-    fn clone(&self) -> Self {
-        Self {
-            tid_address: self.tid_address.clone(),
-            exited: self.exited,
-            exit_code: self.exit_code,
-            program: self.program.clone(),
-            stack_guard: self.stack_guard.clone(),
-            heap: self.heap.clone(),
-        }
+impl<M: ManagerAlloc> Default for SupervisorState<M> {
+    fn default() -> Self {
+        SupervisorState::new()
     }
 }
 

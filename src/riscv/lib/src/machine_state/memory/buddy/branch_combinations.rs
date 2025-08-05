@@ -50,19 +50,8 @@ macro_rules! combined_buddy_branch {
     ($name:ident = $buddy1:ident * $buddy2:ident) => {
         paste::paste! {
             /// Allocated combined Buddy branch
+            #[perfect_derive::perfect_derive(PartialEq, Eq)]
             pub struct [<$name Alloc>]<B: Layout, M: ManagerBase>(AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>);
-
-            // Passthrough implementation, default derive macro can't derive this ...
-            impl<B, M> PartialEq for [<$name Alloc>]<B, M>
-            where
-                B: Layout,
-                M: ManagerRead,
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: PartialEq,
-            {
-                fn eq(&self, other: &Self) -> bool {
-                    self.0.eq(&other.0)
-                }
-            }
 
             // Passthrough implementation, default derive macro can't derive this ...
             impl<B, M> Encode for [<$name Alloc>]<B, M>
@@ -157,6 +146,7 @@ macro_rules! combined_buddy_branch {
         }
 
         /// Combined Buddy branch
+        #[perfect_derive::perfect_derive(PartialEq, Eq)]
         pub struct $name<B, M: ManagerBase>($buddy1<$buddy2<B, M>, M>);
 
         // Passthrough implementation, default derive macro can't derive this ...
@@ -170,16 +160,6 @@ macro_rules! combined_buddy_branch {
         impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for $name<B, M> {
             fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
                 Ok(Self(Decode::decode(decoder)?))
-            }
-        }
-
-        // Passthrough implementation, default derive macro can't derive this ...
-        impl<B, M: ManagerRead> PartialEq for $name<B, M>
-        where
-            B: PartialEq,
-        {
-            fn eq(&self, other: &Self) -> bool {
-                self.0.eq(&other.0)
             }
         }
 

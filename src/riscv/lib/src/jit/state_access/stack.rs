@@ -51,6 +51,7 @@ use cranelift::frontend::FunctionBuilder;
 use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
+use perfect_derive::perfect_derive;
 
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
@@ -143,6 +144,7 @@ impl Stackable for FValue {
 }
 
 /// Dedicated space on the stack to store a value of the underlying type.
+#[perfect_derive(Clone)]
 pub(super) struct Slot<T> {
     slot: StackSlot,
     ptr_type: Type,
@@ -204,15 +206,5 @@ impl<T: Stackable> Slot<T> {
 
         // SAFETY: `T` is the slot value type.
         unsafe { Value::<T>::from_raw(raw_value) }
-    }
-}
-
-impl<T> Clone for Slot<T> {
-    fn clone(&self) -> Self {
-        Self {
-            slot: self.slot,
-            ptr_type: self.ptr_type,
-            _pd: PhantomData,
-        }
     }
 }

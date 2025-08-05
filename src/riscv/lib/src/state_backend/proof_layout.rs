@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
+use perfect_derive::perfect_derive;
 
 use super::AllocatedOf;
 use super::Array;
@@ -109,6 +110,7 @@ pub enum PartialHashError {
 
 /// Part of a tree that may be absent
 #[derive(Debug, PartialEq)]
+#[perfect_derive(Clone, Copy)]
 pub enum ProofPart<'a, T: ?Sized> {
     /// This part of the tree is absent.
     Absent,
@@ -116,14 +118,6 @@ pub enum ProofPart<'a, T: ?Sized> {
     /// There is a proof for this part of the tree.
     Present(&'a T),
 }
-
-impl<T> Clone for ProofPart<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for ProofPart<'_, T> {}
 
 /// Part of a Merkle proof tree
 pub type ProofTree<'a> = ProofPart<'a, MerkleProof>;

@@ -5,6 +5,8 @@
 
 use std::marker::PhantomData;
 
+use perfect_derive::perfect_derive;
+
 use crate::cache_utils::FenceCounter;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
@@ -43,20 +45,11 @@ pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
 /// - an error occurs
 /// - a jump or branch occurs then the partial block is reset, and execution will continue with a
 ///   potentially different block.
+#[perfect_derive(Clone)]
 pub struct PartialBlock<M: ManagerBase> {
     addr: Cell<Address, M>,
     in_progress: Cell<bool, M>,
     progress: Cell<u8, M>,
-}
-
-impl<M: ManagerClone> Clone for PartialBlock<M> {
-    fn clone(&self) -> Self {
-        Self {
-            addr: self.addr.clone(),
-            in_progress: self.in_progress.clone(),
-            progress: self.progress.clone(),
-        }
-    }
 }
 
 impl<M: ManagerBase> PartialBlock<M> {
@@ -221,6 +214,7 @@ pub type CachedLayout = (
 ///
 /// Contains the physical address & fence counter for validity checks, the
 /// underlying [`Block`] state.
+#[perfect_derive(Clone)]
 pub struct Cached<MC: MemoryConfig, B, M: ManagerBase> {
     pub(super) block: B,
     address: Cell<Address, M>,
@@ -293,17 +287,6 @@ impl<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> NewState<M> for Cached<M
             address: Cell::new_with(!0),
             block: B::new(),
             fence_counter: Cell::new(),
-            _pd: PhantomData,
-        }
-    }
-}
-
-impl<MC: MemoryConfig, B: Clone, M: ManagerClone> Clone for Cached<MC, B, M> {
-    fn clone(&self) -> Self {
-        Self {
-            address: self.address.clone(),
-            block: self.block.clone(),
-            fence_counter: self.fence_counter.clone(),
             _pd: PhantomData,
         }
     }

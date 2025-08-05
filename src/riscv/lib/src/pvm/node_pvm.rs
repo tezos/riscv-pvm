@@ -7,6 +7,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::path::Path;
 
+use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
@@ -45,6 +46,7 @@ pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheConfig>;
 
 type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheConfig, Interpreted<NodePvmMemConfig, M>, M>;
 
+#[perfect_derive(Clone)]
 pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
     state: Box<NodePvmState<M>>,
 }
@@ -233,14 +235,6 @@ impl NodePvm<Verifier> {
 impl<M: state_backend::ManagerSerialise> fmt::Debug for NodePvm<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "NodePvm(<unknown state>)")
-    }
-}
-
-impl<M: state_backend::ManagerClone> Clone for NodePvm<M> {
-    fn clone(&self) -> Self {
-        Self {
-            state: self.state.clone(),
-        }
     }
 }
 

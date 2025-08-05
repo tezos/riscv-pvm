@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use perfect_derive::perfect_derive;
+
 use crate::machine_state::csregisters;
 use crate::machine_state::memory::Address;
 use crate::machine_state::registers;
@@ -19,6 +21,7 @@ use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
 /// RISC-V hart state
+#[perfect_derive(Clone)]
 pub struct HartState<M: backend::ManagerBase> {
     /// Integer registers
     pub xregisters: registers::XRegisters<M>,
@@ -95,18 +98,6 @@ impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
             csregisters: csregisters::CSRegisters::new(),
             pc: Cell::new(),
             reservation_set: ReservationSet::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> Clone for HartState<M> {
-    fn clone(&self) -> Self {
-        Self {
-            xregisters: self.xregisters.clone(),
-            fregisters: self.fregisters.clone(),
-            csregisters: self.csregisters.clone(),
-            pc: self.pc.clone(),
-            reservation_set: self.reservation_set.clone(),
         }
     }
 }

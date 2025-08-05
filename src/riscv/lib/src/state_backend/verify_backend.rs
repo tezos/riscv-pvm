@@ -11,6 +11,7 @@ use std::panic::resume_unwind;
 use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use super::Cell;
@@ -565,19 +566,9 @@ impl<const LEAF_SIZE: usize, const LEN: usize> Default for DynRegion<LEAF_SIZE, 
 }
 
 /// Verifier enriched cell
+#[perfect_derive(Clone)]
 pub struct EnrichedCell<V: EnrichedValue> {
     underlying: Region<V::E, 1>,
-}
-
-impl<V: EnrichedValue> Clone for EnrichedCell<V>
-where
-    V::E: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            underlying: self.underlying.clone(),
-        }
-    }
 }
 
 impl<E> Cell<E, Verifier> {

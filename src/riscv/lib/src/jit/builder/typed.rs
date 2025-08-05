@@ -12,7 +12,6 @@
 //! in the type system without runtime overhead. It provides safe conversion functions
 //! and operations that preserve type safety across IR transformations.
 
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -25,6 +24,7 @@ use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
+use perfect_derive::perfect_derive;
 
 /// Cranelift IR type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +101,7 @@ impl<T> Typed for &mut T {
 }
 
 /// Strongly-typed IR value
-#[derive(Debug)]
+#[perfect_derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Value<T> {
     /// Underlying Cranelift value
     value: CraneliftValue,
@@ -217,40 +217,6 @@ impl<T: Sized> Value<NonNull<T>> {
             value: self.value,
             _pd: PhantomData,
         }
-    }
-}
-
-// The deriver macro imposes `T: Copy` on `Value<T>`. We don't want that, so we write our own impl.
-impl<T> Copy for Value<T> {}
-
-// See `impl Copy` for why we hand-write this impl.
-impl<T> Clone for Value<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-// See `impl Copy` for why we hand-write this impl.
-impl<T> PartialEq for Value<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.eq(&other.value)
-    }
-}
-
-// See `impl Copy` for why we hand-write this impl.
-impl<T> Eq for Value<T> {}
-
-// See `impl Copy` for why we hand-write this impl.
-impl<T> PartialOrd for Value<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-// See `impl Copy` for why we hand-write this impl.
-impl<T> Ord for Value<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.value.cmp(&other.value)
     }
 }
 
