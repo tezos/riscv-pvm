@@ -146,11 +146,11 @@ macro_rules! struct_layout {
                 fn state_hash<M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerSerialise>(
                     state: $crate::state_backend::AllocatedOf<Self, M>
                 ) -> std::result::Result<$crate::storage::Hash, $crate::storage::HashError> {
-                    $crate::storage::Hash::combine(&[
+                    Ok($crate::storage::Hash::combine([
                         $(
                             [<$field_name:camel>]::state_hash(state.$field_name)?
                         ),+
-                    ])
+                    ]))
                 }
             }
 
@@ -172,13 +172,13 @@ macro_rules! struct_layout {
                 fn to_merkle_tree(
                     state: $crate::state_backend::RefProofGenOwnedAlloc<Self>,
                 ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, $crate::storage::HashError> {
-                    $crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
+                    Ok($crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
                         vec![
                             $(
                                 [<$field_name:camel>]::to_merkle_tree(state.$field_name)?
                             ),+
                         ]
-                    )
+                    ))
                 }
 
                 #[inline]

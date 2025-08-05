@@ -5,6 +5,7 @@
 
 //! Common type for hashes
 
+use std::borrow::Borrow;
 use std::num::NonZeroUsize;
 
 use bincode::Decode;
@@ -62,15 +63,16 @@ impl Hash {
     /// The hashes are combined by concatenating them, then hashing the result.
     /// Pre-image resistance is not compromised because the concatenation is not
     /// ambiguous, with hashes having a fixed size ([`DIGEST_SIZE`]).
-    pub fn combine(hashes: &[Hash]) -> Result<Hash, HashError> {
+    pub fn combine<H: Borrow<Hash>, HS: IntoIterator<Item = H>>(hashes: HS) -> Hash {
         let mut hasher = blake3::Hasher::new();
 
         for hash in hashes {
+            let hash: &Hash = hash.borrow();
             hasher.update(hash.as_ref());
         }
 
         let digest = hasher.finalize().into();
-        Ok(Hash { digest })
+        Hash { digest }
     }
 }
 
@@ -204,7 +206,7 @@ pub(crate) fn build_custom_merkle_hash(
     while nodes.len() > 1 {
         // Group the nodes into chunks of size `arity` and hash each chunk.
         for chunk in nodes.chunks(arity) {
-            next_level.push(Hash::combine(chunk)?)
+            next_level.push(Hash::combine(chunk))
         }
 
         std::mem::swap(&mut nodes, &mut next_level);
