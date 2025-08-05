@@ -170,6 +170,17 @@ impl Instruction {
         }
     }
 
+    /// Create a new [`Instruction`] for [`OpCode::FenceI`].
+    pub(crate) fn new_fence_i() -> Self {
+        Self {
+            opcode: OpCode::FenceI,
+            args: Args {
+                width: InstrWidth::Uncompressed,
+                ..Args::DEFAULT
+            },
+        }
+    }
+
     /// Create a new [`Instruction`] for [`OpCode::Unknown`].
     pub(crate) fn new_unknown(width: InstrWidth) -> Self {
         Self {

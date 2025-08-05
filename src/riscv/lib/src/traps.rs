@@ -37,7 +37,8 @@ impl TryFrom<&Exception> for EnvironException {
     fn try_from(value: &Exception) -> Result<Self, Self::Error> {
         match value {
             Exception::EnvCall => Ok(EnvironException::EnvCall),
-            Exception::Breakpoint
+            Exception::FenceI
+            | Exception::Breakpoint
             | Exception::IllegalInstruction
             | Exception::InstructionAccessFault
             | Exception::LoadAccessFault
@@ -64,6 +65,7 @@ pub enum Exception {
     InstructionPageFault,
     LoadPageFault,
     StoreAMOPageFault,
+    FenceI,
 }
 
 impl core::fmt::Debug for Exception {
@@ -87,9 +89,12 @@ impl From<Exception> for SbiError {
             | Exception::LoadPageFault
             | Exception::StoreAMOAccessFault
             | Exception::StoreAMOPageFault => SbiError::InvalidAddress,
+
             Exception::IllegalInstruction | Exception::Breakpoint | Exception::EnvCall => {
                 SbiError::Failed
             }
+
+            Exception::FenceI => SbiError::Unknown,
         }
     }
 }

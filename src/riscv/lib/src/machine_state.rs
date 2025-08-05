@@ -28,7 +28,6 @@ use crate::bits::u64;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::Instr;
 use crate::parser::instruction::InstrCacheable;
-use crate::parser::instruction::InstrUncacheable;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
@@ -232,14 +231,6 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-/// Runs a no-arguments instruction (wfi, fence.i)
-macro_rules! run_no_args_instr {
-    ($state: ident, $instr: ident, $run_fn: ident) => {{
-        $state.$run_fn();
-        Ok(Next($instr.width()))
-    }};
-}
-
 impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backend::ManagerBase>
     MachineState<MC, BCC, B, M>
 {
@@ -325,10 +316,10 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             // Writable memory means that the instruction is not cacheable
             if !lower.writable {
-                if let Instr::Cacheable(instr) = instr {
-                    let instr = Instruction::from(&instr);
-                    self.block_cache.push_instr_compressed(addr, instr);
-                }
+                let Instr::Cacheable(instr) = instr;
+                let instr = Instruction::from(&instr);
+
+                self.block_cache.push_instr_compressed(addr, instr);
             }
 
             instr
@@ -341,32 +332,16 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             // Writable memory means that the instruction is not cacheable
             if !combined.writable {
-                if let Instr::Cacheable(instr) = instr {
-                    let instr = Instruction::from(&instr);
-                    self.block_cache.push_instr_uncompressed(addr, instr);
-                }
+                let Instr::Cacheable(instr) = instr;
+                let instr = Instruction::from(&instr);
+
+                self.block_cache.push_instr_uncompressed(addr, instr);
             }
 
             instr
         };
 
         Ok(instr)
-    }
-
-    /// Advance [`MachineState`] by executing an [`InstrUncacheable`].
-    fn run_instr_uncacheable(
-        &mut self,
-        instr: &InstrUncacheable,
-    ) -> Result<ProgramCounterUpdate<Address>, Exception>
-    where
-        M: backend::ManagerReadWrite,
-    {
-        use ProgramCounterUpdate::Next;
-
-        match instr {
-            // Zifencei instructions
-            InstrUncacheable::FenceI => run_no_args_instr!(self, instr, run_fencei),
-        }
     }
 
     /// Advance [`MachineState`] by executing an [`Instr`]
@@ -376,7 +351,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     {
         match instr {
             Instr::Cacheable(i) => self.core.run_instr_cacheable(i),
-            Instr::Uncacheable(i) => self.run_instr_uncacheable(i),
+            Instr::Uncacheable(i) => match *i {},
         }
     }
 
@@ -514,6 +489,19 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
                             Err(error) => break Some(error),
                         },
+
+                        Exception::FenceI => {
+                            self.run_fencei();
+
+                            // We need to advance pc by width of the Fence.I instruction because raising the exception does not do it for us.
+                            self.core.hart.pc.write(
+                                self.core
+                                    .hart
+                                    .pc
+                                    .read()
+                                    .wrapping_add(InstrWidth::Uncompressed as u64),
+                            );
+                        }
 
                         _exception => {
                             // TODO: RV-653: We trap to a "known" bad address right now. This will

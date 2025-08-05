@@ -830,6 +830,7 @@ pub enum InstrCacheable {
 
     Fence(FenceArgs),
     FenceTso,
+    FenceI,
 }
 
 impl ConstDefault for InstrCacheable {
@@ -851,11 +852,8 @@ impl ConstDefault for InstrCacheable {
 /// as they do not invalidate the instruction cache.
 ///
 /// [`BlockCache`]: crate::machine_state::block_cache::BlockCache
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumTag, Hash)]
-pub enum InstrUncacheable {
-    // Zifencei instructions
-    FenceI,
-}
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub enum InstrUncacheable {}
 
 /// RISC-V parsed instructions.
 ///
@@ -1046,6 +1044,7 @@ impl InstrCacheable {
             | Ebreak
             | Fence(_)
             | FenceTso
+            | FenceI
             | Hint { instr: _ } => InstrWidth::Uncompressed,
 
             // 2 bytes instructions (compressed instructions)
@@ -1096,10 +1095,7 @@ impl InstrUncacheable {
     /// Return the width of the instruction in bytes.
     #[inline(always)]
     pub const fn width(&self) -> InstrWidth {
-        use InstrUncacheable::*;
-        match self {
-            FenceI => InstrWidth::Uncompressed,
-        }
+        unreachable!()
     }
 }
 
@@ -1546,17 +1542,14 @@ impl fmt::Display for InstrCacheable {
 
             Fence(args) => fence_instr!(f, "fence", args),
             FenceTso => write!(f, "fence.tso rw,rw"),
+            FenceI => write!(f, "fence.i"),
         }
     }
 }
 
 impl fmt::Display for InstrUncacheable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use InstrUncacheable::*;
-        match self {
-            // Zifencei instructions
-            FenceI => write!(f, "fence.i"),
-        }
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        unreachable!()
     }
 }
 

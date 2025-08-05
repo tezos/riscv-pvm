@@ -339,6 +339,9 @@ pub enum OpCode {
 
     /// Raise a breakpoint exception.
     EBreak,
+
+    /// Raise a fence.i exception.
+    FenceI,
 }
 
 impl OpCode {
@@ -522,6 +525,7 @@ impl OpCode {
             Self::Unknown => Args::run_illegal,
             Self::ECall => Args::run_ecall,
             Self::EBreak => Args::run_ebreak,
+            Self::FenceI => Args::run_fence_i,
         }
     }
 
@@ -1509,6 +1513,10 @@ impl Args {
     fn run_illegal<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         icb.raise_exception(Exception::IllegalInstruction)
     }
+
+    fn run_fence_i<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        icb.raise_exception(Exception::FenceI)
+    }
 }
 
 impl From<&InstrCacheable> for Instruction {
@@ -2284,6 +2292,7 @@ impl From<&InstrCacheable> for Instruction {
 
             InstrCacheable::Fence(_args) => Instruction::new_nop(InstrWidth::Uncompressed),
             InstrCacheable::FenceTso => Instruction::new_nop(InstrWidth::Uncompressed),
+            InstrCacheable::FenceI => Instruction::new_fence_i(),
         }
     }
 }

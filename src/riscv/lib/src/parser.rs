@@ -700,7 +700,7 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
                 },
                 _ => Unknown { instr },
             },
-            F3_1 => return Instr::Uncacheable(InstrUncacheable::FenceI),
+            F3_1 => FenceI,
             _ => Unknown { instr },
         },
         OP_SYS => match funct3(instr) {
