@@ -68,6 +68,64 @@ impl TypeCons for MachineCoreCons {
     type Applied<MC: MemoryConfig, M: ManagerBase> = MachineCoreState<MC, M>;
 }
 
+/// Offset from a base pointer to a [projection's] subject, within the owned backend.
+///
+/// Additional offsets may be added to an existing one, to build up offsets within
+/// layered projections. All such additions will panic on overflowing the `i32` range.
+///
+/// [projection's]: Projection
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProjectionOffset {
+    offset: i32,
+}
+
+impl ProjectionOffset {
+    /// Create a new projection offset from the given offset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the offset overflows the `i32` range.
+    pub fn new(offset: usize) -> Self {
+        Self {
+            offset: offset.try_into().expect("offset overflows i32 range"),
+        }
+    }
+}
+
+impl std::ops::Add<usize> for ProjectionOffset {
+    type Output = Self;
+
+    fn add(self, other: usize) -> Self {
+        let other: i32 = other.try_into().expect("offset overflows i32 range");
+
+        Self {
+            offset: self
+                .offset
+                .checked_add(other)
+                .expect("offset overflows i32 range on addition"),
+        }
+    }
+}
+
+impl std::ops::Add for ProjectionOffset {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            offset: self
+                .offset
+                .checked_add(other.offset)
+                .expect("offset overflows i32 range on addition"),
+        }
+    }
+}
+
+impl From<ProjectionOffset> for cranelift::codegen::ir::immediates::Offset32 {
+    fn from(value: ProjectionOffset) -> Self {
+        Self::new(value.offset)
+    }
+}
+
 /// Projections give you access to a value of the target type within the value of a subject type.
 pub trait Projection {
     /// Subject that contains the target value
@@ -108,7 +166,7 @@ pub trait Projection {
     /// offset to an address of the subject value that would give you the address of the target
     /// value. This is exclusive to the [`crate::state_backend::owned_backend::Owned`] state
     /// backend.
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> i32;
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
 }
 
 /// Implement a projection by pre-composing a field access to an existing projection.
@@ -178,16 +236,17 @@ macro_rules! impl_projection {
 
             fn owned_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
                 param: Self::Parameter
-            ) -> i32 {
-                let field_offset: i32 = std::mem::offset_of!(
+            ) -> $crate::state_context::projection::ProjectionOffset {
+                let field_offset = std::mem::offset_of!(
                     $crate::state_context::projection::ApplyCons<
                         $subject,
                         MC,
                         $crate::state_backend::owned_backend::Owned
                     >,
                     $($field).+
-                ).try_into().expect("Field offset exceeds i32 range");
-                field_offset + <$target>::owned_pointer_offset::<MC>(param)
+                );
+
+                <$target>::owned_pointer_offset::<MC>(param) + field_offset
             }
         }
     };
