@@ -287,10 +287,15 @@ pub struct CSSDTypeArgs {
 }
 
 /// RISC-V parsed instructions. Along with legal instructions, potentially
-/// illegal instructions are parsed as `Unknown` or `UnknownCompressed`.
-/// These instructions are successfully parsed, but must not be interpreted.
+///
+/// Illegal instructions are parsed as `Unknown` or `UnknownCompressed`.
+///
+/// These instructions are successfully parsed, but will raise an
+/// [`IllegalInstruction`] exception if run.
+///
+/// [`IllegalInstruction`]: crate::traps::Exception::IllegalInstruction
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumTag, Hash, Encode, Decode)]
-pub enum InstrCacheable {
+pub enum Instr {
     // RV64I R-type instructions
     /// `ADD` - Perform `val(rs1) + val(rs2)` and store the result in `rd`
     Add(NonZeroRdRTypeArgs),
@@ -833,40 +838,8 @@ pub enum InstrCacheable {
     FenceI,
 }
 
-impl ConstDefault for InstrCacheable {
+impl ConstDefault for Instr {
     const DEFAULT: Self = Self::Unknown { instr: 0 };
-}
-
-/// Uncacheable instructions are those that may result in a
-/// breaking of the normal flow of execution.
-///
-/// Namely, that may happen due:
-/// - instruction cache invalidation (e.g., `fence.i`)
-/// - altering the mapping of virtual to physical memory
-///
-/// Any of these can result in breaking the 'default flow of execution',
-/// invalidating the assumptions that are required for the [`BlockCache`] to
-/// function.
-///
-/// Note: Memory fence instructions (`fence`, `fence.tso`) are cacheable
-/// as they do not invalidate the instruction cache.
-///
-/// [`BlockCache`]: crate::machine_state::block_cache::BlockCache
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub enum InstrUncacheable {}
-
-/// RISC-V parsed instructions.
-///
-/// Along with legal instructions, potentially
-/// illegal instructions are parsed as `Instr::Cacheable::(InstrCacheable::Unknown)`
-/// or `Instr::Cacheable::(InstrCacheable::UnknownCompressed)`.
-/// These instructions are successfully parsed, but must not be interpreted.
-///
-/// Any `Instr::Cacheable` may be written to & fetched from the Instruction Cache.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumTag, Hash)]
-pub enum Instr {
-    Cacheable(InstrCacheable),
-    Uncacheable(InstrUncacheable),
 }
 
 /// RISC-V instruction width.
@@ -879,11 +852,11 @@ pub enum InstrWidth {
     Uncompressed = 4,
 }
 
-impl InstrCacheable {
+impl Instr {
     /// Return the width of the instruction in bytes.
     #[inline(always)]
     pub const fn width(&self) -> InstrWidth {
-        use InstrCacheable::*;
+        use Instr::*;
         match self {
             // 4 bytes instructions
             Add(_)
@@ -1091,26 +1064,6 @@ impl InstrCacheable {
     }
 }
 
-impl InstrUncacheable {
-    /// Return the width of the instruction in bytes.
-    #[inline(always)]
-    pub const fn width(&self) -> InstrWidth {
-        unreachable!()
-    }
-}
-
-impl Instr {
-    /// Return the width of the instruction in bytes.
-    #[inline(always)]
-    pub const fn width(&self) -> InstrWidth {
-        use Instr::*;
-        match self {
-            Cacheable(c) => c.width(),
-            Uncacheable(u) => u.width(),
-        }
-    }
-}
-
 macro_rules! r_instr {
     ($f:expr, $op:expr, $args:expr) => {
         write!($f, "{} {},{},{}", $op, $args.rd, $args.rs1, $args.rs2)
@@ -1284,9 +1237,9 @@ impl fmt::Display for FenceSet {
 
 /// An objdump-style prettyprinter for parsed instructions, used in testing
 /// the parser against objdump.
-impl fmt::Display for InstrCacheable {
+impl fmt::Display for Instr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use InstrCacheable::*;
+        use Instr::*;
         match self {
             // RV64I R-type instructions
             Add(args) => r_instr!(f, "add", args),
@@ -1543,21 +1496,6 @@ impl fmt::Display for InstrCacheable {
             Fence(args) => fence_instr!(f, "fence", args),
             FenceTso => write!(f, "fence.tso rw,rw"),
             FenceI => write!(f, "fence.i"),
-        }
-    }
-}
-
-impl fmt::Display for InstrUncacheable {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        unreachable!()
-    }
-}
-
-impl fmt::Display for Instr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cacheable(i) => i.fmt(f),
-            Self::Uncacheable(i) => i.fmt(f),
         }
     }
 }

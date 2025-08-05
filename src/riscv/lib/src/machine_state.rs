@@ -26,8 +26,6 @@ use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
 use crate::machine_state::block_cache::BlockCacheConfig;
-use crate::parser::instruction::Instr;
-use crate::parser::instruction::InstrCacheable;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
@@ -109,17 +107,6 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         self.hart.reset(memory::FIRST_ADDRESS);
         self.main_memory.reset();
         self.signal_actions.reset();
-    }
-
-    /// Advance [`MachineState`] by executing an [`InstrCacheable`].
-    fn run_instr_cacheable(
-        &mut self,
-        instr: &InstrCacheable,
-    ) -> Result<ProgramCounterUpdate<Address>, Exception>
-    where
-        M: backend::ManagerReadWrite,
-    {
-        Instruction::from(instr).run(self)
     }
 }
 
@@ -302,7 +289,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// The spec stipulates translation is performed for each byte respectively.
     /// However, we assume the `raw_pc` is 2-byte aligned.
     #[inline]
-    fn fetch_instr(&mut self, addr: Address) -> Result<Instr, Exception>
+    fn fetch_instr(&mut self, addr: Address) -> Result<Instruction, Exception>
     where
         M: backend::ManagerReadWrite,
     {
@@ -313,12 +300,10 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         // Hence we can't read all 4 bytes eagerly.
         let instr = if is_compressed(lower.data) {
             let instr = parse_compressed_instruction(lower.data);
+            let instr = Instruction::from(&instr);
 
             // Writable memory means that the instruction is not cacheable
             if !lower.writable {
-                let Instr::Cacheable(instr) = instr;
-                let instr = Instruction::from(&instr);
-
                 self.block_cache.push_instr_compressed(addr, instr);
             }
 
@@ -329,12 +314,10 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             let combined = lower.combine_with_upper(upper);
             let instr = parse_uncompressed_instruction(combined.data);
+            let instr = Instruction::from(&instr);
 
             // Writable memory means that the instruction is not cacheable
             if !combined.writable {
-                let Instr::Cacheable(instr) = instr;
-                let instr = Instruction::from(&instr);
-
                 self.block_cache.push_instr_uncompressed(addr, instr);
             }
 
@@ -345,14 +328,13 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     }
 
     /// Advance [`MachineState`] by executing an [`Instr`]
-    fn run_instr(&mut self, instr: &Instr) -> Result<ProgramCounterUpdate<Address>, Exception>
+    ///
+    /// [`Instr`]: crate::parser::instruction::Instr
+    fn run_instr(&mut self, instr: &Instruction) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
         M: backend::ManagerReadWrite,
     {
-        match instr {
-            Instr::Cacheable(i) => self.core.run_instr_cacheable(i),
-            Instr::Uncacheable(i) => match *i {},
-        }
+        instr.run(&mut self.core)
     }
 
     /// Fetch & run the instruction located at address `instr_pc`
@@ -368,6 +350,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// perform precisely one [`Instr`] and handle the traps that may rise as a side-effect.
     ///
     /// The [`Err`] case represents an [`Exception`] that ought to be handled at a higher level.
+    ///
+    /// [`Instr`]: crate::parser::instruction::Instr
     #[inline]
     pub fn step(&mut self) -> Result<(), Exception>
     where
@@ -491,7 +475,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                         },
 
                         Exception::FenceI => {
-                            self.run_fencei();
+                            self.invalidate_instruction_caches();
 
                             // We need to advance pc by width of the Fence.I instruction because raising the exception does not do it for us.
                             self.core.hart.pc.write(
@@ -535,6 +519,15 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         self.core.hart.xregisters.write(registers::a0, 0);
 
         Ok(())
+    }
+
+    /// Invalidate all instruction caches that are sensitive to
+    /// instruction fences.
+    fn invalidate_instruction_caches(&mut self)
+    where
+        M: ManagerReadWrite,
+    {
+        self.block_cache.invalidate();
     }
 }
 
@@ -731,7 +724,7 @@ mod tests {
 
             // Since we've written a new instruction to the init_pc_addr - we need to
             // invalidate the instruction cache.
-            state.run_fencei();
+            state.invalidate_instruction_caches();
 
             state.step().expect("should not raise trap to EE");
             prop_assert_eq!(state.core.hart.xregisters.read(t0), init_pc_addr + 4);
@@ -1054,7 +1047,7 @@ mod tests {
         }
 
         // Flush the block cache.
-        state.run_fencei();
+        state.invalidate_instruction_caches();
 
         // Run the block again 10 times, this time it should run the new instructions thanks to the
         // previous flush.

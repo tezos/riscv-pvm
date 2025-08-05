@@ -16,4 +16,3 @@ pub mod rv64c;
 pub mod rv64d;
 pub mod rv64dc;
 pub mod rv64f;
-pub mod rv64zifencei;

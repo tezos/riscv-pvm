@@ -168,9 +168,8 @@ fn check_hint_instr(objdump_instr: String) {
 }
 
 fn check_instructions(fname: &str, instructions: Vec<(String, Instr, String)>) {
-    use octez_riscv::parser::instruction::InstrCacheable;
     for (address, parsed_instr, objdump_instr) in instructions {
-        if let Instr::Cacheable(InstrCacheable::Hint { instr: _ }) = parsed_instr {
+        if let Instr::Hint { instr: _ } = parsed_instr {
             check_hint_instr(objdump_instr);
             continue;
         }

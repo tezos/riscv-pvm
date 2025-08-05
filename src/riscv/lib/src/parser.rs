@@ -513,12 +513,12 @@ pub(crate) const SHIFT_BITMASK: i64 = 0b11_1111;
 /// Parse an uncompressed instruction from a u32.
 #[inline]
 pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
-    use InstrCacheable::*;
+    use Instr::*;
     // RV64I (Chapter 5.4) and RV64C (Chapter 16.7) describe the code points associated
     // with HINT instructions. We do not implement any HINT logic, but decode all these
     // as `Hint` or `HintCompresssed` opcodes, which we translate to NOPs in `machine_state`.
     use XRegisterParsed::*;
-    let i = match opcode(instr) {
+    match opcode(instr) {
         // R-type instructions
         OP_ARITH => match funct3(instr) {
             F3_0 => match (funct7(instr), split_x0(rd(instr))) {
@@ -644,7 +644,7 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
                 (F7_0, X0) => Hint { instr },
                 (F7_0, NonZero(rd)) => i_instr!(Srli, instr, rd),
                 (F7_20, X0) => Hint { instr },
-                (F7_20, NonZero(rd)) => InstrCacheable::Srai(NonZeroRdITypeArgs {
+                (F7_20, NonZero(rd)) => Instr::Srai(NonZeroRdITypeArgs {
                     rd,
                     rs1: rs1(instr),
                     imm: shift_imm(instr),
@@ -691,11 +691,11 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
                 FM_0 => match (bits(instr, 20, 4), bits(instr, 24, 4)) {
                     (0, _) => Hint { instr },
                     (_, 0) => Hint { instr },
-                    (_, _) => return Instr::Cacheable(fence_instr!(Fence, instr)),
+                    (_, _) => fence_instr!(Fence, instr),
                 },
                 FM_8 => match (bits(instr, 20, 4), bits(instr, 24, 4)) {
                     // `fence.tso` is only defined for predecessor and successor set equal to RW.
-                    (0b0011, 0b0011) => return Instr::Cacheable(FenceTso),
+                    (0b0011, 0b0011) => FenceTso,
                     _ => Unknown { instr },
                 },
                 _ => Unknown { instr },
@@ -707,11 +707,11 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
             F3_0 => match funct7(instr) {
                 F7_0 => match (rs1_bits(instr), rs2_bits(instr)) {
                     (RS1_0, RS2_0) => Ecall,
-                    (RS1_0, RS2_1) => return Instr::Cacheable(Ebreak),
+                    (RS1_0, RS2_1) => Ebreak,
                     _ => Unknown { instr },
                 },
                 F7_8 => match (rs1_bits(instr), rs2_bits(instr)) {
-                    (RS1_0, RS2_5) => return Instr::Cacheable(Wfi),
+                    (RS1_0, RS2_5) => Wfi,
                     _ => Unknown { instr },
                 },
                 _ => Unknown { instr },
@@ -926,16 +926,13 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
             _ => Unknown { instr },
         },
         _ => Unknown { instr },
-    };
-
-    Instr::Cacheable(i)
+    }
 }
 
 const NUM_COMPRESSED_INSTRUCTIONS: usize = (u16::MAX as usize) + 1;
 
 static COMPRESSED_JUMP_TABLE: [Instr; NUM_COMPRESSED_INSTRUCTIONS] = {
-    let mut table =
-        [Instr::Cacheable(InstrCacheable::Unknown { instr: 0 }); NUM_COMPRESSED_INSTRUCTIONS];
+    let mut table = [Instr::Unknown { instr: 0 }; NUM_COMPRESSED_INSTRUCTIONS];
     let mut i = 0;
 
     while i < u16::MAX {
@@ -1207,9 +1204,9 @@ impl Display for XRegisterParsed {
 
 #[inline]
 const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
-    use InstrCacheable::*;
+    use Instr::*;
     use XRegisterParsed::*;
-    let i = match c_opcode(instr) {
+    match c_opcode(instr) {
         OP_C0 => match c_funct3(instr) {
             C_F3_1 => CFld(FLoadArgs {
                 rd: c_f_rdp_rs2p(instr),
@@ -1272,7 +1269,7 @@ const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
             },
             C_F3_3 => {
                 if u16::bits_subset(instr, 6, 2) == 0 && !u16::bit(instr, 12) {
-                    return Instr::Cacheable(UnknownCompressed { instr });
+                    return UnknownCompressed { instr };
                 };
                 match (split_x0(c_rd_rs1(instr)), ci_imm(instr)) {
                     (NonZero(NonZeroXRegister::x2), _) => CAddi16sp(CJTypeArgs {
@@ -1339,7 +1336,7 @@ const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
                 split_x0(c_rd_rs1(instr)),
                 split_x0(c_rs2(instr)),
             ) {
-                (true, X0, X0) => return Instr::Cacheable(CEbreak),
+                (true, X0, X0) => CEbreak,
                 (_, X0, X0) => UnknownCompressed { instr },
                 (_, X0, NonZero(_)) => HintCompressed { instr },
                 (true, NonZero(rs1), X0) => CJalr(CRJTypeArgs { rs1 }),
@@ -1362,9 +1359,7 @@ const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
             _ => UnknownCompressed { instr },
         },
         _ => UnknownCompressed { instr },
-    };
-
-    Instr::Cacheable(i)
+    }
 }
 
 /// Parse a compressed instruction from a u16.
@@ -1421,8 +1416,7 @@ mod tests {
 
     use super::XRegisterParsed::*;
     use super::instruction::CsrArgs;
-    use super::instruction::Instr;
-    use super::instruction::InstrCacheable::*;
+    use super::instruction::Instr::*;
     use super::instruction::NonZeroRdITypeArgs;
     use super::instruction::SBTypeArgs;
     use super::instruction::UJTypeArgs;
@@ -1451,17 +1445,17 @@ mod tests {
         ];
 
         let expected = [
-            Instr::Cacheable(Jal(UJTypeArgs { rd: x0, imm: 0x50 })),
-            Instr::Cacheable(Csrrs(CsrArgs {
+            Jal(UJTypeArgs { rd: x0, imm: 0x50 }),
+            Csrrs(CsrArgs {
                 rd: x30,
                 rs1: x0,
                 csr: CSRegister::instret,
-            })),
-            Instr::Cacheable(Addi(SplitITypeArgs {
+            }),
+            Addi(SplitITypeArgs {
                 rd: NonZero(NonZeroXRegister::x31),
                 rs1: X0,
                 imm: 0x8,
-            })),
+            }),
         ];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected)
@@ -1483,38 +1477,38 @@ mod tests {
             0x0, 0x9b, 0x83, 0x3, 0x34, 0x63, 0x10, 0x74, 0x12,
         ];
         let expected = [
-            Instr::Cacheable(Addi(SplitITypeArgs {
+            Addi(SplitITypeArgs {
                 rd: NonZero(NonZeroXRegister::x3),
                 rs1: X0,
                 imm: 21,
-            })),
-            Instr::Cacheable(CLui(CIBNZTypeArgs {
+            }),
+            CLui(CIBNZTypeArgs {
                 rd_rs1: NonZeroXRegister::x8,
                 imm: 0x1 << 12,
-            })),
-            Instr::Cacheable(Addiw(NonZeroRdITypeArgs {
+            }),
+            Addiw(NonZeroRdITypeArgs {
                 rd: NonZeroXRegister::x8,
                 rs1: x8,
                 imm: 564,
-            })),
-            Instr::Cacheable(CSlli(CIBNZTypeArgs {
+            }),
+            CSlli(CIBNZTypeArgs {
                 rd_rs1: NonZeroXRegister::x8,
                 imm: 4,
-            })),
-            Instr::Cacheable(Lui(NonZeroRdUJTypeArgs {
+            }),
+            Lui(NonZeroRdUJTypeArgs {
                 rd: NonZeroXRegister::x7,
                 imm: 0x12 << 12,
-            })),
-            Instr::Cacheable(Addiw(NonZeroRdITypeArgs {
+            }),
+            Addiw(NonZeroRdITypeArgs {
                 rd: NonZeroXRegister::x7,
                 rs1: x7,
                 imm: 832,
-            })),
-            Instr::Cacheable(Bne(SBTypeArgs {
+            }),
+            Bne(SBTypeArgs {
                 rs1: x8,
                 rs2: x7,
                 imm: 288,
-            })),
+            }),
         ];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected)
@@ -1525,13 +1519,13 @@ mod tests {
     fn test_3() {
         let bytes: [u8; 5] = [0x1, 0x5, 0x64, 0x1b, 0x4];
         let expected = [
-            Instr::Cacheable(HintCompressed {
+            HintCompressed {
                 instr: u16::from_le_bytes([0x1, 0x5]),
-            }),
-            Instr::Cacheable(CAddi4spn(CIBTypeArgs {
+            },
+            CAddi4spn(CIBTypeArgs {
                 rd_rs1: x9,
                 imm: 444,
-            })),
+            }),
         ];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected)
@@ -1541,7 +1535,7 @@ mod tests {
     #[test]
     fn test_4() {
         let bytes: [u8; 6] = [0x6f, 0x0, 0x0, 0x5, 0x73, 0x2f];
-        let expected = [Instr::Cacheable(Jal(UJTypeArgs { rd: x0, imm: 0x50 }))];
+        let expected = [(Jal(UJTypeArgs { rd: x0, imm: 0x50 }))];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected)
     }
@@ -1552,12 +1546,12 @@ mod tests {
     fn test_5() {
         let bytes: [u8; 8] = [0x13, 0x15, 0xf5, 0x01, 0x13, 0x15, 0xf5, 0x21];
         let expected = [
-            Instr::Cacheable(Slli(NonZeroRdITypeArgs {
+            (Slli(NonZeroRdITypeArgs {
                 rd: NonZeroXRegister::x10,
                 rs1: x10,
                 imm: 31,
             })),
-            Instr::Cacheable(Unknown {
+            (Unknown {
                 instr: u32::from_le_bytes([0x13, 0x15, 0xf5, 0x21]),
             }),
         ];
@@ -1631,36 +1625,36 @@ mod tests {
             0x33, 0xA0, 0x31, 0x00, // SLTU X0, X3, X3
         ];
         let expected = [
-            Instr::Cacheable(Hint { instr: 0x33338037 }),
-            Instr::Cacheable(Hint { instr: 0x33338017 }),
-            Instr::Cacheable(Hint { instr: 0x36A00013 }),
-            Instr::Cacheable(Hint { instr: 0x36ACB013 }),
-            Instr::Cacheable(Hint { instr: 0x36ACC013 }),
-            Instr::Cacheable(Hint { instr: 0x0019801B }),
-            Instr::Cacheable(Hint { instr: 0x00318033 }),
-            Instr::Cacheable(Hint { instr: 0x415A8033 }),
-            Instr::Cacheable(Hint { instr: 0x0031B033 }),
-            Instr::Cacheable(Hint { instr: 0x0031C033 }),
-            Instr::Cacheable(Hint { instr: 0x0031D033 }),
-            Instr::Cacheable(Hint { instr: 0x0031E033 }),
-            Instr::Cacheable(Hint { instr: 0x0031F033 }),
-            Instr::Cacheable(Hint { instr: 0x415AD033 }),
-            Instr::Cacheable(Hint { instr: 0x00C60037 }),
-            Instr::Cacheable(Hint { instr: 0x40C60037 }),
-            Instr::Cacheable(Hint { instr: 0x00C61037 }),
-            Instr::Cacheable(Hint { instr: 0x00C62037 }),
-            Instr::Cacheable(Hint { instr: 0x40C61037 }),
-            Instr::Cacheable(Hint { instr: 0x0F00000F }),
-            Instr::Cacheable(Hint { instr: 0x36A02013 }),
-            Instr::Cacheable(Hint { instr: 0x36A03013 }),
-            Instr::Cacheable(Hint { instr: 0x01441013 }),
-            Instr::Cacheable(Hint { instr: 0x01445013 }),
-            Instr::Cacheable(Hint { instr: 0x41445013 }),
-            Instr::Cacheable(Hint { instr: 0x0019901B }),
-            Instr::Cacheable(Hint { instr: 0x0019D01B }),
-            Instr::Cacheable(Hint { instr: 0x4019D01B }),
-            Instr::Cacheable(Hint { instr: 0x00319033 }),
-            Instr::Cacheable(Hint { instr: 0x0031A033 }),
+            Hint { instr: 0x33338037 },
+            Hint { instr: 0x33338017 },
+            Hint { instr: 0x36A00013 },
+            Hint { instr: 0x36ACB013 },
+            Hint { instr: 0x36ACC013 },
+            Hint { instr: 0x0019801B },
+            Hint { instr: 0x00318033 },
+            Hint { instr: 0x415A8033 },
+            Hint { instr: 0x0031B033 },
+            Hint { instr: 0x0031C033 },
+            Hint { instr: 0x0031D033 },
+            Hint { instr: 0x0031E033 },
+            Hint { instr: 0x0031F033 },
+            Hint { instr: 0x415AD033 },
+            Hint { instr: 0x00C60037 },
+            Hint { instr: 0x40C60037 },
+            Hint { instr: 0x00C61037 },
+            Hint { instr: 0x00C62037 },
+            Hint { instr: 0x40C61037 },
+            Hint { instr: 0x0F00000F },
+            Hint { instr: 0x36A02013 },
+            Hint { instr: 0x36A03013 },
+            Hint { instr: 0x01441013 },
+            Hint { instr: 0x01445013 },
+            Hint { instr: 0x41445013 },
+            Hint { instr: 0x0019901B },
+            Hint { instr: 0x0019D01B },
+            Hint { instr: 0x4019D01B },
+            Hint { instr: 0x00319033 },
+            Hint { instr: 0x0031A033 },
         ];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected);
@@ -1680,14 +1674,14 @@ mod tests {
             0x01, 0x87, // C.SRAI x6 0
         ];
         let expected = [
-            Instr::Cacheable(HintCompressed { instr: 0x0201 }),
-            Instr::Cacheable(HintCompressed { instr: 0x4001 }),
-            Instr::Cacheable(HintCompressed { instr: 0x6051 }),
-            Instr::Cacheable(HintCompressed { instr: 0x8006 }),
-            Instr::Cacheable(HintCompressed { instr: 0x9006 }),
-            Instr::Cacheable(HintCompressed { instr: 0x0002 }),
-            Instr::Cacheable(HintCompressed { instr: 0x8101 }),
-            Instr::Cacheable(HintCompressed { instr: 0x8701 }),
+            HintCompressed { instr: 0x0201 },
+            HintCompressed { instr: 0x4001 },
+            HintCompressed { instr: 0x6051 },
+            HintCompressed { instr: 0x8006 },
+            HintCompressed { instr: 0x9006 },
+            HintCompressed { instr: 0x0002 },
+            HintCompressed { instr: 0x8101 },
+            HintCompressed { instr: 0x8701 },
         ];
         let instructions = parse_block(&bytes);
         assert_eq!(instructions, expected);
