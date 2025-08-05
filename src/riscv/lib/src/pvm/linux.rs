@@ -1061,6 +1061,7 @@ impl<M: ManagerAlloc> Default for SupervisorState<M> {
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU64;
+    use std::ops::Bound;
 
     use rand::Rng;
 
@@ -1074,10 +1075,12 @@ mod tests {
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::registers::sp;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::error::Error;
     use crate::pvm::linux::parameters::NoFileDescriptor;
     use crate::pvm::linux::parameters::Zero;
+    use crate::pvm::linux::signals::Signal;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
     fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> bool
@@ -1886,5 +1889,111 @@ mod tests {
             // Verify we get the expected error
             assert_eq!(result, Err(Error::NoMemory));
         }
+    });
+
+    backend_test!(test_step_into_handler, F, {
+        type MemLayout = M4K;
+        let mut machine_state =
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
+                InterpretedBlockBuilder,
+            );
+
+        machine_state.reset();
+
+        machine_state
+            .core
+            .main_memory
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .unwrap();
+
+        // Write the initial stack pointer and program counter.
+        let stack_top = M4K::TOTAL_BYTES as u64;
+        machine_state.core.hart.xregisters.write(sp, stack_top);
+        let init_pc = 0;
+        machine_state.core.hart.pc.write(init_pc);
+
+        // The address of a psuedo handler.
+        let handler_address = VirtAddr::new(42);
+
+        // The address of a psuedo restorer (`__restore_rt`).
+        // This address is provided by the C library when `sigaction` is called.
+        let restorer_address = VirtAddr::new(84);
+
+        // Instruction to return from a function.
+        // JALR imm=0, rs1=ra, rd=x0
+        const RA_ENC: u32 = 0b00001; // ra(x1)
+        const F3_0: u32 = 0b000;
+        const X0_ENC: u32 = 0b00000;
+        const OP_JALR: u32 = 0b110_0111;
+
+        // Write just an instruction to return to the handler address.
+        machine_state
+            .core
+            .main_memory
+            .write_instruction_unchecked(
+                handler_address.to_machine_address(),
+                (RA_ENC << 15) | (F3_0 << 12) | (X0_ENC << 7) | OP_JALR,
+            )
+            .unwrap();
+
+        // Setup the signal handler
+        machine_state
+            .core
+            .signal_actions
+            .write_restorer(Signal::Sigill, restorer_address);
+        machine_state
+            .core
+            .signal_actions
+            .write_action(Signal::Sigill, handler_address);
+
+        // Cause the [`Exception::IllegalInstruction`].
+        // `unimp`, an illegal instruction.
+        const UNIMPLEMENTED: u32 = 0b_0000;
+
+        machine_state
+            .core
+            .main_memory
+            .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
+            .unwrap();
+        let step_result =
+            machine_state.step_max_handle::<Infallible>(Bound::Included(1), |_| Ok(true));
+        assert_eq!(step_result.error, None);
+
+        // Check that the program counter is now at the handler.
+        assert_eq!(
+            machine_state.core.hart.pc.read(),
+            handler_address.to_machine_address()
+        );
+
+        machine_state.step().unwrap();
+
+        // Check that the program counter returned to the restorer address.
+        assert_eq!(
+            machine_state.core.hart.pc.read(),
+            restorer_address.to_machine_address()
+        );
+
+        // The restorer will just call `rt_sigreturn`
+        // Here that behaviour is emulated.
+
+        // System call number
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a7, RT_SIGRETURN);
+
+        // Perform the system call
+        let mut supervisor_state = SupervisorState::<F>::new();
+        let result = supervisor_state.handle_system_call(
+            &mut machine_state,
+            StdoutDebugHooks,
+            default_on_tezos_handler,
+        );
+        assert!(result);
+
+        // [`Signal::Sigill`] has a TERM disposition by default, so check that the program counter
+        // has been changed to zero.
+        assert_eq!(machine_state.core.hart.pc.read(), 0);
     });
 }

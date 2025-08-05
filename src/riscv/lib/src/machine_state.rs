@@ -32,6 +32,8 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
+use crate::pvm::linux::signals::NO_HANDLER;
+use crate::pvm::linux::signals::Signal;
 use crate::pvm::linux::signals::SignalActions;
 use crate::pvm::linux::signals::SignalActionsLayout;
 use crate::range_utils::bound_saturating_sub;
@@ -493,11 +495,27 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                             );
                         }
 
+                        Exception::IllegalInstruction => {
+                            self.dispatch_signal_or_trap(Signal::Sigill);
+                        }
+
+                        Exception::InstructionAccessFault
+                        | Exception::LoadAccessFault
+                        | Exception::StoreAMOAccessFault
+                        | Exception::InstructionPageFault
+                        | Exception::LoadPageFault
+                        | Exception::StoreAMOPageFault => {
+                            self.dispatch_signal_or_trap(Signal::Sigsegv);
+                        }
+
+                        // There's currently no support for breakpoints - it requires SIGTRAP
+                        Exception::Breakpoint => {
+                            self.core.hart.pc.write(0);
+                        }
+
                         // TODO: RV-758: Handle `ForceFetchRun` by fetching an instruction and
                         // executing it.
-                        _exception => {
-                            // TODO: RV-653: We trap to a "known" bad address right now. This will
-                            // change once synchronous signals are implemented.
+                        Exception::ForceFetchRun => {
                             self.core.hart.pc.write(0);
                         }
                     }
@@ -536,6 +554,19 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         M: ManagerReadWrite,
     {
         self.block_cache.invalidate();
+    }
+
+    fn dispatch_signal_or_trap(&mut self, signal: Signal)
+    where
+        M: ManagerReadWrite,
+    {
+        // We only currently support the `action` field.
+        // TODO RV-732 Parse `sa_flags` subset.
+        let handler = self.core.signal_actions.read_action(signal);
+
+        if handler == NO_HANDLER || self.core.dispatch_signal(signal).is_err() {
+            self.core.hart.pc.write(0);
+        }
     }
 }
 

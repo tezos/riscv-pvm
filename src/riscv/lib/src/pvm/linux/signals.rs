@@ -16,6 +16,7 @@ use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::nz;
 use crate::machine_state::registers::sp;
 use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
@@ -69,6 +70,9 @@ impl LinuxSigAction {
         }
     }
 }
+
+/// The default signal handler - NULL
+pub const NO_HANDLER: VirtAddr = VirtAddr::new(0u64);
 
 /// `size_of(struct sigaction)` on the Kernel side
 const SIZE_SIGACTION: usize = 32;
@@ -238,12 +242,61 @@ struct_layout! {
 }
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
+    /// Set the hart state to a signal handler
+    pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
+        let handler = self.signal_actions.read_action(signal);
+
+        // Having no handler configured isn't an error, it just means we don't do anything else
+        // before continuing the consequences of the signal.
+        if handler == NO_HANDLER {
+            return Ok(());
+        }
+
+        let restorer = self.push_signal_context(signal)?;
+
+        self.hart
+            .xregisters
+            .write_nz(nz::ra, restorer.to_machine_address());
+
+        // Write handler arguments
+        // Signal number
+        self.hart.xregisters.write_nz(nz::a0, signal as u64);
+
+        // TODO RV-754: Implement storing signal information as `siginfo_t`
+        // Pointer to siginfo_t
+        self.hart.xregisters.write_nz(nz::a1, 0u64);
+
+        // TODO RV-754: Implement storing signal execution context as `ucontext_t`
+        // Pointer to ucontext_t
+        self.hart.xregisters.write_nz(nz::a2, 0u64);
+
+        // Update the program counter to the handler
+        self.hart.pc.write(handler.to_machine_address());
+        Ok(())
+    }
+
     /// Pushes the context needed to resume after handling a signal
-    pub fn push_signal_context(&mut self, signal: Signal) -> Result<(), SignalError> {
+    pub fn push_signal_context(&mut self, signal: Signal) -> Result<VirtAddr, SignalError> {
         let signal_index: SignalIndex = signal.into();
-        let signal_index: u64 = signal_index as u64;
-        let mask = self.signal_actions.read_mask(signal);
-        let pc = self.hart.pc.read();
+        let mask = self.signal_actions.read_mask(signal_index);
+
+        // TODO RV-756 Add support for changing signal disposition.
+        //
+        // For signals with a TERM or CORE disposition, we still want to change the program counter
+        // to 0 after the handler.
+        let pc = match signal {
+            Signal::Sigill
+            | Signal::Sigabrt
+            | Signal::Sigiot
+            | Signal::Sigbus
+            | Signal::Sigsegv
+            | Signal::Sigpipe
+            | Signal::Sigterm
+            | Signal::Sigsys => 0,
+            _ => self.hart.pc.read(),
+        };
+
+        let restorer = self.signal_actions.read_restorer(signal_index);
 
         let prev_stack_pointer = self.hart.xregisters.read(sp);
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
@@ -255,7 +308,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             .write(sp, stack_pointer.to_machine_address());
 
         self.main_memory
-            .write(stack_pointer.to_machine_address(), signal_index)?;
+            .write(stack_pointer.to_machine_address(), signal_index as u64)?;
         self.main_memory
             .write(stack_pointer.add(8).to_machine_address(), mask)?;
         self.main_memory
@@ -265,7 +318,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             prev_stack_pointer,
         )?;
 
-        Ok(())
+        Ok(restorer)
     }
 
     /// Pops the context needed to resume after handling a signal
@@ -287,6 +340,8 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         let signal_index =
             SignalIndex::from_repr(signal_index as usize).ok_or(SignalError::BadContext)?;
         self.signal_actions.write_mask(signal_index, mask);
+        // TODO RV-734 Restore the alternative stack
+        // TODO RV-755 Store and restore registers in push/pop_signal_context
 
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
             .add(32)
