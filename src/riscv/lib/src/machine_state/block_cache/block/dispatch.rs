@@ -36,6 +36,7 @@ pub type DispatchFn<D, MC> = unsafe extern "C" fn(
     &mut Jitted<D, MC>,
     &mut MachineCoreState<MC, Owned>,
     Address,
+    usize,
     &mut Result<(), EnvironException>,
     &mut D,
 ) -> usize;

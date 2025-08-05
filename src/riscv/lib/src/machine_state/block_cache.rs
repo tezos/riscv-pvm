@@ -179,7 +179,11 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
     ) -> StepManyResult<EnvironException> {
         if self.entry.block.num_instr() <= max_steps {
             // Safety: the same block builder is passed through every time.
-            unsafe { self.entry.block.run_block(core, instr_pc, block_builder) }
+            unsafe {
+                self.entry
+                    .block
+                    .run_block(core, instr_pc, max_steps, block_builder)
+            }
         } else {
             self.partial.run_block_partial(core, max_steps, self.entry)
         }

@@ -51,11 +51,14 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         block_builder: &mut D,
     ) -> usize {
         if !block_builder.should_compile(&mut self.dispatch) {
-            return unsafe { self.run_block_not_compiled(core, instr_pc, result, block_builder) };
+            return unsafe {
+                self.run_block_not_compiled(core, instr_pc, max_steps, result, block_builder)
+            };
         }
 
         // trigger JIT compilation
@@ -71,7 +74,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
-        unsafe { (fun)(self, core, instr_pc, result, block_builder) }
+        unsafe { (fun)(self, core, instr_pc, max_steps, result, block_builder) }
     }
 
     /// Run a block where JIT-compilation has been attempted, but failed for any reason.
@@ -86,13 +89,18 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
+        max_steps: usize,
         result: &mut Result<(), EnvironException>,
         _block_builder: &mut D,
     ) -> usize {
         let block_result = unsafe {
             // Safety: this function is always safe to call
-            self.fallback
-                .run_block(core, instr_pc, &mut interpreted::InterpretedBlockBuilder)
+            self.fallback.run_block(
+                core,
+                instr_pc,
+                max_steps,
+                &mut interpreted::InterpretedBlockBuilder,
+            )
         };
 
         *result = match block_result.error {
@@ -165,6 +173,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, M
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException> {
         let mut result = Ok(());
@@ -173,7 +182,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, M
 
         // SAFETY: The block builder is always the same instance, guaranteeing that any JIT-compiled
         // function is still alive.
-        let steps = unsafe { (fun)(self, core, instr_pc, &mut result, block_builder) };
+        let steps = unsafe { (fun)(self, core, instr_pc, max_steps, &mut result, block_builder) };
 
         StepManyResult {
             steps,

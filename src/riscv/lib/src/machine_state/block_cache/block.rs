@@ -114,6 +114,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<EnvironException>
     where
@@ -124,10 +125,11 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
     instr: &[EnrichedCell<ICallPlaced<MC, M>, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
+    max_steps: usize,
 ) -> StepManyResult<Exception> {
     let mut result = StepManyResult::ZERO;
 
-    for instr in instr.iter() {
+    for instr in instr.iter().take(max_steps) {
         match run_instr(instr, core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 *instr_pc += width as u64;
