@@ -8,6 +8,7 @@ pub(crate) mod csregisters;
 pub(crate) mod hart_state;
 pub mod instruction;
 pub mod memory;
+pub mod page_cache;
 pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
@@ -24,6 +25,7 @@ use memory::BadMemoryAccess;
 use memory::Memory;
 use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
+use page_cache::PageCache;
 
 use crate::bits::u64;
 use crate::machine_state::block_cache::BlockCacheConfig;
@@ -157,6 +159,8 @@ pub struct MachineState<
     /// The block builder is used to optimise block execution. For example, just-in-time compiling
     /// them to the host architecture.
     pub block_builder: B::BlockBuilder,
+
+    pub page_cache: PageCache<MC, M>,
 }
 
 impl<
@@ -171,6 +175,7 @@ impl<
             core: self.core.clone(),
             block_cache: self.block_cache.clone(),
             block_builder: B::BlockBuilder::default(),
+            page_cache: PageCache::new(),
         }
     }
 }
@@ -235,6 +240,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             core: MachineCoreState::new(),
             block_cache: BlockCache::new(),
             block_builder,
+            page_cache: PageCache::new(),
         }
     }
 
@@ -252,6 +258,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             core: MachineCoreState::bind(space.0),
             block_cache: BCC::bind(space.1),
             block_builder,
+            page_cache: PageCache::new(),
         }
     }
 
@@ -385,12 +392,12 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();
 
-            match self.block_cache.get_block(instr_pc) {
+            match self.page_cache.get_block(instr_pc) {
                 Some(mut block) => {
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(
                         &mut self.core,
-                        &mut self.block_builder,
+                        //&mut self.block_builder,
                         instr_pc,
                         steps_remaining,
                     );
