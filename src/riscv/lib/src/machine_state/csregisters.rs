@@ -15,12 +15,12 @@ use perfect_derive::perfect_derive;
 use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
 use crate::interpreter::float::RoundingMode;
+use crate::jit::builder::typed;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::struct_layout;
-use crate::traps::Exception;
 
 /// CSR index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -39,7 +39,7 @@ use crate::traps::Exception;
     Encode,
     Decode,
 )]
-#[repr(usize)]
+#[repr(u64)]
 pub enum CSRegister {
     // Unprivileged Floating-Point CSRs
     fflags = 0x001,
@@ -138,24 +138,12 @@ impl CSRegister {
     }
 }
 
+impl typed::Typed for CSRegister {
+    const TYPE: typed::Type = typed::Type::Basic(cranelift::prelude::types::I64);
+}
+
 /// Representation of a value in a CSR
 pub type CSRRepr = u64;
-
-/// Return type of read/write operations
-pub type Result<R> = core::result::Result<R, Exception>;
-
-/// Checks that `reg` is write-able.
-///
-/// Throws [`Exception::IllegalInstruction`] in case of wrong access rights.
-/// Section 2.1 - privileged spec
-#[inline]
-pub fn check_write(reg: CSRegister) -> Result<()> {
-    if reg.is_read_only() {
-        return Err(Exception::IllegalInstruction);
-    }
-
-    Ok(())
-}
 
 /// Bit mask for the rounding mode
 const FRM_MASK: CSRRepr = 0b111;
@@ -395,9 +383,21 @@ mod tests {
     use crate::backend_test;
     use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::csregisters::CSRegisters;
-    use crate::machine_state::csregisters::Exception;
-    use crate::machine_state::csregisters::check_write as check;
     use crate::state::NewState;
+    use crate::traps::Exception;
+
+    /// Checks that `reg` is write-able.
+    ///
+    /// Throws [`Exception::IllegalInstruction`] in case of wrong access rights.
+    /// Section 2.1 - privileged spec
+    #[inline]
+    fn check(reg: CSRegister) -> Result<(), Exception> {
+        if reg.is_read_only() {
+            return Err(Exception::IllegalInstruction);
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn test_read_write_access() {

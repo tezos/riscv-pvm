@@ -43,6 +43,7 @@ use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
@@ -607,6 +608,15 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     ) -> Self::FValue {
         self.ext_calls
             .f64_from_x64_unsigned_static(self.builder, self.core_param, xval, rm)
+    }
+
+    fn csr_read(&mut self, reg: CSRegister) -> Self::XValue {
+        self.ext_calls.csr_read(self.builder, self.core_param, reg)
+    }
+
+    fn csr_write(&mut self, reg: CSRegister, value: Self::XValue) {
+        self.ext_calls
+            .csr_write(self.builder, self.core_param, reg, value);
     }
 }
 

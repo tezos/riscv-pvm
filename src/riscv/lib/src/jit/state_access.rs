@@ -33,6 +33,7 @@ use crate::jit::builder::typed;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
@@ -236,6 +237,23 @@ extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryCon
     xval: XValue,
 ) -> FValue {
     MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND)
+}
+
+/// Write to a Control and Status register.
+extern "C" fn csr_write<MC: MemoryConfig>(
+    core: &mut MachineCoreState<MC, Owned>,
+    csr: CSRegister,
+    value: XValue,
+) {
+    core.hart.csregisters.write(csr, value);
+}
+
+/// Read from a Control and Status register.
+extern "C" fn csr_read<MC: MemoryConfig>(
+    core: &MachineCoreState<MC, Owned>,
+    csr: CSRegister,
+) -> XValue {
+    core.hart.csregisters.read(csr)
 }
 
 /// External function call registry for state accesses
@@ -461,6 +479,58 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             reg_value,
             value,
         );
+    }
+
+    /// Write to a Control and Status register.
+    pub(super) fn csr_write(
+        &self,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        csr: CSRegister,
+        value: Value<XValue>,
+    ) {
+        // SAFETY: We construct the typed value from the CSRegister enum discriminant, ensuring
+        // the correct value representation for the CSR parameter.
+        let reg_value = unsafe {
+            Value::<CSRegister>::from_discriminant(&self.target_config, builder, csr as u64 as i64)
+        };
+
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument which means the reference through it
+        //   will be valid for the duration of the call
+        ext_calls::call3(
+            &self.target_config,
+            builder,
+            self::csr_write,
+            unsafe { core_ptr.as_mut() },
+            reg_value,
+            value,
+        );
+    }
+
+    /// Read from a Control and Status register.
+    pub(super) fn csr_read(
+        &self,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        csr: CSRegister,
+    ) -> Value<XValue> {
+        // SAFETY: We construct the typed value from the CSRegister enum discriminant, ensuring
+        // the correct value representation for the CSR parameter.
+        let reg_value = unsafe {
+            Value::<CSRegister>::from_discriminant(&self.target_config, builder, csr as u64 as i64)
+        };
+
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument which means the reference through it
+        //   will be valid for the duration of the call
+        ext_calls::call2(
+            &self.target_config,
+            builder,
+            self::csr_read,
+            unsafe { core_ptr.as_ref() },
+            reg_value,
+        )
     }
 }
 

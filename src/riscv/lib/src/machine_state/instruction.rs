@@ -38,6 +38,7 @@ use crate::instruction_context::Predicate;
 use crate::instruction_context::Shift;
 use crate::interpreter::atomics;
 use crate::interpreter::branching;
+use crate::interpreter::csr;
 use crate::interpreter::float;
 use crate::interpreter::integer;
 use crate::interpreter::load_store;
@@ -652,6 +653,14 @@ impl OpCode {
             // RV64F instructions
             Self::F64FromX64Unsigned => Some(Args::run_f64_from_x64_unsigned),
 
+            // RV64Zicsr instructions
+            Self::Csrrw => Some(Args::run_csrrw),
+            Self::Csrrs => Some(Args::run_csrrs),
+            Self::Csrrc => Some(Args::run_csrrc),
+            Self::Csrrwi => Some(Args::run_csrrwi),
+            Self::Csrrsi => Some(Args::run_csrrsi),
+            Self::Csrrci => Some(Args::run_csrrci),
+
             // Errors
             Self::Unknown => Some(Args::run_illegal),
             Self::ECall => Some(Args::run_ecall),
@@ -1043,27 +1052,19 @@ macro_rules! impl_fcss_type {
 }
 
 macro_rules! impl_csr_type {
-    ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.csr, self.rs1.x, self.rd.x)
-                .map(|_| Next(self.width))
+    ($impl: path, $fn: ident) => {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = $impl(icb, self.csr, self.rs1.x, self.rd.x);
+            I::map(res, |()| Next(self.width))
         }
     };
 }
 
 macro_rules! impl_csr_imm_type {
-    ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception> {
-            core.hart
-                .$fn(self.csr, self.imm as u64, self.rd.x)
-                .map(|_| Next(self.width))
+    ($impl: path, $fn: ident) => {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = $impl(icb, self.csr, self.imm as u64, self.rd.x);
+            I::map(res, |()| Next(self.width))
         }
     };
 }
@@ -1413,12 +1414,12 @@ impl Args {
     impl_f_x_type!(run_fmv_d_x);
 
     // Zicsr instructions
-    impl_csr_type!(run_csrrw);
-    impl_csr_type!(run_csrrs);
-    impl_csr_type!(run_csrrc);
-    impl_csr_imm_type!(run_csrrwi);
-    impl_csr_imm_type!(run_csrrsi);
-    impl_csr_imm_type!(run_csrrci);
+    impl_csr_type!(csr::run_csrrw, run_csrrw);
+    impl_csr_type!(csr::run_csrrs, run_csrrs);
+    impl_csr_type!(csr::run_csrrc, run_csrrc);
+    impl_csr_imm_type!(csr::run_csrrwi, run_csrrwi);
+    impl_csr_imm_type!(csr::run_csrrsi, run_csrrsi);
+    impl_csr_imm_type!(csr::run_csrrci, run_csrrci);
 
     // RV32C compressed instructions
     impl_cr_nz_type!(integer::run_mv, run_mv);

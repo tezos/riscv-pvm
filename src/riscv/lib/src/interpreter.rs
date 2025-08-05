@@ -6,6 +6,7 @@
 pub mod atomics;
 pub mod branching;
 mod common_memory;
+pub mod csr;
 pub mod float;
 pub mod integer;
 pub mod load_store;
@@ -15,5 +16,4 @@ pub mod rv64c;
 pub mod rv64d;
 pub mod rv64dc;
 pub mod rv64f;
-pub mod rv64zicsr;
 pub mod rv64zifencei;

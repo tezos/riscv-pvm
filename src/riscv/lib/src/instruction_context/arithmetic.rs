@@ -47,6 +47,9 @@ pub trait Arithmetic<I: ?Sized>: Copy {
     /// Negate the value of the **XValue**.
     fn negate(self, icb: &mut I) -> Self;
 
+    /// Perform a bitwise not of the **XValue**, returning the new value.
+    fn not(self, icb: &mut I) -> Self;
+
     /// Perform a shift of the **XValue** as determined by the given [`Shift`].
     fn shift(self, shift: Shift, amount: Self, icb: &mut I) -> Self;
 
@@ -105,6 +108,10 @@ impl<I: ?Sized> Arithmetic<I> for XValue {
 
     fn negate(self, _: &mut I) -> Self {
         0_u64.wrapping_sub(self)
+    }
+
+    fn not(self, _: &mut I) -> Self {
+        !self
     }
 
     fn shift(self, shift: Shift, amount: Self, _: &mut I) -> Self {
@@ -175,6 +182,10 @@ impl<I: ?Sized> Arithmetic<I> for XValue32 {
 
     fn negate(self, _: &mut I) -> Self {
         0_u32.wrapping_sub(self)
+    }
+
+    fn not(self, _: &mut I) -> Self {
+        !self
     }
 
     fn shift(self, shift: Shift, amount: Self, _: &mut I) -> Self {
