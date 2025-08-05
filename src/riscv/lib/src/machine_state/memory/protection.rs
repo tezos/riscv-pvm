@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::mem::offset_of;
 use std::ops::Index;
 use std::ops::RangeInclusive;
 
@@ -11,6 +12,9 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use cranelift::codegen::ir;
+use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::isa::TargetFrontendConfig;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -26,10 +30,16 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Address;
+use super::MemoryConfig;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
+use crate::instruction_context::ICB;
+use crate::instruction_context::arithmetic::Arithmetic;
+use crate::jit::state_context::JitStateContext;
+use crate::machine_state::MachineCoreState;
 use crate::state::NewState;
 use crate::state_backend::Cell;
+use crate::state_backend::CellProj;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -37,10 +47,18 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::NarrowlySized;
+use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
+use crate::state_context::StateContext;
+use crate::state_context::projection::ArrayProj;
+use crate::state_context::projection::ArrayProjParam;
+use crate::state_context::projection::BoxProj;
+use crate::state_context::projection::Projection;
+use crate::state_context::projection::TypeCons;
 
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
     pages: Box<[Cell<bool, M>; PAGES]>,
 }
@@ -179,5 +197,90 @@ impl<const PAGES: usize> FromProof for PagePermissions<PAGES, Verify> {
             pages: pages.into_boxed_array(),
         });
         Ok(result)
+    }
+}
+
+/// TODO
+pub struct PagePermissionsCons<const PAGES: usize>;
+
+impl<const PAGES: usize> TypeCons for PagePermissionsCons<PAGES> {
+    type Applied<MC: MemoryConfig, M: ManagerBase> = PagePermissions<PAGES, M>;
+}
+
+/// TODO
+type InnerProj<const PAGES: usize> = BoxProj<ArrayProj<CellProj<bool>, PAGES>>;
+
+/// TODO
+pub struct PagePermissionsProj<const PAGES: usize>;
+
+impl<const PAGES: usize> Projection for PagePermissionsProj<PAGES> {
+    type Subject = PagePermissionsCons<PAGES>;
+
+    type Target = bool;
+
+    type Parameter<SC: StateContext + ?Sized> = SC::Value<u64>;
+
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
+        state: &'a <Self::Subject as TypeCons>::Applied<MC, M>,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
+    ) -> &'a Self::Target {
+        InnerProj::project_ref::<MC, M>(&state.pages, ArrayProjParam {
+            index: param,
+            inner_param: (),
+        })
+    }
+
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
+        state: &'a <Self::Subject as TypeCons>::Applied<MC, M>,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        InnerProj::project_read::<MC, M>(&state.pages, ArrayProjParam {
+            index: param,
+            inner_param: (),
+        })
+    }
+
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
+        state: &'a mut <Self::Subject as TypeCons>::Applied<MC, M>,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
+        value: Self::Target,
+    ) {
+        InnerProj::project_write::<MC, M>(
+            &mut state.pages,
+            ArrayProjParam {
+                index: param,
+                inner_param: (),
+            },
+            value,
+        )
+    }
+
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        base: ir::Value,
+        offset: ir::immediates::Offset32,
+        param: Self::Parameter<SC>,
+    ) -> (ir::Value, ir::immediates::Offset32) {
+        let field_offset = offset_of!(PagePermissions<PAGES, Owned>, pages)
+            .try_into()
+            .expect("Offset should fit into positive i64");
+        let offset = offset
+            .try_add_i64(field_offset)
+            .expect("Offset should not overflow");
+
+        InnerProj::<PAGES>::build_owned_pointer_offset::<MC, SC>(
+            target_config,
+            builder,
+            base,
+            offset,
+            ArrayProjParam {
+                index: param,
+                inner_param: (),
+            },
+        )
     }
 }
