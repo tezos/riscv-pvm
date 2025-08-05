@@ -27,13 +27,13 @@ pub trait StateContext {
     type Value<R>;
 
     /// Read from a region of the machine core state.
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
+    fn read_proj<P>(&mut self, param: P::Parameter<Self>) -> Self::Value<P::Target>
     where
         P: MachineCoreProjection,
         P::Target: Copy + Typed;
 
     /// Write to a region of the machine core state.
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
+    fn write_proj<P>(&mut self, param: P::Parameter<Self>, value: Self::Value<P::Target>)
     where
         P: MachineCoreProjection;
 }
@@ -42,7 +42,7 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCo
     type Value<R> = R;
 
     #[inline]
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
+    fn read_proj<P>(&mut self, param: P::Parameter<Self>) -> Self::Value<P::Target>
     where
         P: MachineCoreProjection,
         P::Target: Copy,
@@ -51,7 +51,7 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCo
     }
 
     #[inline]
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
+    fn write_proj<P>(&mut self, param: P::Parameter<Self>, value: Self::Value<P::Target>)
     where
         P: MachineCoreProjection,
     {

@@ -58,7 +58,9 @@ use octez_riscv_data::mode::Mode;
 pub use proof_layout::*;
 pub use region::*;
 
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_context::StateContext;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::Projection;
 use crate::state_context::projection::RegionCons;
@@ -258,20 +260,20 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
     type Target = E;
 
     // The parameter needs to be a tuple to allow better composition via the `tuples` crate.
-    type Parameter = (usize,);
+    type Parameter<SC: StateContext + ?Sized> = (usize,);
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
         M::region_ref(state, param.0)
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy,
@@ -280,20 +282,20 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
         M::region_write(state, param.0, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         _target_config: &cranelift_isa::TargetFrontendConfig,
         _builder: &mut cranelift_prelude::FunctionBuilder,
         base: cranelift_prelude::Value,
         offset: Offset32,
-        param: Self::Parameter,
+        param: Self::Parameter<SC>,
     ) -> (cranelift_prelude::Value, Offset32) {
         let elem_offset = std::mem::size_of::<E>()
             .checked_mul(param.0)

@@ -31,6 +31,7 @@ use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
 impl From<Predicate> for IntCC {
@@ -50,18 +51,19 @@ impl From<Predicate> for IntCC {
 
 /// Reusable implementation of [`crate::state_context::StateContext::read_proj`] for
 /// the sequencer and instruction builder
-fn read_proj<MC, P>(
+fn read_proj<MC, P, SC>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
     base: Pointer<MachineCoreState<MC, Normal>>,
-    param: P::Parameter,
+    param: P::Parameter<SC>,
 ) -> Value<P::Target>
 where
     MC: MemoryConfig,
     P: MachineCoreProjection,
     P::Target: typed::Typed,
+    SC: StateContext,
 {
-    let (base, offset) = P::build_owned_pointer_offset::<MC>(
+    let (base, offset) = P::build_owned_pointer_offset::<MC, SC>(
         target_config,
         builder,
         base.to_value(),
@@ -84,17 +86,18 @@ where
 
 /// Reusable implementation of [`crate::state_context::StateContext::write_proj`] for
 /// the sequencer and instruction builder
-fn write_proj<MC, P>(
+fn write_proj<MC, P, SC>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
     base: Pointer<MachineCoreState<MC, Normal>>,
-    param: P::Parameter,
+    param: P::Parameter<SC>,
     value: Value<P::Target>,
 ) where
     MC: MemoryConfig,
     P: MachineCoreProjection,
+    SC: StateContext,
 {
-    let (base, offset) = P::build_owned_pointer_offset::<MC>(
+    let (base, offset) = P::build_owned_pointer_offset::<MC, SC>(
         target_config,
         builder,
         base.to_value(),

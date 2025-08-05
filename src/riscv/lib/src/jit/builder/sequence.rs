@@ -496,12 +496,12 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
 impl<D, MC: MemoryConfig> StateContext for SequenceBuilder<'_, D, MC> {
     type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
+    fn read_proj<P>(&mut self, param: P::Parameter<Self>) -> Self::Value<P::Target>
     where
         P: MachineCoreProjection,
         P::Target: Typed,
     {
-        super::read_proj::<MC, P>(
+        super::read_proj::<MC, P, Self>(
             &self.target_config,
             &mut self.builder,
             self.core_param,
@@ -509,11 +509,11 @@ impl<D, MC: MemoryConfig> StateContext for SequenceBuilder<'_, D, MC> {
         )
     }
 
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
+    fn write_proj<P>(&mut self, param: P::Parameter<Self>, value: Self::Value<P::Target>)
     where
         P: MachineCoreProjection,
     {
-        super::write_proj::<MC, P>(
+        super::write_proj::<MC, P, Self>(
             &self.target_config,
             &mut self.builder,
             self.core_param,

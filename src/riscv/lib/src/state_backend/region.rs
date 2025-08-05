@@ -45,6 +45,7 @@ use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use crate::default::ConstDefault;
+use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
@@ -55,6 +56,7 @@ use crate::state_backend::proof_backend;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::verify_backend;
+use crate::state_context::StateContext;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
@@ -200,20 +202,20 @@ impl<E: 'static> Projection for CellProj<E> {
 
     type Target = E;
 
-    type Parameter = ();
+    type Parameter<SC: StateContext + ?Sized> = ();
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
+        _param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
         state.as_ref()
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
+        _param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy,
@@ -222,25 +224,25 @@ impl<E: 'static> Projection for CellProj<E> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
+        _param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
         state.write(value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         target_config: &cranelift_isa::TargetFrontendConfig,
         builder: &mut cranelift_prelude::FunctionBuilder,
         base: cranelift_prelude::Value,
         offset: Offset32,
-        _param: Self::Parameter,
+        _param: Self::Parameter<SC>,
     ) -> (cranelift_prelude::Value, Offset32) {
         let field_offset = std::mem::offset_of!(Cell<E, Normal>, region.region);
         let offset = offset32_try_add(offset, field_offset);
 
-        RegionProj::<E, 1>::build_owned_pointer_offset::<MC>(
+        RegionProj::<E, 1>::build_owned_pointer_offset::<MC, SC>(
             target_config,
             builder,
             base,
@@ -473,20 +475,20 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
 
     type Target = E;
 
-    type Parameter = <RegionProj<E, LEN> as Projection>::Parameter;
+    type Parameter<SC: StateContext + ?Sized> = <RegionProj<E, LEN> as Projection>::Parameter<SC>;
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
         RegionProj::<E, LEN>::project_ref::<MC, M>(&state.region, param)
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy,
@@ -495,25 +497,25 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
         RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         target_config: &cranelift_isa::TargetFrontendConfig,
         builder: &mut cranelift_prelude::FunctionBuilder,
         base: cranelift_prelude::Value,
         offset: Offset32,
-        param: Self::Parameter,
+        param: Self::Parameter<SC>,
     ) -> (cranelift_prelude::Value, Offset32) {
         let field_offset = std::mem::offset_of!(Cells<E, LEN, Normal>, region);
         let offset = offset32_try_add(offset, field_offset);
 
-        RegionProj::<E, LEN>::build_owned_pointer_offset::<MC>(
+        RegionProj::<E, LEN>::build_owned_pointer_offset::<MC, SC>(
             target_config,
             builder,
             base,

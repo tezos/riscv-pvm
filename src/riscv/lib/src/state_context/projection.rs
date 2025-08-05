@@ -29,6 +29,7 @@ use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
+use crate::state_context::StateContext;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -113,38 +114,38 @@ pub trait Projection {
     /// For example, this could be an index when the projection is selecting an element from an
     /// array. In practise this can be any kind of information that is required to perform the
     /// projection.
-    type Parameter;
+    type Parameter<SC: StateContext + ?Sized>;
 
     /// Obtain a reference to the target value within the subject value.
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target;
 
     /// Read the target value from the subject value.
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy;
 
     /// Obtain a mutable reference to the target value within the subject value.
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     );
 
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
     /// value. This is exclusive to the [`octez_riscv_data::mode::Normal`] mode.
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
         offset: Offset32,
-        param: Self::Parameter,
+        param: Self::Parameter<SC>,
     ) -> (ir::Value, Offset32);
 }
 
@@ -156,18 +157,18 @@ impl<P: Projection> Projection for BoxProj<P> {
 
     type Target = P::Target;
 
-    type Parameter = P::Parameter;
+    type Parameter<SC: StateContext + ?Sized> = P::Parameter<SC>;
 
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
         P::project_ref::<MC, M>(state.deref(), param)
     }
 
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy,
@@ -175,20 +176,20 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_read::<MC, M>(state.deref(), param)
     }
 
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
         P::project_write::<MC, M>(state.deref_mut(), param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
         offset: Offset32,
-        param: Self::Parameter,
+        param: Self::Parameter<SC>,
     ) -> (ir::Value, Offset32) {
         let new_base = builder.ins().load(
             target_config.pointer_type(),
@@ -200,7 +201,7 @@ impl<P: Projection> Projection for BoxProj<P> {
         // The previous offset does not apply anymore, since we have loaded a new base pointer.
         let new_offset = Offset32::new(0);
 
-        P::build_owned_pointer_offset::<MC>(target_config, builder, new_base, new_offset, param)
+        P::build_owned_pointer_offset::<MC, SC>(target_config, builder, new_base, new_offset, param)
     }
 }
 
@@ -221,19 +222,19 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
 
     type Target = P::Target;
 
-    type Parameter = ArrayProjParam<P::Parameter>;
+    type Parameter<SC: StateContext + ?Sized> = ArrayProjParam<P::Parameter<SC>>;
 
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
         let inner_state = &state[param.index];
         P::project_ref::<MC, M>(inner_state, param.inner_param)
     }
 
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> Self::Target
     where
         Self::Target: Copy,
@@ -242,21 +243,21 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         P::project_read::<MC, M>(inner_state, param.inner_param)
     }
 
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
         let inner_state = &mut state[param.index];
         P::project_write::<MC, M>(inner_state, param.inner_param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
         offset: Offset32,
-        param: Self::Parameter,
+        param: Self::Parameter<SC>,
     ) -> (ir::Value, Offset32) {
         let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>();
         let elem_offset = param
@@ -265,7 +266,13 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
             .expect("Element offset should not overflow");
 
         let offset = offset32_try_add(offset, elem_offset);
-        P::build_owned_pointer_offset::<MC>(target_config, builder, base, offset, param.inner_param)
+        P::build_owned_pointer_offset::<MC, SC>(
+            target_config,
+            builder,
+            base,
+            offset,
+            param.inner_param,
+        )
     }
 }
 
@@ -377,16 +384,17 @@ macro_rules! impl_projection {
 
             type Target = <$target as $crate::state_context::projection::Projection>::Target;
 
-            type Parameter = <$target as $crate::state_context::projection::Projection>::Parameter;
+            type Parameter<SC: $crate::state_context::StateContext + ?Sized> =
+                <$target as $crate::state_context::projection::Projection>::Parameter<SC>;
 
             #[inline]
             fn project_ref<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerRead + 'a,
+                M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerWrite + 'a,
             >(
                 state: &'a $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
-                param: Self::Parameter,
+                param: Self::Parameter<$crate::machine_state::MachineCoreState<MC, M>>,
             ) -> &'a Self::Target {
                 <$target>::project_ref::<MC, M>(
                     &state.$($field).+,
@@ -398,10 +406,10 @@ macro_rules! impl_projection {
             fn project_read<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerRead + 'a,
+                M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerWrite + 'a,
             >(
                 state: &'a $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
-                param: Self::Parameter,
+                param: Self::Parameter<$crate::machine_state::MachineCoreState<MC, M>>,
             ) -> Self::Target {
                 <$target>::project_read::<MC, M>(
                     &state.$($field).+,
@@ -413,10 +421,10 @@ macro_rules! impl_projection {
             fn project_write<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerWrite + 'a,
+                M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerWrite + 'a,
             >(
                 state: &'a mut $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
-                param: Self::Parameter,
+                param: Self::Parameter<$crate::machine_state::MachineCoreState<MC, M>>,
                 value: Self::Target,
             ) {
                 <$target>::project_write::<MC, M>(
@@ -426,12 +434,15 @@ macro_rules! impl_projection {
                 )
             }
 
-            fn build_owned_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
+            fn build_owned_pointer_offset<
+                MC: $crate::machine_state::memory::MemoryConfig,
+                SC: $crate::state_context::StateContext,
+            >(
                 target_config: &cranelift::prelude::isa::TargetFrontendConfig,
                 builder: &mut cranelift::prelude::FunctionBuilder,
                 base: cranelift::codegen::ir::Value,
                 offset: cranelift::codegen::ir::immediates::Offset32,
-                param: Self::Parameter,
+                param: Self::Parameter<SC>,
             ) -> (cranelift::codegen::ir::Value, cranelift::codegen::ir::immediates::Offset32) {
                 let field_offset = std::mem::offset_of!(
                     $crate::state_context::projection::ApplyCons<
@@ -443,7 +454,7 @@ macro_rules! impl_projection {
                 );
                 let offset = $crate::state_context::projection::offset32_try_add(offset, field_offset);
 
-                <$target>::build_owned_pointer_offset::<MC>(
+                <$target>::build_owned_pointer_offset::<MC, SC>(
                     target_config,
                     builder,
                     base,

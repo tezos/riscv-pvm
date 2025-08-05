@@ -607,19 +607,19 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
     type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
+    fn read_proj<P>(&mut self, param: P::Parameter<Self>) -> Self::Value<P::Target>
     where
         P: MachineCoreProjection,
         P::Target: Typed,
     {
-        super::read_proj::<MC, P>(&self.target_config, self.builder, self.core_param, param)
+        super::read_proj::<MC, P, Self>(&self.target_config, self.builder, self.core_param, param)
     }
 
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
+    fn write_proj<P>(&mut self, param: P::Parameter<Self>, value: Self::Value<P::Target>)
     where
         P: MachineCoreProjection,
     {
-        super::write_proj::<MC, P>(
+        super::write_proj::<MC, P, Self>(
             &self.target_config,
             self.builder,
             self.core_param,
