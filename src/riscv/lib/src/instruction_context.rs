@@ -28,7 +28,6 @@ use crate::machine_state::instruction::Args;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
@@ -91,12 +90,6 @@ where
 
     /// Construct an [`ICB::XValue32`] from an `imm: i32`.
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32;
-
-    #[expect(unused, reason = "Will Be Used Soon™")]
-    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue;
-
-    /// Perform a write to a [`FRegister`], with the given value.
-    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue);
 
     /// Perform a read of the program counter.
     fn pc_read(&mut self) -> Self::XValue;
@@ -240,16 +233,6 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
 
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32 {
         imm as u32
-    }
-
-    #[inline(always)]
-    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
-        self.hart.fregisters.read(reg)
-    }
-
-    #[inline(always)]
-    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
-        self.hart.fregisters.write(reg, value)
     }
 
     #[inline(always)]

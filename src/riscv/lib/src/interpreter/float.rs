@@ -26,6 +26,7 @@ use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::read_xregister;
+use crate::machine_state::registers::write_fregister;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend as backend;
 
@@ -676,7 +677,7 @@ pub fn run_f64_from_x64_unsigned<I: ICB>(
         InstrRoundingMode::Static(rm) => icb.f64_from_x64_unsigned_static(xval, rm),
         InstrRoundingMode::Dynamic => icb.f64_from_x64_unsigned_dynamic(xval),
     };
-    icb.fregister_write(rd, fval);
+    write_fregister(icb, rd, fval);
 }
 
 #[cfg(test)]

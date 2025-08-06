@@ -46,7 +46,6 @@ use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
@@ -314,17 +313,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // SAFETY: The value returned by `uextend` is of type `I64` which matches the representation
         // of `XValue`.
         unsafe { Value::<XValue>::from_raw(raw) }
-    }
-
-    fn fregister_read(&mut self, reg: FRegister) -> Self::FValue {
-        self.ext_calls
-            .ir_freg_read(self.builder, self.core_param, reg)
-    }
-
-    fn fregister_write(&mut self, reg: FRegister, value: Self::FValue) {
-        // The value contained must be a floating-point type.
-        self.ext_calls
-            .ir_freg_write(self.builder, self.core_param, reg, value)
     }
 
     fn pc_read(&mut self) -> Self::XValue {

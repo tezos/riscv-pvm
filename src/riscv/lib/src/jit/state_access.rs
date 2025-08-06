@@ -38,7 +38,6 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
@@ -132,23 +131,6 @@ impl Value<ExceptionCode> {
 
 impl typed::Typed for ExceptionCode {
     const TYPE: typed::Type = typed::Type::Basic(I64);
-}
-
-/// Read the value of the given [`FRegister`].
-extern "C" fn fregister_read<MC: MemoryConfig>(
-    core: &MachineCoreState<MC, Owned>,
-    reg: FRegister,
-) -> FValue {
-    core.hart.fregisters.read(reg)
-}
-
-/// Write the given value to the given [`FRegister`].
-extern "C" fn fregister_write<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
-    reg: FRegister,
-    val: FValue,
-) {
-    core.hart.fregisters.write(reg, val)
 }
 
 /// Handle an [`ExceptionCode`].
@@ -429,56 +411,6 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             unsafe { core_ptr.as_mut() },
             xval,
         )
-    }
-
-    /// Emit the required IR to read the value from the given fregister.
-    pub(super) fn ir_freg_read(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-        reg: FRegister,
-    ) -> Value<FValue> {
-        // SAFETY: We construct the typed value from the `FRegister`, thereby ensuring the use of
-        // the right discriminant.
-        let reg_value = unsafe {
-            Value::<FRegister>::from_discriminant(&self.target_config, builder, reg as u8 as i64)
-        };
-
-        // SAFETY: The `core_ptr` is a JIT function argument which means the reference through it
-        // will be valid for the duration of the call.
-        ext_calls::call2(
-            &self.target_config,
-            builder,
-            self::fregister_read,
-            unsafe { core_ptr.as_ref() },
-            reg_value,
-        )
-    }
-
-    /// Emit the required IR to write the value to the given fregister.
-    pub(super) fn ir_freg_write(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
-        reg: FRegister,
-        value: Value<FValue>,
-    ) {
-        // SAFETY: We construct the typed value from the `FRegister`, thereby ensuring the use of
-        // the right discriminant.
-        let reg_value = unsafe {
-            Value::<FRegister>::from_discriminant(&self.target_config, builder, reg as u8 as i64)
-        };
-
-        // SAFETY: The `core_ptr` is a JIT function argument which means the reference through it
-        // will be valid for the duration of the call.
-        ext_calls::call3(
-            &self.target_config,
-            builder,
-            self::fregister_write,
-            unsafe { core_ptr.as_mut() },
-            reg_value,
-            value,
-        );
     }
 
     /// Write to a Control and Status register.

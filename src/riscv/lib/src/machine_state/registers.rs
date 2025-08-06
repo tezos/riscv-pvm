@@ -703,6 +703,26 @@ pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::X
     icb.write_proj::<XRegisterProj>((reg as usize,), value)
 }
 
+impl_projection! {
+    projection FRegisterProj {
+        subject = MachineCoreCons,
+        target_projection = CellsProj<FValue, 32>,
+        path = hart.fregisters.registers,
+    }
+}
+
+/// Read from a floating-point number register.
+#[inline]
+pub fn read_fregister<I: ICB>(icb: &mut I, reg: FRegister) -> I::FValue {
+    icb.read_proj::<FRegisterProj>((reg as usize,))
+}
+
+/// Write to a floating-point number register.
+#[inline]
+pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
+    icb.write_proj::<FRegisterProj>((reg as usize,), value)
+}
+
 #[cfg(test)]
 mod tests {
     use arbitrary_int::Number;
