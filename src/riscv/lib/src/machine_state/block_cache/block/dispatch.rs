@@ -32,10 +32,6 @@ use crate::traps::EnvironException;
 /// additional work over just execution.
 ///
 /// The first and last parameters must be thin-references, for ABI-compatability reasons.
-#[expect(
-    improper_ctypes_definitions,
-    reason = "The receiving functions know the layout of the referenced types"
-)]
 pub type DispatchFn<D, MC> = unsafe extern "C" fn(
     &mut Jitted<D, MC>,
     &mut MachineCoreState<MC, Owned>,

@@ -2,10 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fmt;
-use std::num::NonZeroU64;
-
 use arbitrary_int::u7;
+use strum::EnumCount;
 use strum::FromRepr;
 
 use super::error::Error;
@@ -13,11 +11,96 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::SupervisorState;
+use crate::pvm::linux::VirtAddr;
+use crate::state::NewState;
+use crate::state_backend::AllocatedOf;
+use crate::state_backend::Atom;
+use crate::state_backend::Cell;
+use crate::state_backend::FnManager;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::Ref;
+use crate::struct_layout;
 
 /// `size_of(struct sigaction)` on the Kernel side
-pub const SIZE_SIGACTION: usize = 32;
+const SIZE_SIGACTION: usize = 32;
+
+// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the linux sigaction
+// struct will have its own array of the primitives or wrappers around primitives (e.g.
+// [VirtAddr]) used for the member's type.
+
+/// Information to support handling each supported signal
+pub struct SignalActions<M: ManagerBase> {
+    /// An array of [VirtAddr]s, one action for each supported signal
+    actions: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+}
+
+struct_layout! {
+    /// Layout for [SignalActions]
+    pub struct SignalActionsLayout {
+        action: [Atom<VirtAddr>; SignalIndex::COUNT],
+    }
+}
+
+impl<M: ManagerAlloc> Default for SignalActions<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: ManagerBase> SignalActions<M> {
+    /// Bind the given allocated regions to the supervisor state.
+    pub fn bind(space: AllocatedOf<SignalActionsLayout, M>) -> Self {
+        SignalActions::<M> {
+            actions: space.action,
+        }
+    }
+
+    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
+    /// the constituents of `N` that were produced from the constituents of `&M`.
+    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
+        &'a self,
+    ) -> AllocatedOf<SignalActionsLayout, F::Output> {
+        SignalActionsLayoutF {
+            action: self
+                .actions
+                .each_ref()
+                .map(|sig_action| Cell::struct_ref::<F>(sig_action)),
+        }
+    }
+
+    /// Reset to the default state
+    pub fn reset(&mut self)
+    where
+        M: ManagerReadWrite,
+    {
+        self.actions
+            .iter_mut()
+            .for_each(|sig_action| sig_action.write(VirtAddr::new(0)));
+    }
+}
+
+impl<M: ManagerBase> NewState<M> for SignalActions<M> {
+    /// Allocate a new [SignalActions]
+    fn new() -> Self
+    where
+        M: ManagerAlloc,
+    {
+        SignalActions::<M> {
+            actions: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+        }
+    }
+}
+
+impl<M: ManagerClone> Clone for SignalActions<M> {
+    fn clone(&self) -> Self {
+        SignalActions::<M> {
+            actions: self.actions.clone(),
+        }
+    }
+}
 
 /// Size of the `sigset_t` type in bytes
 ///
@@ -53,7 +136,7 @@ impl TryFrom<u64> for Signal {
 
 /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
 /// The representation of these enums are used for indices into signal action storage.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, EnumCount)]
 #[repr(usize)]
 pub enum SignalIndex {
     Sigill = 0,
@@ -114,25 +197,19 @@ impl TryFrom<u64> for TkillSignal {
 }
 
 /// An address of a signal action in the VM memory
-#[derive(Clone, Copy)]
-pub struct SignalActionPtr(pub Option<NonZeroU64>);
+#[derive(Clone, Copy, Debug)]
+pub struct SignalActionPtr(Option<VirtAddr>);
 
 impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
     pub fn address(&self) -> Option<u64> {
-        self.0.map(|nz| nz.get())
-    }
-}
-
-impl fmt::Debug for SignalActionPtr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0.map(|nz| nz.get()).unwrap_or(0))
+        self.0.map(|addr| addr.to_machine_address())
     }
 }
 
 impl From<u64> for SignalActionPtr {
     fn from(value: u64) -> Self {
-        SignalActionPtr(NonZeroU64::new(value))
+        SignalActionPtr(Some(VirtAddr::new(value)))
     }
 }
 
