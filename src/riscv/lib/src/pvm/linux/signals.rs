@@ -126,6 +126,12 @@ pub enum Signal {
     Sigsys = 31,
 }
 
+#[expect(dead_code, reason = "Used by divergent branches based on this PR")]
+fn signal_index(signal: Signal) -> usize {
+    let signal_index: SignalIndex = signal.into();
+    unsafe { std::mem::transmute::<SignalIndex, usize>(signal_index) }
+}
+
 impl TryFrom<u64> for Signal {
     type Error = Error;
 
