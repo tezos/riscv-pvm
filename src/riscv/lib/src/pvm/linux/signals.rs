@@ -33,14 +33,27 @@ const SIZE_SIGACTION: usize = 32;
 
 /// Information to support handling each supported signal
 pub struct SignalActions<M: ManagerBase> {
+    /// An array of [VirtAddr]s, unused
+    handlers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
     /// An array of [VirtAddr]s, one action for each supported signal
     actions: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+    /// An array of bitmasks, one mask for each supported signal
+    masks: [Cell<u32, M>; SignalIndex::COUNT],
+    /// An array of bitmasks, one set of flags for each supported signal
+    flags: [Cell<u32, M>; SignalIndex::COUNT],
+    /// An array of [VirtAddr]s, restorers for each signal, see
+    /// <https://www.man7.org/linux/man-pages/man2/sigreturn.2.html>
+    restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
 }
 
 struct_layout! {
     /// Layout for [SignalActions]
     pub struct SignalActionsLayout {
-        action: [Atom<VirtAddr>; SignalIndex::COUNT],
+        handlers: [Atom<VirtAddr>; SignalIndex::COUNT],
+        actions: [Atom<VirtAddr>; SignalIndex::COUNT],
+        masks: [Atom<u32>; SignalIndex::COUNT],
+        flags: [Atom<u32>; SignalIndex::COUNT],
+        restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
     }
 }
 
@@ -54,7 +67,11 @@ impl<M: ManagerBase> SignalActions<M> {
     /// Bind the given allocated regions to the supervisor state.
     pub fn bind(space: AllocatedOf<SignalActionsLayout, M>) -> Self {
         SignalActions::<M> {
-            actions: space.action,
+            handlers: space.handlers,
+            actions: space.actions,
+            masks: space.masks,
+            flags: space.flags,
+            restorers: space.restorers,
         }
     }
 
@@ -64,10 +81,26 @@ impl<M: ManagerBase> SignalActions<M> {
         &'a self,
     ) -> AllocatedOf<SignalActionsLayout, F::Output> {
         SignalActionsLayoutF {
-            action: self
+            handlers: self
+                .handlers
+                .each_ref()
+                .map(|handler| Cell::struct_ref::<F>(handler)),
+            actions: self
                 .actions
                 .each_ref()
                 .map(|sig_action| Cell::struct_ref::<F>(sig_action)),
+            masks: self
+                .masks
+                .each_ref()
+                .map(|mask| Cell::struct_ref::<F>(mask)),
+            flags: self
+                .flags
+                .each_ref()
+                .map(|flag| Cell::struct_ref::<F>(flag)),
+            restorers: self
+                .restorers
+                .each_ref()
+                .map(|restorer| Cell::struct_ref::<F>(restorer)),
         }
     }
 
@@ -89,7 +122,11 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
         M: ManagerAlloc,
     {
         SignalActions::<M> {
+            handlers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
             actions: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+            masks: core::array::from_fn(|_| Cell::new_with(0u32)),
+            flags: core::array::from_fn(|_| Cell::new_with(0u32)),
+            restorers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
         }
     }
 }
@@ -97,7 +134,11 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
 impl<M: ManagerClone> Clone for SignalActions<M> {
     fn clone(&self) -> Self {
         SignalActions::<M> {
+            handlers: self.handlers.clone(),
             actions: self.actions.clone(),
+            masks: self.masks.clone(),
+            flags: self.flags.clone(),
+            restorers: self.restorers.clone(),
         }
     }
 }
