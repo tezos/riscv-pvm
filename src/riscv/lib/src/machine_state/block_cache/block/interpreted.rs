@@ -7,17 +7,19 @@
 
 use perfect_derive::perfect_derive;
 
+use super::run_block_inner;
 use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::CACHE_INSTR;
 use crate::machine_state::block_cache::ICallPlaced;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::BlockLayout;
-use crate::machine_state::block_cache::block::run_block_inner;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::CacheEntry;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Cell;

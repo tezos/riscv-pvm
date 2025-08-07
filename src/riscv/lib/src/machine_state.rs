@@ -316,7 +316,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             // Writable memory means that the instruction is not cacheable
             if !lower.writable {
-                self.block_cache.push_instr_compressed(addr, instr);
+                //    self.block_cache.push_instr_compressed(addr, instr);
+                self.page_cache.populate(addr, &mut self.core);
             }
 
             instr
@@ -330,7 +331,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             // Writable memory means that the instruction is not cacheable
             if !combined.writable {
-                self.block_cache.push_instr_uncompressed(addr, instr);
+                //    self.block_cache.push_instr_uncompressed(addr, instr);
+                self.page_cache.populate(addr, &mut self.core);
             }
 
             instr
@@ -394,6 +396,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             match self.page_cache.get_block(instr_pc) {
                 Some(mut block) => {
+                    //eprintln!("found_block {instr_pc}");
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(
                         &mut self.core,
