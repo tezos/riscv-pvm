@@ -13,7 +13,7 @@ cd "$RISCV_DIR"
 
 USAGE="Usage: [ -s: static inbox ] [ -n: run natively ]"
 
-TX="15"
+TX="200"
 SANDBOX_BIN="riscv-sandbox"
 DEFAULT_ROLLUP_ADDRESS="sr163Lv22CdE8QagCwf48PWDTquk6isQwv57"
 ETHERLINK_SANDBOX_PARAMS=("--input" "kernels/etherlink/target/riscv64gc-unknown-linux-musl/release/etherlink")
