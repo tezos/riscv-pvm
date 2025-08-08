@@ -70,24 +70,18 @@ fn extract_transactions_from_log(log: &[LogLine]) -> Result<Vec<Tx>> {
     let mut txs: Vec<Tx> = Vec::new();
     let mut tx_builder: Option<TxBuilder> = None;
     for line in log {
-        if line.message == TX_START_LINE {
+        if line.message.starts_with(TX_OUTCOME_LINE) {
             // If a transaction is already in progress (i.e., this is not
             // the first transaction), build it using the new transaction's
             // start time as its end time.
             if let Some(txb) = tx_builder.take() {
-                txs.push(txb.build(Some(line.elapsed))?);
-            }
-            tx_builder = Some(TxBuilder::new(line.elapsed));
-        }
-
-        if line.message.starts_with(TX_OUTCOME_LINE) {
-            let txb = tx_builder
-                .ok_or("Parsed unexpected transaction outcome: no transaction in progress")?;
+                txs.push(txb.build(Some(line.elapsed))?)
+            };
+            let txb = TxBuilder::new(line.elapsed);
             let tx_outcome = parse_execution_outcome(&line.message)
                 .ok_or("Could not extract transaction execution outcome")?;
             tx_builder = Some(txb.outcome(tx_outcome));
         }
-
         if line.message.starts_with(TX_END_LINE) {
             let txb = tx_builder
                 .ok_or("Parsed unexpected transaction end: no transaction in progress")?;
@@ -421,6 +415,5 @@ fn u64_from_ethereum_u256_bytes(bytes: &[u8]) -> Option<u64> {
     }
 }
 
-const TX_START_LINE: &str = "[Debug] Going to run an Ethereum transaction";
 const TX_OUTCOME_LINE: &str = "[Debug] Transaction executed, outcome:";
 const TX_END_LINE: &str = "[Debug] Applying FeeUpdates";
