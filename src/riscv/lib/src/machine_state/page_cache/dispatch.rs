@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 use super::CacheEntry;
+use super::OFFSET_MASK;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
@@ -38,7 +39,7 @@ use crate::traps::EnvironException;
     reason = "The receiving functions know the layout of the referenced types"
 )]
 pub type DispatchFn<D, MC> = unsafe extern "C" fn(
-    &mut [CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048],
+    &Arc<[CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048]>,
     &mut MachineCoreState<MC, Owned>,
     Address,
     usize,
@@ -55,8 +56,8 @@ pub struct DispatchTarget<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// This will allow the `fun` to be updated from a background thread.
     /// See <https://doc.rust-lang.org/std/primitive.fn.html#casting-to-and-from-integers> for
     /// considerations taken whilst converting pointer <--> usize.
-    fun: Arc<AtomicUsize>,
-    remaining_calls: usize,
+    fun: AtomicUsize,
+    remaining_calls: internal_corro::UnsafeSyncCell<usize>,
     _pd: PhantomData<(D, MC)>,
 }
 
@@ -68,11 +69,9 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
         // If we just reset the current arc, outline jit could update it from the background thread
         // after reset it - meaning a reset/under construction block could now have a jitted function for
         // a completely different set of instructions.
-        self.fun = Arc::new(AtomicUsize::new(
-            CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize,
-        ));
+        self.fun = AtomicUsize::new(CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize);
 
-        self.remaining_calls = 1000;
+        unsafe { self.remaining_calls.get().write(1000) };
     }
 
     /// Set the dispatch target to use the given `block_run` function.
@@ -101,10 +100,8 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
     fn default() -> Self {
         Self {
-            fun: Arc::new(AtomicUsize::new(
-                CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize,
-            )),
-            remaining_calls: 1000,
+            fun: AtomicUsize::new(CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize),
+            remaining_calls: internal_corro::UnsafeSyncCell::new(1000),
             _pd: PhantomData,
         }
     }
@@ -114,7 +111,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC
 /// said block in the given dispatch target.
 pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// Whether compilation should be attempted for the block.
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool;
+    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool;
 
     /// Compile a block, hot-swapping the `run_block` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
@@ -125,8 +122,7 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// outline jit, especially).
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
-        instr: Vec<Instruction>,
+        entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC>;
 }
@@ -146,7 +142,7 @@ impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
 
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
     #[inline]
-    fn should_compile(&self, _target: &mut DispatchTarget<Self, MC>) -> bool {
+    fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
         // every block must be compiled immediately for inline jit, as it's used for testing
         // jit compatibility with interpreted mode.
         true
@@ -154,11 +150,20 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
-        instr: Vec<Instruction>,
+        entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
-        let fun = match self.jit.compile(&instr, program_counter) {
+        let mut instructions = Vec::with_capacity(40);
+        let offset = ((program_counter & OFFSET_MASK) >> 1) as usize;
+        let mut index = offset;
+
+        while index < 2048 && instructions.len() < instructions.capacity() {
+            let i = entries[index].instr;
+            index += i.width() as usize >> 1;
+            instructions.push(i);
+        }
+
+        let fun = match self.jit.compile(&instructions, program_counter) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
                 // last parameters. These are both thin-pointers, and ignored by the JitFn.
@@ -174,7 +179,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
             None => CacheEntry::run_block_not_compiled,
         };
 
-        target.set(fun);
+        entries[offset].block_run.set(fun);
 
         fun
     }
@@ -182,6 +187,26 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
 
 /// Unsafe Rust escape hatches
 mod internal_corro {
+
+    #[derive(Default)]
+    pub(super) struct UnsafeSyncCell<T> {
+        cell: std::cell::UnsafeCell<T>,
+    }
+
+    unsafe impl<T> Sync for UnsafeSyncCell<T> {}
+
+    impl<T> UnsafeSyncCell<T> {
+        pub unsafe fn get(&self) -> *mut T {
+            self.cell.get()
+        }
+
+        pub fn new(v: T) -> Self {
+            Self {
+                cell: std::cell::UnsafeCell::new(v),
+            }
+        }
+    }
+
     /// A wrapper to make a value `Send`
     #[derive(Default)]
     pub(super) struct SendWrapper<T> {
@@ -213,10 +238,10 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
     _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
-    sender: Sender<CompilationRequest>,
+    sender: Sender<CompilationRequest<MC, Self>>,
 }
 
-impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
+impl<MC: MemoryConfig + Send + Sync> OutlineCompiler<MC> {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
         let jit: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>> = Default::default();
@@ -234,9 +259,14 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
-                    if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
+                    let instr = msg.instr();
+                    let fun = &msg.entries[((msg.program_counter & OFFSET_MASK) >> 1) as usize]
+                        .block_run
+                        .fun;
+
+                    if let Some(jitfn) = jit.compile(&instr, msg.program_counter) {
                         debug_assert_eq!(
-                            msg.fun.load(Ordering::Acquire),
+                            fun.load(Ordering::Acquire),
                             CacheEntry::<MC, DispatchTarget<Self, MC>, Owned>::run_block_not_compiled as usize,
                             "Unexpected function pointer in dispatch target"
                         );
@@ -251,7 +281,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                         //
                         // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
                         // information on ABI compatability.
-                        msg.fun.store(jitfn as usize, Ordering::Release);
+                        fun.store(jitfn as usize, Ordering::Release);
                     };
                 }
             }
@@ -273,13 +303,14 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
 }
 
 impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool {
+    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool {
         unsafe {
-            match target.remaining_calls {
+            let x = target.remaining_calls.get();
+            match *x {
                 0 => true,
-                _ => {
+                a => {
                     //SAFETY: `remaining_calls` (a usize) can only be a positive, non-zero integer
-                    target.remaining_calls = target.remaining_calls.unchecked_sub(1);
+                    x.write(a.unchecked_sub(1));
                     false
                 }
             }
@@ -288,21 +319,21 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
-        instr: Vec<Instruction>,
+        entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
         let fun = CacheEntry::run_block_not_compiled;
-        target.set(fun);
+
+        let offset = ((program_counter & OFFSET_MASK) >> 1) as usize;
+        entries[offset].block_run.set(fun);
 
         // Single instruction blocks don't perform as well when compiled
-        if instr.len() <= 1 {
-            return fun;
-        }
+        //if instr.len() <= 1 {
+        //    return fun;
+        //}
 
         let request = CompilationRequest {
-            instr,
-            fun: target.fun.clone(),
+            entries,
             program_counter,
         };
 
@@ -321,8 +352,22 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     }
 }
 
-struct CompilationRequest {
-    instr: Vec<Instruction>,
-    fun: Arc<AtomicUsize>,
+struct CompilationRequest<MC: MemoryConfig, D: DispatchCompiler<MC>> {
+    entries: Arc<[CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048]>,
     program_counter: Address,
+}
+
+impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CompilationRequest<MC, D> {
+    fn instr(&self) -> Vec<Instruction> {
+        let mut instructions = Vec::with_capacity(40);
+        let mut index = ((self.program_counter & OFFSET_MASK) >> 1) as usize;
+
+        while index < 2048 && instructions.len() < instructions.capacity() {
+            let i = self.entries[index].instr;
+            index += i.width() as usize >> 1;
+            instructions.push(i);
+        }
+
+        instructions
+    }
 }

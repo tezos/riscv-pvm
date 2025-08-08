@@ -285,7 +285,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 }
 
 /// Memory configuration
-pub trait MemoryConfig: Send + 'static {
+pub trait MemoryConfig: Send + Sync + 'static {
     /// Number of bytes in the memory
     const TOTAL_BYTES: usize;
 

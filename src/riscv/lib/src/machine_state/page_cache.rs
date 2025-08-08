@@ -1,6 +1,8 @@
 pub mod dispatch;
 
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::sync::Arc;
 
 use dispatch::DispatchCompiler;
 use dispatch::DispatchTarget;
@@ -46,10 +48,9 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCache<MC, BR,
 
         self.pages
             .get_mut(page_index)
-            .map(|page| page.as_mut())
-            .flatten()
+            .and_then(|page| page.as_ref())
             .map(|page| BlockCall {
-                entries: &mut page.entries,
+                entries: &page.entries,
                 _pd: PhantomData,
             })
     }
@@ -77,7 +78,7 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCache<MC, BR,
 }
 
 pub struct BlockCall<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
-    entries: &'a mut [BR; 2048],
+    entries: &'a Arc<[BR; 2048]>,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -93,7 +94,7 @@ impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> std::fmt::Deb
 
 impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> BlockCall<'a, MC, BR, M> {
     pub fn run_block(
-        &mut self,
+        &self,
         core: &mut MachineCoreState<MC, M>,
         block_builder: &mut BR::BlockBuilder,
         instr_pc: Address,
@@ -102,12 +103,12 @@ impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> BlockCall<'a,
     where
         M: ManagerReadWrite,
     {
-        unsafe { BR::run_block(&mut self.entries, core, instr_pc, max_steps, block_builder) }
+        unsafe { BR::run_block(&self.entries, core, instr_pc, max_steps, block_builder) }
     }
 }
 
 pub struct PageCacheEntry<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
-    entries: Box<[BR; 2048]>,
+    entries: Arc<[BR; 2048]>,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -116,8 +117,16 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
     where
         M: ManagerReadWrite,
     {
-        let mut page_cache = Vec::with_capacity(2048);
+        let mut page_cache: Arc<MaybeUninit<[BR; 2048]>> = Arc::new_uninit();
         let mut words = vec![0u16; 2048];
+
+        let mut index = 0;
+        let entries = Arc::get_mut(&mut page_cache).unwrap();
+        let entries = unsafe {
+            std::mem::transmute::<&mut MaybeUninit<[BR; 2048]>, &mut [MaybeUninit<BR>; 2048]>(
+                entries,
+            )
+        };
 
         core.main_memory
             .read_all(page_start, words.as_mut_slice())
@@ -136,21 +145,21 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
 
             let instr = Instruction::from(&instr);
 
-            page_cache.push(BR::new(instr));
+            entries[index].write(BR::new(instr));
+            index += 1;
         }
 
         // final instruction is not-compressed
         // todo: exception to raise up to run-instr
-        if page_cache.len() == 2047 {
+        if index == 2047 {
             let bytes: u32 = core.main_memory.read(page_start + 4096 - 2).unwrap();
             let instr = parse_uncompressed_instruction(bytes);
             let instr = Instruction::from(&instr);
-
-            page_cache.push(BR::new(instr));
+            entries[index].write(BR::new(instr));
         }
 
         Self {
-            entries: page_cache.try_into().unwrap(),
+            entries: unsafe { page_cache.assume_init() },
             _pd: PhantomData,
         }
     }
@@ -239,7 +248,7 @@ pub trait BlockRunner<MC: MemoryConfig, M: ManagerBase>: Sized + std::fmt::Debug
         M: ManagerReadWrite;
 
     unsafe fn run_block(
-        instr: &mut [Self; 2048],
+        instr: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
         max_steps: usize,
@@ -269,7 +278,7 @@ impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Int
     }
 
     unsafe fn run_block(
-        instr: &mut [Self; 2048],
+        instr: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, M>,
         mut instr_pc: Address,
         _max_steps: usize,
@@ -287,7 +296,7 @@ impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Int
 
 impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D, MC>, Owned> {
     unsafe extern "C" fn run_block_not_compiled(
-        entries: &mut [Self; 2048],
+        entries: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, Owned>,
         mut instr_pc: Address,
         max_steps: usize,
@@ -308,7 +317,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
     }
 
     unsafe extern "C" fn run_block_interpreted(
-        entries: &mut [Self; 2048],
+        entries: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
@@ -318,7 +327,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
         // aligned
         let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
 
-        if !block_builder.should_compile(&mut entries[offset].block_run) {
+        if !block_builder.should_compile(&entries[offset].block_run) {
             return unsafe {
                 Self::run_block_not_compiled(
                     entries,
@@ -332,7 +341,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
         }
 
         // trigger JIT compilation
-        let mut instructions = Vec::with_capacity(20);
+        let mut instructions = Vec::with_capacity(40);
         let mut index = offset;
 
         while index < 2048 && instructions.len() < instructions.capacity() {
@@ -341,7 +350,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
             instructions.push(i);
         }
 
-        let fun = block_builder.compile(&mut entries[offset].block_run, instructions, instr_pc);
+        let fun = block_builder.compile(entries.clone(), instr_pc);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
@@ -363,7 +372,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> BlockRunner<MC, Owned>
     }
 
     unsafe fn run_block(
-        instr: &mut [Self; 2048],
+        instr: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
