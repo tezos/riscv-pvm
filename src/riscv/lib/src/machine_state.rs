@@ -160,7 +160,7 @@ pub struct MachineState<
     /// them to the host architecture.
     pub block_builder: B::BlockBuilder,
 
-    pub page_cache: PageCache<MC, M>,
+    pub page_cache: PageCache<MC, page_cache::CacheEntry<MC, page_cache::Interpreted, M>, M>,
 }
 
 impl<
@@ -400,7 +400,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(
                         &mut self.core,
-                        //&mut self.block_builder,
+                        &mut page_cache::InterpretedBlockBuilder,
                         instr_pc,
                         steps_remaining,
                     );

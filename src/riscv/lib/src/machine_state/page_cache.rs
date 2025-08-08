@@ -10,6 +10,7 @@ use super::memory::Memory;
 use super::memory::MemoryConfig;
 use super::memory::OFFSET_BITS;
 use crate::array_utils::boxed_from_fn;
+use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
@@ -21,29 +22,29 @@ use crate::traps::Exception;
 
 pub const OFFSET_MASK: u64 = 0b1111_1111_1111;
 
-pub struct PageCache<MC: MemoryConfig, M: ManagerBase> {
+pub struct PageCache<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
     // pages for 1GB
-    pages: Box<[Option<PageCacheEntry<MC, M>>; 1024 * 1024 * 1024 / 4096]>,
+    pages: Box<[Option<PageCacheEntry<MC, BR, M>>; 1024 * 1024 * 1024 / 4096]>,
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> PageCache<MC, M> {
+impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCache<MC, BR, M> {
     pub fn new() -> Self {
         Self {
             pages: boxed_from_fn(|| None),
         }
     }
 
-    pub fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, MC, M>> {
+    pub fn get_block(&mut self, addr: Address) -> Option<BlockCall<'_, MC, BR, M>> {
         let page_index = (addr >> OFFSET_BITS) as usize;
-        // aligned to 2 byte boundaries
-        let page_offset = (addr & OFFSET_MASK) as usize >> 1;
 
         self.pages
-            .get(page_index)
-            .map(|page| page.as_ref())
+            .get_mut(page_index)
+            .map(|page| page.as_mut())
             .flatten()
-            .map(|page| &page.entries[page_offset..])
-            .map(|entries| BlockCall { entries })
+            .map(|page| BlockCall {
+                entries: &mut page.entries,
+                _pd: PhantomData,
+            })
     }
 
     pub fn populate(&mut self, address: Address, core: &mut MachineCoreState<MC, M>)
@@ -68,11 +69,14 @@ impl<MC: MemoryConfig, M: ManagerBase> PageCache<MC, M> {
     }
 }
 
-pub struct BlockCall<'a, MC: MemoryConfig, M: ManagerBase> {
-    entries: &'a [CacheEntry<MC, M>],
+pub struct BlockCall<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
+    entries: &'a mut [BR; 2048],
+    _pd: PhantomData<(MC, M)>,
 }
 
-impl<'a, MC: MemoryConfig, M: ManagerBase> std::fmt::Debug for BlockCall<'a, MC, M> {
+impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> std::fmt::Debug
+    for BlockCall<'a, MC, BR, M>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BlockCall")
             .field("entries", &self.entries)
@@ -80,30 +84,27 @@ impl<'a, MC: MemoryConfig, M: ManagerBase> std::fmt::Debug for BlockCall<'a, MC,
     }
 }
 
-impl<'a, MC: MemoryConfig, M: ManagerBase> BlockCall<'a, MC, M> {
+impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> BlockCall<'a, MC, BR, M> {
     pub fn run_block(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        //block_builder: &mut B::BlockBuilder,
+        block_builder: &mut BR::BlockBuilder,
         mut instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
-        run_block_inner(
-            &self.entries[0..usize::min(max_steps, self.entries.len())],
-            core,
-            &mut instr_pc,
-        )
+        unsafe { BR::run_block(&mut self.entries, core, instr_pc, block_builder) }
     }
 }
 
-pub struct PageCacheEntry<MC: MemoryConfig, M: ManagerBase> {
-    entries: Box<[CacheEntry<MC, M>; 2048]>,
+pub struct PageCacheEntry<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
+    entries: Box<[BR; 2048]>,
+    _pd: PhantomData<(MC, M)>,
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> PageCacheEntry<MC, M> {
+impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC, BR, M> {
     pub fn new(page_start: Address, core: &mut MachineCoreState<MC, M>) -> Self
     where
         M: ManagerReadWrite,
@@ -128,10 +129,7 @@ impl<MC: MemoryConfig, M: ManagerBase> PageCacheEntry<MC, M> {
 
             let instr = Instruction::from(&instr);
 
-            page_cache.push(CacheEntry {
-                run_fn: instr.opcode.to_run(),
-                instr,
-            })
+            page_cache.push(BR::new(instr));
         }
 
         // final instruction is not-compressed
@@ -141,33 +139,33 @@ impl<MC: MemoryConfig, M: ManagerBase> PageCacheEntry<MC, M> {
             let instr = parse_uncompressed_instruction(bytes);
             let instr = Instruction::from(&instr);
 
-            page_cache.push(CacheEntry {
-                instr,
-                run_fn: instr.opcode.to_run(),
-            })
+            page_cache.push(BR::new(instr));
         }
 
         Self {
             entries: page_cache.try_into().unwrap(),
+            _pd: PhantomData,
         }
     }
 }
 
-pub struct CacheEntry<MC: MemoryConfig, M: ManagerBase> {
+pub struct CacheEntry<MC: MemoryConfig, BR, M: ManagerBase> {
     instr: Instruction,
     run_fn: RunInstr<MC, M>,
+    block_run: BR,
 }
 
-impl<MC: MemoryConfig, M: ManagerClone> Clone for CacheEntry<MC, M> {
+impl<MC: MemoryConfig, BR: Default, M: ManagerClone> Clone for CacheEntry<MC, BR, M> {
     fn clone(&self) -> Self {
         Self {
             instr: self.instr.clone(),
             run_fn: self.run_fn,
+            block_run: Default::default(),
         }
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> std::fmt::Debug for CacheEntry<MC, M> {
+impl<MC: MemoryConfig, BR, M: ManagerBase> std::fmt::Debug for CacheEntry<MC, BR, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CacheEntry")
             .field("instr", &self.instr)
@@ -175,23 +173,28 @@ impl<MC: MemoryConfig, M: ManagerBase> std::fmt::Debug for CacheEntry<MC, M> {
     }
 }
 
-fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
-    entries: &'a [CacheEntry<MC, M>],
+fn run_block_inner<'a, MC: MemoryConfig, BR, M: ManagerReadWrite + 'a>(
+    entries: &'a [CacheEntry<MC, BR, M>],
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
 ) -> StepManyResult<Exception> {
     let mut result = StepManyResult::ZERO;
 
-    let mut index = 0;
-    while index < entries.len() {
-        let entry = &entries[index];
+    let mut iter = entries.iter();
 
-        match (entry.run_fn)(&entry.instr.args, core) {
+    while let Some(entry) = iter.next() {
+        let res = (entry.run_fn)(&entry.instr.args, core);
+        match res {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 *instr_pc += width as u64;
                 core.hart.pc.write(*instr_pc);
                 result.steps += 1;
-                index += (width as usize) >> 1;
+
+                if width == InstrWidth::Uncompressed {
+                    // skip the next instruction as it corresponds to the
+                    // upper halfword of the current instr
+                    let _ = iter.next();
+                }
             }
 
             Ok(ProgramCounterUpdate::Set(instr_pc)) => {
@@ -219,4 +222,56 @@ fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
     }
 
     result
+}
+
+pub trait BlockRunner<MC: MemoryConfig, M: ManagerBase>: Sized + std::fmt::Debug {
+    type BlockBuilder: Default + Sized;
+
+    fn new(instr: Instruction) -> Self
+    where
+        M: ManagerReadWrite;
+
+    unsafe fn run_block(
+        instr: &mut [Self; 2048],
+        core: &mut MachineCoreState<MC, M>,
+        instr_pc: Address,
+        block_builder: &mut Self::BlockBuilder,
+    ) -> StepManyResult<Exception>
+    where
+        M: ManagerReadWrite;
+}
+
+pub struct Interpreted;
+
+#[derive(Default)]
+pub struct InterpretedBlockBuilder;
+
+impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Interpreted, M> {
+    type BlockBuilder = InterpretedBlockBuilder;
+
+    fn new(instr: Instruction) -> Self
+    where
+        M: ManagerReadWrite,
+    {
+        Self {
+            instr,
+            run_fn: instr.opcode.to_run(),
+            block_run: Interpreted,
+        }
+    }
+
+    unsafe fn run_block(
+        instr: &mut [Self; 2048],
+        core: &mut MachineCoreState<MC, M>,
+        mut instr_pc: Address,
+        _block_builder: &mut Self::BlockBuilder,
+    ) -> StepManyResult<Exception>
+    where
+        M: ManagerReadWrite,
+    {
+        // aligned
+        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
+
+        run_block_inner(&instr[offset..], core, &mut instr_pc)
+    }
 }
