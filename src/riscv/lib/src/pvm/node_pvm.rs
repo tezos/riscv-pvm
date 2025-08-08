@@ -15,6 +15,7 @@ use super::PvmLayout;
 use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
+use crate::machine_state::page_cache;
 use crate::program::Program;
 use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
@@ -44,7 +45,13 @@ type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
 pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheConfig>;
 
-type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheConfig, Interpreted<NodePvmMemConfig, M>, M>;
+type NodePvmState<M> = Pvm<
+    NodePvmMemConfig,
+    TestCacheConfig,
+    Interpreted<NodePvmMemConfig, M>,
+    page_cache::CacheEntry<NodePvmMemConfig, page_cache::Interpreted, M>,
+    M,
+>;
 
 #[perfect_derive(Clone)]
 pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
@@ -56,7 +63,7 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
     where
         M::ManagerRoot: state_backend::ManagerReadWrite,
     {
-        let state = NodePvmState::<M>::bind(space, InterpretedBlockBuilder);
+        let state = NodePvmState::<M>::bind(space, page_cache::InterpretedBlockBuilder);
         Self {
             state: Box::new(state),
         }
@@ -253,7 +260,7 @@ impl<M: state_backend::ManagerBase> NewState<M> for NodePvm<M> {
         M: state_backend::ManagerAlloc,
     {
         Self {
-            state: Box::new(NodePvmState::<M>::new(InterpretedBlockBuilder)),
+            state: Box::new(NodePvmState::<M>::new(page_cache::InterpretedBlockBuilder)),
         }
     }
 }

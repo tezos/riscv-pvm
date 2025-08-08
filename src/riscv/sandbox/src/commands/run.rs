@@ -12,7 +12,9 @@ use std::ops::Bound;
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::block_cache::block::Block;
+use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory;
+use octez_riscv::machine_state::page_cache;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -29,25 +31,38 @@ use crate::memory_config::MemoryConfigValue;
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Interpreted<MC, Owned>;
+        //type BlockImplInner<MC> = block::Interpreted<MC, Owned>;
+        type BlockImplInner<MC> = page_cache::CacheEntry<MC, page_cache::Interpreted, Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
+        //type BlockImplInner<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
+        type BlockImplInner<MC> = page_cache::CacheEntry<
+            MC,
+            page_cache::dispatch::DispatchTarget<
+                page_cache::dispatch::InlineCompiler<MC>,
+                MC>,
+            Owned>;
     } else {
         /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
+        //type BlockImplInner<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
+        type BlockImplInner<MC> = page_cache::CacheEntry<
+            MC,
+            page_cache::dispatch::DispatchTarget<
+                page_cache::dispatch::OutlineCompiler<MC>,
+                MC>,
+            Owned>;
     }
 }
 
-/// Executor of blocks
-#[cfg(not(feature = "metrics"))]
+// /// Executor of blocks
+//#[cfg(not(feature = "metrics"))]
 pub type BlockImpl<MC> = BlockImplInner<MC>;
 
 /// Executor of blocks
-#[cfg(feature = "metrics")]
-pub type BlockImpl<MC> =
-    octez_riscv::machine_state::block_cache::metrics::BlockMetrics<BlockImplInner<MC>>;
-
+//#[cfg(feature = "metrics")]
+//pub type BlockImpl<MC> =
+//    octez_riscv::machine_state::block_cache::metrics::BlockMetrics<BlockImplInner<MC>>;
+//
 pub fn run_with_memory_config<MC: memory::MemoryConfig>(
     opts: RunOptions,
 ) -> Result<(), Box<dyn Error>> {
@@ -85,13 +100,14 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, B> = PvmStepper<Console<'static>, MC, DefaultCacheConfig, Owned, B>;
+type PvmStepperRunner<MC, P> =
+    PvmStepper<Console<'static>, MC, DefaultCacheConfig, Owned, block::Interpreted<MC, Owned>, P>;
 
-pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
+pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, P: page_cache::BlockRunner<MC, Owned>>(
     program: &[u8],
     common: &CommonOptions,
-    block_builder: B::BlockBuilder,
-) -> Result<PvmStepperRunner<MC, B>, Box<dyn error::Error>> {
+    block_builder: P::BlockBuilder,
+) -> Result<PvmStepperRunner<MC, P>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -105,7 +121,7 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, DefaultCacheConfig, Owned, B>::new(
+    let stepper = PvmStepper::<_, MC, DefaultCacheConfig, Owned, _, P>::new(
         program,
         inbox.build(),
         console,

@@ -32,6 +32,7 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
+use crate::machine_state::page_cache;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
@@ -164,8 +165,13 @@ enum AuxVectorKey {
     ProgramHeadersPtr = 3,
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
-    MachineState<MC, BCC, B, M>
+impl<
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
+    M: ManagerBase,
+> MachineState<MC, BCC, B, P, M>
 {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
@@ -241,11 +247,12 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
     }
 }
 
-impl<MC, BCC, B, M> Pvm<MC, BCC, B, M>
+impl<MC, BCC, B, P, M> Pvm<MC, BCC, B, P, M>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
     B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
     M: ManagerBase,
 {
     /// Load the program into memory and set the PC to its entrypoint.
@@ -510,9 +517,9 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 
     /// Handle a Linux system call.
-    pub fn handle_system_call<MC, BCC, B>(
+    pub fn handle_system_call<MC, BCC, P, B>(
         &mut self,
-        machine: &mut MachineState<MC, BCC, B, M>,
+        machine: &mut MachineState<MC, BCC, B, P, M>,
         hooks: impl PvmHooks,
         on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> bool,
     ) -> bool
@@ -520,6 +527,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         MC: MemoryConfig,
         BCC: BlockCacheConfig,
         B: Block<MC, M>,
+        P: page_cache::BlockRunner<MC, M>,
         M: ManagerReadWrite,
     {
         // We need to jump to the next instruction. The ECall instruction which triggered this

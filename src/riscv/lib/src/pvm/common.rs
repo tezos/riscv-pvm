@@ -22,6 +22,7 @@ use crate::machine_state::block_cache::block;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
@@ -106,13 +107,20 @@ pub(crate) type PvmProofGen<'a, MC, CL, M> = Pvm<
     MC,
     CL,
     block::Interpreted<MC, ProofGen<state_backend::Ref<'a, M>>>,
+    page_cache::CacheEntry<MC, page_cache::Interpreted, ProofGen<state_backend::Ref<'a, M>>>,
     ProofGen<state_backend::Ref<'a, M>>,
 >;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone)]
-pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: ManagerBase> {
-    pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, M>,
+pub struct Pvm<
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: block::Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
+    M: ManagerBase,
+> {
+    pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, P, M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
     version: Cell<u64, M>,
@@ -123,11 +131,16 @@ pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, 
     pub(crate) status: Cell<PvmStatus, M>,
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_backend::ManagerBase>
-    Pvm<MC, BCC, B, M>
+impl<
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: block::Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
+    M: state_backend::ManagerBase,
+> Pvm<MC, BCC, B, P, M>
 {
     /// Allocate a new PVM.
-    pub fn new(block_builder: B::BlockBuilder) -> Self
+    pub fn new(block_builder: P::BlockBuilder) -> Self
     where
         M: state_backend::ManagerAlloc,
     {
@@ -149,7 +162,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     /// [block builder]: block::Block::BlockBuilder
     pub(crate) fn bind(
         space: state_backend::AllocatedOf<PvmLayout<MC, BCC>, M>,
-        block_builder: B::BlockBuilder,
+        block_builder: P::BlockBuilder,
     ) -> Self
     where
         M::ManagerRoot: state_backend::ManagerReadWrite,
@@ -191,7 +204,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
         M: state_backend::ManagerRead,
     {
         let space = self.struct_ref::<ProofWrapper>();
-        Pvm::bind(space, block::InterpretedBlockBuilder)
+        Pvm::bind(space, page_cache::InterpretedBlockBuilder)
     }
 
     /// Reset the PVM.
@@ -403,8 +416,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, B, Owned> {
-    pub(crate) fn empty(block_builder: B::BlockBuilder) -> Self {
+impl<
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, Owned>,
+    P: page_cache::BlockRunner<MC, Owned>,
+> Pvm<MC, BCC, B, P, Owned>
+{
+    pub(crate) fn empty(block_builder: P::BlockBuilder) -> Self {
         Self::new(block_builder)
     }
 
@@ -414,8 +433,13 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, 
     }
 }
 
-impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, Owned>>>>
-    Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
+impl<
+    'a,
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, ProofGen<Ref<'a, Owned>>>,
+    P: page_cache::BlockRunner<MC, ProofGen<Ref<'a, Owned>>>,
+> Pvm<MC, BCC, B, P, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError>
@@ -449,9 +473,15 @@ pub enum InputRequest {
     NeedsReveal(Box<[u8]>),
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BCC, B, Verifier> {
+impl<
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, Verifier>,
+    P: page_cache::BlockRunner<MC, Verifier>,
+> Pvm<MC, BCC, B, P, Verifier>
+{
     /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
+    pub fn from_proof(proof: &MerkleProof, block_builder: P::BlockBuilder) -> Option<Self>
     where
         AllocatedOf<BCC::Layout, Verifier>: 'static,
     {
@@ -463,8 +493,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BC
 }
 
 /// Handle a system call in the PVM.
-pub(crate) fn handle_system_call<MC, BCC, B, M>(
-    machine: &mut machine_state::MachineState<MC, BCC, B, M>,
+pub(crate) fn handle_system_call<MC, BCC, B, P, M>(
+    machine: &mut machine_state::MachineState<MC, BCC, B, P, M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
@@ -474,6 +504,7 @@ where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
     B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {

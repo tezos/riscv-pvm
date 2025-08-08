@@ -1,4 +1,9 @@
+pub mod dispatch;
+
 use std::marker::PhantomData;
+
+use dispatch::DispatchCompiler;
+use dispatch::DispatchTarget;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -10,6 +15,7 @@ use super::memory::Memory;
 use super::memory::MemoryConfig;
 use super::memory::OFFSET_BITS;
 use crate::array_utils::boxed_from_fn;
+use crate::jit::state_access::ExceptionCode;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
@@ -17,6 +23,7 @@ use crate::parser::parse_uncompressed_instruction;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::owned_backend::Owned;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
@@ -89,13 +96,13 @@ impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> BlockCall<'a,
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         block_builder: &mut BR::BlockBuilder,
-        mut instr_pc: Address,
+        instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
-        unsafe { BR::run_block(&mut self.entries, core, instr_pc, block_builder) }
+        unsafe { BR::run_block(&mut self.entries, core, instr_pc, max_steps, block_builder) }
     }
 }
 
@@ -235,6 +242,7 @@ pub trait BlockRunner<MC: MemoryConfig, M: ManagerBase>: Sized + std::fmt::Debug
         instr: &mut [Self; 2048],
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
+        max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<Exception>
     where
@@ -264,6 +272,7 @@ impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Int
         instr: &mut [Self; 2048],
         core: &mut MachineCoreState<MC, M>,
         mut instr_pc: Address,
+        _max_steps: usize,
         _block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<Exception>
     where
@@ -273,5 +282,106 @@ impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Int
         let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
 
         run_block_inner(&instr[offset..], core, &mut instr_pc)
+    }
+}
+
+impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D, MC>, Owned> {
+    unsafe extern "C" fn run_block_not_compiled(
+        entries: &mut [Self; 2048],
+        core: &mut MachineCoreState<MC, Owned>,
+        mut instr_pc: Address,
+        max_steps: usize,
+        result: &mut ExceptionCode,
+        _dispatch_compiler: &mut D,
+    ) -> usize {
+        // aligned
+        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
+
+        let block_result = run_block_inner(&entries[offset..], core, &mut instr_pc);
+
+        *result = block_result
+            .error
+            .map(ExceptionCode::from_exception)
+            .unwrap_or(ExceptionCode::NoException);
+
+        block_result.steps
+    }
+
+    unsafe extern "C" fn run_block_interpreted(
+        entries: &mut [Self; 2048],
+        core: &mut MachineCoreState<MC, Owned>,
+        instr_pc: Address,
+        max_steps: usize,
+        result: &mut ExceptionCode,
+        block_builder: &mut D,
+    ) -> usize {
+        // aligned
+        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
+
+        if !block_builder.should_compile(&mut entries[offset].block_run) {
+            return unsafe {
+                Self::run_block_not_compiled(
+                    entries,
+                    core,
+                    instr_pc,
+                    max_steps,
+                    result,
+                    block_builder,
+                )
+            };
+        }
+
+        // trigger JIT compilation
+        let mut instructions = Vec::with_capacity(20);
+        let mut index = offset;
+
+        while index < 2048 && instructions.len() < instructions.capacity() {
+            let i = entries[index].instr;
+            index += i.width() as usize >> 1;
+            instructions.push(i);
+        }
+
+        let fun = block_builder.compile(&mut entries[offset].block_run, instructions, instr_pc);
+
+        // Safety: the block builder passed to this function is always the same for the
+        // lifetime of the block
+        unsafe { (fun)(entries, core, instr_pc, max_steps, result, block_builder) }
+    }
+}
+
+impl<MC: MemoryConfig, D: DispatchCompiler<MC>> BlockRunner<MC, Owned>
+    for CacheEntry<MC, DispatchTarget<D, MC>, Owned>
+{
+    type BlockBuilder = D;
+
+    fn new(instr: Instruction) -> Self {
+        Self {
+            instr,
+            run_fn: instr.opcode.to_run(),
+            block_run: DispatchTarget::default(),
+        }
+    }
+
+    unsafe fn run_block(
+        instr: &mut [Self; 2048],
+        core: &mut MachineCoreState<MC, Owned>,
+        instr_pc: Address,
+        max_steps: usize,
+        block_builder: &mut Self::BlockBuilder,
+    ) -> StepManyResult<Exception> {
+        let mut result = ExceptionCode::NoException;
+
+        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
+
+        let fun = instr[offset].block_run.get();
+
+        // SAFETY: The block builder is always the same instance, guaranteeing that any JIT-compiled
+        // function is still alive.
+        let steps = unsafe { (fun)(instr, core, instr_pc, max_steps, &mut result, block_builder) };
+
+        StepManyResult {
+            steps,
+            error: result.to_exception(),
+        }
     }
 }

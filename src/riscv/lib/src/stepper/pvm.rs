@@ -25,6 +25,7 @@ use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache;
 use crate::program::Program;
 use crate::pvm::Pvm;
 use crate::pvm::PvmLayout;
@@ -72,8 +73,9 @@ pub struct PvmStepper<
     BCC: BlockCacheConfig = DefaultCacheConfig,
     M: ManagerBase = Owned,
     B: Block<MC, M> = Interpreted<MC, M>,
+    P: page_cache::BlockRunner<MC, M> = page_cache::CacheEntry<MC, page_cache::Interpreted, M>,
 > {
-    pvm: Pvm<MC, BCC, B, M>,
+    pvm: Pvm<MC, BCC, B, P, M>,
     hooks: H,
     inbox: Inbox,
     rollup_address: [u8; 20],
@@ -84,8 +86,13 @@ pub struct PvmStepper<
 /// Variant of the [`PvmStepper`] used for verifying proofs
 type PvmVerifier<MC, BCC> = PvmStepper<NoHooks, MC, BCC, Verifier, Interpreted<MC, Verifier>>;
 
-impl<H, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
-    PvmStepper<H, MC, BCC, Owned, B>
+impl<
+    H,
+    MC: MemoryConfig,
+    B: Block<MC, Owned>,
+    P: page_cache::BlockRunner<MC, Owned>,
+    BCC: BlockCacheConfig,
+> PvmStepper<H, MC, BCC, Owned, B, P>
 {
     /// Create a new PVM stepper.
     pub fn new(
@@ -95,7 +102,7 @@ impl<H, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
         rollup_address: [u8; 20],
         origination_level: u32,
         preimages_dir: Option<Box<Path>>,
-        block_builder: B::BlockBuilder,
+        block_builder: P::BlockBuilder,
     ) -> Result<Self, PvmStepperError> {
         let mut pvm = Pvm::empty(block_builder);
 
@@ -139,8 +146,14 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig> PvmStepper<H, MC, BCC, Owned> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerReadWrite>
-    PvmStepper<H, MC, BCC, M, B>
+impl<
+    H: PvmHooks,
+    MC: MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
+    M: ManagerReadWrite,
+> PvmStepper<H, MC, BCC, M, B, P>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
@@ -238,7 +251,7 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
     /// pvm.
     ///
     /// [`BlockBuilder`]: Block::BlockBuilder
-    pub fn rebind_via_bincode(&mut self, block_builder: B::BlockBuilder)
+    pub fn rebind_via_bincode(&mut self, block_builder: P::BlockBuilder)
     where
         for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Encode,
         AllocatedOf<PvmLayout<MC, BCC>, M>: Decode<()>,
@@ -253,7 +266,7 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.
-    pub fn rebind_via_clone(&mut self, block_builder: B::BlockBuilder)
+    pub fn rebind_via_clone(&mut self, block_builder: P::BlockBuilder)
     where
         PvmLayout<MC, BCC>: CloneLayout,
         M: ManagerClone,
@@ -339,10 +352,13 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
         &self,
         space: AllocatedOf<PvmLayout<MC, BCC>, Verifier>,
     ) -> Result<PvmVerifier<MC, BCC>, ProofVerificationFailure> {
-        let pvm = Pvm::<MC, BCC, Interpreted<MC, Verifier>, Verifier>::bind(
-            space,
-            InterpretedBlockBuilder,
-        );
+        let pvm = Pvm::<
+            MC,
+            BCC,
+            Interpreted<MC, Verifier>,
+            page_cache::CacheEntry<MC, page_cache::Interpreted, Verifier>,
+            Verifier,
+        >::bind(space, page_cache::InterpretedBlockBuilder);
         Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
@@ -420,8 +436,13 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig> Stepper
-    for PvmStepper<H, MC, BCC, Owned, B>
+impl<
+    H: PvmHooks,
+    MC: MemoryConfig,
+    B: Block<MC, Owned>,
+    P: page_cache::BlockRunner<MC, Owned>,
+    BCC: BlockCacheConfig,
+> Stepper for PvmStepper<H, MC, BCC, Owned, B, P>
 {
     type MemoryConfig = MC;
 

@@ -151,6 +151,7 @@ pub struct MachineState<
     MC: memory::MemoryConfig,
     BCC: block_cache::BlockCacheConfig,
     B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
     M: backend::ManagerBase,
 > {
     pub core: MachineCoreState<MC, M>,
@@ -158,23 +159,24 @@ pub struct MachineState<
 
     /// The block builder is used to optimise block execution. For example, just-in-time compiling
     /// them to the host architecture.
-    pub block_builder: B::BlockBuilder,
+    pub block_builder: P::BlockBuilder,
 
-    pub page_cache: PageCache<MC, page_cache::CacheEntry<MC, page_cache::Interpreted, M>, M>,
+    pub page_cache: PageCache<MC, P, M>,
 }
 
 impl<
     MC: memory::MemoryConfig,
     BCC: BlockCacheConfig,
     B: Block<MC, M> + Clone,
+    P: page_cache::BlockRunner<MC, M>,
     M: backend::ManagerClone,
-> Clone for MachineState<MC, BCC, B, M>
+> Clone for MachineState<MC, BCC, B, P, M>
 {
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
             block_cache: self.block_cache.clone(),
-            block_builder: B::BlockBuilder::default(),
+            block_builder: P::BlockBuilder::default(),
             page_cache: PageCache::new(),
         }
     }
@@ -228,11 +230,16 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backend::ManagerBase>
-    MachineState<MC, BCC, B, M>
+impl<
+    MC: memory::MemoryConfig,
+    BCC: BlockCacheConfig,
+    B: Block<MC, M>,
+    P: page_cache::BlockRunner<MC, M>,
+    M: backend::ManagerBase,
+> MachineState<MC, BCC, B, P, M>
 {
     /// Allocate a new machine state.
-    pub fn new(block_builder: B::BlockBuilder) -> Self
+    pub fn new(block_builder: P::BlockBuilder) -> Self
     where
         M: backend::ManagerAlloc,
     {
@@ -249,7 +256,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// [block builder]: Block::BlockBuilder
     pub fn bind(
         space: backend::AllocatedOf<MachineStateLayout<MC, BCC>, M>,
-        block_builder: B::BlockBuilder,
+        block_builder: P::BlockBuilder,
     ) -> Self
     where
         M::ManagerRoot: ManagerReadWrite,
@@ -400,7 +407,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(
                         &mut self.core,
-                        &mut page_cache::InterpretedBlockBuilder,
+                        &mut self.block_builder,
                         instr_pc,
                         steps_remaining,
                     );
