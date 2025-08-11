@@ -18,8 +18,6 @@ use crate::machine_state::block_cache::config::BlockCacheConfig;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::memory::OFFSET_MASK;
-use crate::machine_state::memory::PAGE_SIZE;
 use crate::parser::instruction::InstrWidth;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
@@ -378,7 +376,6 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         let possible_block = Self::entry(&self.entries, next_addr);
         let adjacent_block_found = possible_block.address.read() == next_addr
             && possible_block.fence_counter.read() == fence_counter
-            && next_addr & OFFSET_MASK != 0
             && possible_block.block.num_instr() + new_len <= CACHE_INSTR;
 
         if adjacent_block_found {
@@ -505,9 +502,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 
         let next_addr = self.next_instr_addr.read();
 
-        // If the instruction is at the start of the page, we _must_ start a new block,
-        // as we cannot allow blocks to cross page boundaries.
-        if addr & OFFSET_MASK == 0 || addr != next_addr {
+        if addr != next_addr {
             self.reset_to(addr);
         }
 
@@ -524,17 +519,9 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             "expected uncompressed instruction, found: {instr:?}"
         );
 
-        // ensure uncompressed does not cross page boundaries
-        const END_OF_PAGE: Address = PAGE_SIZE.get() - 2;
-        if addr % PAGE_SIZE.get() == END_OF_PAGE {
-            return;
-        }
-
         let next_addr = self.next_instr_addr.read();
 
-        // If the instruction is at the start of the page, we _must_ start a new block,
-        // as we cannot allow blocks to cross page boundaries.
-        if addr & OFFSET_MASK == 0 || addr != next_addr {
+        if addr != next_addr {
             self.reset_to(addr);
         }
 
@@ -579,7 +566,6 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::registers::XRegister;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::nz;
@@ -699,37 +685,6 @@ mod tests {
         let block = state.get_block(addr + 2 * CACHE_INSTR as u64);
         assert!(block.is_some());
         assert_eq!(CACHE_INSTR, block.unwrap().entry.block.num_instr());
-    });
-
-    // writing across pages offset two blocks next to each other
-    backend_test!(test_crossing_page_exactly_creates_new_block, F, {
-        let mut state = TestState::<F>::new();
-
-        let compressed = Instruction {
-            opcode: OpCode::Li,
-            args: Args {
-                rd: nz::a0.into(),
-                imm: 1,
-                rs1: nz::ra.into(),
-                rs2: nz::ra.into(),
-                width: InstrWidth::Compressed,
-                ..Args::DEFAULT
-            },
-        };
-
-        let addr = PAGE_SIZE.get() - 10;
-
-        for offset in 0..10 {
-            state.push_instr_compressed(addr + offset * 2, compressed);
-        }
-
-        let block = state.get_block(addr);
-        assert!(block.is_some());
-        assert_eq!(5, block.unwrap().entry.block.num_instr());
-
-        let block = state.get_block(addr + 10);
-        assert!(block.is_some());
-        assert_eq!(5, block.unwrap().entry.block.num_instr());
     });
 
     backend_test!(test_partial_block_executes, F, {

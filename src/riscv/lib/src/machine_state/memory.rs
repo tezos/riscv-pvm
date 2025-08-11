@@ -29,9 +29,6 @@ use crate::state_backend::Ref;
 /// Number of bits needed so you can address every byte in a page
 pub const OFFSET_BITS: u64 = 12;
 
-/// Bit mask to keep only the page offset
-pub const OFFSET_MASK: u64 = (1 << OFFSET_BITS) - 1;
-
 /// Size of a page
 pub const PAGE_SIZE: NonZeroU64 = {
     const PAGE_SIZE: u64 = 1 << OFFSET_BITS;
