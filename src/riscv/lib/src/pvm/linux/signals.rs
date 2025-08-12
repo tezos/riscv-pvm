@@ -650,4 +650,22 @@ impl<M: ManagerBase> SupervisorState<M> {
         // Return 0 as an indicator of success
         Ok(0)
     }
+
+    /// Handle `rt_sigreturn` system call.
+    /// While `rt_sigreturn` is needed for implementing signal handlers, it should never be called
+    /// directly by userspace code. The libc wrapper simply returns an error.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigreturn.2.html>
+    pub(super) fn handle_rt_sigreturn(
+        &self,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+    ) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        let pc = core.pop_signal_context().map_err(|_| Error::Fault)?;
+        core.hart.pc.write(pc);
+        // Return 0 as an indicator of success
+        Ok(0)
+    }
 }

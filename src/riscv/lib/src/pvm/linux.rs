@@ -114,6 +114,9 @@ const RT_SIGACTION: u64 = 134;
 /// System call number for `rt_sigprocmask` on RISC-V
 const RT_SIGPROCMASK: u64 = 135;
 
+/// System call number for `rt_sigreturn` on RISC-V
+const RT_SIGRETURN: u64 = 139;
+
 /// System call number for `getpid` on RISC-V
 const GETPID: u64 = 172;
 
@@ -760,6 +763,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             SIGALTSTACK => dispatch2!(sigaltstack, &mut machine.core),
             RT_SIGACTION => dispatch4!(rt_sigaction, &mut machine.core),
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
+            RT_SIGRETURN => dispatch0!(rt_sigreturn, &mut machine.core),
             BRK => dispatch0!(brk),
             MMAP => dispatch6!(mmap, &mut machine.core),
             MPROTECT => dispatch3!(mprotect, &mut machine.core),
