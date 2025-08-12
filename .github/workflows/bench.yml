@@ -36,7 +36,7 @@ jobs:
         run: echo "${{ secrets.BENCH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Benchmark
         run: |
