@@ -223,7 +223,6 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 
     /// Handle an exception using the defined Execution Environment.
-    // The conditional compilation below causes some warnings.
     fn handle_exception(&mut self, hooks: impl PvmHooks, _exception: EnvironException) -> bool
     where
         M: state_backend::ManagerReadWrite,
@@ -269,7 +268,6 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     /// the execution environment will still retire an instruction, just not itself.
     /// (a possible case: the privilege mode access violation is treated in EE,
     /// but a page fault is not)
-    // The conditional compilation below causes some warnings.
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
         M: state_backend::ManagerReadWrite,
