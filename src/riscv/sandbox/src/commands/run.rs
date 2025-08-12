@@ -11,8 +11,6 @@ use std::ops::Bound;
 
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
-use octez_riscv::machine_state::block_cache::block::Block;
-use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::state_backend::owned_backend::Owned;

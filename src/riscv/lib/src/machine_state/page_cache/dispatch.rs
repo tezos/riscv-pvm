@@ -26,7 +26,6 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
 
 /// The function signature for dispatching a block run.
 ///
@@ -34,10 +33,6 @@ use crate::traps::EnvironException;
 /// additional work over just execution.
 ///
 /// The first and last parameters must be thin-references, for ABI-compatability reasons.
-#[expect(
-    improper_ctypes_definitions,
-    reason = "The receiving functions know the layout of the referenced types"
-)]
 pub type DispatchFn<D, MC> = unsafe extern "C" fn(
     &Arc<[CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048]>,
     &mut MachineCoreState<MC, Owned>,

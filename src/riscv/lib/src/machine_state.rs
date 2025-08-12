@@ -402,7 +402,7 @@ impl<
             let instr_pc = self.core.hart.pc.read();
 
             match self.page_cache.get_block(instr_pc) {
-                Some(mut block) => {
+                Some(block) => {
                     //eprintln!("found_block {instr_pc}");
                     let steps_remaining = max_steps - result.steps;
                     let block_result = block.run_block(

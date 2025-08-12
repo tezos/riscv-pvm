@@ -14,7 +14,6 @@ use super::Pvm;
 use super::PvmLayout;
 use crate::machine_state::block_cache::TestCacheConfig;
 use crate::machine_state::block_cache::block::Interpreted;
-use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::page_cache;
 use crate::program::Program;
 use crate::pvm::InputRequest;

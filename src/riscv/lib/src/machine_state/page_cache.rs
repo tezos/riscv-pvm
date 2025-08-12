@@ -16,6 +16,7 @@ use super::memory::Address;
 use super::memory::Memory;
 use super::memory::MemoryConfig;
 use super::memory::OFFSET_BITS;
+use super::memory::Permissions;
 use crate::array_utils::boxed_from_fn;
 use crate::jit::state_access::ExceptionCode;
 use crate::parser::instruction::InstrWidth;
@@ -26,7 +27,6 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 pub const OFFSET_MASK: u64 = 0b1111_1111_1111;
@@ -34,6 +34,12 @@ pub const OFFSET_MASK: u64 = 0b1111_1111_1111;
 pub struct PageCache<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
     // pages for 1GB
     pages: Box<[Option<PageCacheEntry<MC, BR, M>>; 1024 * 1024 * 1024 / 4096]>,
+}
+
+impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> Default for PageCache<MC, BR, M> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCache<MC, BR, M> {
@@ -75,6 +81,19 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCache<MC, BR,
         let page_start = address & !OFFSET_MASK;
         self.pages[page_index] = Some(PageCacheEntry::new(page_start, core));
     }
+
+    pub fn update_permissions(&mut self, start: Address, len: usize, perm: Permissions) {
+        let page_index_start = (start >> OFFSET_BITS) as usize;
+        let page_index_end = ((start + (len as u64)) >> OFFSET_BITS) as usize;
+
+        if perm.exec && !perm.write {
+            return;
+        }
+
+        for idx in page_index_start..=page_index_end {
+            self.pages[idx] = None;
+        }
+    }
 }
 
 pub struct BlockCall<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> {
@@ -103,7 +122,7 @@ impl<'a, MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> BlockCall<'a,
     where
         M: ManagerReadWrite,
     {
-        unsafe { BR::run_block(&self.entries, core, instr_pc, max_steps, block_builder) }
+        unsafe { BR::run_block(self.entries, core, instr_pc, max_steps, block_builder) }
     }
 }
 
@@ -174,7 +193,7 @@ pub struct CacheEntry<MC: MemoryConfig, BR, M: ManagerBase> {
 impl<MC: MemoryConfig, BR: Default, M: ManagerClone> Clone for CacheEntry<MC, BR, M> {
     fn clone(&self) -> Self {
         Self {
-            instr: self.instr.clone(),
+            instr: self.instr,
             run_fn: self.run_fn,
             block_run: Default::default(),
         }
@@ -299,7 +318,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
         entries: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, Owned>,
         mut instr_pc: Address,
-        max_steps: usize,
+        _max_steps: usize,
         result: &mut ExceptionCode,
         _dispatch_compiler: &mut D,
     ) -> usize {

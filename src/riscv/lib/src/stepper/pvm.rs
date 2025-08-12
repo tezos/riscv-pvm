@@ -22,7 +22,6 @@ use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::DefaultCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::block_cache::block::Interpreted;
-use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache;
