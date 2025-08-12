@@ -17,6 +17,7 @@ use crate::machine_state;
 /// Virtual address
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, derive_more::From)]
 #[repr(transparent)]
+#[cfg_attr(test, derive(Default))]
 pub struct VirtAddr(u64);
 
 impl VirtAddr {

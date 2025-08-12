@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroUsize;
+
 use arbitrary_int::u7;
 use strum::EnumCount;
 use strum::FromRepr;
@@ -16,20 +18,114 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
+use crate::state_backend::Elem;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
 use crate::struct_layout;
+
+/// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
+#[repr(C)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default, PartialEq))]
+pub struct LinuxSigAction {
+    sa_handler: VirtAddr,
+    sa_sigaction: VirtAddr,
+    sa_mask: u32,
+    sa_flags: u32,
+    sa_restorer: VirtAddr,
+}
+
+/// Currently we only support the `sa_sigaction` field, so in tests it's useful to be able to
+/// create a sigaction using only this field.
+#[cfg(test)]
+impl LinuxSigAction {
+    pub(crate) fn new(sa_sigaction: VirtAddr) -> Self {
+        Self {
+            sa_sigaction,
+            ..Default::default()
+        }
+    }
+}
 
 /// `size_of(struct sigaction)` on the Kernel side
 const SIZE_SIGACTION: usize = 32;
 
-// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the linux sigaction
-// struct will have its own array of the primitives or wrappers around primitives (e.g.
-// [VirtAddr]) used for the member's type.
+impl Elem for LinuxSigAction {
+    const STORED_SIZE: NonZeroUsize = {
+        const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(SIZE_SIGACTION).unwrap();
+        if size_of::<Self>() != STORED_SIZE.get() {
+            panic!("Expected STORED_SIZE to match size_of<LinuxSigAction>");
+        }
+        STORED_SIZE
+    };
+
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each
+        // field.
+        unsafe {
+            let offset = 0;
+
+            let sa_handler_bits = source.cast::<u64>().read();
+            let offset = offset + size_of_val(&sa_handler_bits);
+
+            let sa_sigaction_bits = source.add(offset).cast::<u64>().read();
+            let offset = offset + size_of_val(&sa_sigaction_bits);
+
+            let sa_mask_bits = source.add(offset).cast::<u32>().read();
+            let offset = offset + size_of_val(&sa_mask_bits);
+
+            let sa_flags_bits = source.add(offset).cast::<u32>().read();
+            let offset = offset + size_of_val(&sa_flags_bits);
+
+            let sa_restorer_bits = source.add(offset).cast::<u64>().read();
+
+            Self {
+                sa_handler: VirtAddr::new(u64::from_le(sa_handler_bits)),
+                sa_sigaction: VirtAddr::new(u64::from_le(sa_sigaction_bits)),
+                sa_mask: u32::from_le(sa_mask_bits),
+                sa_flags: u32::from_le(sa_flags_bits),
+                sa_restorer: VirtAddr::new(u64::from_le(sa_restorer_bits)),
+            }
+        }
+    }
+
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        // SAFETY: The bitwise representation is the same as `read_unaligned` and matches each
+        // field.
+        unsafe {
+            let offset = 0;
+
+            dest.cast::<u64>()
+                .write(self.sa_handler.to_machine_address().to_le());
+            let offset = offset + size_of_val(&self.sa_handler);
+
+            dest.add(offset)
+                .cast::<u64>()
+                .write(self.sa_sigaction.to_machine_address().to_le());
+            let offset = offset + size_of_val(&self.sa_sigaction);
+
+            dest.add(offset).cast::<u32>().write(self.sa_mask.to_le());
+            let offset = offset + size_of_val(&self.sa_mask);
+
+            dest.add(offset).cast::<u32>().write(self.sa_flags.to_le());
+            let offset = offset + size_of_val(&self.sa_flags);
+
+            dest.add(offset)
+                .cast::<u64>()
+                .write(self.sa_restorer.to_machine_address().to_le());
+        }
+    }
+}
+
+// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the [LinuxSigAction]
+// struct will have its own array of the primitives or wrappers around primitives (e.g. [VirtAddr])
+// used for the member's type.
 
 /// Information to support handling each supported signal
 pub struct SignalActions<M: ManagerBase> {
@@ -54,6 +150,32 @@ struct_layout! {
         masks: [Atom<u32>; SignalIndex::COUNT],
         flags: [Atom<u32>; SignalIndex::COUNT],
         restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
+    }
+}
+
+impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
+    fn signal_action(&self, signal: Signal) -> LinuxSigAction
+    where
+        M: ManagerRead,
+    {
+        let index: SignalIndex = signal.into();
+        let sa_sigaction = self.signal_actions.actions[index as usize].read();
+
+        LinuxSigAction {
+            sa_handler: VirtAddr::new(0),
+            sa_sigaction,
+            sa_mask: 0,
+            sa_flags: 0,
+            sa_restorer: VirtAddr::new(0),
+        }
+    }
+
+    fn set_signal_action(&mut self, signal: Signal, action: LinuxSigAction)
+    where
+        M: ManagerWrite,
+    {
+        let index: SignalIndex = signal.into();
+        self.signal_actions.actions[index as usize].write(action.sa_sigaction);
     }
 }
 
@@ -301,8 +423,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_rt_sigaction(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: Signal,
-        _: u64,
+        signal: Signal,
+        action: SignalActionPtr,
         old: SignalActionPtr,
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
@@ -310,8 +432,13 @@ impl<M: ManagerBase> SupervisorState<M> {
         M: ManagerReadWrite,
     {
         if let Some(old) = old.address() {
-            // As we don't store the previous signal handler, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIZE_SIGACTION])?;
+            let old_action = core.signal_action(signal);
+            core.main_memory.write(old, old_action)?;
+        }
+
+        if let Some(action) = action.address() {
+            let new_action: LinuxSigAction = core.main_memory.read(action)?;
+            core.set_signal_action(signal, new_action);
         }
 
         // Return 0 as an indicator of success
