@@ -22,18 +22,11 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_BLAKE2B_HASH256;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_ED25519_SIGN;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_ED25519_VERIFY;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
+use tezos_smart_rollup_constants::riscv::SBI_TEZOS_KECCAK256_HASH;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
+use tezos_smart_rollup_constants::riscv::SBI_TEZOS_SECP256K1_VERIFY;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
-// TODO: RV-691: Move constant to kernel_sdk
-/// Function ID for `sbi_tezos_secp256k1_verify`
-pub const SBI_TEZOS_SECP256K1_VERIFY: u64 = 0x0a;
-
-// TODO: RV-691: Move constant to kernel_sdk
-/// Function ID for `sbi_tezos_keccak_hash256`
-pub const SBI_TEZOS_KECCAK256_HASH: u64 = 0x0b;
-
-// TODO: RV-691: Move constant to kernel_sdk
 /// Maximum size of pvm memory access by a host function in bytes
 /// To limit size of proofs in refutation games
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
