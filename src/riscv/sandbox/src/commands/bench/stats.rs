@@ -205,7 +205,7 @@ impl fmt::Display for BenchStats {
 
         writeln!(f, "Outcome:        {}", self.run_result)?;
         writeln!(f, "Total steps:    {}", self.total_steps)?;
-        writeln!(f, "Speed:          {} instr / s", instr_speed)?;
+        writeln!(f, "Speed:          {instr_speed} instr / s")?;
         writeln!(f)?;
         writeln!(f, " Bench stats:\n{}", self.bench_duration_stats)?;
 
@@ -230,6 +230,6 @@ impl fmt::Display for BenchStats {
                 format!("{summary}\n{instr_data}")
             }
         };
-        write!(f, " Instruction statistics:\n{}", stats)
+        write!(f, " Instruction statistics:\n{stats}")
     }
 }

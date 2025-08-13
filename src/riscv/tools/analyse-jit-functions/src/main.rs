@@ -146,7 +146,7 @@ fn create_type_file(content: &str, func_name: &str, func_addr: u64, type_dir: &P
     let named_base = format!("{func_name}.txt");
     let named_path = by_name_dir.join(&named_base);
     let mut file = File::create(&named_path)?;
-    writeln!(file, "{}", content)?;
+    writeln!(file, "{content}")?;
 
     // Create symlink in by-address directory with hex address
     let addr_base = format!("{func_addr:#x}.txt");
@@ -223,7 +223,7 @@ fn create_function_files(
     let disassembly =
         match disassemble_machine_code(capstone, &func_data.machine_code, func_data.func_addr) {
             Ok(disassembly) => disassembly,
-            Err(e) => format!("Error disassembling: {}", e),
+            Err(e) => format!("Error disassembling: {e}"),
         };
     create_type_file(
         &disassembly,

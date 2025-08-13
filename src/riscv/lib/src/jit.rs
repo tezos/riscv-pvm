@@ -3241,7 +3241,7 @@ mod tests {
                     let expected: FValue = (Double::from_u128_r(13872u128, Round::TowardZero))
                         .value
                         .into();
-                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                    assert_eq!(res, expected, "Expected {expected:?}, found {res:?}");
                 }))
                 .build(),
             ScenarioBuilder::default()
@@ -3261,7 +3261,7 @@ mod tests {
                         (Double::from_u128_r(13872u128, Round::NearestTiesToEven))
                             .value
                             .into();
-                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                    assert_eq!(res, expected, "Expected {expected:?}, found {res:?}");
                 }))
                 .build(),
         ];

@@ -73,11 +73,10 @@ fn run_test_with_check<B: Block<M1M, Owned>>(
             message,
             steps,
         } => match message {
-            Some(message) => panic!(
-                "Unexpected exception after {steps} steps: {message} (caused by {:?})",
-                cause
-            ),
-            None => panic!("Unexpected exception after {steps} steps: {:?}", cause),
+            Some(message) => {
+                panic!("Unexpected exception after {steps} steps: {message} (caused by {cause:?})")
+            }
+            None => panic!("Unexpected exception after {steps} steps: {cause:?}"),
         },
     };
 

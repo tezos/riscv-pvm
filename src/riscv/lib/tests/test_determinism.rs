@@ -72,7 +72,7 @@ fn run_steps_ladder<MC, BCC, F>(
 
     let mut steps_done = 0;
     for &steps in ladder {
-        eprintln!("> Running {} steps ...", steps);
+        eprintln!("> Running {steps} steps ...");
         let result_lhs = stepper_lhs.step_max(Bound::Included(steps));
         let result_rhs = stepper_rhs.step_max(Bound::Included(steps));
         steps_done += steps;
@@ -92,8 +92,7 @@ fn run_steps_ladder<MC, BCC, F>(
         );
         assert!(
             stepper_lhs.struct_ref() == stepper_rhs.struct_ref(),
-            "Stepper states have diverged after running {} steps",
-            steps
+            "Stepper states have diverged after running {steps} steps"
         );
 
         let block_builder = InterpretedBlockBuilder;

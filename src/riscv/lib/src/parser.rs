@@ -1200,7 +1200,7 @@ impl Display for XRegisterParsed {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             XRegisterParsed::X0 => write!(f, "zero"),
-            XRegisterParsed::NonZero(r) => write!(f, "{}", r),
+            XRegisterParsed::NonZero(r) => write!(f, "{r}"),
         }
     }
 }

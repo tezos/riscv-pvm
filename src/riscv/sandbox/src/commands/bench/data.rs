@@ -62,7 +62,7 @@ impl Display for SimpleBenchData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let f_duration = format!("Bench Duration: {:?}", self.duration);
         let f_steps = format!("Steps:          {}", self.steps);
-        write!(f, "Simple bench data:\n {}\n {}", f_duration, f_steps)
+        write!(f, "Simple bench data:\n {f_duration}\n {f_steps}")
     }
 }
 
