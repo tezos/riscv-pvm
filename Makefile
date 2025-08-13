@@ -4,17 +4,17 @@
 
 ### Generic top-level targets
 
-all: riscv/all jstz/all dummy/all etherlink/all
+all: riscv/all jstz/all dummy/all block-cache-tester/all etherlink/all
 
 build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check jstz/check dummy/check etherlink/check
+check: riscv/check jstz/check dummy/check block-cache-tester/all etherlink/check
 
 audit: riscv/audit
 
-build: riscv/build jstz/build dummy/build etherlink/build
+build: riscv/build jstz/build dummy/build block-cache-tester/build etherlink/build
 
 test: riscv/test jstz/test etherlink/test 
 
@@ -22,7 +22,7 @@ test-long: riscv/test-long
 
 test-miri: riscv/test-miri
 
-clean: riscv/clean jstz/clean dummy/clean etherlink/clean
+clean: riscv/clean jstz/clean dummy/clean block-cache-tester/clean etherlink/clean
 
 ### Target proxies
 
@@ -34,6 +34,9 @@ jstz/%:
 
 dummy/%: 
 	@make -C kernels/dummy ${@:dummy/%=%}
+
+block-cache-tester/%: 
+	@make -C kernels/block-cache-tester ${@:block-cache-tester/%=%}
 
 etherlink/%: 
 	@make -C kernels/etherlink ${@:etherlink/%=%}
