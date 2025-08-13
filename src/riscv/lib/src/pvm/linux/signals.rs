@@ -142,7 +142,6 @@ pub struct SignalActions<M: ManagerBase> {
     restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
 }
 
-#[expect(dead_code, reason = "Not all of these fields are used yet")]
 impl<M: ManagerRead> SignalActions<M> {
     fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
@@ -170,7 +169,6 @@ impl<M: ManagerRead> SignalActions<M> {
     }
 }
 
-#[expect(dead_code, reason = "Not all of these fields are used yet")]
 impl<M: ManagerWrite> SignalActions<M> {
     fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
@@ -215,14 +213,18 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         M: ManagerRead,
     {
         let index: SignalIndex = signal.into();
-        let sa_sigaction = self.signal_actions.actions[index as usize].read();
+        let sa_handler = self.signal_actions.read_handler(index);
+        let sa_sigaction = self.signal_actions.read_action(index);
+        let sa_mask = self.signal_actions.read_mask(index);
+        let sa_flags = self.signal_actions.read_flags(index);
+        let sa_restorer = self.signal_actions.read_restorer(index);
 
         LinuxSigAction {
-            sa_handler: VirtAddr::new(0),
+            sa_handler,
             sa_sigaction,
-            sa_mask: 0,
-            sa_flags: 0,
-            sa_restorer: VirtAddr::new(0),
+            sa_mask,
+            sa_flags,
+            sa_restorer,
         }
     }
 
@@ -231,7 +233,12 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         M: ManagerWrite,
     {
         let index: SignalIndex = signal.into();
-        self.signal_actions.actions[index as usize].write(action.sa_sigaction);
+        self.signal_actions.write_handler(index, action.sa_handler);
+        self.signal_actions.write_action(index, action.sa_sigaction);
+        self.signal_actions.write_mask(index, action.sa_mask);
+        self.signal_actions.write_flags(index, action.sa_flags);
+        self.signal_actions
+            .write_restorer(index, action.sa_restorer);
     }
 }
 
