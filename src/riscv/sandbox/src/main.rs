@@ -24,7 +24,7 @@ fn format_status(result: &StepperStatus) -> String {
             status,
             ..
         } => format!("Ok (status = {status})"),
-        Exited { status, .. } => format!("Exit with exit code = {}", status),
+        Exited { status, .. } => format!("Exit with exit code = {status}"),
         Running { .. } => "Timeout".to_string(),
         Errored { cause, message, .. } => format!("{message}\nCaused by: {cause}"),
     }

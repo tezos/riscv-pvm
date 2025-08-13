@@ -115,7 +115,7 @@ fn run_steps_ladder<MC, BCC, F>(
     for &steps in ladder {
         // Run one step short of `steps`, then produce a proof of the following step.
         let steps = steps.checked_sub(1).expect("minimum step size is 1");
-        eprintln!("> Running {} steps ...", steps);
+        eprintln!("> Running {steps} steps ...");
         let result = stepper.step_max(Bound::Included(steps));
         steps_done += steps;
 

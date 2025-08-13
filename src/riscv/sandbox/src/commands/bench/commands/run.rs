@@ -213,9 +213,9 @@ fn run_binary(path: &Path, opts: &BenchRunOptions) -> Result<BenchStats, Box<dyn
         }
     };
     if !warnings.is_empty() {
-        eprintln!("Warning: Binary {:?} exited with:", path);
+        eprintln!("Warning: Binary {path:?} exited with:");
         for w in warnings {
-            eprintln!(" - {}", w);
+            eprintln!(" - {w}");
         }
     }
     Ok(stats)

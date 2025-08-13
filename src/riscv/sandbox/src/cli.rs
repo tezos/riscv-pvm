@@ -198,8 +198,7 @@ impl BenchCompareOptions {
                 if let Some(p) = p.to_str() {
                     Ok(p.to_string())
                 } else {
-                    Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    Err(Box::new(std::io::Error::other(
                         "Invalid path to benchmark file",
                     )))
                 }

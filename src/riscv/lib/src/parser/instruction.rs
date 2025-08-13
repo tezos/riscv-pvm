@@ -1281,7 +1281,7 @@ impl fmt::Display for FenceSet {
         if out.is_empty() {
             write!(f, "unknown")
         } else {
-            write!(f, "{}", out)
+            write!(f, "{out}")
         }
     }
 }
@@ -1532,11 +1532,11 @@ impl fmt::Display for InstrCacheable {
             CFsd(args) => write!(f, "c.fsd {},{}({})", args.rs2, args.imm, args.rs1),
             CFsdsp(args) => cs_instr_sp!(f, "c.fsdsp", args),
 
-            Unknown { instr } => write!(f, "unknown {:x}", instr),
-            UnknownCompressed { instr } => write!(f, "unknown.c {:x}", instr),
+            Unknown { instr } => write!(f, "unknown {instr:x}"),
+            UnknownCompressed { instr } => write!(f, "unknown.c {instr:x}"),
 
-            Hint { instr } => write!(f, "hint {:x}", instr),
-            HintCompressed { instr } => write!(f, "hint.c {:x}", instr),
+            Hint { instr } => write!(f, "hint {instr:x}"),
+            HintCompressed { instr } => write!(f, "hint.c {instr:x}"),
             // Interrupt-management
             Wfi => write!(f, "wfi"),
 

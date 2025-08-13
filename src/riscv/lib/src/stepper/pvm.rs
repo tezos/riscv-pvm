@@ -150,7 +150,7 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
                 return StepperStatus::Exited {
                     steps: 0,
                     success: exit_code == 0,
-                    status: format!("Exited with code {}", exit_code),
+                    status: format!("Exited with code {exit_code}"),
                 };
             }
         }

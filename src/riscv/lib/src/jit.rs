@@ -68,7 +68,7 @@ pub enum JitError {
     BuilderFailure(#[from] CodegenError),
     /// Unable to register external state access functionality.
     #[error("Unable to register external state access functions: {0}")]
-    JsaRegistration(#[from] ModuleError),
+    JsaRegistration(#[from] Box<ModuleError>),
 }
 
 /// The JIT is responsible for compiling blocks of instructions to machine code,
@@ -181,7 +181,7 @@ impl<MC: MemoryConfig> JIT<MC> {
     }
 
     /// Finalise and cache the function under construction.
-    fn produce_function(&mut self, hash: &Hash) -> cranelift_module::ModuleResult<JitFn<MC>> {
+    fn produce_function(&mut self, hash: &Hash) -> Result<JitFn<MC>, Box<ModuleError>> {
         let name = hex::encode(hash);
 
         let fun = self.finalise(&name)?;
@@ -193,7 +193,7 @@ impl<MC: MemoryConfig> JIT<MC> {
     }
 
     /// Finalise the function currently under construction.
-    fn finalise(&mut self, name: &str) -> cranelift_module::ModuleResult<JitFn<MC>> {
+    fn finalise(&mut self, name: &str) -> Result<JitFn<MC>, Box<ModuleError>> {
         let id = self.module.declare_function(
             name.as_ref(),
             Linkage::Export,
@@ -3241,7 +3241,7 @@ mod tests {
                     let expected: FValue = (Double::from_u128_r(13872u128, Round::TowardZero))
                         .value
                         .into();
-                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                    assert_eq!(res, expected, "Expected {expected:?}, found {res:?}");
                 }))
                 .build(),
             ScenarioBuilder::default()
@@ -3261,7 +3261,7 @@ mod tests {
                         (Double::from_u128_r(13872u128, Round::NearestTiesToEven))
                             .value
                             .into();
-                    assert_eq!(res, expected, "Expected {:?}, found {:?}", expected, res);
+                    assert_eq!(res, expected, "Expected {expected:?}, found {res:?}");
                 }))
                 .build(),
         ];
