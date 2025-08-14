@@ -8,12 +8,13 @@ use std::fs::read_to_string;
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Deserialize;
 use tezos_smart_rollup::utils::inbox::file::InboxFile;
 
-use crate::Result;
+use crate::{
+    Result,
+    common::{EXPECTED_LEVELS, LogLine},
+};
 
-const EXPECTED_LEVELS: usize = 1;
 const EXPECTED_EXTRA_TXS: usize = 5;
 
 pub fn handle_results(
@@ -211,12 +212,6 @@ fn check_transfer_metrics(txs: &[Tx]) -> Result<TransferMetrics> {
         duration,
         tps,
     })
-}
-
-#[derive(Deserialize, Debug, PartialEq)]
-struct LogLine {
-    elapsed: Duration,
-    message: String,
 }
 
 #[derive(Debug)]
