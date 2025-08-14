@@ -699,13 +699,13 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::ops::Bound;
 
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
     use super::MachineState;
-    use super::MachineStateLayout;
     use super::block_cache::block::Interpreted;
     use super::block_cache::block::InterpretedBlockBuilder;
     use super::instruction::Instruction;
@@ -718,20 +718,19 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::memory::Memory;
+    use crate::machine_state::memory::M64M;
     use crate::machine_state::registers::a0;
+    use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
-    use crate::machine_state::registers::t1;
     use crate::machine_state::registers::t2;
     use crate::machine_state::test_helpers::ManagerTestInit;
     use crate::machine_state::test_helpers::TestMachineOf;
-    use crate::parser::XRegisterParsed::*;
-    use crate::parser::instruction::Instr;
-    use crate::parser::instruction::InstrCacheable;
-    use crate::parser::instruction::SBTypeArgs;
-    use crate::parser::instruction::SplitITypeArgs;
-    use crate::parser::parse_block;
+    use crate::program::Program;
+    use crate::pvm::Pvm;
+    use crate::pvm::PvmLayout;
+    use crate::pvm::handle_system_call;
+    use crate::pvm::hooks::StdoutDebugHooks;
     use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
     use crate::traps::EnvironException;
@@ -829,133 +828,99 @@ mod tests {
         });
     });
 
-    // Test that the machine state does not behave differently when potential ephermeral state is
-    // reset that may impact instruction caching.
-    backend_test!(test_instruction_cache, F, {
-        // Instruction that writes the value in t1 to the address t0.
-        const I_WRITE_T1_TO_ADDRESS_T0: u32 = 0b0011000101010000000100011;
-        assert_eq!(parse_block(&I_WRITE_T1_TO_ADDRESS_T0.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Sw(SBTypeArgs {
-                rs1: t0,
-                rs2: t1,
-                imm: 0,
-            }))
-        ]);
-
-        // Instruction that loads 6 into t2.
-        const I_LOAD_6_INTO_T2: u32 = 0b11000000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_6_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
-                rd: NonZero(nz::t2),
-                rs1: X0,
-                imm: 6,
-            }))
-        ]);
-
-        // Instruction that loads 5 into t2.
-        const I_LOAD_5_INTO_T2: u32 = 0b10100000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_5_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
-                rd: NonZero(nz::t2),
-                rs1: X0,
-                imm: 5,
-            }))
-        ]);
-
-        type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
-
-        type BlockRunner<F> = Interpreted<M4K, F>;
-
-        type LocalMachineState<F> = MachineState<M4K, TestCacheConfig, BlockRunner<F>, F>;
-
-        // Configure the machine state.
+    // This test checks that view on the instruction memory is preserved across rebindings of the
+    // PVM state. There are more details in the `block-cache-tester` kernel's source that is used
+    // to test this.
+    backend_test!(test_block_cache_state, F, {
         let base_state = {
-            let mut state = MachineState::<M4K, TestCacheConfig, BlockRunner<F>, _>::new(
-                InterpretedBlockBuilder,
+            let mut state =
+                Pvm::<M64M, TestCacheConfig, Interpreted<M64M, F>, F>::new(InterpretedBlockBuilder);
+
+            // The `block-cache-tester` kernel is a simple kernel that needs to be built before
+            // this test can run. It is located in the `/kernels/block-cache-tester` directory.
+            let contents = fs::read("../../../kernels/block-cache-tester/target/riscv64gc-unknown-linux-musl/debug/block-cache-tester").expect("Could not find `block-cache-tester` kernel. Perhaps you need to build it via `make -C kernels/block-cache-tester build`?");
+            let program = Program::from_elf(&contents).unwrap();
+
+            state.setup_linux_process(&program).unwrap();
+
+            let res =
+                state
+                    .machine_state
+                    .step_max_handle::<()>(Bound::Unbounded, |machine, _exc| {
+                        let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
+
+                        // The `block-cache-tester` kernel will issue a system call with number -1
+                        // to indicate that it has reached the signal point. This is our cue that we
+                        // have produced the right "start" state.
+                        if syscall_number == -1 {
+                            return Err(());
+                        }
+
+                        let shall_continue = handle_system_call(
+                            machine,
+                            &mut state.system_state,
+                            &mut state.status,
+                            &mut state.reveal_request,
+                            StdoutDebugHooks,
+                        );
+                        Ok(shall_continue)
+                    });
+
+            assert_eq!(
+                res.error,
+                Some(()),
+                "Program didn't make it to the signal point"
             );
-
-            state.reset();
-            state.core.main_memory.set_all_readable_writeable();
-
-            let start_ram = memory::FIRST_ADDRESS;
-
-            // Write the instructions to the beginning of the main memory and point the program
-            // counter at the first instruction.
-            state.core.hart.pc.write(start_ram);
-            let instrs: [u8; 8] = [I_WRITE_T1_TO_ADDRESS_T0, I_LOAD_5_INTO_T2]
-                .into_iter()
-                .flat_map(u32::to_le_bytes)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-            state
-                .core
-                .main_memory
-                .write_all(start_ram, &instrs)
-                .unwrap();
-
-            // Configure the machine in such a way that the first instruction will override the
-            // second instruction. The second instruction behaves differently.
-            let address_to_write = start_ram + 4;
-            state.core.hart.xregisters.write(t0, address_to_write);
-            state
-                .core
-                .hart
-                .xregisters
-                .write(t1, I_LOAD_6_INTO_T2 as u64);
 
             state
         };
 
-        // Perform 2 steps consecutively in one backend.
-        let state = {
-            let mut state = LocalMachineState::<F>::bind(
-                <LocalLayout as CloneLayout>::clone_allocated(
-                    base_state.struct_ref::<FnManagerIdent>(),
-                ),
-                InterpretedBlockBuilder,
-            );
-
-            state.step().unwrap();
-            state.step().unwrap();
-
-            state
-        };
-
-        // Perform 2 steps separately in another backend by re-binding the state between steps.
         let alt_state = {
-            let alt_state = {
-                let mut state = LocalMachineState::<F>::bind(
-                    <LocalLayout as CloneLayout>::clone_allocated(
-                        base_state.struct_ref::<FnManagerIdent>(),
-                    ),
-                    InterpretedBlockBuilder,
-                );
-                state.step().unwrap();
-                state
-            };
+            // Clone the base state to get rid of any ephemeral state that was created.
+            let refs = base_state.struct_ref::<FnManagerIdent>();
+            let refs = PvmLayout::<M64M, TestCacheConfig>::clone_allocated(refs);
+            let mut state = Pvm::<M64M, TestCacheConfig, Interpreted<M64M, F>, F>::bind(
+                refs,
+                InterpretedBlockBuilder,
+            );
 
-            {
-                let mut state = LocalMachineState::<F>::bind(
-                    <LocalLayout as CloneLayout>::clone_allocated(
-                        alt_state.struct_ref::<FnManagerIdent>(),
-                    ),
-                    InterpretedBlockBuilder,
-                );
-                state.step().unwrap();
-                state
+            // We want to run the kernel until it exits as that is a good point to compare.
+            loop {
+                let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
+
+                if unsafe { state.has_exited().is_some() } {
+                    break;
+                }
             }
+
+            state
         };
 
-        // The two backends should have the same state.
+        let state = {
+            // Take ownership within this code block.
+            let mut state = base_state;
+
+            // We want to run the kernel until it exits as that is a good point to compare.
+            loop {
+                let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
+
+                if unsafe { state.has_exited().is_some() } {
+                    break;
+                }
+            }
+
+            state
+        };
+
         assert_eq!(
-            state.core.hart.xregisters.read(t2),
-            alt_state.core.hart.xregisters.read(t2)
+            unsafe { state.has_exited() },
+            Some(0),
+            "State didn't exit cleanly"
         );
 
         assert!(
             state.struct_ref::<FnManagerIdent>() == alt_state.struct_ref::<FnManagerIdent>(),
-            "State equality expected"
+            "States aren't equal"
         );
     });
 

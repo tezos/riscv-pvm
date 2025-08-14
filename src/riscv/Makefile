@@ -80,6 +80,7 @@ build-deps: build-deps-slim
 .PHONY: test
 test: build
 	@make -C ../.. dummy/build
+	@make -C ../.. block-cache-tester/build
 	@cargo test --workspace $(EXTRA_FLAGS)
 
 .PHONY: test-long

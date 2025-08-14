@@ -114,14 +114,14 @@ pub(crate) type PvmProofGen<'a, MC, CL, M> = Pvm<
 #[perfect_derive(Clone)]
 pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: ManagerBase> {
     pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, M>,
-    reveal_request: RevealRequest<M>,
-    pub(super) system_state: linux::SupervisorState<M>,
+    pub(crate) reveal_request: RevealRequest<M>,
+    pub(crate) system_state: linux::SupervisorState<M>,
     version: Cell<u64, M>,
     pub(crate) tick: Cell<u64, M>,
     pub(crate) message_counter: Cell<u64, M>,
     pub(crate) level: Cell<u32, M>,
     pub(crate) level_is_set: Cell<bool, M>,
-    status: Cell<PvmStatus, M>,
+    pub(crate) status: Cell<PvmStatus, M>,
 }
 
 impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_backend::ManagerBase>
@@ -469,7 +469,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BC
     }
 }
 
-fn handle_system_call<MC, BCC, B, M>(
+/// Handle a system call in the PVM.
+pub(crate) fn handle_system_call<MC, BCC, B, M>(
     machine: &mut machine_state::MachineState<MC, BCC, B, M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Cell<PvmStatus, M>,
