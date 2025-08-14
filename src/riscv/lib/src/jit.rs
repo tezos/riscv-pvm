@@ -49,6 +49,7 @@ pub type JitFn<MC> = unsafe extern "C" fn(
     *const c_void,
     &mut MachineCoreState<MC, Owned>,
     u64,
+    usize,
     &mut Result<(), EnvironException>,
     // ignored
     *const c_void,
@@ -356,8 +357,9 @@ mod tests {
                 (hook)(&mut jitted)
             }
 
-            // initialise starting parameters: pc
+            // initialise starting parameters: pc, max_steps
             let initial_pc = self.initial_pc.unwrap_or_default();
+            let max_steps = usize::MAX;
             interpreted.hart.pc.write(initial_pc);
             jitted.hart.pc.write(initial_pc);
 
@@ -369,14 +371,21 @@ mod tests {
             // Run the block in both interpreted and jitted mode.
             let interpreted_res = unsafe {
                 // SAFETY: interpreted blocks are always callable
-                block.run_block(&mut interpreted, initial_pc, interpreted_bb)
+                block.run_block(&mut interpreted, initial_pc, max_steps, interpreted_bb)
             };
 
             let mut jitted_res = Ok(());
             let jitted_steps = unsafe {
                 // # Safety - the block builder is alive for at least
                 //            the duration of the `run` function.
-                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
+                (fun)(
+                    null(),
+                    &mut jitted,
+                    initial_pc,
+                    max_steps,
+                    &mut jitted_res,
+                    null(),
+                )
             };
             let jitted_res = StepManyResult {
                 steps: jitted_steps,
@@ -1741,10 +1750,18 @@ mod tests {
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_res = Ok(());
+            let max_steps = usize::MAX;
             let jitted_steps = unsafe {
                 // # Safety - the jit is not dropped until after we
                 //            exit the block.
-                (fun)(null(), &mut jitted, initial_pc, &mut jitted_res, null())
+                (fun)(
+                    null(),
+                    &mut jitted,
+                    initial_pc,
+                    max_steps,
+                    &mut jitted_res,
+                    null(),
+                )
             };
 
             assert!(jitted_res.is_ok());
