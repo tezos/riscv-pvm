@@ -50,5 +50,10 @@ pub fn entry(host: &mut impl Runtime) {
         }
     });
 
+    #[cfg(feature = "profiling")]
+    for _ in 0..100 {
+        debug_msg!(host, "[Profiling] Calibration\n");
+    }
+
     evm_kernel::kernel_loop(host);
 }
