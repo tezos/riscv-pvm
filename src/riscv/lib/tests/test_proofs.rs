@@ -54,7 +54,7 @@ fn test_jstz_proofs_full_stream() {
 
 #[test]
 fn test_jstz_initial_proof_regression() {
-    // Configuring the stepper with `TestCachelayouts` to match the node PVM
+    // Configuring the stepper with `TestCacheConfig` to match the node PVM
     // and make the test run faster.
     let make_stepper = make_stepper_factory::<M64M, TestCacheConfig>();
     let mut stepper = make_stepper();
