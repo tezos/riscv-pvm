@@ -11,7 +11,7 @@ CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
 cd "$RISCV_DIR"
 
-USAGE="Usage: [ -s: static inbox ] [ -n: run natively ]"
+USAGE="Usage: [ -s: static inbox ] [ -n: run natively ] [ -p: profile kernel run ]"
 
 TX="200"
 SANDBOX_BIN="riscv-sandbox"
@@ -21,13 +21,16 @@ INBOX_FILE=$(realpath "src/riscv/assets/etherlink-erc20-inbox.json")
 STATIC_INBOX=""
 NATIVE=""
 
-while getopts "sn" OPTION; do
+while getopts "snp" OPTION; do
   case "$OPTION" in
   s)
     STATIC_INBOX="y"
     ;;
   n)
     NATIVE=$(make --silent -C kernels/jstz print-native-target | grep -wv make)
+    ;;
+  p)
+    PROFILING="y"
     ;;
   *)
     echo "$USAGE"
@@ -48,6 +51,8 @@ fi
 build_etherlink_riscv() {
   if [ "$STATIC_INBOX" = "y" ]; then
     make -C kernels/etherlink INBOX_FILE="$INBOX_FILE" build-kernel-static &> /dev/null
+  elif [ "$PROFILING" = "y" ]; then
+    make -C kernels/etherlink build-kernel-profiling &> /dev/null
   else
     make -C kernels/etherlink build-kernel &> /dev/null
   fi
@@ -107,8 +112,14 @@ run_etherlink() {
 DATA_DIR=${DATA_DIR:=$(mktemp -d)}
 run_etherlink
 
+if [ "$PROFILING" = "y" ]; then
+  CMD="profile"
+else
+  CMD="results"
+fi
+
 echo -e "\033[1m"
-kernels/etherlink/inbox-bench results \
+kernels/etherlink/inbox-bench $CMD \
   --inbox-file "$INBOX_FILE" \
   --log-file "$LOG" \
   --expected-transfers "$TX"

@@ -8,8 +8,11 @@ use std::path::Path;
 
 use clap::Parser;
 use clap::Subcommand;
+use profile::handle_profile;
 use results::handle_results;
 
+mod common;
+mod profile;
 mod results;
 
 type Result<T, E = Box<dyn Error>> = std::result::Result<T, E>;
@@ -32,6 +35,15 @@ enum Commands {
         #[arg(long)]
         expected_transfers: usize,
     },
+    #[command(about = "Profile the execution of the binary")]
+    Profile {
+        #[arg(long)]
+        inbox_file: Box<Path>,
+        #[arg(long)]
+        log_file: Box<Path>,
+        #[arg(long)]
+        expected_transfers: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -41,6 +53,11 @@ fn main() -> Result<()> {
             log_file,
             expected_transfers,
         } => handle_results(inbox_file, log_file, expected_transfers)?,
+        Commands::Profile {
+            inbox_file,
+            log_file,
+            expected_transfers,
+        } => handle_profile(inbox_file, log_file, expected_transfers)?,
     }
 
     Ok(())

@@ -25,9 +25,12 @@ build-kernel-static: cargo-build-kernel-static
 
 build-kernel-native: cargo-build-kernel-native
 
+build-kernel-profiling: cargo-build-kernel-profiling
+
 test: build-kernel build-kernel-native
 	@../../scripts/etherlink-bench.sh
 	@../../scripts/etherlink-bench.sh -sn
+	@../../scripts/etherlink-bench.sh -p
 
 check: cargo-format cargo-check cargo-clippy cargo-check-docs
 
@@ -59,6 +62,10 @@ cargo-build-kernel-static:
 
 cargo-build-kernel-native:
 	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features static-inbox $(NATIVE_OPT)
+
+cargo-build-kernel-profiling:
+	@INBOX_FILE=$(INBOX_FILE) cargo build -p etherlink --release --features profiling
+
 
 cargo-build-inbox-bench:
 	@cargo build $(NATIVE_OPT) --bin inbox-bench --release
