@@ -11,6 +11,7 @@ pub mod memory;
 pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
+use std::num::NonZeroU64;
 use std::ops::Bound;
 
 use block_cache::BlockCache;
@@ -160,6 +161,11 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         Instruction::from(instr).run(self)
     }
 }
+
+/// The alignment of a stack pointer in RISC-V's ABI
+/// See RISC-V ABIs Specification Chapter 2.1
+pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
+    NonZeroU64::new(16).expect("Alignment must be non-zero");
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineCoreState<MC, M> {
     fn new() -> Self
@@ -712,6 +718,7 @@ mod tests {
     use super::instruction::OpCode;
     use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
     use crate::machine_state::block_cache::BlockCache;
     use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::instruction::Args;
@@ -719,9 +726,11 @@ mod tests {
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::M64M;
+    use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
+    use crate::machine_state::registers::sp;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t2;
     use crate::machine_state::test_helpers::ManagerTestInit;
@@ -731,6 +740,7 @@ mod tests {
     use crate::pvm::PvmLayout;
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
+    use crate::pvm::linux::signals::Signal;
     use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
     use crate::traps::EnvironException;
@@ -1117,5 +1127,25 @@ mod tests {
             assert!(state.block_cache.get_block(0x100).is_some());
             assert_eq!(state.block_cache.get_block_instr(0x100), code2_instrs);
         }
+    });
+
+    backend_test!(test_signal_context, F, {
+        let mut state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
+            InterpretedBlockBuilder,
+        );
+
+        state.reset();
+        state.core.main_memory.set_all_readable_writeable();
+
+        let stack_top = M4K::TOTAL_BYTES as u64;
+        state.core.hart.xregisters.write(sp, stack_top);
+
+        let init_pc = 0xFE;
+        assert!(init_pc % RISCV_ABI_SP_ALIGNMENT.get() != 0);
+        state.core.hart.pc.write(init_pc);
+
+        state.core.push_signal_context(Signal::Sigfpe).unwrap();
+        let pc = state.core.pop_signal_context().unwrap();
+        assert_eq!(pc, init_pc);
     });
 }
