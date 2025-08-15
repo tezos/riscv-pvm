@@ -26,33 +26,6 @@ use std::fmt::Formatter;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 /// RISC-V Exceptions (also known as synchronous exceptions)
-#[derive(PartialEq, Eq, thiserror::Error, strum::Display, Debug, Clone, Copy)]
-pub enum EnvironException {
-    EnvCall,
-}
-
-impl TryFrom<&Exception> for EnvironException {
-    type Error = &'static str;
-
-    fn try_from(value: &Exception) -> Result<Self, Self::Error> {
-        match value {
-            Exception::EnvCall => Ok(EnvironException::EnvCall),
-            Exception::FenceI
-            | Exception::Breakpoint
-            | Exception::IllegalInstruction
-            | Exception::InstructionAccessFault
-            | Exception::LoadAccessFault
-            | Exception::StoreAMOAccessFault
-            | Exception::InstructionPageFault
-            | Exception::LoadPageFault
-            | Exception::StoreAMOPageFault => {
-                Err("Execution environment supports only ecall exceptions")
-            }
-        }
-    }
-}
-
-/// RISC-V Exceptions (also known as synchronous exceptions)
 #[derive(PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
 #[repr(i64)]
 pub enum Exception {

@@ -31,7 +31,7 @@ use crate::machine_state::memory::Permissions;
 use crate::program::Program;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 #[derive(Clone, Debug)]
 pub enum TestStepperResult {
@@ -39,10 +39,10 @@ pub enum TestStepperResult {
     Running { steps: usize },
     /// Program exited. Returns exit code and number of steps executed.
     Exit { code: usize, steps: usize },
-    /// Execution finished because an unhandled environment exception has been thrown.
+    /// Execution finished because an unhandled exception has been thrown.
     /// Returns exception and number of steps executed.
     Exception {
-        cause: EnvironException,
+        cause: Exception,
         steps: usize,
         message: Option<String>,
     },
@@ -57,13 +57,13 @@ impl Default for TestStepperResult {
 impl StepResult for TestStepperResult {
     fn to_stepper_status(&self) -> StepperStatus {
         match self {
-            Running { steps } => StepperStatus::Running { steps: *steps },
-            Exit { code, steps } => StepperStatus::Exited {
+            Self::Running { steps } => StepperStatus::Running { steps: *steps },
+            Self::Exit { code, steps } => StepperStatus::Exited {
                 steps: *steps,
                 success: *code == 0,
                 status: format!("code {code}"),
             },
-            Exception {
+            Self::Exception {
                 cause,
                 steps,
                 message,
@@ -75,8 +75,6 @@ impl StepResult for TestStepperResult {
         }
     }
 }
-
-use TestStepperResult::*;
 
 #[derive(Debug, From, Error, derive_more::Display)]
 pub enum TestStepperError {
@@ -138,7 +136,7 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
 
     fn handle_step_result(
         &mut self,
-        result: StepManyResult<(EnvironException, String)>,
+        result: StepManyResult<(Exception, String)>,
     ) -> TestStepperResult {
         match result.error {
             // An error was encountered in the evaluation function.
@@ -152,12 +150,12 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
             None => {
                 // Check if the machine has exited.
                 if let Some(code) = self.posix_state.exit_code() {
-                    Exit {
+                    TestStepperResult::Exit {
                         code: code as usize,
                         steps: result.steps,
                     }
                 } else {
-                    Running {
+                    TestStepperResult::Running {
                         steps: result.steps,
                     }
                 }
@@ -181,13 +179,11 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCach
     type StepResult = TestStepperResult;
 
     fn step_max(&mut self, steps: Bound<usize>) -> Self::StepResult {
-        let result = self
-            .machine_state
-            .step_max_handle(steps, |machine_state, exc| {
-                self.posix_state
-                    .handle_call(machine_state)
-                    .map_err(|message| (exc, message))
-            });
+        let result = self.machine_state.step_max_handle(steps, |machine_state| {
+            self.posix_state
+                .handle_call(machine_state)
+                .map_err(|message| (Exception::EnvCall, message))
+        });
         self.handle_step_result(result)
     }
 }
