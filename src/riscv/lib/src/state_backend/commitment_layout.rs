@@ -39,7 +39,7 @@ where
     T: Encode + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        Hash::blake3_hash(state)
+        Ok(Hash::blake3_hash(state)?)
     }
 }
 
@@ -48,7 +48,7 @@ where
     T: Encode + 'static,
 {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        Hash::blake3_hash(state)
+        Ok(Hash::blake3_hash(state)?)
     }
 }
 
@@ -58,7 +58,7 @@ impl<const LEN: usize> CommitmentLayout for DynArray<LEN> {
         chunks_to_writer::<LEN, _, _>(&mut writer, |address| {
             state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address)
         })?;
-        let hashes = writer.finalise()?;
+        let hashes = writer.finalise();
         hash::build_custom_merkle_hash(MERKLE_ARITY, hashes)
     }
 }

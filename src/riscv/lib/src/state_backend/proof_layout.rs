@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 
 use super::AllocatedOf;
@@ -89,8 +90,10 @@ pub type VerifierAlloc<L> = <L as Layout>::Allocated<verify_backend::Verifier>;
 /// Errors that may occur when hashing a [`verify_backend::Verifier`] state
 #[derive(Debug, thiserror::Error)]
 pub enum PartialHashError {
-    #[error("Error during hashing: {0}")]
-    Hash(#[from] HashError),
+    /// The hash could not be computed because encoding a value to bytes failed. The byte
+    /// representation is used as input to the hash function.
+    #[error("Error while encoding a to-be-hashed value: {0}")]
+    Encode(#[from] EncodeError),
 
     #[error("Error from proof: {0}")]
     FromProof(#[from] FromProofError),
@@ -189,7 +192,7 @@ impl<'a> ProofTree<'a> {
 
         let hash = match leaf {
             MerkleProofLeaf::Blind(hash) => *hash,
-            MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data)?,
+            MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data),
         };
 
         Ok(hash)
@@ -330,7 +333,7 @@ where
         let access_info = region.get_access_info();
         let cell = super::Cell::<T, Ref<'_, Owned>>::bind(region.inner_region_ref());
         let serialised = binary::serialise(&cell)?;
-        MerkleTree::make_merkle_leaf(serialised, access_info)
+        Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
@@ -366,7 +369,7 @@ where
         let access_info = region.get_access_info();
         let cells = super::Cells::<T, LEN, Ref<'_, Owned>>::bind(region.inner_region_ref());
         let serialised = binary::serialise(&cells)?;
-        MerkleTree::make_merkle_leaf(serialised, access_info)
+        Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
@@ -510,7 +513,7 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
                         {
                             PartialState::Absent => hashes.push(tree.partial_hash_leaf()),
                             PartialState::Complete(data) => {
-                                hashes.push(Ok(Hash::blake3_hash_bytes(data)?))
+                                hashes.push(Ok(Hash::blake3_hash_bytes(data)))
                             }
                             PartialState::Incomplete => {
                                 return Err(PartialHashError::Fatal);

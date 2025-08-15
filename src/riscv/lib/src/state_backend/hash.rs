@@ -17,14 +17,11 @@ use crate::storage::binary;
 
 #[derive(Error, Debug)]
 pub enum HashError {
-    #[error("Invalid digest size")]
-    InvalidDigestSize,
-
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] EncodeError),
+    #[error("Encoding error: {0}")]
+    Encode(#[from] EncodeError),
 
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    IO(#[from] std::io::Error),
 
     #[error("The input buffer was expected to be non-empty")]
     NonEmptyBufferExpected,
@@ -44,13 +41,13 @@ pub struct Hash {
 
 impl Hash {
     /// Hash a slice of bytes
-    pub fn blake3_hash_bytes(bytes: &[u8]) -> Result<Self, HashError> {
+    pub fn blake3_hash_bytes(bytes: &[u8]) -> Self {
         let digest = blake3::hash(bytes).into();
-        Ok(Hash { digest })
+        Hash { digest }
     }
 
     /// Get the hash of a value that can be serialised by hashing its serialisation
-    pub fn blake3_hash<T: Encode>(data: T) -> Result<Self, HashError> {
+    pub fn blake3_hash<T: Encode>(data: T) -> Result<Self, EncodeError> {
         let mut hasher = blake3::Hasher::new();
         binary::serialise_into(&data, &mut hasher)?;
 
@@ -85,24 +82,6 @@ impl std::fmt::Display for Hash {
 impl std::fmt::Debug for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
-    }
-}
-
-impl TryFrom<&[u8]> for Hash {
-    type Error = HashError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let digest: [u8; DIGEST_SIZE] =
-            value.try_into().map_err(|_| HashError::InvalidDigestSize)?;
-        Ok(Hash { digest })
-    }
-}
-
-impl TryFrom<Vec<u8>> for Hash {
-    type Error = HashError;
-
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        Hash::try_from(value.as_ref())
     }
 }
 
@@ -144,19 +123,19 @@ impl HashWriter {
 
     /// Finalise the writer by hashing any remaining data and returning the vector
     /// of hashes.
-    pub fn finalise(mut self) -> Result<Vec<Hash>, HashError> {
+    pub fn finalise(mut self) -> Vec<Hash> {
         if !self.buffer.is_empty() {
-            self.flush_buffer()?;
+            self.flush_buffer();
         }
-        Ok(self.hashes)
+
+        self.hashes
     }
 
     /// Hash the contents of the buffer.
-    fn flush_buffer(&mut self) -> Result<(), HashError> {
-        let hash = Hash::blake3_hash_bytes(&self.buffer)?;
+    fn flush_buffer(&mut self) {
+        let hash = Hash::blake3_hash_bytes(&self.buffer);
         self.hashes.push(hash);
         self.buffer.clear();
-        Ok(())
     }
 }
 
@@ -174,9 +153,10 @@ impl std::io::Write for HashWriter {
 
             // If the buffer has been completely filled, flush it.
             if rem_buffer_len == new_buf_len {
-                self.flush_buffer().map_err(std::io::Error::other)?;
+                self.flush_buffer();
             }
         }
+
         Ok(consumed)
     }
 
