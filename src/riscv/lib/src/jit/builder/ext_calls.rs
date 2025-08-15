@@ -149,21 +149,3 @@ pub fn call3<A0: Typed, A1: Typed, A2: Typed, R: ReturnTyped>(
         arg2.to_value(),
     ])
 }
-
-/// Call an external function with 4 arguments.
-pub fn call4<A0: Typed, A1: Typed, A2: Typed, A3: Typed, R: ReturnTyped>(
-    target_config: &TargetFrontendConfig,
-    builder: &mut FunctionBuilder,
-    callee: extern "C" fn(A0, A1, A2, A3) -> R,
-    arg0: Value<A0>,
-    arg1: Value<A1>,
-    arg2: Value<A2>,
-    arg3: Value<A3>,
-) -> R::Value {
-    call_raw::<(A0, A1, A2, A3), R>(target_config, builder, callee as usize, &[
-        arg0.to_value(),
-        arg1.to_value(),
-        arg2.to_value(),
-        arg3.to_value(),
-    ])
-}

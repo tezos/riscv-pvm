@@ -6,6 +6,7 @@
 //! JIT-compiled blocks of instructions
 
 use super::ICallPlaced;
+use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::Block;
@@ -22,7 +23,7 @@ use crate::state_backend::EnrichedCell;
 use crate::state_backend::FnManager;
 use crate::state_backend::Ref;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 /// Blocks that are compiled to native code for execution, when possible.
 ///
@@ -52,7 +53,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
-        result: &mut Result<(), EnvironException>,
+        result: &mut ExceptionCode,
         block_builder: &mut D,
     ) -> usize {
         if !block_builder.should_compile(&mut self.dispatch) {
@@ -90,7 +91,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
-        result: &mut Result<(), EnvironException>,
+        result: &mut ExceptionCode,
         _block_builder: &mut D,
     ) -> usize {
         let block_result = unsafe {
@@ -103,10 +104,10 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             )
         };
 
-        *result = match block_result.error {
-            Some(exc) => Err(exc),
-            None => Ok(()),
-        };
+        *result = block_result
+            .error
+            .map(ExceptionCode::from_exception)
+            .unwrap_or(ExceptionCode::NoException);
 
         block_result.steps
     }
@@ -175,8 +176,8 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, M
         instr_pc: Address,
         max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> StepManyResult<EnvironException> {
-        let mut result = Ok(());
+    ) -> StepManyResult<Exception> {
+        let mut result = ExceptionCode::NoException;
 
         let fun = self.dispatch.get();
 
@@ -186,7 +187,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, M
 
         StepManyResult {
             steps,
-            error: result.err(),
+            error: result.to_exception(),
         }
     }
 

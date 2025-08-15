@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use cranelift::codegen::ir::MemFlags;
 use cranelift::codegen::ir::Type as CraneliftType;
 use cranelift::codegen::ir::Value as CraneliftValue;
 use cranelift::prelude::FunctionBuilder;
@@ -217,6 +218,13 @@ impl<T: Sized> Value<NonNull<T>> {
             value: self.value,
             _pd: PhantomData,
         }
+    }
+
+    /// Write a value to the memory location pointed to by this pointer.
+    pub fn write(self, builder: &mut FunctionBuilder, value: Value<T>) {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), value.to_value(), self.to_value(), 0);
     }
 }
 

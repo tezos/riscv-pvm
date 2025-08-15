@@ -42,7 +42,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::storage::Hash;
-use crate::traps::EnvironException;
+use crate::traps::Exception;
 
 #[cfg(feature = "metrics")]
 #[doc(hidden)]
@@ -319,7 +319,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         instr_pc: crate::machine_state::memory::Address,
         max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: crate::state_backend::ManagerReadWrite,
     {

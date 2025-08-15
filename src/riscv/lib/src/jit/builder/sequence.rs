@@ -32,6 +32,7 @@ use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
+use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::write_pc;
@@ -41,7 +42,6 @@ use crate::parser::instruction::InstrWidth;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
-use crate::traps::EnvironException;
 
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
@@ -72,7 +72,7 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     max_steps_param: Value<usize>,
 
     /// Parameter pointing to the sequence result
-    result_param: Pointer<Result<(), EnvironException>>,
+    result_param: Pointer<ExceptionCode>,
 
     /// Variable storing the maximum number of steps that can be executed in the sequence.
     steps_remaining: Variable,
@@ -144,10 +144,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             Value::<usize>::from_raw(raw_value)
         };
 
-        // SAFETY: `JitFn` accepts a `&mut Result<(), EnvironException>` as the 5th parameter.
+        // SAFETY: `JitFn` accepts a `&mut ExceptionCode` as the 5th parameter.
         let result_param = unsafe {
             let raw_value = builder.block_params(param_block)[4];
-            Pointer::<Result<(), EnvironException>>::from_raw(raw_value)
+            Pointer::<ExceptionCode>::from_raw(raw_value)
         };
 
         let steps_remaining = Variable::new(STEPS_REMAINING_VAR_ID);

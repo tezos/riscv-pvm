@@ -19,12 +19,12 @@ use std::sync::mpsc::Sender;
 use super::Jitted;
 use crate::jit::JIT;
 use crate::jit::JitFn;
+use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::EnvironException;
 
 /// The function signature for dispatching a block run.
 ///
@@ -37,7 +37,7 @@ pub type DispatchFn<D, MC> = unsafe extern "C" fn(
     &mut MachineCoreState<MC, Owned>,
     Address,
     usize,
-    &mut Result<(), EnvironException>,
+    &mut ExceptionCode,
     &mut D,
 ) -> usize;
 

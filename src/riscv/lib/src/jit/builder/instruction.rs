@@ -53,7 +53,6 @@ use crate::parser::instruction::InstrWidth;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// Instruction execution outcome
@@ -151,7 +150,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     core_param: Pointer<MachineCoreState<MC, Owned>>,
 
     /// Parameter pointing to the sequence result
-    result_param: Pointer<Result<(), EnvironException>>,
+    result_param: Pointer<ExceptionCode>,
 
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
@@ -166,7 +165,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         entry_block: Block,
         instruction_pc: Value<Address>,
         core_param: Pointer<MachineCoreState<MC, Owned>>,
-        result_param: Pointer<Result<(), EnvironException>>,
+        result_param: Pointer<ExceptionCode>,
     ) -> Self {
         Self {
             target_config,
@@ -199,39 +198,12 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         hook
     }
 
-    /// Allocate an outcome block for an unknown branch.
-    fn create_unknown_branch_outcome(&mut self, destination: Value<Address>) -> Block {
-        let hook = self.builder.create_block();
-        self.outcomes
-            .push(Outcome::UnknownBranch { destination, hook });
-        hook
-    }
-
     /// Handle an exception raised by the instruction.
     fn handle_exception<Any>(&mut self, exception: Value<ExceptionCode>) -> InstructionResult<Any> {
-        let current_pc = self.pc_read();
-        let outcome = self.ext_calls.handle_exception(
-            self.builder,
-            self.core_param,
-            exception,
-            self.result_param,
-            current_pc,
-        );
+        self.result_param.write(self.builder, exception);
 
         let exception_block = self.create_exception_outcome();
-        let unknown_branch_block = self.create_unknown_branch_outcome(outcome.new_pc);
-
-        self.ins().brif(
-            outcome.handled.to_value(),
-            unknown_branch_block,
-            [],
-            exception_block,
-            [],
-        );
-
-        // The predecessors of either block are now known
-        self.builder.seal_block(exception_block);
-        self.builder.seal_block(unknown_branch_block);
+        self.builder.ins().jump(exception_block, []);
 
         InstructionResult::NoNext
     }

@@ -106,7 +106,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::Ref;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// The maximum number of instructions that may be contained in a block.
@@ -176,7 +175,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerReadWrite> BlockCall<'_, B, MC
         block_builder: &mut B::BlockBuilder,
         instr_pc: Address,
         max_steps: usize,
-    ) -> StepManyResult<EnvironException> {
+    ) -> StepManyResult<Exception> {
         if self.entry.block.num_instr() <= max_steps {
             // Safety: the same block builder is passed through every time.
             unsafe {
@@ -248,7 +247,7 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         max_steps: usize,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite;
 }

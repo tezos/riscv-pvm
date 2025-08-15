@@ -35,7 +35,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// State Layout for Blocks
@@ -116,7 +115,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
         instr_pc: Address,
         max_steps: usize,
         block_builder: &mut Self::BlockBuilder,
-    ) -> StepManyResult<EnvironException>
+    ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite;
 }
@@ -124,7 +123,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
 fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
     instr: &[EnrichedCell<ICallPlaced<MC, M>, M>],
     core: &mut MachineCoreState<MC, M>,
-    instr_pc: &mut Address,
+    mut instr_pc: Address,
     max_steps: usize,
 ) -> StepManyResult<Exception> {
     let mut result = StepManyResult::ZERO;
@@ -132,30 +131,32 @@ fn run_block_inner<MC: MemoryConfig, M: ManagerReadWrite>(
     for instr in instr.iter().take(max_steps) {
         match run_instr(instr, core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
-                *instr_pc += width as u64;
-                core.hart.pc.write(*instr_pc);
+                instr_pc += width as u64;
+                core.hart.pc.write(instr_pc);
                 result.steps += 1;
             }
 
-            Ok(ProgramCounterUpdate::Set(instr_pc)) => {
-                // Setting the instr_pc implies execution continuing
-                // elsewhere and no longer within the current block, so the
-                // current block instr_pc does not need updating.
-                core.hart.pc.write(instr_pc);
+            Ok(ProgramCounterUpdate::Set(new_instr_pc)) => {
+                // A jump to a new instruction requires us to exit this loop. The targeted
+                // instruction may not be part of the current block, but also we need to ensure we
+                // don't violate the maximum number of steps allowed to run.
+                core.hart.pc.write(new_instr_pc);
                 result.steps += 1;
                 break;
             }
 
             Ok(ProgramCounterUpdate::Relative(offset)) => {
+                // While relative jumps are likely to be in the same block, we don't do step
+                // counting within this function, so we can't respect the maximum number of steps
+                // allowed to run.
                 core.hart.pc.write(instr_pc.wrapping_add_signed(offset));
                 result.steps += 1;
                 break;
             }
 
-            Err(e) => {
-                // Exceptions lead to a new address being set to handle it,
-                // with no guarantee of it being the next instruction.
-                result.error = Some(e);
+            Err(exception) => {
+                // Exceptions are handled outside of block execution. So we exit the loop.
+                result.error = Some(exception);
                 break;
             }
         }
