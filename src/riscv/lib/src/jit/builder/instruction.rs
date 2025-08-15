@@ -623,6 +623,12 @@ impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
     where
         P: MachineCoreProjection,
     {
-        super::write_proj::<MC, P>(self.builder, self.core_param, param, value)
+        super::write_proj::<MC, P>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            param,
+            value,
+        )
     }
 }
