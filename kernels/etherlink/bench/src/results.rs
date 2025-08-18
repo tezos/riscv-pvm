@@ -152,31 +152,23 @@ fn check_transfer(tx: &Tx) -> Result<u64> {
                 .outcome
                 .logs
                 .as_ref()
-                .ok_or(format!(
-                    "Expected this contract call to have a log {:?}",
-                    tx
-                ))?
+                .ok_or(format!("Expected this contract call to have a log {tx:?}"))?
                 .data;
             let amount = u64_from_ethereum_u256_bytes(tx_data.as_slice()).ok_or(format!(
-                "Expected this contract call to have log data {:?}",
-                tx
+                "Expected this contract call to have log data {tx:?}"
             ))?;
             Ok(amount)
         }
-        _ => Err(format!("Expected a successful contract call, got {:?}", tx).into()),
+        _ => Err(format!("Expected a successful contract call, got {tx:?}").into()),
     }
 }
 
 fn check_call_balance_of(tx: &Tx) -> Result<u64> {
     match tx.outcome.result {
-        TxExecutionResult::CallSucceeded { value, .. } => value.ok_or(
-            format!(
-                "Expected this contract call to have a return value {:?}",
-                tx
-            )
-            .into(),
-        ),
-        _ => Err(format!("Expected a successful contract call, got {:?}", tx).into()),
+        TxExecutionResult::CallSucceeded { value, .. } => {
+            value.ok_or(format!("Expected this contract call to have a return value {tx:?}").into())
+        }
+        _ => Err(format!("Expected a successful contract call, got {tx:?}").into()),
     }
 }
 
