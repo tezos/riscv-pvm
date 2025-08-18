@@ -385,18 +385,6 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
             self.current_block_addr.write(!0);
         }
     }
-
-    /// *TEST ONLY* - retrieve the underlying instructions contained in the entry at the given
-    /// address.
-    #[cfg(test)]
-    pub(crate) fn get_block_instr(&mut self, addr: Address) -> Vec<Instruction>
-    where
-        M: ManagerRead,
-    {
-        let entry = Self::entry_mut(&mut self.entries, addr);
-        let instr = entry.block.instr();
-        instr.iter().map(|cell| cell.read_stored()).collect()
-    }
 }
 
 impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
@@ -551,12 +539,14 @@ mod tests {
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::block_cache::config::TestCacheConfig;
+    use crate::machine_state::block_cache::state::BlockCache as BC;
     use crate::machine_state::instruction::Args;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::instruction::OpCode;
     use crate::machine_state::memory;
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::registers::XRegister;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::nz;
@@ -564,10 +554,38 @@ mod tests {
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
+    use crate::state_backend::ManagerBase;
+    use crate::state_backend::ManagerRead;
+    use crate::state_backend::ManagerReadWrite;
     use crate::state_backend::owned_backend::Owned;
     use crate::traps::Exception;
 
     type TestState<M> = <TestCacheConfig as BlockCacheConfig>::State<M4K, Interpreted<M4K, M>, M>;
+
+    impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> BC<SIZE, B, MC, M> {
+        /// Retrieve the underlying instructions contained in the entry at the given address.
+        pub(crate) fn get_block_instr(&mut self, addr: Address) -> Vec<Instruction>
+        where
+            M: ManagerRead,
+        {
+            let entry = Self::entry_mut(&mut self.entries, addr);
+            let instr = entry.block.instr();
+            instr.iter().map(|cell| cell.read_stored()).collect()
+        }
+
+        /// Insert a block into the cache at the relevant index for the supplied `addr`.
+        ///
+        /// This is needed for tests where we want to simulate a block cache with pre-existing
+        /// formed blocks.
+        pub(crate) fn insert_block(&mut self, addr: Address, block: B)
+        where
+            M: ManagerReadWrite,
+        {
+            let entry = Self::entry_mut(&mut self.entries, addr);
+            entry.block = block;
+            entry.address.write(addr);
+        }
+    }
 
     // writing CACHE_INSTR to the block cache creates new block
     backend_test!(test_writing_full_block_fetchable_uncompressed, F, {
