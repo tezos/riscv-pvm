@@ -94,19 +94,27 @@ pub enum Outcome {
 /// Lowered RISC-V instruction
 pub struct LoweredInstruction {
     /// Location of the instruction
-    program_counter: Value<Address>,
+    program_counter: Address,
 
     /// Block that runs the instruction
     run_block: Block,
 
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
+
+    /// Width of the instruction
+    width: InstrWidth,
 }
 
 impl LoweredInstruction {
     /// Access the program counter for this instruction.
-    pub fn program_counter(&self) -> Value<Address> {
+    pub fn program_counter(&self) -> Address {
         self.program_counter
+    }
+
+    /// Return the address of the instruction following this one.
+    pub fn next_instruction_address(&self) -> Address {
+        self.program_counter.wrapping_add(self.width as u64)
     }
 
     /// Access the outcomes of the instruction.
@@ -144,7 +152,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     entry_block: Block,
 
     /// Program counter for the instruction being built
-    instruction_pc: Value<Address>,
+    instruction_pc: Address,
 
     /// Parameter pointing to the `MachineCoreState`
     core_param: Pointer<MachineCoreState<MC, Owned>>,
@@ -154,18 +162,26 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
 
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
+
+    /// Width of the instruction being built
+    width: InstrWidth,
 }
 
 impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Create a new instruction builder.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "All parameters are required to define a new instruction builder."
+    )]
     pub(super) fn new(
         target_config: TargetFrontendConfig,
         builder: &'seq mut FunctionBuilder<'jit>,
         ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
-        instruction_pc: Value<Address>,
+        instruction_pc: Address,
         core_param: Pointer<MachineCoreState<MC, Owned>>,
         result_param: Pointer<ExceptionCode>,
+        width: InstrWidth,
     ) -> Self {
         Self {
             target_config,
@@ -176,6 +192,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
             core_param,
             result_param,
             outcomes: Vec::new(),
+            width,
         }
     }
 
@@ -217,6 +234,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
             program_counter: self.instruction_pc,
             run_block: self.entry_block,
             outcomes: self.outcomes,
+            width: self.width,
         };
 
         // Hook up the end of the instruction.
@@ -288,7 +306,15 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     }
 
     fn pc_read(&mut self) -> Self::XValue {
-        self.instruction_pc
+        // SAFETY: `I64` is the valid cranelift representation for an `Address`, and matches
+        // the representation of `XValue`.
+        unsafe {
+            Value::<XValue>::from_discriminant(
+                &self.target_config,
+                self.builder,
+                self.instruction_pc as i64,
+            )
+        }
     }
 
     fn bool_and(&mut self, lhs: Self::Bool, rhs: Self::Bool) -> Self::Bool {

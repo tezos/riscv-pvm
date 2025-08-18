@@ -27,6 +27,7 @@ use crate::log;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::block_cache::metrics::block_metrics;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
@@ -43,16 +44,20 @@ use crate::state_backend::owned_backend::Owned;
 /// with pointers to `c_void` - which in the C abi map to the same parameter type as the
 /// thin-references to the actual variables passed.
 ///
+/// It also does not inspect the third parameter as it is hard-coded in the sequence building.
+///
 /// [`DispatchFn`]: crate::machine_state::block_cache::block::DispatchFn
 pub type JitFn<MC> = unsafe extern "C" fn(
     // ignored
     *const c_void,
     &mut MachineCoreState<MC, Owned>,
+    // ignored
     u64,
     usize,
     &mut ExceptionCode,
     // ignored
     *const c_void,
+    // TODO: RV-751 - Move the unused parameters for the JIT function to the end.
 ) -> usize;
 
 /// Errors that may arise from the initialisation of the JIT.
@@ -127,8 +132,12 @@ impl<MC: MemoryConfig> JIT<MC> {
     ///
     /// Not all instructions are currently supported. For blocks containing
     /// unsupported instructions, `None` will be returned.
-    pub fn compile(&mut self, instr: &[Instruction]) -> Option<JitFn<MC>> {
-        let Ok(hash) = Hash::blake3_hash(instr) else {
+    pub fn compile(
+        &mut self,
+        instr: &[Instruction],
+        program_counter: Address,
+    ) -> Option<JitFn<MC>> {
+        let Ok(hash) = Hash::blake3_hash((instr, program_counter)) else {
             return None;
         };
 
@@ -136,7 +145,7 @@ impl<MC: MemoryConfig> JIT<MC> {
             return *compilation_result;
         }
 
-        let mut builder = self.start();
+        let mut builder = self.start(program_counter);
         let mut lowered_instrs = Vec::with_capacity(instr.len());
 
         // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
@@ -177,8 +186,13 @@ impl<MC: MemoryConfig> JIT<MC> {
     }
 
     /// Start building a new sequence of instructions.
-    fn start(&mut self) -> SequenceBuilder<'_, MC> {
-        SequenceBuilder::new(&mut self.module, &mut self.ctx, &mut self.builder_context)
+    fn start(&mut self, program_counter: Address) -> SequenceBuilder<'_, MC> {
+        SequenceBuilder::new(
+            &mut self.module,
+            &mut self.ctx,
+            &mut self.builder_context,
+            program_counter,
+        )
     }
 
     /// Finalise and cache the function under construction.
@@ -365,7 +379,7 @@ mod tests {
 
             // Create the JIT function.
             let fun = jit
-                .compile(instructions(&block).as_slice())
+                .compile(instructions(&block).as_slice(), initial_pc)
                 .expect("Compilation of block should succeed.");
 
             // Run the block in both interpreted and jitted mode.
@@ -1736,7 +1750,7 @@ mod tests {
             jitted.hart.xregisters.write_nz(x1, 1);
 
             // Act
-            let res = jit.compile(instructions(&block).as_slice());
+            let res = jit.compile(instructions(&block).as_slice(), initial_pc);
 
             assert!(
                 res.is_none(),
@@ -1749,7 +1763,7 @@ mod tests {
             }
 
             let fun = jit
-                .compile(instructions(&block).as_slice())
+                .compile(instructions(&block).as_slice(), initial_pc)
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_err = ExceptionCode::NoException;

@@ -35,6 +35,7 @@ pub(crate) use block_metrics;
 use super::ICallPlaced;
 use super::block::Block;
 use crate::machine_state::StepManyResult;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::EnrichedCell;
@@ -324,7 +325,7 @@ impl<B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase> Block<MC, M> for BlockMe
         M: crate::state_backend::ManagerReadWrite,
     {
         if let BlockHash::Dirty = self.block_hash {
-            let hash = block_hash(self.block.instr());
+            let hash = block_hash(self.block.instr(), instr_pc);
             block_metrics!(hash = &hash, constructed = self);
 
             self.block_hash = BlockHash::Runnable(hash);
@@ -413,11 +414,12 @@ pub enum BlockHash {
 /// Construct a block hash from the contained instructions.
 fn block_hash<MC: MemoryConfig, M: ManagerRead>(
     block: &[EnrichedCell<ICallPlaced<MC, M>, M>],
+    program_counter: Address,
 ) -> Hash {
     let instr = block
         .iter()
         .map(|i| i.read_ref_stored())
         .collect::<Vec<_>>();
 
-    Hash::blake3_hash(instr).expect("Hashing instructions always succeeds")
+    Hash::blake3_hash((instr, program_counter)).expect("Hashing instructions always succeeds")
 }
