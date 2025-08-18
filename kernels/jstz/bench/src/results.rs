@@ -313,8 +313,7 @@ fn check_balances(level: &Level, messages: &[Message], num_transfers: usize) -> 
 
     if expected_transfers != num_transfers {
         return Err(format!(
-            "Found {} transfer messages, vs {} transfers completed",
-            num_transfers, expected_transfers
+            "Found {num_transfers} transfer messages, vs {expected_transfers} transfers completed",
         )
         .into());
     }

@@ -65,7 +65,7 @@ pub fn entry(host: &mut impl Runtime) {
     host.write_debug("Reveal metadata...\n");
     let result = host.reveal_metadata();
     host.write_debug("Reveal metadata succeeded, result: \n");
-    host.write_debug(&format!("Rollup address: {:?}\n", result));
+    host.write_debug(&format!("Rollup address: {result:?}\n"));
 
     host.write_debug("Reveal preimage...\n");
 
