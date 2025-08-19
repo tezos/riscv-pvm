@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -55,6 +55,8 @@ enum Commands {
         expected_transfers: usize,
         #[arg(long)]
         collapsible_results: bool,
+        #[arg(long, default_value = "0")]
+        exclude_warmup_transfers: usize,
     },
 }
 
@@ -75,11 +77,13 @@ fn main() -> Result<()> {
             log_file,
             expected_transfers,
             collapsible_results,
+            exclude_warmup_transfers,
         } => handle_results(
             inbox_file,
             log_file,
             expected_transfers,
             collapsible_results,
+            exclude_warmup_transfers,
         )?,
     }
 
