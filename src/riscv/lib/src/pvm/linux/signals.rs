@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
+use std::ops::Add;
+use std::ops::Sub;
 
 use arbitrary_int::u7;
 use strum::EnumCount;
@@ -10,8 +13,12 @@ use strum::FromRepr;
 
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
+use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::sp;
+use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::state::NewState;
@@ -142,6 +149,60 @@ pub struct SignalActions<M: ManagerBase> {
     restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
 }
 
+impl<M: ManagerRead> SignalActions<M> {
+    fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+        let signal_index: SignalIndex = signal.into();
+        self.handlers[signal_index as usize].read()
+    }
+
+    fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+        let signal_index: SignalIndex = signal.into();
+        self.actions[signal_index as usize].read()
+    }
+
+    fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+        let signal_index: SignalIndex = signal.into();
+        self.masks[signal_index as usize].read()
+    }
+
+    fn read_flags<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+        let signal_index: SignalIndex = signal.into();
+        self.flags[signal_index as usize].read()
+    }
+
+    fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+        let signal_index: SignalIndex = signal.into();
+        self.restorers[signal_index as usize].read()
+    }
+}
+
+impl<M: ManagerWrite> SignalActions<M> {
+    fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
+        let signal_index: SignalIndex = signal.into();
+        self.handlers[signal_index as usize].write(handler);
+    }
+
+    fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
+        let signal_index: SignalIndex = signal.into();
+        self.actions[signal_index as usize].write(action);
+    }
+
+    fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
+        let signal_index: SignalIndex = signal.into();
+        self.masks[signal_index as usize].write(mask);
+    }
+
+    fn write_flags<T: Into<SignalIndex>>(&mut self, signal: T, flags: u32) {
+        let signal_index: SignalIndex = signal.into();
+        self.flags[signal_index as usize].write(flags);
+    }
+
+    fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
+        let signal_index: SignalIndex = signal.into();
+        self.restorers[signal_index as usize].write(restorer);
+    }
+}
+
 struct_layout! {
     /// Layout for [SignalActions]
     pub struct SignalActionsLayout {
@@ -153,20 +214,87 @@ struct_layout! {
     }
 }
 
+impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
+    /// Pushes the context needed to resume after handling a signal
+    pub fn push_signal_context(&mut self, signal: Signal) -> Result<(), BadMemoryAccess> {
+        let signal_index: SignalIndex = signal.into();
+        let signal_index: u64 = signal_index as u64;
+        let mask = self.signal_actions.read_mask(signal);
+        let pc = self.hart.pc.read();
+
+        let prev_stack_pointer = self.hart.xregisters.read(sp);
+        let stack_pointer = VirtAddr::new(prev_stack_pointer)
+            .sub(32)
+            .align_down(RISCV_ABI_SP_ALIGNMENT);
+
+        self.hart
+            .xregisters
+            .write(sp, stack_pointer.to_machine_address());
+
+        self.main_memory
+            .write(stack_pointer.to_machine_address(), signal_index)?;
+        self.main_memory
+            .write(stack_pointer.add(8).to_machine_address(), mask)?;
+        self.main_memory
+            .write(stack_pointer.add(12).to_machine_address(), pc)?;
+        self.main_memory.write(
+            stack_pointer.add(20).to_machine_address(),
+            prev_stack_pointer,
+        )?;
+
+        Ok(())
+    }
+
+    /// Pops the context needed to resume after handling a signal
+    pub fn pop_signal_context(&mut self) -> Result<Address, BadMemoryAccess> {
+        let stack_pointer = VirtAddr::new(self.hart.xregisters.read(sp));
+
+        let prev_stack_pointer = self
+            .main_memory
+            .read(stack_pointer.add(20).to_machine_address())?;
+        let pc: u64 = self
+            .main_memory
+            .read(stack_pointer.add(12).to_machine_address())?;
+        let mask: u32 = self
+            .main_memory
+            .read(stack_pointer.add(8).to_machine_address())?;
+        let signal_index: u64 = self.main_memory.read(stack_pointer.to_machine_address())?;
+
+        // SAFETY: This was stored by converting from a SignalIndex
+        let signal_index = SignalIndex::from_repr(signal_index as usize).unwrap();
+        self.signal_actions.write_mask(signal_index, mask);
+
+        let stack_pointer = VirtAddr::new(prev_stack_pointer)
+            .add(32)
+            .align_up(NonZeroU64::new(16).expect("Alignment must be non-zero"))
+            .ok_or(BadMemoryAccess)?;
+
+        self.hart
+            .xregisters
+            .write(sp, stack_pointer.to_machine_address());
+
+        Ok(pc)
+    }
+}
+
 impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
     fn signal_action(&self, signal: Signal) -> LinuxSigAction
     where
         M: ManagerRead,
     {
         let index: SignalIndex = signal.into();
-        let sa_sigaction = self.signal_actions.actions[index as usize].read();
+        let sa_handler = self.signal_actions.read_handler(index);
+        let sa_sigaction = self.signal_actions.read_action(index);
+        let sa_mask = self.signal_actions.read_mask(index);
+        let sa_flags = self.signal_actions.read_flags(index);
+        let sa_restorer = self.signal_actions.read_restorer(index);
 
         LinuxSigAction {
-            sa_handler: VirtAddr::new(0),
+            sa_handler,
             sa_sigaction,
-            sa_mask: 0,
-            sa_flags: 0,
-            sa_restorer: VirtAddr::new(0),
+            sa_mask,
+            sa_flags,
+            sa_restorer,
         }
     }
 
@@ -175,7 +303,12 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         M: ManagerWrite,
     {
         let index: SignalIndex = signal.into();
-        self.signal_actions.actions[index as usize].write(action.sa_sigaction);
+        self.signal_actions.write_handler(index, action.sa_handler);
+        self.signal_actions.write_action(index, action.sa_sigaction);
+        self.signal_actions.write_mask(index, action.sa_mask);
+        self.signal_actions.write_flags(index, action.sa_flags);
+        self.signal_actions
+            .write_restorer(index, action.sa_restorer);
     }
 }
 
@@ -299,7 +432,7 @@ impl TryFrom<u64> for Signal {
 
 /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
 /// The representation of these enums are used for indices into signal action storage.
-#[derive(Debug, Clone, Copy, EnumCount)]
+#[derive(Debug, Clone, Copy, EnumCount, FromRepr)]
 #[repr(usize)]
 pub enum SignalIndex {
     Sigill = 0,
