@@ -555,6 +555,12 @@ pub struct DynCells<const LEN: usize, M: ManagerBase> {
     region: M::DynRegion<LEN>,
 }
 
+impl<const LEN: usize> DynCells<LEN, Owned> {
+    pub(crate) fn dyn_cells_start(&self) -> *const u8 {
+        Owned::dyn_region_start::<LEN>(&self.region)
+    }
+}
+
 impl<const LEN: usize, M: ManagerBase> DynCells<LEN, M> {
     /// Bind this state to the given dynamic region.
     pub fn bind(region: M::DynRegion<LEN>) -> Self {

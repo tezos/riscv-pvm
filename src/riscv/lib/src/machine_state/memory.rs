@@ -14,6 +14,7 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
+use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::Elem;
@@ -305,6 +306,8 @@ pub trait MemoryConfig: Send + Sync + 'static {
     where
         M: ManagerBase,
         F: FnManager<Ref<'a, M>>;
+
+    fn owned_start(instance: &Self::State<Owned>) -> (*const u8, usize);
 }
 
 // Re-export memory configurations

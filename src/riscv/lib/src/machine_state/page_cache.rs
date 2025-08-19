@@ -346,6 +346,8 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
         // aligned
         let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
 
+        //let (ptr, _ /*offset is within page, so within main memory*/) = MC::owned_start(&core.main_memory);
+
         if !block_builder.should_compile(&entries[offset].block_run) {
             return unsafe {
                 Self::run_block_not_compiled(
