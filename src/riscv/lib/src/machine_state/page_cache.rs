@@ -19,7 +19,6 @@ use super::memory::OFFSET_BITS;
 use super::memory::Permissions;
 use crate::array_utils::boxed_from_fn;
 use crate::jit::state_access::ExceptionCode;
-use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
@@ -208,28 +207,26 @@ impl<MC: MemoryConfig, BR, M: ManagerBase> std::fmt::Debug for CacheEntry<MC, BR
     }
 }
 
-fn run_block_inner<'a, MC: MemoryConfig, BR, M: ManagerReadWrite + 'a>(
-    entries: &'a [CacheEntry<MC, BR, M>],
+fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
     core: &mut MachineCoreState<MC, M>,
     instr_pc: &mut Address,
+    max_steps: usize,
 ) -> StepManyResult<Exception> {
     let mut result = StepManyResult::ZERO;
 
-    let mut iter = entries.iter();
+    let mut offset = *instr_pc & OFFSET_MASK;
 
-    while let Some(entry) = iter.next() {
-        let res = (entry.run_fn)(&entry.instr.args, core);
+    while result.steps < max_steps && offset < 4092 {
+
+        let instr = unsafe { core.fetch_instr_no_cache(*instr_pc) };
+        let res = instr.run(core);
+
         match res {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 *instr_pc += width as u64;
                 core.hart.pc.write(*instr_pc);
                 result.steps += 1;
-
-                if width == InstrWidth::Uncompressed {
-                    // skip the next instruction as it corresponds to the
-                    // upper halfword of the current instr
-                    let _ = iter.next();
-                }
+                offset += width as u64;
             }
 
             Ok(ProgramCounterUpdate::Set(instr_pc)) => {
@@ -241,8 +238,8 @@ fn run_block_inner<'a, MC: MemoryConfig, BR, M: ManagerReadWrite + 'a>(
                 break;
             }
 
-            Ok(ProgramCounterUpdate::Relative(offset)) => {
-                core.hart.pc.write(instr_pc.wrapping_add_signed(offset));
+            Ok(ProgramCounterUpdate::Relative(offset_)) => {
+                core.hart.pc.write(instr_pc.wrapping_add_signed(offset_));
                 result.steps += 1;
                 break;
             }
@@ -297,35 +294,31 @@ impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Int
     }
 
     unsafe fn run_block(
-        instr: &Arc<[Self; 2048]>,
+        _instr: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, M>,
         mut instr_pc: Address,
-        _max_steps: usize,
+        max_steps: usize,
         _block_builder: &mut Self::BlockBuilder,
     ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite,
     {
         // aligned
-        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
-
-        run_block_inner(&instr[offset..], core, &mut instr_pc)
+        run_block_inner(core, &mut instr_pc, max_steps)
     }
 }
 
 impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D, MC>, Owned> {
     unsafe extern "C" fn run_block_not_compiled(
-        entries: &Arc<[Self; 2048]>,
+        _entries: &Arc<[Self; 2048]>,
         core: &mut MachineCoreState<MC, Owned>,
         mut instr_pc: Address,
-        _max_steps: usize,
+        max_steps: usize,
         result: &mut ExceptionCode,
         _dispatch_compiler: &mut D,
     ) -> usize {
         // aligned
-        let offset = (instr_pc & OFFSET_MASK) as usize >> 1;
-
-        let block_result = run_block_inner(&entries[offset..], core, &mut instr_pc);
+        let block_result = run_block_inner(core, &mut instr_pc, max_steps);
 
         *result = block_result
             .error

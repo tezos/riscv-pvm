@@ -8,7 +8,6 @@ use super::protection::PagePermissions;
 use super::protection::PagePermissionsLayout;
 use super::state::MemoryImpl;
 use crate::state::NewState;
-use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
@@ -94,7 +93,9 @@ where
         )
     }
 
-    fn owned_start(instance: &Self::State<crate::state_backend::owned_backend::Owned>) -> (*const u8, usize) {
+    fn owned_start(
+        instance: &Self::State<crate::state_backend::owned_backend::Owned>,
+    ) -> (*const u8, usize) {
         (instance.data.dyn_cells_start(), TOTAL_BYTES)
     }
 }

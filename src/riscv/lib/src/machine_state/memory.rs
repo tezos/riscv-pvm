@@ -14,7 +14,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
-use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::Elem;
@@ -26,6 +25,7 @@ use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::Ref;
+use crate::state_backend::owned_backend::Owned;
 
 /// Number of bits needed so you can address every byte in a page
 pub const OFFSET_BITS: u64 = 12;

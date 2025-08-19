@@ -80,6 +80,46 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         self.hart.pc.write(pc);
     }
 
+    /// Fetch the 16 bits of an instruction at the given physical address.
+    #[inline(always)]
+    fn fetch_instr_halfword(
+        &self,
+        phys_addr: Address,
+    ) -> Result<memory::InstructionData<u16>, Exception>
+    where
+        M: backend::ManagerRead,
+    {
+        self.main_memory
+            .read_exec(phys_addr)
+            .map_err(|_: BadMemoryAccess| Exception::InstructionAccessFault)
+    }
+
+    /// Fetch instruction from the address given by program counter
+    /// The spec stipulates translation is performed for each byte respectively.
+    /// However, we assume the `raw_pc` is 2-byte aligned.
+    #[inline]
+    unsafe fn fetch_instr_no_cache(&mut self, addr: Address) -> Instruction
+    where
+        M: backend::ManagerReadWrite,
+    {
+        let lower = unsafe { self.fetch_instr_halfword(addr).unwrap_unchecked() };
+
+        // The reasons to provide the second half in the lambda is
+        // because those bytes may be inaccessible or may trigger an exception when read.
+        // Hence we can't read all 4 bytes eagerly.
+        let instr = if is_compressed(lower.data) {
+            parse_compressed_instruction(lower.data)
+        } else {
+            let next_addr = addr + 2;
+            let upper = unsafe { self.fetch_instr_halfword(next_addr).unwrap_unchecked() };
+
+            let combined = lower.combine_with_upper(upper);
+            parse_uncompressed_instruction(combined.data)
+        };
+
+        Instruction::from(&instr)
+    }
+
     /// Bind the machine state to the given allocated space.
     pub fn bind(space: backend::AllocatedOf<MachineCoreStateLayout<MC>, M>) -> Self {
         Self {

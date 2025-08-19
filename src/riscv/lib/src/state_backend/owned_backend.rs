@@ -43,7 +43,9 @@ impl Owned {
         index * std::mem::size_of::<E>()
     }
 
-    pub(crate) fn dyn_region_start<const LEN: usize>(region: &<Owned as ManagerBase>::DynRegion<LEN>) -> *const u8 {
+    pub(crate) fn dyn_region_start<const LEN: usize>(
+        region: &<Owned as ManagerBase>::DynRegion<LEN>,
+    ) -> *const u8 {
         region.as_ref().as_ptr()
     }
 }

@@ -27,6 +27,8 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::owned_backend::Owned;
 
+const THRESHOLD: usize = 700;
+
 /// The function signature for dispatching a block run.
 ///
 /// Internally, this may be interpreted, just-in-time compiled, or do
@@ -66,7 +68,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
         // a completely different set of instructions.
         self.fun = AtomicUsize::new(CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize);
 
-        unsafe { self.remaining_calls.get().write(1000) };
+        unsafe { self.remaining_calls.get().write(THRESHOLD) };
     }
 
     /// Set the dispatch target to use the given `block_run` function.
@@ -96,7 +98,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC
     fn default() -> Self {
         Self {
             fun: AtomicUsize::new(CacheEntry::<MC, Self, Owned>::run_block_interpreted as usize),
-            remaining_calls: internal_corro::UnsafeSyncCell::new(1000),
+            remaining_calls: internal_corro::UnsafeSyncCell::new(THRESHOLD),
             _pd: PhantomData,
         }
     }
