@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -28,7 +28,13 @@ pub fn handle_results(
     all_logs: Vec<Box<Path>>,
     expected_transfers: usize,
     collapsible_results: bool,
+    exclude_warmup_transfers: usize,
 ) -> Result<()> {
+
+    if expected_transfers <= exclude_warmup_transfers {
+        return Err(format!("Warmup transfers {exclude_warmup_transfers} must be less than total transfers {expected_transfers}").into());
+    }
+
     let inbox = InboxFile::load(&inbox)?;
 
     let all_metrics = all_logs
@@ -54,7 +60,7 @@ pub fn handle_results(
             let [results]: [_; EXPECTED_LEVELS] = levels.try_into().unwrap();
 
             check_deploy(&results)?;
-            let metrics = check_transfer_metrics(&results, expected_transfers)?;
+            let metrics = check_transfer_metrics(&results, expected_transfers, exclude_warmup_transfers)?;
             check_balances(
                 &results,
                 &inbox.0[0][2 + expected_transfers..],
@@ -241,7 +247,7 @@ impl fmt::Display for TransferMetrics {
     }
 }
 
-fn check_transfer_metrics(level: &Level, expected_transfers: usize) -> Result<TransferMetrics> {
+fn check_transfer_metrics(level: &Level, expected_transfers: usize, exclude_warmup_transfers: usize) -> Result<TransferMetrics> {
     if expected_transfers + 1 != level.executions.len() {
         return Err(format!(
             "Expected {expected_transfers} transfers, got {}",
@@ -250,10 +256,12 @@ fn check_transfer_metrics(level: &Level, expected_transfers: usize) -> Result<Tr
         .into());
     }
 
-    let transfers = level.executions.len() - 1;
+    let total_transfers = level.executions.len() - 1;
+    let transfers = total_transfers - exclude_warmup_transfers;
+
     // The first execution is the minting call. We collect the time elapsed at the _end_ of the
     // minting, all the way up to the _end_ of the last execution (transfer).
-    let duration = level.executions[transfers].elapsed - level.executions[0].elapsed;
+    let duration = level.executions[total_transfers].elapsed - level.executions[exclude_warmup_transfers].elapsed;
     let tps = (transfers as f64) / duration.as_secs_f64();
 
     Ok(TransferMetrics {

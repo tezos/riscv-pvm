@@ -16,6 +16,10 @@ USAGE="Usage:
     -p: profile with samply
     -n: run natively
     -i <num_iterations>: number of runs
+    -w <num_warmup_tx>: number of warmup transactions
+       Run additional transactions before the benchmarking scenario.
+       This allows performance to be measured excluding warmup-time for
+       various caches to be populated or JIT compilation to take place.
     -j <disable|inline>: disable jit / use inline jit
     -m <all | jit-unsupported>: enable metrics"
 
@@ -32,12 +36,13 @@ METRICS=""
 METRICS_ARGS=()
 NATIVE=""
 JSTZ_SANDBOX_PARAMS=("--input" "kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz")
+WARMUP_TX="0"
 
 CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
 cd "$RISCV_DIR"
 
-while getopts "i:t:m:spnj:" OPTION; do
+while getopts "i:t:m:w:spnj:" OPTION; do
   case "$OPTION" in
   i)
     ITERATIONS="$OPTARG"
@@ -69,6 +74,9 @@ while getopts "i:t:m:spnj:" OPTION; do
       ;;
     esac
     ;;
+  w)
+    WARMUP_TX="$OPTARG"
+    ;;
   m)
     SANDBOX_ENABLE_FEATURES+=("metrics")
     METRICS="y"
@@ -96,6 +104,8 @@ if [ -z "$TX" ]; then
   exit 1
 fi
 
+TOTAL_TX=$(("$TX" + "$WARMUP_TX"))
+
 if [ -n "$NATIVE" ] && [ -z "$STATIC_INBOX" ]; then
   echo "Native compilation without static inbox unsupported"
   echo "$USAGE"
@@ -109,10 +119,10 @@ make -C kernels/jstz inbox-bench &> /dev/null
 
 DATA_DIR=${DATA_DIR:=$(mktemp -d)}
 
-echo "[INFO]: generating $TX transfers"
+echo "[INFO]: generating $TX transfers with $WARMUP_TX warmup tx"
 INBOX_FILE="${DATA_DIR}/inbox.json"
 RUN_INBOX="$INBOX_FILE"
-kernels/jstz/inbox-bench generate --inbox-file "$INBOX_FILE" --transfers "$TX"
+kernels/jstz/inbox-bench generate --inbox-file "$INBOX_FILE" --transfers "$TOTAL_TX"
 
 log_file_args=()
 
@@ -190,7 +200,7 @@ run_jstz() {
 
 collect() {
   echo -e "\033[1m"
-  kernels/jstz/inbox-bench results --inbox-file "$INBOX_FILE" "${log_file_args[@]}" --expected-transfers "$TX"
+  kernels/jstz/inbox-bench results --inbox-file "$INBOX_FILE" "${log_file_args[@]}" --expected-transfers "$TOTAL_TX" --exclude-warmup-transfers "$WARMUP_TX"
   echo -e "\033[0m"
 }
 
