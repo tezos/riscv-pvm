@@ -8,7 +8,17 @@
 
 set -e
 
-USAGE="Usage: -t <num_transfers> [ -s: static inbox ] [ -p: profile with samply ] [ -n: run natively ] [ -i <num_iterations>: number of runs ] [ -j <disable|inline>: disable jit / use inline jit ] [ -m <all | jit-unsupported>: enable metrics ]"
+USAGE="Usage:
+  REQUIRED:
+    -t <num_transfers>
+  OPTIONAL:
+    -s: static inbox
+    -p: profile with samply
+    -n: run natively
+    -i <num_iterations>: number of runs
+    -j <disable|inline>: disable jit / use inline jit
+    -m <all | jit-unsupported>: enable metrics"
+
 DEFAULT_ROLLUP_ADDRESS="sr163Lv22CdE8QagCwf48PWDTquk6isQwv57"
 
 ITERATIONS="1"
