@@ -564,16 +564,6 @@ impl<M: ManagerBase> SupervisorState<M> {
     where
         M: ManagerReadWrite,
     {
-        if let Some(old) = old.address() {
-            let old_action = core.signal_action(signal);
-            core.main_memory.write(old, old_action)?;
-        }
-
-        if let Some(action) = action.address() {
-            let new_action: LinuxSigAction = core.main_memory.read(action)?;
-            core.set_signal_action(signal, new_action);
-        }
-
         // Return 0 as an indicator of success
         Ok(0)
     }
