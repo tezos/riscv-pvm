@@ -233,9 +233,8 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
             return self.provide_reveal_error_response();
         }
 
-        self.machine_state.step_max_handle::<Infallible>(
-            Bound::Included(1),
-            |machine_state, _exception| {
+        self.machine_state
+            .step_max_handle::<Infallible>(Bound::Included(1), |machine_state| {
                 Ok(handle_system_call(
                     machine_state,
                     &mut self.system_state,
@@ -243,8 +242,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
                     &mut self.reveal_request,
                     &mut hooks,
                 ))
-            },
-        );
+            });
 
         self.tick.write(self.tick.read().wrapping_add(1u64));
     }
@@ -282,7 +280,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
         let steps = self
             .machine_state
-            .step_max_handle::<Infallible>(step_bounds, |machine_state, _exception| {
+            .step_max_handle::<Infallible>(step_bounds, |machine_state| {
                 Ok(handle_system_call(
                     machine_state,
                     &mut self.system_state,

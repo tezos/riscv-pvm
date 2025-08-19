@@ -40,7 +40,6 @@ use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerReadWrite;
-use crate::traps::EnvironException;
 use crate::traps::Exception;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
@@ -448,7 +447,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     pub fn step_max_handle<E>(
         &mut self,
         mut step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self, EnvironException) -> Result<bool, E>,
+        mut handle: impl FnMut(&mut Self) -> Result<bool, E>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
@@ -470,7 +469,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     step_bounds = bound_saturating_sub(step_bounds, 1);
 
                     match cause {
-                        Exception::EnvCall => match handle(self, EnvironException::EnvCall) {
+                        Exception::EnvCall => match handle(self) {
                             Ok(may_continue) => {
                                 if !may_continue {
                                     break None;
@@ -803,28 +802,27 @@ mod tests {
 
             state.setup_linux_process(&program).unwrap();
 
-            let res =
-                state
-                    .machine_state
-                    .step_max_handle::<()>(Bound::Unbounded, |machine, _exc| {
-                        let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
+            let res = state
+                .machine_state
+                .step_max_handle::<()>(Bound::Unbounded, |machine| {
+                    let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
 
-                        // The `block-cache-tester` kernel will issue a system call with number -1
-                        // to indicate that it has reached the signal point. This is our cue that we
-                        // have produced the right "start" state.
-                        if syscall_number == -1 {
-                            return Err(());
-                        }
+                    // The `block-cache-tester` kernel will issue a system call with number -1
+                    // to indicate that it has reached the signal point. This is our cue that we
+                    // have produced the right "start" state.
+                    if syscall_number == -1 {
+                        return Err(());
+                    }
 
-                        let shall_continue = handle_system_call(
-                            machine,
-                            &mut state.system_state,
-                            &mut state.status,
-                            &mut state.reveal_request,
-                            StdoutDebugHooks,
-                        );
-                        Ok(shall_continue)
-                    });
+                    let shall_continue = handle_system_call(
+                        machine,
+                        &mut state.system_state,
+                        &mut state.status,
+                        &mut state.reveal_request,
+                        StdoutDebugHooks,
+                    );
+                    Ok(shall_continue)
+                });
 
             assert_eq!(
                 res.error,
