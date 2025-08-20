@@ -45,6 +45,7 @@ use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use crate::default::ConstDefault;
+use crate::jit::state_context::JitStateContext;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
@@ -232,7 +233,7 @@ impl<E: 'static> Projection for CellProj<E> {
         state.write(value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
         target_config: &cranelift_isa::TargetFrontendConfig,
         builder: &mut cranelift_prelude::FunctionBuilder,
         base: cranelift_prelude::Value,
@@ -505,7 +506,7 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
         RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
         target_config: &cranelift_isa::TargetFrontendConfig,
         builder: &mut cranelift_prelude::FunctionBuilder,
         base: cranelift_prelude::Value,

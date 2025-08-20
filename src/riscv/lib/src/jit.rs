@@ -7,6 +7,7 @@
 
 pub(crate) mod builder;
 pub(crate) mod state_access;
+pub(crate) mod state_context;
 
 use cranelift::codegen::CodegenError;
 use cranelift::codegen::settings::SetError;

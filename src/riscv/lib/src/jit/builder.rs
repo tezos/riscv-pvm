@@ -29,9 +29,9 @@ use octez_riscv_data::mode::Normal;
 use crate::instruction_context::Predicate;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
+use crate::jit::state_context::JitStateContext;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
 impl From<Predicate> for IntCC {
@@ -61,7 +61,7 @@ where
     MC: MemoryConfig,
     P: MachineCoreProjection,
     P::Target: typed::Typed,
-    SC: StateContext,
+    SC: JitStateContext,
 {
     let (base, offset) = P::build_owned_pointer_offset::<MC, SC>(
         target_config,
@@ -95,7 +95,7 @@ fn write_proj<MC, P, SC>(
 ) where
     MC: MemoryConfig,
     P: MachineCoreProjection,
-    SC: StateContext,
+    SC: JitStateContext,
 {
     let (base, offset) = P::build_owned_pointer_offset::<MC, SC>(
         target_config,

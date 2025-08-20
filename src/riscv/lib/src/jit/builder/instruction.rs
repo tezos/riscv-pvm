@@ -44,6 +44,7 @@ use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
+use crate::jit::state_context::JitStateContext;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
@@ -626,5 +627,12 @@ impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
             param,
             value,
         )
+    }
+}
+
+impl<MC: MemoryConfig> JitStateContext for InstructionBuilder<'_, '_, MC> {
+    #[inline(always)]
+    fn to_jit_value<T>(value: Self::Value<T>) -> Value<T> {
+        value
     }
 }

@@ -22,6 +22,7 @@ use cranelift::prelude::isa::TargetFrontendConfig;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::mode::Normal;
 
+use crate::jit::state_context::JitStateContext;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::Cell;
@@ -140,7 +141,7 @@ pub trait Projection {
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
     /// value. This is exclusive to the [`octez_riscv_data::mode::Normal`] mode.
-    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
@@ -184,7 +185,7 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_write::<MC, M>(state.deref_mut(), param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
@@ -206,9 +207,9 @@ impl<P: Projection> Projection for BoxProj<P> {
 }
 
 /// Parameter for an array projection
-pub struct ArrayProjParam<T> {
+pub struct ArrayProjParam<I, T> {
     /// Index of the element to project
-    pub index: usize,
+    pub index: I,
 
     /// Parameter for the inner projection
     pub inner_param: T,
@@ -222,13 +223,13 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
 
     type Target = P::Target;
 
-    type Parameter<SC: StateContext + ?Sized> = ArrayProjParam<P::Parameter<SC>>;
+    type Parameter<SC: StateContext + ?Sized> = ArrayProjParam<SC::Value<u64>, P::Parameter<SC>>;
 
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + ManagerWrite + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter<MachineCoreState<MC, M>>,
     ) -> &'a Self::Target {
-        let inner_state = &state[param.index];
+        let inner_state = &state[param.index as usize];
         P::project_ref::<MC, M>(inner_state, param.inner_param)
     }
 
@@ -239,7 +240,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
     where
         Self::Target: Copy,
     {
-        let inner_state = &state[param.index];
+        let inner_state = &state[param.index as usize];
         P::project_read::<MC, M>(inner_state, param.inner_param)
     }
 
@@ -248,24 +249,25 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         param: Self::Parameter<MachineCoreState<MC, M>>,
         value: Self::Target,
     ) {
-        let inner_state = &mut state[param.index];
+        let inner_state = &mut state[param.index as usize];
         P::project_write::<MC, M>(inner_state, param.inner_param, value);
     }
 
-    fn build_owned_pointer_offset<MC: MemoryConfig, SC: StateContext>(
+    fn build_owned_pointer_offset<MC: MemoryConfig, SC: JitStateContext>(
         target_config: &TargetFrontendConfig,
         builder: &mut FunctionBuilder,
         base: ir::Value,
         offset: Offset32,
         param: Self::Parameter<SC>,
     ) -> (ir::Value, Offset32) {
-        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>();
-        let elem_offset = param
-            .index
-            .checked_mul(elem_size)
-            .expect("Element offset should not overflow");
+        let elem_size: i64 = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>()
+            .try_into()
+            .expect("element size should fit in i64");
 
-        let offset = offset32_try_add(offset, elem_offset);
+        let index = SC::to_jit_value(param.index).to_value();
+        let elem_offset = builder.ins().imul_imm(index, elem_size);
+        let base = builder.ins().iadd(base, elem_offset);
+
         P::build_owned_pointer_offset::<MC, SC>(
             target_config,
             builder,
@@ -436,7 +438,7 @@ macro_rules! impl_projection {
 
             fn build_owned_pointer_offset<
                 MC: $crate::machine_state::memory::MemoryConfig,
-                SC: $crate::state_context::StateContext,
+                SC: $crate::jit::state_context::JitStateContext,
             >(
                 target_config: &cranelift::prelude::isa::TargetFrontendConfig,
                 builder: &mut cranelift::prelude::FunctionBuilder,
