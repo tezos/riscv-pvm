@@ -703,21 +703,45 @@ impl ConstDefault for Register {
 
 impl From<XRegister> for Register {
     fn from(x: XRegister) -> Self {
-        Self { x, ..Self::DEFAULT }
+        x.into_const()
+    }
+}
+
+impl XRegister {
+    pub(crate) const fn into_const(self) -> Register {
+        Register {
+            x: self,
+            ..Register::DEFAULT
+        }
     }
 }
 
 impl From<FRegister> for Register {
     fn from(f: FRegister) -> Self {
-        Self { f, ..Self::DEFAULT }
+        f.into_const()
+    }
+}
+
+impl FRegister {
+    pub(crate) const fn into_const(self) -> Register {
+        Register {
+            f: self,
+            ..Register::DEFAULT
+        }
     }
 }
 
 impl From<NonZeroXRegister> for Register {
-    fn from(nzx: NonZeroXRegister) -> Self {
-        Self {
-            nzx,
-            ..Self::DEFAULT
+    fn from(x: NonZeroXRegister) -> Self {
+        x.into_const()
+    }
+}
+
+impl NonZeroXRegister {
+    pub(crate) const fn into_const(self) -> Register {
+        Register {
+            nzx: self,
+            ..Register::DEFAULT
         }
     }
 }
@@ -1521,6 +1545,12 @@ impl Args {
 
 impl From<&Instr> for Instruction {
     fn from(value: &Instr) -> Self {
+        Instruction::from_const(value)
+    }
+}
+
+impl Instruction {
+    pub const fn from_const(value: &Instr) -> Self {
         match value {
             // RV64I R-type instructions
             Instr::Add(args) => Instruction::from_ic_add(args),
@@ -1859,115 +1889,115 @@ impl From<&Instr> for Instruction {
             },
             Instr::Feqs(args) => Instruction {
                 opcode: OpCode::Feqs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fles(args) => Instruction {
                 opcode: OpCode::Fles,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Flts(args) => Instruction {
                 opcode: OpCode::Flts,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fadds(args) => Instruction {
                 opcode: OpCode::Fadds,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsubs(args) => Instruction {
                 opcode: OpCode::Fsubs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmuls(args) => Instruction {
                 opcode: OpCode::Fmuls,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fdivs(args) => Instruction {
                 opcode: OpCode::Fdivs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsqrts(args) => Instruction {
                 opcode: OpCode::Fsqrts,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmins(args) => Instruction {
                 opcode: OpCode::Fmins,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmaxs(args) => Instruction {
                 opcode: OpCode::Fmaxs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjs(args) => Instruction {
                 opcode: OpCode::Fsgnjs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjns(args) => Instruction {
                 opcode: OpCode::Fsgnjns,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjxs(args) => Instruction {
                 opcode: OpCode::Fsgnjxs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmadds(args) => Instruction {
                 opcode: OpCode::Fmadds,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmsubs(args) => Instruction {
                 opcode: OpCode::Fmsubs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fnmsubs(args) => Instruction {
                 opcode: OpCode::Fnmsubs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fnmadds(args) => Instruction {
                 opcode: OpCode::Fnmadds,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FclassS(args) => Instruction {
                 opcode: OpCode::FclassS,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FmvXW(args) => Instruction {
                 opcode: OpCode::FmvXW,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FmvWX(args) => Instruction {
                 opcode: OpCode::FmvWX,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtsw(args) => Instruction {
                 opcode: OpCode::Fcvtsw,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtswu(args) => Instruction {
                 opcode: OpCode::Fcvtswu,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtsl(args) => Instruction {
                 opcode: OpCode::Fcvtsl,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtslu(args) => Instruction {
                 opcode: OpCode::Fcvtslu,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtws(args) => Instruction {
                 opcode: OpCode::Fcvtws,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtwus(args) => Instruction {
                 opcode: OpCode::Fcvtwus,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtls(args) => Instruction {
                 opcode: OpCode::Fcvtls,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtlus(args) => Instruction {
                 opcode: OpCode::Fcvtlus,
-                args: args.into(),
+                args: args.into_const(),
             },
 
             // RV64D instructions
@@ -1981,95 +2011,95 @@ impl From<&Instr> for Instruction {
             },
             Instr::Feqd(args) => Instruction {
                 opcode: OpCode::Feqd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fled(args) => Instruction {
                 opcode: OpCode::Fled,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fltd(args) => Instruction {
                 opcode: OpCode::Fltd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Faddd(args) => Instruction {
                 opcode: OpCode::Faddd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsubd(args) => Instruction {
                 opcode: OpCode::Fsubd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmuld(args) => Instruction {
                 opcode: OpCode::Fmuld,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fdivd(args) => Instruction {
                 opcode: OpCode::Fdivd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsqrtd(args) => Instruction {
                 opcode: OpCode::Fsqrtd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmind(args) => Instruction {
                 opcode: OpCode::Fmind,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmaxd(args) => Instruction {
                 opcode: OpCode::Fmaxd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjd(args) => Instruction {
                 opcode: OpCode::Fsgnjd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjnd(args) => Instruction {
                 opcode: OpCode::Fsgnjnd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fsgnjxd(args) => Instruction {
                 opcode: OpCode::Fsgnjxd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtds(args) => Instruction {
                 opcode: OpCode::Fcvtds,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtsd(args) => Instruction {
                 opcode: OpCode::Fcvtsd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmaddd(args) => Instruction {
                 opcode: OpCode::Fmaddd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fmsubd(args) => Instruction {
                 opcode: OpCode::Fmsubd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fnmsubd(args) => Instruction {
                 opcode: OpCode::Fnmsubd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fnmaddd(args) => Instruction {
                 opcode: OpCode::Fnmaddd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FclassD(args) => Instruction {
                 opcode: OpCode::FclassD,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtdw(args) => Instruction {
                 opcode: OpCode::Fcvtdw,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtdwu(args) => Instruction {
                 opcode: OpCode::Fcvtdwu,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtdl(args) => Instruction {
                 opcode: OpCode::Fcvtdl,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtdlu(args) => Instruction::new_f64_from_x64_unsigned(
                 args.rd,
@@ -2079,61 +2109,61 @@ impl From<&Instr> for Instruction {
             ),
             Instr::Fcvtwd(args) => Instruction {
                 opcode: OpCode::Fcvtwd,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtwud(args) => Instruction {
                 opcode: OpCode::Fcvtwud,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtld(args) => Instruction {
                 opcode: OpCode::Fcvtld,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Fcvtlud(args) => Instruction {
                 opcode: OpCode::Fcvtlud,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FmvXD(args) => Instruction {
                 opcode: OpCode::FmvXD,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::FmvDX(args) => Instruction {
                 opcode: OpCode::FmvDX,
-                args: args.into(),
+                args: args.into_const(),
             },
 
             // Zicsr instructions
             Instr::Csrrw(args) => Instruction {
                 opcode: OpCode::Csrrw,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Csrrs(args) => Instruction {
                 opcode: OpCode::Csrrs,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Csrrc(args) => Instruction {
                 opcode: OpCode::Csrrc,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Csrrwi(args) => Instruction {
                 opcode: OpCode::Csrrwi,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Csrrsi(args) => Instruction {
                 opcode: OpCode::Csrrsi,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::Csrrci(args) => Instruction {
                 opcode: OpCode::Csrrci,
-                args: args.into(),
+                args: args.into_const(),
             },
 
             // RV32C compressed instructions
             Instr::CLw(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 4 == 0);
                 Instruction::new_x32_load_signed(
-                    args.rd.into(),
-                    args.rs1.into(),
+                    args.rd.as_xreg(),
+                    args.rs1.as_xreg(),
                     args.imm,
                     InstrWidth::Compressed,
                 )
@@ -2141,7 +2171,7 @@ impl From<&Instr> for Instruction {
             Instr::CLwsp(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 4 == 0);
                 Instruction::new_x32_load_signed(
-                    args.rd_rs1.into(),
+                    args.rd_rs1.as_xreg(),
                     sp,
                     args.imm,
                     InstrWidth::Compressed,
@@ -2150,8 +2180,8 @@ impl From<&Instr> for Instruction {
             Instr::CSw(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 4 == 0);
                 Instruction::new_x32_store(
-                    args.rs1.into(),
-                    args.rs2.into(),
+                    args.rs1.as_xreg(),
+                    args.rs2.as_xreg(),
                     args.imm,
                     InstrWidth::Compressed,
                 )
@@ -2200,8 +2230,8 @@ impl From<&Instr> for Instruction {
             Instr::CLd(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
                 Instruction::new_x64_load_signed(
-                    args.rd.into(),
-                    args.rs1.into(),
+                    args.rd.as_xreg(),
+                    args.rs1.as_xreg(),
                     args.imm,
                     InstrWidth::Compressed,
                 )
@@ -2209,7 +2239,7 @@ impl From<&Instr> for Instruction {
             Instr::CLdsp(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
                 Instruction::new_x64_load_signed(
-                    args.rd_rs1.into(),
+                    args.rd_rs1.as_xreg(),
                     sp,
                     args.imm,
                     InstrWidth::Compressed,
@@ -2218,8 +2248,8 @@ impl From<&Instr> for Instruction {
             Instr::CSd(args) => {
                 debug_assert!(args.imm >= 0 && args.imm % 8 == 0);
                 Instruction::new_x64_store(
-                    args.rs1.into(),
-                    args.rs2.into(),
+                    args.rs1.as_xreg(),
+                    args.rs2.as_xreg(),
                     args.imm,
                     InstrWidth::Compressed,
                 )
@@ -2230,7 +2260,7 @@ impl From<&Instr> for Instruction {
             }
             Instr::CAddiw(args) => Instruction::new_add_word_immediate(
                 args.rd_rs1,
-                args.rd_rs1.into(),
+                args.rd_rs1.as_xreg(),
                 args.imm,
                 InstrWidth::Compressed,
             ),
@@ -2244,7 +2274,7 @@ impl From<&Instr> for Instruction {
             },
             Instr::CFldsp(args) => Instruction {
                 opcode: OpCode::CFldsp,
-                args: args.into(),
+                args: args.into_const(),
             },
             Instr::CFsd(args) => Instruction {
                 opcode: OpCode::CFsd,
@@ -2252,7 +2282,7 @@ impl From<&Instr> for Instruction {
             },
             Instr::CFsdsp(args) => Instruction {
                 opcode: OpCode::CFsdsp,
-                args: args.into(),
+                args: args.into_const(),
             },
 
             Instr::Unknown { instr: _ } => Instruction::new_unknown(InstrWidth::Uncompressed),
@@ -2277,171 +2307,171 @@ impl From<&Instr> for Instruction {
     }
 }
 
-impl From<&RTypeArgs> for Args {
-    fn from(value: &RTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
+impl RTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&NonZeroRdRTypeArgs> for Args {
-    fn from(value: &NonZeroRdRTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
+impl NonZeroRdRTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&UJTypeArgs> for Args {
-    fn from(value: &UJTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            imm: value.imm,
+impl UJTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            imm: self.imm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&NonZeroRdUJTypeArgs> for Args {
-    fn from(value: &NonZeroRdUJTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            imm: value.imm,
+impl NonZeroRdUJTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            imm: self.imm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&AmoArgs> for Args {
-    fn from(value: &AmoArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            aq: value.aq,
-            rl: value.rl,
+impl AmoArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
+            aq: self.aq,
+            rl: self.rl,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CIBTypeArgs> for Args {
-    fn from(value: &CIBTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            imm: value.imm,
-            rs1: value.rd_rs1.into(),
+impl CIBTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd_rs1.into_const(),
+            imm: self.imm,
+            rs1: self.rd_rs1.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CIBNZTypeArgs> for Args {
-    fn from(value: &CIBNZTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            imm: value.imm,
+impl CIBNZTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd_rs1.into_const(),
+            imm: self.imm,
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CRTypeArgs> for Args {
-    fn from(value: &CRTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            rs2: value.rs2.into(),
+impl CRTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd_rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CNZRTypeArgs> for Args {
-    fn from(value: &CNZRTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            rs2: value.rs2.into(),
+impl CNZRTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd_rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CJTypeArgs> for Args {
-    fn from(value: &CJTypeArgs) -> Self {
-        Self {
-            imm: value.imm,
+impl CJTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            imm: self.imm,
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CRJTypeArgs> for Args {
-    fn from(value: &CRJTypeArgs) -> Self {
-        Self {
-            rs1: value.rs1.into(),
+impl CRJTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rs1: self.rs1.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CSSTypeArgs> for Args {
-    fn from(value: &CSSTypeArgs) -> Self {
-        Self {
-            rs2: value.rs2.into(),
-            imm: value.imm,
+impl CSSTypeArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rs2: self.rs2.into_const(),
+            imm: self.imm,
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CsrArgs> for Args {
-    fn from(value: &CsrArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            csr: value.csr,
+impl CsrArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            csr: self.csr,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CsriArgs> for Args {
-    fn from(value: &CsriArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            imm: value.imm,
-            csr: value.csr,
+impl CsriArgs {
+  const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            imm: self.imm,
+            csr: self.csr,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
 impl FLoadArgs {
-    fn to_args(self, width: InstrWidth) -> Args {
+    const fn to_args(self, width: InstrWidth) -> Args {
         Args {
-            rd: self.rd.into(),
-            rs1: self.rs1.into(),
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
             imm: self.imm,
             width,
             ..Args::DEFAULT
@@ -2450,10 +2480,10 @@ impl FLoadArgs {
 }
 
 impl FStoreArgs {
-    fn to_args(self, width: InstrWidth) -> Args {
+    const fn to_args(self, width: InstrWidth) -> Args {
         Args {
-            rs1: self.rs1.into(),
-            rs2: self.rs2.into(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
             imm: self.imm,
             width,
             ..Args::DEFAULT
@@ -2461,133 +2491,133 @@ impl FStoreArgs {
     }
 }
 
-impl From<&CSSDTypeArgs> for Args {
-    fn from(value: &CSSDTypeArgs) -> Self {
-        Self {
-            imm: value.imm,
-            rs2: value.rs2.into(),
+impl CSSDTypeArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            imm: self.imm,
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&CIBDTypeArgs> for Args {
-    fn from(value: &CIBDTypeArgs) -> Self {
-        Self {
-            imm: value.imm,
-            rd: value.rd_rs1.into(),
+impl CIBDTypeArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            imm: self.imm,
+            rd: self.rd_rs1.into_const(),
             width: InstrWidth::Compressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&XRegToFRegArgs> for Args {
-    fn from(value: &XRegToFRegArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
+impl XRegToFRegArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&XRegToFRegArgsWithRounding> for Args {
-    fn from(value: &XRegToFRegArgsWithRounding) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rm: value.rm,
+impl XRegToFRegArgsWithRounding {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rm: self.rm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FRegToXRegArgs> for Args {
-    fn from(value: &FRegToXRegArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
+impl FRegToXRegArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FRegToXRegArgsWithRounding> for Args {
-    fn from(value: &FRegToXRegArgsWithRounding) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rm: value.rm,
+impl FRegToXRegArgsWithRounding {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rm: self.rm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FR3ArgsWithRounding> for Args {
-    fn from(value: &FR3ArgsWithRounding) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            rs3f: value.rs3,
-            rm: value.rm,
+impl FR3ArgsWithRounding {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
+            rs3f: self.rs3,
+            rm: self.rm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FRArgs> for Args {
-    fn from(value: &FRArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
+impl FRArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FR1ArgWithRounding> for Args {
-    fn from(value: &FR1ArgWithRounding) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rm: value.rm,
+impl FR1ArgWithRounding {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rm: self.rm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FR2ArgsWithRounding> for Args {
-    fn from(value: &FR2ArgsWithRounding) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            rm: value.rm,
+impl FR2ArgsWithRounding {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
+            rm: self.rm,
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }
 
-impl From<&FCmpArgs> for Args {
-    fn from(value: &FCmpArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
+impl FCmpArgs {
+    const fn into_const(&self) -> Args {
+        Args {
+            rd: self.rd.into_const(),
+            rs1: self.rs1.into_const(),
+            rs2: self.rs2.into_const(),
             width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
+            ..Args::DEFAULT
         }
     }
 }

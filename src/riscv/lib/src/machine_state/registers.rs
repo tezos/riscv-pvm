@@ -342,6 +342,16 @@ pub enum NonZeroXRegister {
     x31,
 }
 
+impl NonZeroXRegister {
+    pub(crate) const fn equal_const(self, other: Self) -> bool {
+        self as u8 == other as u8
+    }
+
+    pub(crate) const fn as_xreg(self) -> XRegister {
+        unsafe { std::mem::transmute::<NonZeroXRegister, XRegister>(self) }
+    }
+}
+
 impl fmt::Display for NonZeroXRegister {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", XRegister::from(*self))

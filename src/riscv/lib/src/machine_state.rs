@@ -107,17 +107,18 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         // The reasons to provide the second half in the lambda is
         // because those bytes may be inaccessible or may trigger an exception when read.
         // Hence we can't read all 4 bytes eagerly.
-        let instr = if is_compressed(lower.data) {
+        if is_compressed(lower.data) {
             parse_compressed_instruction(lower.data)
         } else {
             let next_addr = addr + 2;
             let upper = unsafe { self.fetch_instr_halfword(next_addr).unwrap_unchecked() };
 
             let combined = lower.combine_with_upper(upper);
-            parse_uncompressed_instruction(combined.data)
-        };
+            let instr = parse_uncompressed_instruction(combined.data);
 
-        Instruction::from(&instr)
+            Instruction::from(&instr)
+        }
+
     }
 
     /// Bind the machine state to the given allocated space.
@@ -359,7 +360,6 @@ impl<
         // Hence we can't read all 4 bytes eagerly.
         let instr = if is_compressed(lower.data) {
             let instr = parse_compressed_instruction(lower.data);
-            let instr = Instruction::from(&instr);
 
             // Writable memory means that the instruction is not cacheable
             if !lower.writable {

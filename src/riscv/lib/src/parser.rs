@@ -18,6 +18,7 @@ use instruction::*;
 
 use crate::bits::u16;
 use crate::machine_state::csregisters::CSRegister;
+use crate::machine_state::instruction::Instruction;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegister;
@@ -931,15 +932,15 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
 
 const NUM_COMPRESSED_INSTRUCTIONS: usize = (u16::MAX as usize) + 1;
 
-static COMPRESSED_JUMP_TABLE: [Instr; NUM_COMPRESSED_INSTRUCTIONS] = {
-    let mut table = [Instr::Unknown { instr: 0 }; NUM_COMPRESSED_INSTRUCTIONS];
+static COMPRESSED_JUMP_TABLE: [Instruction; NUM_COMPRESSED_INSTRUCTIONS] = {
+    let mut table = [Instruction::new_unknown(InstrWidth::Compressed); NUM_COMPRESSED_INSTRUCTIONS];
     let mut i = 0;
 
     while i < u16::MAX {
-        table[i as usize] = parse_compressed_instruction_inner(i);
+        table[i as usize] = Instruction::from_const(&parse_compressed_instruction_inner(i));
         i += 1;
     }
-    table[i as usize] = parse_compressed_instruction_inner(i);
+    table[i as usize] = Instruction::from_const(&parse_compressed_instruction_inner(i));
 
     table
 };
@@ -1364,7 +1365,7 @@ const fn parse_compressed_instruction_inner(instr: u16) -> Instr {
 
 /// Parse a compressed instruction from a u16.
 #[inline(always)]
-pub fn parse_compressed_instruction(bytes: u16) -> Instr {
+pub fn parse_compressed_instruction(bytes: u16) -> Instruction {
     COMPRESSED_JUMP_TABLE[bytes as usize]
 }
 
@@ -1372,13 +1373,13 @@ pub fn parse_compressed_instruction(bytes: u16) -> Instr {
 /// compressed instruction, parse it immediately. If it encodes a 4-byte
 /// uncompressed instruction, request 2 extra bytes via `more`.
 #[inline(always)]
-pub fn parse<E>(bytes: u16, more: impl FnOnce() -> Result<u16, E>) -> Result<Instr, E> {
+pub fn parse<E>(bytes: u16, more: impl FnOnce() -> Result<u16, E>) -> Result<Instruction, E> {
     if bytes & 0b11 != 0b11 {
         Ok(parse_compressed_instruction(bytes))
     } else {
         let upper = more()?;
         let combined = ((upper as u32) << 16) | (bytes as u32);
-        Ok(parse_uncompressed_instruction(combined))
+        Ok(Instruction::from(&parse_uncompressed_instruction(combined)))
     }
 }
 
@@ -1397,16 +1398,16 @@ pub fn u16_iter_from_u8_iter(mut iter: impl Iterator<Item = u8>) -> impl Iterato
 
 pub fn instr_iter_from_u16_iter(
     mut iter: impl Iterator<Item = u16>,
-) -> impl Iterator<Item = Instr> {
+) -> impl Iterator<Item = Instruction> {
     std::iter::from_fn(move || parse(iter.next()?, || iter.next().ok_or(())).ok())
 }
 
-pub fn parse_block(bytes: &[u8]) -> Vec<Instr> {
+pub fn parse_block(bytes: &[u8]) -> Vec<Instruction> {
     let iter = bytes.iter().copied();
     instr_iter_from_u16_iter(u16_iter_from_u8_iter(iter)).collect()
 }
 
-pub fn parse_segment(contents: &[u8], range: Range<usize>) -> Vec<Instr> {
+pub fn parse_segment(contents: &[u8], range: Range<usize>) -> Vec<Instruction> {
     parse_block(&contents[range])
 }
 

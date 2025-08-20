@@ -125,7 +125,7 @@ impl<'a, MC: memory::MemoryConfig> Program<'a, MC> {
             let mut address = *segment.0;
             let instructions = parse_block(segment.1);
             for instr in instructions {
-                parsed.insert(address, instr.to_string());
+                parsed.insert(address, format!("{instr:?}"));
                 address += instr.width() as u64;
             }
         }

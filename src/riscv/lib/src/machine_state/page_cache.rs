@@ -158,10 +158,11 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
             } else {
                 let Some(upper_half) = iter.peek() else { break };
 
-                parse_uncompressed_instruction((lower_half as u32) | ((*upper_half as u32) << 16))
+                let instr = parse_uncompressed_instruction(
+                    (lower_half as u32) | ((*upper_half as u32) << 16),
+                );
+                Instruction::from(&instr)
             };
-
-            let instr = Instruction::from(&instr);
 
             entries[index].write(BR::new(instr));
             index += 1;
@@ -217,7 +218,6 @@ fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
     let mut offset = *instr_pc & OFFSET_MASK;
 
     while result.steps < max_steps && offset < 4092 {
-
         let instr = unsafe { core.fetch_instr_no_cache(*instr_pc) };
         let res = instr.run(core);
 

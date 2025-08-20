@@ -50,7 +50,7 @@ where
     let pc = machine_state.hart.pc.read();
     let first = get_half_instr(pc)?;
     let second = || get_half_instr(pc + 2);
-    parse(first, second)
+    todo!()
 }
 
 /// Composes "in time" two [`StepperStatus`] one after another,
