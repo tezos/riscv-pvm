@@ -162,54 +162,64 @@ pub struct SignalActions<M: ManagerBase> {
 }
 
 impl<M: ManagerRead> SignalActions<M> {
-    fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the handler for a given signal
+    pub(crate) fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.handlers[signal_index as usize].read()
     }
 
-    fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the action for a given signal
+    pub(crate) fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].read()
     }
 
-    fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+    /// Read the mask for a given signal
+    pub(crate) fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
         let signal_index: SignalIndex = signal.into();
         self.masks[signal_index as usize].read()
     }
 
-    fn read_flags<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+    /// Read the flags for a given signal
+    pub(crate) fn read_flags<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
         let signal_index: SignalIndex = signal.into();
         self.flags[signal_index as usize].read()
     }
 
-    fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the restorer for a given signal
+    pub(crate) fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.restorers[signal_index as usize].read()
     }
 }
 
 impl<M: ManagerWrite> SignalActions<M> {
-    fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
+    /// Write the handler for a given signal
+    pub(crate) fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.handlers[signal_index as usize].write(handler);
     }
 
-    fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
+    /// Write the action for a given signal
+    pub(crate) fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].write(action);
     }
 
-    fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
+    /// Write the mask for a given signal
+    pub(crate) fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
         let signal_index: SignalIndex = signal.into();
         self.masks[signal_index as usize].write(mask);
     }
 
-    fn write_flags<T: Into<SignalIndex>>(&mut self, signal: T, flags: u32) {
+    /// Write the flags for a given signal
+    pub(crate) fn write_flags<T: Into<SignalIndex>>(&mut self, signal: T, flags: u32) {
         let signal_index: SignalIndex = signal.into();
         self.flags[signal_index as usize].write(flags);
     }
 
-    fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
+    /// Write the restorer for a given signal
+    pub(crate) fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.restorers[signal_index as usize].write(restorer);
     }
