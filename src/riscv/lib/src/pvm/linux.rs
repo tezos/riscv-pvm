@@ -35,6 +35,7 @@ use crate::machine_state::memory::Permissions;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
+use crate::pvm::linux::signals::Signal;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -785,7 +786,13 @@ impl<M: ManagerBase> SupervisorState<M> {
                     .hart
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
-                false
+
+                if machine.core.dispatch_signal(Signal::Sigsys).is_err() {
+                    // If handling the signal fails, set the program counter to zero as if there is
+                    // no handler.
+                    machine.core.hart.pc.write(0);
+                }
+                true
             }
 
             Err(error) => {
