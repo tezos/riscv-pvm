@@ -208,7 +208,7 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
     _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
-    sender: Sender<CompilationRequest>,
+    sender: Sender<JitRequest>,
 }
 
 impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
@@ -229,25 +229,35 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
-                    if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
-                        debug_assert_eq!(
-                            msg.fun.load(Ordering::Acquire),
-                            Jitted::<Self, MC>::run_block_not_compiled as usize,
-                            "Unexpected function pointer in dispatch target"
-                        );
+                    match msg {
+                        JitRequest::Compilation(CompilationRequest {
+                            instr,
+                            fun,
+                            program_counter,
+                        }) => {
+                            if let Some(jitfn) = jit.compile(&instr, program_counter) {
+                                debug_assert_eq!(
+                                    fun.load(Ordering::Acquire),
+                                    Jitted::<Self, MC>::run_block_not_compiled as usize,
+                                    "Unexpected function pointer in dispatch target"
+                                );
 
-                        // Safety: this function will be retrieved as a DispatchFn, rather than a
-                        // JitFn. The two function signatures are identical, apart from the first and
-                        // last parameters. These are both thin-pointers, and ignored by the JitFn.
-                        //
-                        // It's therefore safe to cast this function pointer to an identical ABI, where
-                        // this first and last parameter are thin-references to any value. This is the
-                        // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
-                        //
-                        // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                        // information on ABI compatability.
-                        msg.fun.store(jitfn as usize, Ordering::Release);
-                    };
+                                // Safety: this function will be retrieved as a DispatchFn, rather than a
+                                // JitFn. The two function signatures are identical, apart from the first and
+                                // last parameters. These are both thin-pointers, and ignored by the JitFn.
+                                //
+                                // It's therefore safe to cast this function pointer to an identical ABI, where
+                                // this first and last parameter are thin-references to any value. This is the
+                                // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
+                                //
+                                // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
+                                // information on ABI compatability.
+                                fun.store(jitfn as usize, Ordering::Release);
+                            };
+                        }
+                        // TODO: implement handling of memory update requests
+                        _ => {}
+                    }
                 }
             }
             // because we used blocking recv with an asynchronous channel, this only fails when the
@@ -310,7 +320,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         // NB - any blocks already JIT compiled are safe to keep calling, as the
         // data behind the mutex (the JIT) is kept alive for as long as we maintain
         // our reference to it, despite the lock itself being poisoned.
-        let _ = self.sender.send(request);
+        let _ = self.sender.send(JitRequest::Compilation(request));
 
         fun
     }
@@ -320,4 +330,14 @@ struct CompilationRequest {
     instr: Vec<Instruction>,
     fun: Arc<AtomicUsize>,
     program_counter: Address,
+}
+
+struct MemoryUpdateRequest {
+    page_index: u64,
+    validate: bool,
+}
+
+enum JitRequest {
+    Compilation(CompilationRequest),
+    MemoryUpdate(MemoryUpdateRequest),
 }
