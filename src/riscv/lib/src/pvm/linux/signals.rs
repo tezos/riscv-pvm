@@ -147,6 +147,8 @@ pub struct SignalActions<M: ManagerBase> {
     /// An array of [VirtAddr]s, restorers for each signal, see
     /// <https://www.man7.org/linux/man-pages/man2/sigreturn.2.html>
     restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+    /// A per-thread mask for all signals
+    thread_mask: Cell<u64, M>,
 }
 
 impl<M: ManagerRead> SignalActions<M> {
@@ -211,6 +213,7 @@ struct_layout! {
         masks: [Atom<u32>; SignalIndex::COUNT],
         flags: [Atom<u32>; SignalIndex::COUNT],
         restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
+        thread_mask: Atom<u64>,
     }
 }
 
@@ -327,6 +330,7 @@ impl<M: ManagerBase> SignalActions<M> {
             masks: space.masks,
             flags: space.flags,
             restorers: space.restorers,
+            thread_mask: space.thread_mask,
         }
     }
 
@@ -356,6 +360,7 @@ impl<M: ManagerBase> SignalActions<M> {
                 .restorers
                 .each_ref()
                 .map(|restorer| Cell::struct_ref::<F>(restorer)),
+            thread_mask: self.thread_mask.struct_ref::<F>(),
         }
     }
 
@@ -382,6 +387,7 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
             masks: core::array::from_fn(|_| Cell::new_with(0u32)),
             flags: core::array::from_fn(|_| Cell::new_with(0u32)),
             restorers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+            thread_mask: Cell::new_with(0u64),
         }
     }
 }
@@ -394,6 +400,7 @@ impl<M: ManagerClone> Clone for SignalActions<M> {
             masks: self.masks.clone(),
             flags: self.flags.clone(),
             restorers: self.restorers.clone(),
+            thread_mask: self.thread_mask.clone(),
         }
     }
 }
