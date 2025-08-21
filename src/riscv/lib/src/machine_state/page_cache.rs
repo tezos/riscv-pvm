@@ -217,7 +217,7 @@ fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
 
     let mut offset = *instr_pc & OFFSET_MASK;
 
-    while result.steps < max_steps && offset < 4092 {
+    while result.steps < max_steps && offset < 4096 {
         let instr = unsafe { core.fetch_instr_no_cache(*instr_pc) };
         let res = instr.run(core);
 
@@ -364,7 +364,7 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
             instructions.push(i);
         }
 
-        let fun = block_builder.compile(entries.clone(), instr_pc);
+        let fun = block_builder.compile(entries.clone(), instr_pc, MC::owned_start(&core.main_memory).0);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block

@@ -16,6 +16,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
+use internal_corro::SendWrapper;
+
 use super::CacheEntry;
 use super::OFFSET_MASK;
 use crate::jit::JIT;
@@ -121,6 +123,7 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
         &mut self,
         entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
+        main_memory_start: *const u8,
     ) -> DispatchFn<Self, MC>;
 }
 
@@ -149,6 +152,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         &mut self,
         entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
+        main_memory_start: *const u8,
     ) -> DispatchFn<Self, MC> {
         let mut instructions = Vec::with_capacity(40);
         let offset = ((program_counter & OFFSET_MASK) >> 1) as usize;
@@ -221,6 +225,12 @@ mod internal_corro {
         pub(super) unsafe fn as_mut(&mut self) -> &mut T {
             &mut self._no_please_no
         }
+
+        pub(super) fn new(value: T) -> Self {
+            Self {
+                _no_please_no: value
+            }
+        }
     }
 
     // We know that the main thread does not actually use the JIT compilation state. The only thing it
@@ -255,7 +265,7 @@ impl<MC: MemoryConfig + Send + Sync> OutlineCompiler<MC> {
                 // SAFETY: We are the only thread that may access the JIT compilation state.
                 let jit = unsafe { jit_guard.as_mut() };
 
-                while let Ok(msg) = receiver.recv() {
+                while let Ok(mut msg) = receiver.recv() {
                     let instr = msg.instr();
                     let fun = &msg.entries[((msg.program_counter & OFFSET_MASK) >> 1) as usize]
                         .block_run
@@ -318,6 +328,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         &mut self,
         entries: Arc<[CacheEntry<MC, DispatchTarget<Self, MC>, Owned>; 2048]>,
         program_counter: Address,
+        main_memory_start: *const u8,
     ) -> DispatchFn<Self, MC> {
         let fun = CacheEntry::run_block_not_compiled;
 
@@ -332,6 +343,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let request = CompilationRequest {
             entries,
             program_counter,
+            main_memory_start: SendWrapper::new(main_memory_start)
         };
 
         // This will always succeed, unless the compilation thread has panicked
@@ -352,19 +364,28 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 struct CompilationRequest<MC: MemoryConfig, D: DispatchCompiler<MC>> {
     entries: Arc<[CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048]>,
     program_counter: Address,
+    main_memory_start: internal_corro::SendWrapper<*const u8>
 }
 
 impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CompilationRequest<MC, D> {
-    fn instr(&self) -> Vec<Instruction> {
-        let mut instructions = Vec::with_capacity(40);
-        let mut index = ((self.program_counter & OFFSET_MASK) >> 1) as usize;
+    fn instr(&mut self) -> Vec<Instruction> {
+        let main_memory_start = *unsafe { self.main_memory_start.as_mut()};
+        get_instr(main_memory_start, self.program_counter)
+    }
+}
 
-        while index < 2048 && instructions.len() < instructions.capacity() {
-            let i = self.entries[index].instr;
-            index += i.width() as usize >> 1;
-            instructions.push(i);
+fn get_instr(main_memory: *const u8, program_counter: Address) -> Vec<Instruction> {
+        let mut instructions = Vec::with_capacity(40);
+        let index = program_counter & OFFSET_MASK >> 1 as usize;
+
+        let instr_start = unsafe { main_memory.add(program_counter as usize) } as *const u16;
+        let bytes = unsafe { std::slice::from_raw_parts(instr_start, 2048 - index as usize) }.to_vec();
+
+        let instr_iter = crate::parser::instr_iter_from_u16_iter(bytes.into_iter());
+
+        for instr in instr_iter.take(instructions.capacity()) {
+            instructions.push(instr);
         }
 
         instructions
-    }
 }
