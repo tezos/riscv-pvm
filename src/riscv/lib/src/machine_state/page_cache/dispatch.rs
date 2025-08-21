@@ -8,6 +8,7 @@
 //! Currently, this is only 'inline' jit, but will soon be expanded to 'outline' jit also;
 //! where 'outline' means any JIT compilation occurs in a separate thread.
 
+use std::io::Write;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -228,7 +229,7 @@ mod internal_corro {
 
         pub(super) fn new(value: T) -> Self {
             Self {
-                _no_please_no: value
+                _no_please_no: value,
             }
         }
     }
@@ -343,7 +344,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let request = CompilationRequest {
             entries,
             program_counter,
-            main_memory_start: SendWrapper::new(main_memory_start)
+            main_memory_start: main_memory_start as usize,
         };
 
         // This will always succeed, unless the compilation thread has panicked
@@ -364,28 +365,61 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 struct CompilationRequest<MC: MemoryConfig, D: DispatchCompiler<MC>> {
     entries: Arc<[CacheEntry<MC, DispatchTarget<D, MC>, Owned>; 2048]>,
     program_counter: Address,
-    main_memory_start: internal_corro::SendWrapper<*const u8>
+    main_memory_start: usize,
 }
 
 impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CompilationRequest<MC, D> {
     fn instr(&mut self) -> Vec<Instruction> {
-        let main_memory_start = *unsafe { self.main_memory_start.as_mut()};
+        let main_memory_start = self.main_memory_start as *const () as *const u8;
         get_instr(main_memory_start, self.program_counter)
     }
 }
 
 fn get_instr(main_memory: *const u8, program_counter: Address) -> Vec<Instruction> {
-        let mut instructions = Vec::with_capacity(40);
-        let index = program_counter & OFFSET_MASK >> 1 as usize;
+    let mut instructions = Vec::with_capacity(40);
+    let offset = program_counter & OFFSET_MASK;
 
-        let instr_start = unsafe { main_memory.add(program_counter as usize) } as *const u16;
-        let bytes = unsafe { std::slice::from_raw_parts(instr_start, 2048 - index as usize) }.to_vec();
+    let instr_start = unsafe { main_memory.add(program_counter as usize) };
 
-        let instr_iter = crate::parser::instr_iter_from_u16_iter(bytes.into_iter());
+    //std::io::stderr().write_all(format!(
+    //    "{program_counter:x} => instr_start {instr_start:x?}, index {offset:x?} | {main_memory:?}\n"
+    //).as_bytes()).unwrap();
 
-        for instr in instr_iter.take(instructions.capacity()) {
-            instructions.push(instr);
-        }
 
-        instructions
+    let bytes_iter = U16Iter { pointer: instr_start }.take(2048usize.saturating_sub((offset >> 1) as usize));
+    let instr_iter = crate::parser::instr_iter_from_u16_iter(bytes_iter);
+
+    for instr in instr_iter.take(instructions.capacity()) {
+        instructions.push(instr);
+    }
+
+    //std::io::stderr().write_all(format!(
+    //    "read instructions\n"
+    //).as_bytes()).unwrap();
+
+    instructions
+}
+
+struct U16Iter {
+    pointer: *const u8
+}
+
+impl Iterator for U16Iter {
+    type Item = u16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        //std::io::stderr().write_all(format!(
+        //    "reading bytes from {:?}\n", self.pointer
+        //).as_bytes()).unwrap();
+
+        let val = unsafe { (self.pointer as *const u16).read() };
+
+        //std::io::stderr().write_all(format!(
+        //    "read bytes {val:x?} from {:?}\n", self.pointer
+        //).as_bytes()).unwrap();
+
+        self.pointer = unsafe { self.pointer.add(2) };
+
+        Some(val)
+    }
 }

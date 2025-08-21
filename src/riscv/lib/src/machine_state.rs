@@ -118,7 +118,6 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
 
             Instruction::from(&instr)
         }
-
     }
 
     /// Bind the machine state to the given allocated space.

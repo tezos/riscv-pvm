@@ -2308,7 +2308,7 @@ impl Instruction {
 }
 
 impl RTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             rs1: self.rs1.into_const(),
@@ -2320,7 +2320,7 @@ impl RTypeArgs {
 }
 
 impl NonZeroRdRTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             rs1: self.rs1.into_const(),
@@ -2332,7 +2332,7 @@ impl NonZeroRdRTypeArgs {
 }
 
 impl UJTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             imm: self.imm,
@@ -2343,7 +2343,7 @@ impl UJTypeArgs {
 }
 
 impl NonZeroRdUJTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             imm: self.imm,
@@ -2354,7 +2354,7 @@ impl NonZeroRdUJTypeArgs {
 }
 
 impl AmoArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             rs1: self.rs1.into_const(),
@@ -2368,7 +2368,7 @@ impl AmoArgs {
 }
 
 impl CIBTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd_rs1.into_const(),
             imm: self.imm,
@@ -2380,7 +2380,7 @@ impl CIBTypeArgs {
 }
 
 impl CIBNZTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd_rs1.into_const(),
             imm: self.imm,
@@ -2391,7 +2391,7 @@ impl CIBNZTypeArgs {
 }
 
 impl CRTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd_rs1.into_const(),
             rs2: self.rs2.into_const(),
@@ -2402,7 +2402,7 @@ impl CRTypeArgs {
 }
 
 impl CNZRTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd_rs1.into_const(),
             rs2: self.rs2.into_const(),
@@ -2413,7 +2413,7 @@ impl CNZRTypeArgs {
 }
 
 impl CJTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             imm: self.imm,
             width: InstrWidth::Compressed,
@@ -2423,7 +2423,7 @@ impl CJTypeArgs {
 }
 
 impl CRJTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rs1: self.rs1.into_const(),
             width: InstrWidth::Compressed,
@@ -2433,7 +2433,7 @@ impl CRJTypeArgs {
 }
 
 impl CSSTypeArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rs2: self.rs2.into_const(),
             imm: self.imm,
@@ -2444,7 +2444,7 @@ impl CSSTypeArgs {
 }
 
 impl CsrArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             rs1: self.rs1.into_const(),
@@ -2456,7 +2456,7 @@ impl CsrArgs {
 }
 
 impl CsriArgs {
-  const fn into_const(&self) -> Args {
+    const fn into_const(&self) -> Args {
         Args {
             rd: self.rd.into_const(),
             imm: self.imm,

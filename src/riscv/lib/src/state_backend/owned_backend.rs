@@ -46,7 +46,7 @@ impl Owned {
     pub(crate) fn dyn_region_start<const LEN: usize>(
         region: &<Owned as ManagerBase>::DynRegion<LEN>,
     ) -> *const u8 {
-        region.as_ref().as_ptr()
+        region.as_ptr()
     }
 }
 

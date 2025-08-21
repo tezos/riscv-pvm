@@ -364,7 +364,10 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
             instructions.push(i);
         }
 
-        let fun = block_builder.compile(entries.clone(), instr_pc, MC::owned_start(&core.main_memory).0);
+        let (mm_ptr, mm_len) = MC::owned_start(&core.main_memory);
+
+        assert!(mm_len > (instr_pc & !OFFSET_MASK) as usize + 4096);
+        let fun = block_builder.compile(entries.clone(), instr_pc, mm_ptr);
 
         // Safety: the block builder passed to this function is always the same for the
         // lifetime of the block
