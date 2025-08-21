@@ -9,6 +9,7 @@
 //! where 'outline' means any JIT compilation occurs in a separate thread.
 
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
@@ -20,10 +21,12 @@ use super::Jitted;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
+use crate::jit_router::JitRouter;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::Permissions;
 use crate::state_backend::owned_backend::Owned;
 
 /// The function signature for dispatching a block run.
@@ -228,6 +231,8 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 // SAFETY: We are the only thread that may access the JIT compilation state.
                 let jit = unsafe { jit_guard.as_mut() };
 
+                let mut jit_router = JitRouter::new(jit);
+
                 while let Ok(msg) = receiver.recv() {
                     match msg {
                         JitRequest::Compilation(CompilationRequest {
@@ -235,7 +240,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                             fun,
                             program_counter,
                         }) => {
-                            if let Some(jitfn) = jit.compile(&instr, program_counter) {
+                            if let Some(jitfn) = jit_router.compile(&instr, program_counter) {
                                 debug_assert_eq!(
                                     fun.load(Ordering::Acquire),
                                     Jitted::<Self, MC>::run_block_not_compiled as usize,
@@ -255,8 +260,14 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                                 fun.store(jitfn as usize, Ordering::Release);
                             };
                         }
-                        // TODO: implement handling of memory update requests
-                        _ => {}
+
+                        JitRequest::MemoryUpdate(MemoryUpdateRequest {
+                            addr,
+                            length,
+                            perms,
+                        }) => {
+                            jit_router.update_memory(addr, length, perms);
+                        }
                     }
                 }
             }
@@ -333,8 +344,9 @@ struct CompilationRequest {
 }
 
 struct MemoryUpdateRequest {
-    page_index: u64,
-    validate: bool,
+    addr: u64,
+    length: NonZeroU64,
+    perms: Permissions,
 }
 
 enum JitRequest {

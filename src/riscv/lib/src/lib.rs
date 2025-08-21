@@ -10,6 +10,7 @@ mod default;
 mod instruction_context;
 mod interpreter;
 pub mod jit;
+mod jit_router;
 mod kernel_loader;
 pub mod log;
 pub mod machine_state;

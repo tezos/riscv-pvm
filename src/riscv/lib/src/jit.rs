@@ -95,6 +95,10 @@ pub struct JIT<MC: MemoryConfig> {
 
     /// Cache of compilation results.
     cache: HashMap<Hash, Option<JitFn<MC>>>,
+
+    pub start_page_index: u64,
+
+    pub end_page_index: u64,
 }
 
 impl<MC: MemoryConfig> JIT<MC> {
@@ -125,6 +129,8 @@ impl<MC: MemoryConfig> JIT<MC> {
             ctx: codegen::Context::new(),
             module,
             cache: Default::default(),
+            start_page_index: 0,
+            end_page_index: 0,
         })
     }
 
@@ -183,6 +189,11 @@ impl<MC: MemoryConfig> JIT<MC> {
                 log::warning!("Failed to compile {:?}: {:?}", opcodes, error);
             })
             .ok()
+    }
+
+    pub fn update_memory_range(&mut self, start_page_index: u64, end_page_index: u64) {
+        self.start_page_index = start_page_index;
+        self.end_page_index = end_page_index;
     }
 
     /// Start building a new sequence of instructions.
