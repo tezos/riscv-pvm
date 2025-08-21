@@ -109,7 +109,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC
 
 /// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
 /// said block in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
+pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized + Drop {
     /// Whether compilation should be attempted for the block.
     fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool;
 
@@ -141,6 +141,10 @@ impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
     }
 }
 
+impl<MC: MemoryConfig> Drop for InlineCompiler<MC> {
+    fn drop(&mut self) { }
+}
+
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
     #[inline]
     fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
@@ -155,15 +159,9 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         program_counter: Address,
         main_memory_start: *const u8,
     ) -> DispatchFn<Self, MC> {
-        let mut instructions = Vec::with_capacity(40);
         let offset = ((program_counter & OFFSET_MASK) >> 1) as usize;
-        let mut index = offset;
 
-        while index < 2048 && instructions.len() < instructions.capacity() {
-            let i = entries[index].instr;
-            index += i.width() as usize >> 1;
-            instructions.push(i);
-        }
+        let instructions = get_instr(main_memory_start, program_counter);
 
         let fun = match self.jit.compile(&instructions, program_counter) {
             Some(jitfn) => {
@@ -246,7 +244,7 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
     _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
-    sender: Sender<CompilationRequest<MC, Self>>,
+    sender: Option<Sender<CompilationRequest<MC, Self>>>,
 }
 
 impl<MC: MemoryConfig + Send + Sync> OutlineCompiler<MC> {
@@ -256,7 +254,7 @@ impl<MC: MemoryConfig + Send + Sync> OutlineCompiler<MC> {
 
         let compiler = Self {
             _do_not_use_this_is_for_drop_only: jit.clone(),
-            sender,
+            sender: Some(sender),
         };
 
         std::thread::spawn(move || {
@@ -310,6 +308,16 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
     }
 }
 
+impl<MC: MemoryConfig + Send> Drop for OutlineCompiler<MC> {
+    fn drop(&mut self) {
+        let sender = self.sender.take();
+        std::mem::drop(sender);
+
+        // spin lock until jit drops
+        while Arc::strong_count(&self._do_not_use_this_is_for_drop_only) > 1 {}
+    }
+}
+
 impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool {
         unsafe {
@@ -356,7 +364,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         // NB - any blocks already JIT compiled are safe to keep calling, as the
         // data behind the mutex (the JIT) is kept alive for as long as we maintain
         // our reference to it, despite the lock itself being poisoned.
-        let _ = self.sender.send(request);
+        let _ = self.sender.as_ref().map(|sender| sender.send(request));
 
         fun
     }
@@ -385,8 +393,10 @@ fn get_instr(main_memory: *const u8, program_counter: Address) -> Vec<Instructio
     //    "{program_counter:x} => instr_start {instr_start:x?}, index {offset:x?} | {main_memory:?}\n"
     //).as_bytes()).unwrap();
 
-
-    let bytes_iter = U16Iter { pointer: instr_start }.take(2048usize.saturating_sub((offset >> 1) as usize));
+    let bytes_iter = U16Iter {
+        pointer: instr_start,
+    }
+    .take(2048usize.saturating_sub((offset >> 1) as usize));
     let instr_iter = crate::parser::instr_iter_from_u16_iter(bytes_iter);
 
     for instr in instr_iter.take(instructions.capacity()) {
@@ -401,7 +411,7 @@ fn get_instr(main_memory: *const u8, program_counter: Address) -> Vec<Instructio
 }
 
 struct U16Iter {
-    pointer: *const u8
+    pointer: *const u8,
 }
 
 impl Iterator for U16Iter {

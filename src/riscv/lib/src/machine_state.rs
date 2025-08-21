@@ -194,14 +194,18 @@ pub struct MachineState<
     P: page_cache::BlockRunner<MC, M>,
     M: backend::ManagerBase,
 > {
-    pub core: MachineCoreState<MC, M>,
-    pub block_cache: BCC::State<MC, B, M>,
+    // !!!!!!!
+    // DROP ORDER
+    // !!!!!!!
 
     /// The block builder is used to optimise block execution. For example, just-in-time compiling
     /// them to the host architecture.
     pub block_builder: P::BlockBuilder,
 
     pub page_cache: PageCache<MC, P, M>,
+
+    pub core: MachineCoreState<MC, M>,
+    pub block_cache: BCC::State<MC, B, M>,
 }
 
 impl<

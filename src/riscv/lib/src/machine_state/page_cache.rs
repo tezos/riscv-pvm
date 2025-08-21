@@ -136,9 +136,6 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
         M: ManagerReadWrite,
     {
         let mut page_cache: Arc<MaybeUninit<[BR; 2048]>> = Arc::new_uninit();
-        let mut words = vec![0u16; 2048];
-
-        let mut index = 0;
         let entries = Arc::get_mut(&mut page_cache).unwrap();
         let entries = unsafe {
             std::mem::transmute::<&mut MaybeUninit<[BR; 2048]>, &mut [MaybeUninit<BR>; 2048]>(
@@ -146,35 +143,8 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
             )
         };
 
-        core.main_memory
-            .read_all(page_start, words.as_mut_slice())
-            .expect("The page is read/exec not write");
-
-        let mut iter = words.into_iter().peekable();
-
-        while let Some(lower_half) = iter.next() {
-            let instr = if is_compressed(lower_half) {
-                parse_compressed_instruction(lower_half)
-            } else {
-                let Some(upper_half) = iter.peek() else { break };
-
-                let instr = parse_uncompressed_instruction(
-                    (lower_half as u32) | ((*upper_half as u32) << 16),
-                );
-                Instruction::from(&instr)
-            };
-
-            entries[index].write(BR::new(instr));
-            index += 1;
-        }
-
-        // final instruction is not-compressed
-        // todo: exception to raise up to run-instr
-        if index == 2047 {
-            let bytes: u32 = core.main_memory.read(page_start + 4096 - 2).unwrap();
-            let instr = parse_uncompressed_instruction(bytes);
-            let instr = Instruction::from(&instr);
-            entries[index].write(BR::new(instr));
+        for e in entries.iter_mut() {
+            e.write(BR::new());
         }
 
         Self {
@@ -185,26 +155,22 @@ impl<MC: MemoryConfig, BR: BlockRunner<MC, M>, M: ManagerBase> PageCacheEntry<MC
 }
 
 pub struct CacheEntry<MC: MemoryConfig, BR, M: ManagerBase> {
-    instr: Instruction,
-    run_fn: RunInstr<MC, M>,
     block_run: BR,
+    _pd: PhantomData<(MC, M)>,
 }
 
 impl<MC: MemoryConfig, BR: Default, M: ManagerClone> Clone for CacheEntry<MC, BR, M> {
     fn clone(&self) -> Self {
         Self {
-            instr: self.instr,
-            run_fn: self.run_fn,
             block_run: Default::default(),
+            _pd: PhantomData,
         }
     }
 }
 
 impl<MC: MemoryConfig, BR, M: ManagerBase> std::fmt::Debug for CacheEntry<MC, BR, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CacheEntry")
-            .field("instr", &self.instr)
-            .finish()
+        f.debug_struct("CacheEntry").finish()
     }
 }
 
@@ -259,7 +225,7 @@ fn run_block_inner<'a, MC: MemoryConfig, M: ManagerReadWrite + 'a>(
 pub trait BlockRunner<MC: MemoryConfig, M: ManagerBase>: Sized + std::fmt::Debug {
     type BlockBuilder: Default + Sized;
 
-    fn new(instr: Instruction) -> Self
+    fn new() -> Self
     where
         M: ManagerReadWrite;
 
@@ -282,14 +248,13 @@ pub struct InterpretedBlockBuilder;
 impl<MC: MemoryConfig, M: ManagerBase> BlockRunner<MC, M> for CacheEntry<MC, Interpreted, M> {
     type BlockBuilder = InterpretedBlockBuilder;
 
-    fn new(instr: Instruction) -> Self
+    fn new() -> Self
     where
         M: ManagerReadWrite,
     {
         Self {
-            instr,
-            run_fn: instr.opcode.to_run(),
             block_run: Interpreted,
+            _pd: PhantomData,
         }
     }
 
@@ -355,15 +320,6 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> CacheEntry<MC, DispatchTarget<D,
         }
 
         // trigger JIT compilation
-        let mut instructions = Vec::with_capacity(40);
-        let mut index = offset;
-
-        while index < 2048 && instructions.len() < instructions.capacity() {
-            let i = entries[index].instr;
-            index += i.width() as usize >> 1;
-            instructions.push(i);
-        }
-
         let (mm_ptr, mm_len) = MC::owned_start(&core.main_memory);
 
         assert!(mm_len > (instr_pc & !OFFSET_MASK) as usize + 4096);
@@ -380,11 +336,10 @@ impl<MC: MemoryConfig, D: DispatchCompiler<MC>> BlockRunner<MC, Owned>
 {
     type BlockBuilder = D;
 
-    fn new(instr: Instruction) -> Self {
+    fn new() -> Self {
         Self {
-            instr,
-            run_fn: instr.opcode.to_run(),
             block_run: DispatchTarget::default(),
+            _pd: PhantomData,
         }
     }
 
