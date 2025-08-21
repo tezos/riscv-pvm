@@ -368,7 +368,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         }
     }
 
-    fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
+    pub(super) fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
     where
         M: backend::ManagerReadWrite,
     {

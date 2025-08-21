@@ -300,10 +300,13 @@ mod tests {
     use crate::instruction_context::LoadStoreWidth;
     use crate::interpreter::float::RoundingMode;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::StepManyResult;
+    use crate::machine_state::MachineState;
+    use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::Block;
+    use crate::machine_state::block_cache::block::InlineCompiler;
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
+    use crate::machine_state::block_cache::block::Jitted;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
@@ -329,6 +332,9 @@ mod tests {
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Owned>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Owned>);
 
+    /// Machine state for test scenarios with a configurable [`Block`] type.
+    type TestMachineState<B> = MachineState<M4K, TestCacheConfig, B, Owned>;
+
     struct Scenario {
         initial_pc: Option<u64>,
         expected_steps: Option<usize>,
@@ -348,75 +354,74 @@ mod tests {
             }
         }
 
+        fn check_compilable(&self) {
+            // Ensure the set of instructions can be compiled in JIT.
+            let mut test_jit = JIT::<M4K>::new().unwrap();
+            test_jit
+                .compile(&self.instructions, self.initial_pc.unwrap_or_default())
+                .expect("JIT compilation should succeed.");
+        }
+
         /// Run a test scenario over both the Interpreted & JIT modes of compilation,
         /// to ensure they behave identically.
-        fn run(&self, jit: &mut JIT<M4K>, interpreted_bb: &mut InterpretedBlockBuilder) {
+        fn run(&self) {
+            // ensure the set of instructions can be compiled in JIT.
+            self.check_compilable();
+
             // Create the states for the interpreted and jitted runs.
-            let mut interpreted = MachineCoreState::<M4K, _>::new();
-            interpreted.main_memory.set_all_readable_writeable();
+            let mut interpreted_state: TestMachineState<Interpreted<_, _>> =
+                MachineState::new(InterpretedBlockBuilder);
+            interpreted_state
+                .core
+                .main_memory
+                .set_all_readable_writeable();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new();
-            jitted.main_memory.set_all_readable_writeable();
+            let mut jitted_state: TestMachineState<Jitted<InlineCompiler<_>, _>> =
+                MachineState::new(InlineCompiler::default());
+            jitted_state.core.main_memory.set_all_readable_writeable();
 
-            // Create the block of instructions.
-            let mut block = Interpreted::<M4K, _>::new();
-            block.start_block();
+            let mut interpreted_block = Interpreted::<_, _>::new();
+            interpreted_block.start_block();
             for instr in self.instructions.iter() {
-                block.push_instr(*instr);
+                interpreted_block.push_instr(*instr);
+            }
+
+            let mut jitted_block = Jitted::<InlineCompiler<_>, _>::new();
+            jitted_block.start_block();
+            for instr in self.instructions.iter() {
+                jitted_block.push_instr(*instr);
             }
 
             // Run the setup hooks.
             if let Some(hook) = &self.setup_hook {
-                (hook)(&mut interpreted);
-                (hook)(&mut jitted)
+                (hook)(&mut interpreted_state.core);
+                (hook)(&mut jitted_state.core)
             }
 
-            // initialise starting parameters: pc, max_steps
+            // initialise starting parameters: pc and expected_steps
+            let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
             let initial_pc = self.initial_pc.unwrap_or_default();
-            let max_steps = usize::MAX;
-            interpreted.hart.pc.write(initial_pc);
-            jitted.hart.pc.write(initial_pc);
+            interpreted_state.core.hart.pc.write(initial_pc);
+            jitted_state.core.hart.pc.write(initial_pc);
 
-            // Create the JIT function.
-            let fun = jit
-                .compile(instructions(&block).as_slice(), initial_pc)
-                .expect("Compilation of block should succeed.");
+            // Run the sequence in interpreted mode and Jitted mode.
+            interpreted_state
+                .block_cache
+                .insert_block(initial_pc, interpreted_block);
+            let interpreted_res = interpreted_state.step_max_inner(expected_steps);
 
-            // Run the block in both interpreted and jitted mode.
-            let interpreted_res = unsafe {
-                // SAFETY: interpreted blocks are always callable
-                block.run_block(&mut interpreted, initial_pc, max_steps, interpreted_bb)
-            };
-
-            let mut jitted_err = ExceptionCode::NoException;
-            let jitted_steps = unsafe {
-                // # Safety - the block builder is alive for at least
-                //            the duration of the `run` function.
-                (fun)(
-                    null(),
-                    &mut jitted,
-                    initial_pc,
-                    max_steps,
-                    &mut jitted_err,
-                    null(),
-                )
-            };
-            let jitted_res = StepManyResult {
-                steps: jitted_steps,
-                error: jitted_err.to_exception(),
-            };
+            jitted_state
+                .block_cache
+                .insert_block(initial_pc, jitted_block);
+            let jitted_res = jitted_state.step_max_inner(expected_steps);
 
             // Assert state equality.
             assert_eq!(jitted_res, interpreted_res);
-            assert_eq!(
-                interpreted_res.steps, jitted_steps,
-                "Interpreted mode ran for {}, compared to jit-mode of {jitted_steps}",
-                interpreted_res.steps
-            );
 
             assert!(
-                interpreted.struct_ref::<FnManagerIdent>() == jitted.struct_ref::<FnManagerIdent>(),
-                "Interpreted and Jitted states should be equal"
+                interpreted_state.struct_ref::<FnManagerIdent>()
+                    == jitted_state.struct_ref::<FnManagerIdent>(),
+                "Interpreted and Jitted states should be equal."
             );
 
             // Only check steps against one state, as we know both interpreted/jit steps are equal.
@@ -430,7 +435,7 @@ mod tests {
             // Run the assert hooks. Since we have already verified that the states are equal,
             // we can run the assert hooks on just the interpreted state.
             if let Some(hook) = &self.assert_hook {
-                (hook)(&mut interpreted);
+                (hook)(&mut interpreted_state.core);
             }
         }
     }
@@ -506,11 +511,8 @@ mod tests {
             ]),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -545,11 +547,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -594,11 +593,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -621,10 +617,7 @@ mod tests {
             .set_assert_hook(assert_x1_is_five)
             .build();
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
-        scenario.run(&mut jit, &mut interpreted_bb);
+        scenario.run();
     }
 
     #[test]
@@ -665,11 +658,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -708,11 +698,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -754,11 +741,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -797,11 +781,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -845,11 +826,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -911,11 +889,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -958,11 +933,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1006,11 +978,8 @@ mod tests {
             test_x32_mul(0x80000000, 0x80000000, 0, Compressed),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1052,11 +1021,8 @@ mod tests {
             test_division(40, -80, 0),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1126,11 +1092,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1293,11 +1256,8 @@ mod tests {
             test_jump_and_link_pc(10, u64::MAX - 1, 8, 0, Compressed),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1336,11 +1296,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1384,11 +1341,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1500,11 +1454,8 @@ mod tests {
             test_slt_imm(I::new_set_less_than_immediate_unsigned, (x3, -7), -6, TRUE),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1591,11 +1542,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1667,11 +1615,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1689,11 +1634,8 @@ mod tests {
             ])
             .build()];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -1708,10 +1650,7 @@ mod tests {
             ])
             .build();
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
-        scenario.run(&mut jit, &mut interpreted_bb);
+        scenario.run();
     }
 
     #[test]
@@ -1820,11 +1759,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2003,11 +1939,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2108,11 +2041,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2194,11 +2124,8 @@ mod tests {
             invalid_store(I::new_x8_store, LoadStoreWidth::Byte),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2284,11 +2211,8 @@ mod tests {
             invalid_load(I::new_x8_load_unsigned, LoadStoreWidth::Byte),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2338,11 +2262,8 @@ mod tests {
             bitwise_test_xor(x1, 0xFFF0, x3, 0x0FFF, 0xF00F),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2514,11 +2435,8 @@ mod tests {
             invalid_x64_atomic_unsigned(I::new_x64_atomic_max_unsigned, 10, 30, u64::max),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2621,11 +2539,8 @@ mod tests {
             test_mul_high(I::new_x64_mul_high_unsigned, x1, 0u64, x3, u64::MAX, 0u64),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2774,11 +2689,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -2949,11 +2861,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -3050,11 +2959,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -3131,11 +3037,8 @@ mod tests {
             ),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -3268,11 +3171,8 @@ mod tests {
             invalid_x32_atomic(I::new_x32_atomic_max_signed, 10, 20, signed_max),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
     }
 
@@ -3327,11 +3227,8 @@ mod tests {
                 .build(),
         ];
 
-        let mut jit = JIT::<M4K>::new().unwrap();
-        let mut interpreted_bb = InterpretedBlockBuilder;
-
         for scenario in scenarios {
-            scenario.run(&mut jit, &mut interpreted_bb);
+            scenario.run();
         }
 
         //invalid csr repr
