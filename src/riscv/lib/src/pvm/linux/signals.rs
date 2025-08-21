@@ -516,6 +516,26 @@ impl From<u64> for SignalActionPtr {
     }
 }
 
+/// The behaviour of `rt_sigprocmask(2)`
+///
+/// See: <https://github.com/torvalds/linux/blob/32b7144f806e231a3fb619d4ddc5a6bffb731715/include/uapi/asm-generic/signal-defs.h#L72>
+///      <https://man7.org/linux/man-pages/man2/rt_sigprocmask.2.html>
+#[derive(Debug, Clone, Copy, FromRepr)]
+#[repr(u64)]
+pub enum SigProcMaskHow {
+    Block = 0,
+    Unblock = 1,
+    SetMask = 2,
+}
+
+impl TryFrom<u64> for SigProcMaskHow {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or(Error::InvalidArgument)
+    }
+}
+
 /// A valid size of `sigset_t`
 #[derive(Clone, Copy, Debug)]
 pub struct SigsetTSizeEightBytes;
@@ -585,22 +605,35 @@ impl<M: ManagerBase> SupervisorState<M> {
         Ok(0)
     }
 
-    /// Handle `rt_sigprocmask` system call. This does nothing effectively. If the previous mask is
-    /// requested, it will simply be zeroed out.
+    /// Handle `rt_sigprocmask` system call.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/rt_sigprocmask.2.html>
     pub(super) fn handle_rt_sigprocmask(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
-        _: u64,
-        old: SignalActionPtr,
+        how: SigProcMaskHow,
+        old: VirtAddr,
+        set: VirtAddr,
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
     {
-        if let Some(old) = old.address() {
-            // As we don't store the previous mask, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIGSET_SIZE as usize])?;
+        let old_mask = core.signal_actions.thread_mask.read();
+
+        if !old.is_null() {
+            core.main_memory.write(old.to_machine_address(), old_mask)?;
+        }
+
+        if !set.is_null() {
+            let mask: u64 = core.main_memory.read(set.to_machine_address())?;
+            let mask = match how {
+                SigProcMaskHow::Block => old_mask | mask,
+                SigProcMaskHow::Unblock => old_mask & !mask,
+                SigProcMaskHow::SetMask => mask,
+            };
+
+            core.signal_actions.thread_mask.write(mask);
         }
 
         // Return 0 as an indicator of success
