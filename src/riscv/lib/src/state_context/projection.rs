@@ -27,6 +27,7 @@ use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
+use crate::state_backend::owned_backend::Owned;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -54,6 +55,13 @@ pub struct BoxCons<T>(PhantomData<T>);
 
 impl<T: TypeCons> TypeCons for BoxCons<T> {
     type Applied<MC: MemoryConfig, M: ManagerBase> = Box<ApplyCons<T, MC, M>>;
+}
+
+/// Type constructor `[T; LEN]`
+pub struct ArrayCons<T, const LEN: usize>(PhantomData<T>);
+
+impl<T: TypeCons, const LEN: usize> TypeCons for ArrayCons<T, LEN> {
+    type Applied<MC: MemoryConfig, M: ManagerBase> = [ApplyCons<T, MC, M>; LEN];
 }
 
 /// Type constructor [`ManagerBase::Region`]
@@ -194,7 +202,7 @@ pub trait Projection {
     /// For example, this could be an index when the projection is selecting an element from an
     /// array. In practise this can be any kind of information that is required to perform the
     /// projection.
-    type Parameter: tuples::Tuple;
+    type Parameter;
 
     /// Obtain a reference to the target value within the subject value.
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
@@ -265,6 +273,73 @@ impl<P: Projection> Projection for BoxProj<P> {
             offset: 0,
             inner: Box::new(offset),
         }
+    }
+}
+
+/// Parameter for an array projection
+pub struct ArrayProjParam<T> {
+    /// Index of the element to project
+    pub index: usize,
+
+    /// Parameter for the inner projection
+    pub inner_param: T,
+}
+
+/// A projection from an array to one of its elements
+pub struct ArrayProj<P, const LEN: usize>(P);
+
+impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
+    type Subject = ArrayCons<P::Subject, LEN>;
+
+    type Target = P::Target;
+
+    type Parameter = ArrayProjParam<P::Parameter>;
+
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        let inner_state = &state[param.index];
+        P::project_ref::<MC, M>(inner_state, param.inner_param)
+    }
+
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        let inner_state = &state[param.index];
+        P::project_read::<MC, M>(inner_state, param.inner_param)
+    }
+
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        let inner_state = &mut state[param.index];
+        P::project_write::<MC, M>(inner_state, param.inner_param, value);
+    }
+
+    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        assert!(
+            param.index < LEN,
+            "Array index out of bounds: {} >= {}",
+            param.index,
+            LEN
+        );
+
+        let inner_offset = P::owned_pointer_offset::<MC>(param.inner_param);
+
+        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Owned>>();
+        let offset = param
+            .index
+            .checked_mul(elem_size)
+            .expect("Array index overflow");
+
+        inner_offset + offset
     }
 }
 
