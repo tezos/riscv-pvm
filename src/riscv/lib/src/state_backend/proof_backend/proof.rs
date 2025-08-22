@@ -22,8 +22,8 @@ use super::tree::impl_modify_map_collect;
 use crate::bits::ones;
 use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
-use crate::state_backend::FromProofError;
 use crate::state_backend::OwnedProofPart;
+use crate::state_backend::ProofLayoutError;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
@@ -194,14 +194,14 @@ impl From<&MerkleProof> for Tag {
 }
 
 impl TryFrom<u8> for Tag {
-    type Error = DeserialiseError;
+    type Error = InvalidTagError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             TAG_NODE => Ok(Self::Node),
             TAG_BLIND => Ok(Self::Leaf(LeafTag::Blind)),
             TAG_READ => Ok(Self::Leaf(LeafTag::Read)),
-            _ => Err(DeserialiseError::InvalidTag),
+            _ => Err(InvalidTagError),
         }
     }
 }
@@ -226,7 +226,7 @@ impl From<LeafTag> for Tag {
 
 impl Tag {
     /// Obtain the parsed tags from the most significant bits to the lower ones.
-    pub fn ordered_tags_from_u8(byte: u8) -> [Result<Tag, DeserialiseError>; TAGS_PER_BYTE] {
+    pub fn ordered_tags_from_u8(byte: u8) -> [Result<Tag, InvalidTagError>; TAGS_PER_BYTE] {
         core::array::from_fn(tag_offset)
             .map(|offset| (byte >> offset) & TAG_MASK)
             .map(Tag::try_from)
@@ -288,23 +288,23 @@ pub fn serialise_merkle_tree(tree: &MerkleProof) -> impl Iterator<Item = u8> + '
     tags_encoding.chain(nodes_encoding)
 }
 
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum DeserialiseError {
-    #[error("Expected a leaf tag, but got a node tag")]
-    UnexpectedNode,
-    #[error("Invalid tag")]
-    InvalidTag,
-    #[error("Not enough bytes")]
-    NotEnoughBytes,
-    #[error("Too many bytes")]
-    TooManyBytes,
-}
+/// The tag is invalid.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("Invalid tag")]
+pub struct InvalidTagError;
 
-fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, DeserialiseError> {
+/// When parsing, not enough bytes were provided to successfully complete the operation.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("Not enough bytes")]
+pub struct NotEnoughBytesError;
+
+fn deserialise_final_hash(
+    bytes: &mut impl Iterator<Item = u8>,
+) -> Result<Hash, NotEnoughBytesError> {
     let mut digest = [0; DIGEST_SIZE];
     for b in digest.iter_mut() {
         match bytes.next() {
-            None => return Err(DeserialiseError::NotEnoughBytes),
+            None => return Err(NotEnoughBytesError),
             Some(byte) => *b = byte,
         }
     }
@@ -316,14 +316,15 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> Result<(Proof, NodePvm<Verifier>), FromProofError> {
-    let final_state_hash = deserialise_final_hash(&mut bytes)?;
+) -> deserialiser::Result<(Proof, NodePvm<Verifier>)> {
+    let final_state_hash = deserialise_final_hash(&mut bytes)
+        .map_err(|e| ProofLayoutError::TagDeserialise(e.into()))?;
 
     let (space, proof_tree) =
         deserialise_stream::deserialise::<NodePvmLayout>(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
-        OwnedProofPart::Absent => return Err(FromProofError::AbsentProof),
+        OwnedProofPart::Absent => return Err(ProofLayoutError::AbsentProof.into()),
         OwnedProofPart::Present(tree) => tree,
     };
 

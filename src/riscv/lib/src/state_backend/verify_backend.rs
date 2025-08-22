@@ -28,6 +28,7 @@ use crate::state_backend::elem_bytes;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
+use crate::state_backend::proof_backend::proof::deserialiser;
 
 /// Panic payload that is raised when a value isn't present in a part of the Verifier backend.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]
@@ -57,8 +58,8 @@ pub(crate) fn handle_stepper_panics<R, F: FnOnce() -> R + std::panic::UnwindSafe
 /// Error during proof verification
 #[derive(Debug, thiserror::Error)]
 pub enum ProofVerificationFailure {
-    #[error("Unexpected proof shape")]
-    UnexpectedProofShape,
+    #[error("Deserialisation error: {0}")]
+    BadDeserialisation(#[from] deserialiser::Error),
 
     #[error("Stepper error")]
     StepperError,

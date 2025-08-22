@@ -295,7 +295,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).collect();
         let (space, merkle_tree) =
             deserialise_stream::deserialise::<PvmLayout<MC, BCC>>(&tree_serialisation)
-                .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+                .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
             OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
@@ -320,7 +320,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
         let proof_tree = ProofTree::Present(proof.tree());
         let (space, deserialised_proof_tree) =
             deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(proof_tree)
-                .map_err(|_| ProofVerificationFailure::UnexpectedProofShape)?;
+                .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
             OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),

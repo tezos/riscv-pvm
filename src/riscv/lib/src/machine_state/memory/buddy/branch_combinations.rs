@@ -39,8 +39,6 @@ use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
-use crate::state_backend::proof_backend::proof::deserialiser::Result;
-use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
@@ -106,6 +104,8 @@ macro_rules! combined_buddy_branch {
                 }
 
                 fn into_verifier_alloc<D: Deserialiser>(proof: D) -> $crate::state_backend::VerifierAllocResult<D, Self> {
+                    use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
+
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verifier_alloc(proof)?;
                     Ok(inner.map(|(inner, merkle)| ([<$name Alloc>](inner), merkle)))
                 }
