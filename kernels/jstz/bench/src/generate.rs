@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -31,6 +31,7 @@ use jstz_proto::operation::SignedOperation;
 use serde::Serialize;
 use serde::Serializer;
 use tezos_data_encoding::enc::BinWriter;
+use tezos_smart_rollup::core_unsafe::MAX_INPUT_MESSAGE_SIZE;
 use tezos_smart_rollup::inbox::ExternalMessageFrame;
 use tezos_smart_rollup::types::SmartRollupAddress;
 use tezos_smart_rollup::utils::inbox::file::InboxFile;
@@ -317,10 +318,17 @@ impl Account {
         };
 
         frame.bin_write(&mut external)?;
-
         self.nonce = self.nonce.next();
-        let message = Message::External { external };
 
+        if external.len() > MAX_INPUT_MESSAGE_SIZE {
+            return Err(format!(
+                "Message exceeded max input length of {MAX_INPUT_MESSAGE_SIZE}, got {}",
+                external.len()
+            )
+            .into());
+        }
+
+        let message = Message::External { external };
         Ok(message)
     }
 }
