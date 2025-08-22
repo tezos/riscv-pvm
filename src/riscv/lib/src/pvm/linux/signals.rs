@@ -36,6 +36,17 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
 use crate::struct_layout;
 
+/// Errors relating to handling signals
+#[derive(Debug, Eq, thiserror::Error, PartialEq)]
+pub enum SignalError {
+    #[error(transparent)]
+    Memory(#[from] BadMemoryAccess),
+    #[error("Bad signal context")]
+    BadContext,
+    #[error("Misaligned stack pointer")]
+    MisalignedStackPointer,
+}
+
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
 #[repr(C)]
 #[derive(Clone, Debug)]
