@@ -147,6 +147,8 @@ pub struct SignalActions<M: ManagerBase> {
     /// An array of [VirtAddr]s, restorers for each signal, see
     /// <https://www.man7.org/linux/man-pages/man2/sigreturn.2.html>
     restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+    /// A per-thread mask for all signals
+    thread_mask: Cell<u64, M>,
 }
 
 impl<M: ManagerRead> SignalActions<M> {
@@ -211,6 +213,7 @@ struct_layout! {
         masks: [Atom<u32>; SignalIndex::COUNT],
         flags: [Atom<u32>; SignalIndex::COUNT],
         restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
+        thread_mask: Atom<u64>,
     }
 }
 
@@ -327,6 +330,7 @@ impl<M: ManagerBase> SignalActions<M> {
             masks: space.masks,
             flags: space.flags,
             restorers: space.restorers,
+            thread_mask: space.thread_mask,
         }
     }
 
@@ -356,6 +360,7 @@ impl<M: ManagerBase> SignalActions<M> {
                 .restorers
                 .each_ref()
                 .map(|restorer| Cell::struct_ref::<F>(restorer)),
+            thread_mask: self.thread_mask.struct_ref::<F>(),
         }
     }
 
@@ -382,6 +387,7 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
             masks: core::array::from_fn(|_| Cell::new_with(0u32)),
             flags: core::array::from_fn(|_| Cell::new_with(0u32)),
             restorers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+            thread_mask: Cell::new_with(0u64),
         }
     }
 }
@@ -394,6 +400,7 @@ impl<M: ManagerClone> Clone for SignalActions<M> {
             masks: self.masks.clone(),
             flags: self.flags.clone(),
             restorers: self.restorers.clone(),
+            thread_mask: self.thread_mask.clone(),
         }
     }
 }
@@ -509,6 +516,26 @@ impl From<u64> for SignalActionPtr {
     }
 }
 
+/// The behaviour of `rt_sigprocmask(2)`
+///
+/// See: <https://github.com/torvalds/linux/blob/32b7144f806e231a3fb619d4ddc5a6bffb731715/include/uapi/asm-generic/signal-defs.h#L72>
+///      <https://man7.org/linux/man-pages/man2/rt_sigprocmask.2.html>
+#[derive(Debug, Clone, Copy, FromRepr)]
+#[repr(u64)]
+pub enum SigProcMaskHow {
+    Block = 0,
+    Unblock = 1,
+    SetMask = 2,
+}
+
+impl TryFrom<u64> for SigProcMaskHow {
+    type Error = Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or(Error::InvalidArgument)
+    }
+}
+
 /// A valid size of `sigset_t`
 #[derive(Clone, Copy, Debug)]
 pub struct SigsetTSizeEightBytes;
@@ -578,22 +605,35 @@ impl<M: ManagerBase> SupervisorState<M> {
         Ok(0)
     }
 
-    /// Handle `rt_sigprocmask` system call. This does nothing effectively. If the previous mask is
-    /// requested, it will simply be zeroed out.
+    /// Handle `rt_sigprocmask` system call.
+    ///
+    /// See: <https://man7.org/linux/man-pages/man2/rt_sigprocmask.2.html>
     pub(super) fn handle_rt_sigprocmask(
         &mut self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-        _: u64,
-        _: u64,
-        old: SignalActionPtr,
+        how: SigProcMaskHow,
+        old: VirtAddr,
+        set: VirtAddr,
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
         M: ManagerReadWrite,
     {
-        if let Some(old) = old.address() {
-            // As we don't store the previous mask, we just zero out the memory
-            core.main_memory.write(old, [0u8; SIGSET_SIZE as usize])?;
+        let old_mask = core.signal_actions.thread_mask.read();
+
+        if !old.is_null() {
+            core.main_memory.write(old.to_machine_address(), old_mask)?;
+        }
+
+        if !set.is_null() {
+            let mask: u64 = core.main_memory.read(set.to_machine_address())?;
+            let mask = match how {
+                SigProcMaskHow::Block => old_mask | mask,
+                SigProcMaskHow::Unblock => old_mask & !mask,
+                SigProcMaskHow::SetMask => mask,
+            };
+
+            core.signal_actions.thread_mask.write(mask);
         }
 
         // Return 0 as an indicator of success

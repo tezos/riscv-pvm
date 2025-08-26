@@ -54,6 +54,11 @@ impl VirtAddr {
         self.0.rem_euclid(align.get()) == 0
     }
 
+    /// Is the address NULL?
+    pub const fn is_null(self) -> bool {
+        self.0 == 0
+    }
+
     /// Convert the virtual address to the machine state's memory address representation.
     pub fn to_machine_address(self) -> machine_state::memory::Address {
         self.0
