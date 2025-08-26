@@ -1523,14 +1523,14 @@ impl From<&Instr> for Instruction {
     fn from(value: &Instr) -> Self {
         match value {
             // RV64I R-type instructions
-            Instr::Add(args) => Instruction::from_ic_add(args),
-            Instr::Sub(args) => Instruction::from_ic_sub(args),
-            Instr::Xor(args) => Instruction::from_ic_xor(args),
-            Instr::Or(args) => Instruction::from_ic_or(args),
-            Instr::And(args) => Instruction::from_ic_and(args),
-            Instr::Sll(args) => Instruction::from_ic_sll(args),
-            Instr::Srl(args) => Instruction::from_ic_srl(args),
-            Instr::Sra(args) => Instruction::from_ic_sra(args),
+            Instr::Add(args) => Instruction::from_add(args),
+            Instr::Sub(args) => Instruction::from_sub(args),
+            Instr::Xor(args) => Instruction::from_xor(args),
+            Instr::Or(args) => Instruction::from_or(args),
+            Instr::And(args) => Instruction::from_and(args),
+            Instr::Sll(args) => Instruction::from_sll(args),
+            Instr::Srl(args) => Instruction::from_srl(args),
+            Instr::Sra(args) => Instruction::from_sra(args),
             Instr::Slt(args) => Instruction::new_set_less_than_signed(args.rd, args.rs1, args.rs2),
             Instr::Sltu(args) => {
                 Instruction::new_set_less_than_unsigned(args.rd, args.rs1, args.rs2)
@@ -1561,22 +1561,22 @@ impl From<&Instr> for Instruction {
             ),
 
             // RV64I I-type instructions
-            Instr::Addi(args) => Instruction::from_ic_addi(args),
+            Instr::Addi(args) => Instruction::from_addi(args),
             Instr::Addiw(args) => Instruction::new_add_word_immediate(
                 args.rd,
                 args.rs1,
                 args.imm,
                 InstrWidth::Uncompressed,
             ),
-            Instr::Xori(args) => Instruction::from_ic_xori(args),
-            Instr::Ori(args) => Instruction::from_ic_ori(args),
-            Instr::Andi(args) => Instruction::from_ic_andi(args),
-            Instr::Slli(args) => Instruction::from_ic_slli(args),
-            Instr::Srli(args) => Instruction::from_ic_srli(args),
-            Instr::Srai(args) => Instruction::from_ic_srai(args),
-            Instr::Slliw(args) => Instruction::from_ic_x32_shift_left_immediate(args),
-            Instr::Srliw(args) => Instruction::from_ic_x32_shift_right_immediate_unsigned(args),
-            Instr::Sraiw(args) => Instruction::from_ic_x32_shift_right_immediate_signed(args),
+            Instr::Xori(args) => Instruction::from_xori(args),
+            Instr::Ori(args) => Instruction::from_ori(args),
+            Instr::Andi(args) => Instruction::from_andi(args),
+            Instr::Slli(args) => Instruction::from_slli(args),
+            Instr::Srli(args) => Instruction::from_srli(args),
+            Instr::Srai(args) => Instruction::from_srai(args),
+            Instr::Slliw(args) => Instruction::from_x32_shift_left_immediate(args),
+            Instr::Srliw(args) => Instruction::from_x32_shift_right_immediate_unsigned(args),
+            Instr::Sraiw(args) => Instruction::from_x32_shift_right_immediate_signed(args),
             Instr::Slti(args) => {
                 Instruction::new_set_less_than_immediate_signed(args.rd, args.rs1, args.imm)
             }
@@ -1640,12 +1640,12 @@ impl From<&Instr> for Instruction {
             }
 
             // RV64I B-type instructions
-            Instr::Beq(args) => Instruction::from_ic_beq(args),
-            Instr::Bne(args) => Instruction::from_ic_bne(args),
-            Instr::Blt(args) => Instruction::from_ic_blt(args),
-            Instr::Bge(args) => Instruction::from_ic_bge(args),
-            Instr::Bltu(args) => Instruction::from_ic_bltu(args),
-            Instr::Bgeu(args) => Instruction::from_ic_bgeu(args),
+            Instr::Beq(args) => Instruction::from_beq(args),
+            Instr::Bne(args) => Instruction::from_bne(args),
+            Instr::Blt(args) => Instruction::from_blt(args),
+            Instr::Bge(args) => Instruction::from_bge(args),
+            Instr::Bltu(args) => Instruction::from_bltu(args),
+            Instr::Bgeu(args) => Instruction::from_bgeu(args),
 
             // RV64I U-type instructions
             Instr::Lui(args) => Instruction::new_li(args.rd, args.imm, InstrWidth::Uncompressed),
@@ -1654,8 +1654,8 @@ impl From<&Instr> for Instruction {
             }
 
             // RV64I jump instructions
-            Instr::Jal(args) => Instruction::from_ic_jal(args),
-            Instr::Jalr(args) => Instruction::from_ic_jalr(args),
+            Instr::Jal(args) => Instruction::from_jal(args),
+            Instr::Jalr(args) => Instruction::from_jalr(args),
 
             // RV64A atomic instructions
             Instr::Lrw(args) => Instruction::new_x32_atomic_load(
@@ -1834,19 +1834,19 @@ impl From<&Instr> for Instruction {
             ),
 
             // RV64M multiplication and division instructions
-            Instr::Rem(args) => Instruction::from_ic_rem(args),
-            Instr::Remu(args) => Instruction::from_ic_remu(args),
-            Instr::Remw(args) => Instruction::from_ic_remw(args),
-            Instr::Remuw(args) => Instruction::from_ic_remuw(args),
-            Instr::Div(args) => Instruction::from_ic_div(args),
-            Instr::Divu(args) => Instruction::from_ic_divu(args),
-            Instr::Divw(args) => Instruction::from_ic_divw(args),
-            Instr::Divuw(args) => Instruction::from_ic_divuw(args),
-            Instr::Mul(args) => Instruction::from_ic_mul(args),
-            Instr::Mulh(args) => Instruction::from_ic_mulh(args),
-            Instr::Mulhsu(args) => Instruction::from_ic_mulhsu(args),
-            Instr::Mulhu(args) => Instruction::from_ic_mulhu(args),
-            Instr::Mulw(args) => Instruction::from_ic_mulw(args),
+            Instr::Rem(args) => Instruction::from_rem(args),
+            Instr::Remu(args) => Instruction::from_remu(args),
+            Instr::Remw(args) => Instruction::from_remw(args),
+            Instr::Remuw(args) => Instruction::from_remuw(args),
+            Instr::Div(args) => Instruction::from_div(args),
+            Instr::Divu(args) => Instruction::from_divu(args),
+            Instr::Divw(args) => Instruction::from_divw(args),
+            Instr::Divuw(args) => Instruction::from_divuw(args),
+            Instr::Mul(args) => Instruction::from_mul(args),
+            Instr::Mulh(args) => Instruction::from_mulh(args),
+            Instr::Mulhsu(args) => Instruction::from_mulhsu(args),
+            Instr::Mulhu(args) => Instruction::from_mulhu(args),
+            Instr::Mulw(args) => Instruction::from_mulw(args),
 
             // RV64F instructions
             Instr::Flw(args) => Instruction {
@@ -2163,8 +2163,8 @@ impl From<&Instr> for Instruction {
             Instr::CJ(args) => Instruction::new_jump_pc(args.imm, InstrWidth::Compressed),
             Instr::CJr(args) => Instruction::new_jr(args.rs1, InstrWidth::Compressed),
             Instr::CJalr(args) => Instruction::new_jalr(nz::ra, args.rs1, InstrWidth::Compressed),
-            Instr::CBeqz(args) => Instruction::from_ic_cbeqz(args),
-            Instr::CBnez(args) => Instruction::from_ic_cbnez(args),
+            Instr::CBeqz(args) => Instruction::from_cbeqz(args),
+            Instr::CBnez(args) => Instruction::from_cbnez(args),
             Instr::CLi(args) => Instruction::new_li(args.rd_rs1, args.imm, InstrWidth::Compressed),
             Instr::CLui(args) => Instruction::new_li(args.rd_rs1, args.imm, InstrWidth::Compressed),
             Instr::CAddi(args) => {
@@ -2176,24 +2176,24 @@ impl From<&Instr> for Instruction {
                 args.imm,
                 InstrWidth::Compressed,
             ),
-            Instr::CAddi4spn(args) => Instruction::from_ic_caddi4spn(args),
+            Instr::CAddi4spn(args) => Instruction::from_caddi4spn(args),
             Instr::CSlli(args) => Instruction::new_x64_shift_left_imm(
                 args.rd_rs1,
                 args.rd_rs1,
                 args.imm,
                 InstrWidth::Compressed,
             ),
-            Instr::CSrli(args) => Instruction::from_ic_csrli(args),
-            Instr::CSrai(args) => Instruction::from_ic_csrai(args),
-            Instr::CAndi(args) => Instruction::from_ic_candi(args),
+            Instr::CSrli(args) => Instruction::from_csrli(args),
+            Instr::CSrai(args) => Instruction::from_csrai(args),
+            Instr::CAndi(args) => Instruction::from_candi(args),
             Instr::CMv(args) => Instruction::new_mv(args.rd_rs1, args.rs2, InstrWidth::Compressed),
             Instr::CAdd(args) => {
                 Instruction::new_x64_add(args.rd_rs1, args.rd_rs1, args.rs2, InstrWidth::Compressed)
             }
-            Instr::CAnd(args) => Instruction::from_ic_cand(args),
-            Instr::CXor(args) => Instruction::from_ic_cxor(args),
-            Instr::COr(args) => Instruction::from_ic_cor(args),
-            Instr::CSub(args) => Instruction::from_ic_csub(args),
+            Instr::CAnd(args) => Instruction::from_cand(args),
+            Instr::CXor(args) => Instruction::from_cxor(args),
+            Instr::COr(args) => Instruction::from_cor(args),
+            Instr::CSub(args) => Instruction::from_csub(args),
             Instr::CNop => Instruction::new_nop(InstrWidth::Compressed),
 
             // RV64C compressed instructions
@@ -2234,8 +2234,8 @@ impl From<&Instr> for Instruction {
                 args.imm,
                 InstrWidth::Compressed,
             ),
-            Instr::CAddw(args) => Instruction::from_ic_caddw(args),
-            Instr::CSubw(args) => Instruction::from_ic_csubw(args),
+            Instr::CAddw(args) => Instruction::from_caddw(args),
+            Instr::CSubw(args) => Instruction::from_csubw(args),
 
             // RV64DC compressed instructions
             Instr::CFld(args) => Instruction {
