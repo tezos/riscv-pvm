@@ -1989,7 +1989,7 @@ impl Instruction {
     /// Convert [`Instr::Add`] according to whether registers are non-zero.
     ///
     /// [`Instr::Add`]: crate::parser::instruction::Instr::Add
-    pub(super) fn from_ic_add(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_add(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
@@ -2005,7 +2005,7 @@ impl Instruction {
     /// Convert [`Instr::CAddw`] according to whether registers are non-zero.
     ///
     /// [`Instr::CAddw`]: crate::parser::instruction::Instr::CAddw    
-    pub(super) fn from_ic_caddw(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_caddw(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2018,7 +2018,7 @@ impl Instruction {
     /// Convert [`Instr::Sub`] according to whether registers are non-zero.
     ///
     /// [`Instr::Sub`]: crate::parser::instruction::Instr::Sub
-    pub(super) fn from_ic_sub(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_sub(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
@@ -2037,7 +2037,7 @@ impl Instruction {
     /// Convert [`Instr::Csub`] according to whether registers are non-zero.
     ///
     /// [`Instr::CSub`]: crate::parser::instruction::Instr::CSub
-    pub(super) fn from_ic_csub(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_csub(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd_rs1), split_x0(args.rs2)) {
             // Storing anything in x0 or Subtracting 0 from anything is a NOP.
@@ -2051,7 +2051,7 @@ impl Instruction {
     /// Convert [`Instr::CSubw`] according to whether registers are non-zero.
     ///
     /// [`Instr::CSubw`]: crate::parser::instruction::Instr::CSubw
-    pub(super) fn from_ic_csubw(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_csubw(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2064,7 +2064,7 @@ impl Instruction {
     /// Convert [`Instr::Addi`] according to whether registers are non-zero.
     ///
     /// [`Instr::Addi`]: crate::parser::instruction::Instr::Addi
-    pub(super) fn from_ic_addi(args: &SplitITypeArgs) -> Instruction {
+    pub(super) fn from_addi(args: &SplitITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (args.rd, args.rs1) {
             (X::X0, _) => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2078,7 +2078,7 @@ impl Instruction {
     /// Convert [`Instr::CAddi4spn`] according to whether register is non-zero.
     ///
     /// [`Instr::CAddi4spn`]: crate::parser::instruction::Instr::CAddi4spn
-    pub(super) fn from_ic_caddi4spn(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_caddi4spn(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2091,7 +2091,7 @@ impl Instruction {
     /// Convert [`Instr::Andi`] according to whether register is non-zero.
     ///
     /// [`Instr::Andi`]: crate::parser::instruction::Instr::Andi
-    pub(super) fn from_ic_andi(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_andi(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Bitwise AND with zero is zero: `x & 0 == 0`
@@ -2105,7 +2105,7 @@ impl Instruction {
     /// Convert [`Instr::CAndi`] according to whether register is non-zero.
     ///
     /// [`Instr::CAndi`]: crate::parser::instruction::Instr::CAndi
-    pub(super) fn from_ic_candi(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_candi(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2118,7 +2118,7 @@ impl Instruction {
     /// Convert [`Instr::Ori`] according to whether register is non-zero.
     ///
     /// [`Instr::Ori`]: crate::parser::instruction::Instr::Ori
-    pub(super) fn from_ic_ori(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_ori(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Bitwise OR with zero is identity: `x | 0 == x`
@@ -2132,7 +2132,7 @@ impl Instruction {
     /// Convert [`Instr::Xori`] according to whether register is non-zero.
     ///
     /// [`Instr::Xori`]: crate::parser::instruction::Instr::Xori
-    pub(super) fn from_ic_xori(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_xori(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Bitwise XOR with zero is identity: `x ^ 0 == x`
@@ -2146,7 +2146,7 @@ impl Instruction {
     /// Convert [`Instr::Slli`] according to whether register is non-zero.
     ///
     /// [`Instr::Slli`]: crate::parser::instruction::Instr::Slli
-    pub(super) fn from_ic_slli(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_slli(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2163,7 +2163,7 @@ impl Instruction {
     /// Convert [`Instr::Srli`] according to whether registers are non-zero.
     ///
     /// [`Instr::Srli`]: crate::parser::instruction::Instr::Srli
-    pub(super) fn from_ic_srli(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_srli(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // shifting 0 by any amount is 0.
@@ -2180,7 +2180,7 @@ impl Instruction {
     /// Convert [`Instr::CSrli`] according to whether register is non-zero.
     ///
     /// [`Instr::CSrli`]: crate::parser::instruction::Instr::CSrli
-    pub(super) fn from_ic_csrli(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_csrli(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2196,7 +2196,7 @@ impl Instruction {
     /// Convert [`Instr::Srai`] according to whether registers are non-zero.
     ///
     /// [`Instr::Srai`]: crate::parser::instruction::Instr::Srai
-    pub(super) fn from_ic_srai(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_srai(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // shifting 0 by any amount is 0.
@@ -2213,7 +2213,7 @@ impl Instruction {
     /// Convert [`Instr::CSrai`] according to whether registers are non-zero.
     ///
     /// [`Instr::CSrai`]: crate::parser::instruction::Instr::CSrai
-    pub(super) fn from_ic_csrai(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_csrai(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             X::X0 => Instruction::new_nop(InstrWidth::Compressed),
@@ -2229,7 +2229,7 @@ impl Instruction {
     /// Convert [`Instr::Slliw`] according to whether register is non-zero.
     ///
     /// [`Instr::Slliw`]: crate::parser::instruction::Instr::Slliw
-    pub(super) fn from_ic_x32_shift_left_immediate(args: &NonZeroRdITypeArgs) -> Instruction {
+    pub(super) fn from_x32_shift_left_immediate(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2247,7 +2247,7 @@ impl Instruction {
     /// Convert [`Instr::Srliw`] according to whether register is non-zero.
     ///
     /// [`Instr::Srliw`]: crate::parser::instruction::Instr::Srliw
-    pub(super) fn from_ic_x32_shift_right_immediate_unsigned(
+    pub(super) fn from_x32_shift_right_immediate_unsigned(
         args: &NonZeroRdITypeArgs,
     ) -> Instruction {
         use XRegisterParsed as X;
@@ -2267,9 +2267,7 @@ impl Instruction {
     /// Convert [`Instr::Sraiw`] according to whether register is non-zero.
     ///
     /// [`Instr::Sraiw`]: crate::parser::instruction::Instr::Sraiw
-    pub(super) fn from_ic_x32_shift_right_immediate_signed(
-        args: &NonZeroRdITypeArgs,
-    ) -> Instruction {
+    pub(super) fn from_x32_shift_right_immediate_signed(args: &NonZeroRdITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2287,7 +2285,7 @@ impl Instruction {
     /// Convert [`Instr::And`] according to whether register is non-zero.
     ///
     /// [`Instr::And`]: crate::parser::instruction::Instr::And
-    pub(super) fn from_ic_and(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_and(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // Bitwise AND with zero is zero: `x & 0 == 0`
@@ -2301,7 +2299,7 @@ impl Instruction {
     /// Convert [`Instr::CAnd`] according to whether register is non-zero.
     ///
     /// [`Instr::CAnd`]: crate::parser::instruction::Instr::CAnd
-    pub(super) fn from_ic_cand(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_cand(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd_rs1), split_x0(args.rs2)) {
             (X::X0, _) => Instruction::new_nop(InstrWidth::Compressed),
@@ -2316,7 +2314,7 @@ impl Instruction {
     /// Convert [`Instr::Or`] according to whether register is non-zero.
     ///
     /// [`Instr::Or`]: crate::parser::instruction::Instr::Or
-    pub(super) fn from_ic_or(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_or(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
@@ -2332,7 +2330,7 @@ impl Instruction {
     /// Convert [`Instr::COr`] according to whether registers are non-zero.
     ///
     /// [`Instr::COr`]: crate::parser::instruction::Instr::COr
-    pub(super) fn from_ic_cor(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_cor(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd_rs1), split_x0(args.rs2)) {
             // if rd is 0, then the instruction is a NOP.
@@ -2347,7 +2345,7 @@ impl Instruction {
     /// Convert [`Instr::Xor`] according to whether register is non-zero.
     ///
     /// [`Instr::Xor`]: crate::parser::instruction::Instr::Xor
-    pub(super) fn from_ic_xor(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_xor(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, X::X0) => Instruction::new_li(args.rd, 0, InstrWidth::Uncompressed),
@@ -2363,7 +2361,7 @@ impl Instruction {
     /// Convert [`Instr::CXor`] according to whether register is non-zero.
     ///
     /// [`Instr::CXor`]: crate::parser::instruction::Instr::CXor
-    pub(super) fn from_ic_cxor(args: &CRTypeArgs) -> Instruction {
+    pub(super) fn from_cxor(args: &CRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd_rs1), split_x0(args.rs2)) {
             // if rd is 0, then the instruction is a NOP.
@@ -2378,7 +2376,7 @@ impl Instruction {
     /// Convert [`Instr::Sll`] according to whether register is non-zero.
     ///
     /// [`Instr::Sll`]: crate::parser::instruction::Instr::Sll
-    pub(super) fn from_ic_sll(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_sll(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2396,7 +2394,7 @@ impl Instruction {
     /// Convert [`Instr::Srl`] according to whether register is non-zero.
     ///
     /// [`Instr::Srl`]: crate::parser::instruction::Instr::Srl
-    pub(super) fn from_ic_srl(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_srl(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2417,7 +2415,7 @@ impl Instruction {
     /// Convert [`Instr::Sra`] according to whether register is non-zero.
     ///
     /// [`Instr::Sra`]: crate::parser::instruction::Instr::Sra
-    pub(super) fn from_ic_sra(args: &NonZeroRdRTypeArgs) -> Instruction {
+    pub(super) fn from_sra(args: &NonZeroRdRTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rs1) {
             // Shifting 0 by any amount is 0.
@@ -2438,7 +2436,7 @@ impl Instruction {
     /// Convert ['Instr::Jal'] according to whether register is non-zero.
     ///
     /// ['Instr::Jal']: crate::parser::instruction::Instr::Jal
-    pub(super) fn from_ic_jal(args: &UJTypeArgs) -> Instruction {
+    pub(super) fn from_jal(args: &UJTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // If rd is 0, we are just doing an unconditional jump and not storing the current pc.
@@ -2452,7 +2450,7 @@ impl Instruction {
     /// Convert [`Instr::Beq`] according to whether registers are non-zero.
     ///
     /// [`Instr::Beq`]: crate::parser::instruction::Instr::Beq
-    pub(super) fn from_ic_beq(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_beq(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, then the instruction is an unconditional jump.
@@ -2473,7 +2471,7 @@ impl Instruction {
     /// Convert [`Instr::CBeqz`] according to whether register is non-zero.
     ///
     /// [`Instr::CBeqz`]: crate::parser::instruction::Instr::CBeqz
-    pub(super) fn from_ic_cbeqz(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_cbeqz(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             // If `rd_rs1` is zero, the result is an unconditional jump
@@ -2487,7 +2485,7 @@ impl Instruction {
     /// Convert [`Instr::Bne`] according to whether registers are non-zero.
     ///
     /// [`Instr::Bne`]: crate::parser::instruction::Instr::Bne
-    pub(super) fn from_ic_bne(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_bne(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, they are equal so we don't branch.
@@ -2508,7 +2506,7 @@ impl Instruction {
     /// Convert [`Instr::CBnez`] according to whether register is non-zero.
     ///
     /// [`Instr::CBnez`]: crate::parser::instruction::Instr::CBnez
-    pub(super) fn from_ic_cbnez(args: &CIBTypeArgs) -> Instruction {
+    pub(super) fn from_cbnez(args: &CIBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd_rs1) {
             // If `rd_rs1 == x0`, this will never branch.
@@ -2522,7 +2520,7 @@ impl Instruction {
     /// Convert [`Instr::Jalr`] according to whether registers and imm are non-zero.
     ///
     /// [`Instr::Jalr`]: crate::parser::instruction::Instr::Jalr
-    pub(super) fn from_ic_jalr(args: &ITypeArgs) -> Instruction {
+    pub(super) fn from_jalr(args: &ITypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd), split_x0(args.rs1), args.imm) {
             // if rd and rs1 are x0, the only effect is an unconditional jump to the absolute address `imm`.
@@ -2554,7 +2552,7 @@ impl Instruction {
     /// Convert [`Instr::Blt`] according to whether register is non-zero.
     ///
     /// [`Instr::Blt`]: crate::parser::instruction::Instr::Blt
-    pub(super) fn from_ic_blt(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_blt(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, the values are the same so we don't branch.
@@ -2582,7 +2580,7 @@ impl Instruction {
     /// Convert [`Instr::Bge`] according to whether register is non-zero.
     ///
     /// [`Instr::Bge`]: crate::parser::instruction::Instr::Bge
-    pub(super) fn from_ic_bge(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_bge(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If the registers are the same, the values are the same so we always branch.
@@ -2616,7 +2614,7 @@ impl Instruction {
     /// Convert [`Instr::Bltu`] according to whether register is non-zero.
     ///
     /// [`Instr::Bltu`]: crate::parser::instruction::Instr::Bltu
-    pub(super) fn from_ic_bltu(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_bltu(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If rs2 is x0, rs1 is either the same or greater than rs2, so we don't branch.
@@ -2641,7 +2639,7 @@ impl Instruction {
     /// Convert [`Instr::Bgeu`] according to whether register is non-zero.
     ///
     /// [`Instr::Bgeu`]: crate::parser::instruction::Instr::Bgeu
-    pub(super) fn from_ic_bgeu(args: &SBTypeArgs) -> Instruction {
+    pub(super) fn from_bgeu(args: &SBTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rs1), split_x0(args.rs2)) {
             // If rs2 is x0, rs1 is either the same or more than rs2, so we always branch.
@@ -2668,7 +2666,7 @@ impl Instruction {
     /// Convert [`Instr::Mul`] according to whether registers are non-zero.
     ///
     /// [`Instr::Mul`]: crate::parser::instruction::Instr::Mul
-    pub(super) fn from_ic_mul(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_mul(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2684,7 +2682,7 @@ impl Instruction {
     /// Converts [`Instr::Mulh`] according to whether registers are non-zero.
     ///
     /// [`Instr::Mulh`]: crate::parser::instruction::Instr::Mulh
-    pub(crate) fn from_ic_mulh(args: &RTypeArgs) -> Instruction {
+    pub(crate) fn from_mulh(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2700,7 +2698,7 @@ impl Instruction {
     /// Converts [`Instr::Mulhsu`] according to whether registers are non-zero.
     ///
     /// [`Instr::Mulhsu`]: crate::parser::instruction::Instr::Mulhsu
-    pub(crate) fn from_ic_mulhsu(args: &RTypeArgs) -> Instruction {
+    pub(crate) fn from_mulhsu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2721,7 +2719,7 @@ impl Instruction {
     /// Converts [`Instr::Mulhu`] according to whether registers are non-zero.
     ///
     /// [`Instr::Mulhu`]: crate::parser::instruction::Instr::Mulhu
-    pub(crate) fn from_ic_mulhu(args: &RTypeArgs) -> Instruction {
+    pub(crate) fn from_mulhu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match (split_x0(args.rd), split_x0(args.rs1), split_x0(args.rs2)) {
             (X::X0, _, _) => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2741,7 +2739,7 @@ impl Instruction {
     /// (the zero register), the instruction is optimized to a NOP since writes to `x0` are discarded.
     ///
     /// [`Instr::Mulw`]: crate::parser::instruction::Instr::Mulw
-    pub(crate) fn from_ic_mulw(args: &RTypeArgs) -> Instruction {
+    pub(crate) fn from_mulw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             X::X0 => Instruction::new_nop(InstrWidth::Uncompressed),
@@ -2754,7 +2752,7 @@ impl Instruction {
     /// Convert [`Instr::Div`] according to whether registers are non-zero.
     ///
     /// [`Instr::Div`]: crate::parser::instruction::Instr::Div
-    pub(super) fn from_ic_div(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_div(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `div` is non-trapping in the case of division by zero.
@@ -2768,7 +2766,7 @@ impl Instruction {
     /// Convert [`Instr::Divu`] according to whether registers are non-zero.
     ///
     /// [`Instr::Divu`]: crate::parser::instruction::Instr::Divu
-    pub(super) fn from_ic_divu(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_divu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `div` is non-trapping in the case of division by zero.
@@ -2782,7 +2780,7 @@ impl Instruction {
     /// Convert [`Instr::Divw`] according to whether registers are non-zero.
     ///
     /// [`Instr::Divw`]: crate::parser::instruction::Instr::Divw
-    pub(super) fn from_ic_divw(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_divw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `div` is non-trapping in the case of division by zero.
@@ -2796,7 +2794,7 @@ impl Instruction {
     /// Convert [`Instr::Divuw`] according to whether registers are non-zero.
     ///
     /// [`Instr::Divuw`]: crate::parser::instruction::Instr::Divuw
-    pub(super) fn from_ic_divuw(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_divuw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `div` is non-trapping in the case of division by zero.
@@ -2810,7 +2808,7 @@ impl Instruction {
     /// Convert [`Instr::Rem`] according to whether registers are non-zero.
     ///
     /// [`Instr::Rem`]: crate::parser::instruction::Instr::Rem
-    pub(super) fn from_ic_rem(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_rem(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `rem` is non-trapping in the case of division by zero.
@@ -2824,7 +2822,7 @@ impl Instruction {
     /// Convert [`Instr::Remu`] according to whether registers are non-zero.
     ///
     /// [`Instr::Remu`]: crate::parser::instruction::Instr::Remu
-    pub(super) fn from_ic_remu(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_remu(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `rem` is non-trapping in the case of division by zero.
@@ -2838,7 +2836,7 @@ impl Instruction {
     /// Convert [`Instr::Remw`] according to whether registers are non-zero.
     ///
     /// [`Instr::Remw`]: crate::parser::instruction::Instr::Remw
-    pub(super) fn from_ic_remw(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_remw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `rem` is non-trapping in the case of division by zero.
@@ -2852,7 +2850,7 @@ impl Instruction {
     /// Convert [`Instr::Remuw`] according to whether registers are non-zero.
     ///
     /// [`Instr::Remuw`]: crate::parser::instruction::Instr::Remuw
-    pub(super) fn from_ic_remuw(args: &RTypeArgs) -> Instruction {
+    pub(super) fn from_remuw(args: &RTypeArgs) -> Instruction {
         use XRegisterParsed as X;
         match split_x0(args.rd) {
             // This holds as `rem` is non-trapping in the case of division by zero.
