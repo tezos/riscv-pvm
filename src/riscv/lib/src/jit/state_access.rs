@@ -63,6 +63,7 @@ pub enum ExceptionCode {
     LoadPageFault = Exception::LoadPageFault as i64,
     StoreAMOPageFault = Exception::StoreAMOPageFault as i64,
     FenceI = Exception::FenceI as i64,
+    ForceFetchRun = Exception::ForceFetchRun as i64,
 }
 
 impl ExceptionCode {
@@ -79,6 +80,7 @@ impl ExceptionCode {
             Exception::LoadPageFault => Self::LoadPageFault,
             Exception::StoreAMOPageFault => Self::StoreAMOPageFault,
             Exception::FenceI => Self::FenceI,
+            Exception::ForceFetchRun => Self::ForceFetchRun,
         }
     }
 
@@ -97,6 +99,7 @@ impl ExceptionCode {
             Self::LoadPageFault => Some(Exception::LoadPageFault),
             Self::StoreAMOPageFault => Some(Exception::StoreAMOPageFault),
             Self::FenceI => Some(Exception::FenceI),
+            Self::ForceFetchRun => Some(Exception::ForceFetchRun),
         }
     }
 
