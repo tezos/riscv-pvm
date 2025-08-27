@@ -25,6 +25,7 @@ use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::MemoryGovernanceListener;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -50,7 +51,7 @@ pub trait Block<MC: MemoryConfig, M: ManagerBase>: NewState<M> {
     ///
     /// `Sized` bound is required to ensure any reference to `BlockBuilder` will be thin -
     /// see [`dispatch::DispatchFn`].
-    type BlockBuilder: Default + Sized;
+    type BlockBuilder: Default + Sized + MemoryGovernanceListener;
 
     /// Bind the block to the given allocated state.
     fn bind(allocated: AllocatedOf<BlockLayout, M>) -> Self

@@ -275,6 +275,7 @@ where
             program_start,
             program_length,
             Permissions::WRITE,
+            &mut self.machine_state.block_builder,
         )?;
 
         // Write program to main memory
@@ -287,6 +288,7 @@ where
             program_start,
             program_length,
             Permissions::NONE,
+            &mut self.machine_state.block_builder,
         )?;
 
         // Configure memory permissions using the ELF program headers, if present
@@ -296,6 +298,7 @@ where
                     mem_perms.start_address,
                     mem_perms.length as usize,
                     mem_perms.permissions,
+                    &mut self.machine_state.block_builder,
                 )?;
             }
         }
@@ -345,6 +348,7 @@ where
             stack_guard.to_machine_address(),
             PAGE_SIZE.get() as usize,
             Permissions::NONE,
+            &mut self.machine_state.block_builder,
         )?;
 
         // Make sure the stack region is readable and writable
@@ -352,6 +356,7 @@ where
             stack_bottom.to_machine_address(),
             stack_space,
             Permissions::READ_WRITE,
+            &mut self.machine_state.block_builder,
         )?;
 
         self.machine_state
@@ -767,9 +772,9 @@ impl<M: ManagerBase> SupervisorState<M> {
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
             RT_SIGRETURN => dispatch0!(rt_sigreturn, &mut machine.core),
             BRK => dispatch0!(brk),
-            MMAP => dispatch6!(mmap, &mut machine.core),
-            MPROTECT => dispatch3!(mprotect, &mut machine.core),
-            MUNMAP => dispatch2!(munmap, &mut machine.core),
+            MMAP => dispatch6!(mmap, machine),
+            MPROTECT => dispatch3!(mprotect, machine),
+            MUNMAP => dispatch2!(munmap, machine),
             MADVISE => dispatch0!(madvise),
             GETRANDOM => dispatch2!(getrandom, &mut machine.core),
             CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
@@ -1150,7 +1155,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         for fd in [0i32, 1, 2] {
@@ -1220,7 +1230,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1350,7 +1365,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1495,7 +1515,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         // Mask pointer (must be non-zero)
@@ -1806,7 +1831,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new();
@@ -1873,11 +1903,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         let mut supervisor_state = SupervisorState::new();
 
@@ -1968,6 +1994,7 @@ mod tests {
                 MemLayout::TOTAL_BYTES,
                 Permissions::READ_WRITE,
                 true,
+                &mut machine_state.block_builder,
             )
             .unwrap();
 
@@ -1994,7 +2021,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 addr.into(),
                 length,
                 perms,
@@ -2022,7 +2049,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 VirtAddr::new(addr),
                 length,
                 perms,
@@ -2048,7 +2075,12 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                MemLayout::TOTAL_BYTES,
+                Permissions::READ_WRITE,
+                &mut machine_state.block_builder,
+            )
             .unwrap();
 
         // Write the initial stack pointer and program counter.

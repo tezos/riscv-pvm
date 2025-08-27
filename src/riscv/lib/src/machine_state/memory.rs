@@ -2,12 +2,14 @@
 //
 // SPDX-License-Identifier: MIT
 
-mod buddy;
+pub(crate) mod buddy;
 mod config;
 mod protection;
-mod state;
+pub(crate) mod state;
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
+use std::ops::RangeInclusive;
 
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -54,6 +56,15 @@ pub const PAGE_OFFSET_MASK: u64 = (1 << OFFSET_BITS.get()) - 1;
 
 /// Mask for obtaining a page-aligned-down address.
 pub const PAGE_MASK: u64 = !0 << OFFSET_BITS.get();
+
+/// Calculate the page range for a given address and length.
+pub fn get_page_range(address: Address, length: NonZeroUsize) -> std::ops::RangeInclusive<usize> {
+    let address = address as usize;
+    let start_page = address >> OFFSET_BITS.get();
+
+    let end_page = address.wrapping_add(length.get()).saturating_sub(1) >> OFFSET_BITS.get();
+    start_page..=end_page
+}
 
 /// Memory address
 pub type Address = XValue;
@@ -242,6 +253,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         address: Address,
         length: usize,
         perms: Permissions,
+        memory_governance_listener: &mut impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerWrite;
@@ -272,6 +284,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         length: usize,
         perms: Permissions,
         allow_replace: bool,
+        memory_governance_listener: &mut impl MemoryGovernanceListener,
     ) -> Result<Address, MemoryGovernanceError>
     where
         M: ManagerReadWrite;
@@ -281,12 +294,18 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         &mut self,
         address: Address,
         length: usize,
+        memory_governance_listener: &mut impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite,
     {
         self.deallocate_pages(address, length)?;
-        self.protect_pages(address, length, Permissions::NONE)
+        self.protect_pages(
+            address,
+            length,
+            Permissions::NONE,
+            memory_governance_listener,
+        )
     }
 }
 
@@ -313,6 +332,31 @@ pub trait MemoryConfig: Send + 'static {
         F: FnManager<Ref<'a, M>>;
 }
 
+/// State of a range of memory pages
+pub enum PageState {
+    /// The range is immutable and marked as executable.
+    ImmutableExec,
+
+    /// No beneficial properties hold for the range.
+    Other,
+}
+
+impl From<Permissions> for PageState {
+    fn from(permissions: Permissions) -> Self {
+        if permissions.can_read() && permissions.can_exec() && !permissions.can_write() {
+            Self::ImmutableExec
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// Implementing types will be informed about changes to memory permissions
+pub trait MemoryGovernanceListener {
+    /// Called on changes to memory permissions.
+    fn handle_memory_permission_change(&mut self, pages: RangeInclusive<usize>, state: PageState);
+}
+
 // Re-export memory configurations
 pub use config::M1G;
 pub use config::M1M;
@@ -323,3 +367,41 @@ pub use config::M16G;
 pub use config::M32G;
 pub use config::M64G;
 pub use config::M64M;
+
+#[cfg(test)]
+pub mod tests {
+
+    use super::*;
+
+    /// Default memory governance handler that does nothing
+    #[derive(Default)]
+    pub struct DummyMemoryGovernanceHandler;
+
+    impl MemoryGovernanceListener for DummyMemoryGovernanceHandler {
+        fn handle_memory_permission_change(
+            &mut self,
+            _pages: RangeInclusive<usize>,
+            _state: PageState,
+        ) {
+            // do nothing
+        }
+    }
+
+    #[test]
+    fn test_get_page_range() {
+        // Single byte
+        let range = get_page_range(0, NonZeroUsize::new(1).unwrap());
+        assert_eq!(*range.start(), 0);
+        assert_eq!(*range.end(), 0);
+
+        // Exactly one page
+        let range = get_page_range(0, NonZeroUsize::new(4096).unwrap());
+        assert_eq!(*range.start(), 0);
+        assert_eq!(*range.end(), 0);
+
+        // Cross page boundary
+        let range = get_page_range(4090, NonZeroUsize::new(20).unwrap());
+        assert_eq!(*range.start(), 0);
+        assert_eq!(*range.end(), 1);
+    }
+}

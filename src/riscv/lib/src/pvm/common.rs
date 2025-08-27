@@ -529,10 +529,7 @@ mod tests {
         // Setup PVM
         let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
         pvm.reset();
-        pvm.machine_state
-            .core
-            .main_memory
-            .set_all_readable_writeable();
+        pvm.machine_state.set_all_readable_writeable();
 
         let level_addr = memory::FIRST_ADDRESS;
         let counter_addr = level_addr + 4;
@@ -638,10 +635,7 @@ mod tests {
             // Setup PVM
             let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
             pvm.reset();
-            pvm.machine_state
-                .core
-                .main_memory
-                .set_all_readable_writeable();
+            pvm.machine_state.set_all_readable_writeable();
 
             // Write characters
             pvm.machine_state
@@ -685,10 +679,7 @@ mod tests {
         // Setup PVM
         let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F>::new(InterpretedBlockBuilder);
         pvm.reset();
-        pvm.machine_state
-            .core
-            .main_memory
-            .set_all_readable_writeable();
+        pvm.machine_state.set_all_readable_writeable();
 
         let input_address = memory::FIRST_ADDRESS;
         let buffer = [1u8, 2, 3, 4];
@@ -758,10 +749,7 @@ mod tests {
         // Setup PVM
         let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F>::new(InterpretedBlockBuilder);
         pvm.reset();
-        pvm.machine_state
-            .core
-            .main_memory
-            .set_all_readable_writeable();
+        pvm.machine_state.set_all_readable_writeable();
 
         const OUTPUT_BUFFER_SIZE: usize = 10;
         let input_address = memory::FIRST_ADDRESS;

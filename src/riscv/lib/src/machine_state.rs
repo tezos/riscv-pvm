@@ -596,6 +596,19 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         Ok(())
     }
 
+    /// Mark all memory as readable and writeable.
+    #[cfg(test)]
+    pub fn set_all_readable_writeable<MB, const PAGES: usize, const TOTAL_BYTES: usize>(&mut self)
+    where
+        M: backend::ManagerReadWrite,
+        MB: memory::buddy::Buddy<M>,
+        MC: MemoryConfig<State<M> = memory::state::MemoryImpl<PAGES, TOTAL_BYTES, MB, M>>,
+    {
+        self.core
+            .main_memory
+            .set_all_readable_writeable(&mut self.block_builder);
+    }
+
     /// Invalidate all instruction caches that are sensitive to
     /// instruction fences.
     fn invalidate_instruction_caches(&mut self)
@@ -1262,7 +1275,7 @@ mod tests {
         );
 
         state.reset();
-        state.core.main_memory.set_all_readable_writeable();
+        state.set_all_readable_writeable();
 
         let stack_top = M4K::TOTAL_BYTES as u64;
         state.core.hart.xregisters.write(sp, stack_top);
@@ -1283,7 +1296,7 @@ mod tests {
         );
 
         state.reset();
-        state.core.main_memory.set_all_readable_writeable();
+        state.set_all_readable_writeable();
 
         let stack_top = M4K::TOTAL_BYTES as u64;
         state.core.hart.xregisters.write(sp, stack_top);

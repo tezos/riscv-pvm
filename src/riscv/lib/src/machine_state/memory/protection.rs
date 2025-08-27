@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::ops::RangeInclusive;
+
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -115,23 +117,13 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     }
 
     /// Change the access permissions for the given range.
-    pub fn modify_access(&mut self, address: Address, length: usize, accessible: bool)
+    pub fn modify_access(&mut self, page_range: RangeInclusive<usize>, accessible: bool)
     where
         M: ManagerWrite,
     {
-        if length < 1 {
-            return;
-        }
-
-        let address = address as usize;
-        let start_page = address >> super::OFFSET_BITS.get();
-        let end_page = address.wrapping_add(length).wrapping_sub(1) >> super::OFFSET_BITS.get();
-
-        (start_page..=end_page)
-            .filter(|&page| page < PAGES)
-            .for_each(|page| {
-                self.pages[page].write(accessible);
-            })
+        page_range.filter(|&page| page < PAGES).for_each(|page| {
+            self.pages[page].write(accessible);
+        })
     }
 }
 

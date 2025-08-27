@@ -6,6 +6,7 @@
 //! This module exposes wrappers for the style of dispatch and compilation that is done.
 
 use std::marker::PhantomData;
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
@@ -21,6 +22,8 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::MemoryGovernanceListener;
+use crate::machine_state::memory::PageState;
 use crate::state_backend::owned_backend::Owned;
 
 /// The function signature for dispatching a block run.
@@ -173,7 +176,7 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> Defaul
 
 /// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
 /// said block in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
+pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized + MemoryGovernanceListener {
     /// Whether compilation should be attempted for the block.
     fn should_compile<C: CodeDispatcher<Self, MC>>(
         &self,
@@ -198,6 +201,16 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
 /// JIT compiler for blocks that performs compilation inline, in the same thread as execution.
 pub struct InlineCompiler<MC: MemoryConfig> {
     jit: JIT<MC>,
+}
+
+impl<MC: MemoryConfig> MemoryGovernanceListener for InlineCompiler<MC> {
+    fn handle_memory_permission_change(
+        &mut self,
+        _pages: RangeInclusive<usize>,
+        _state: PageState,
+    ) {
+        // TODO RV-761 - Implement handling of memory permissions in the JIT.
+    }
 }
 
 impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
@@ -280,7 +293,18 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
     _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
-    sender: Sender<CompilationRequest>,
+    sender: Sender<JitRequest>,
+}
+
+impl<MC: MemoryConfig> MemoryGovernanceListener for OutlineCompiler<MC> {
+    fn handle_memory_permission_change(&mut self, pages: RangeInclusive<usize>, state: PageState) {
+        let _ = self
+            .sender
+            .send(JitRequest::MemoryPermissions(MemoryPermissionsRequest {
+                pages,
+                state,
+            }));
+    }
 }
 
 impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
@@ -301,25 +325,39 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
-                    if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
-                        debug_assert_eq!(
-                            msg.fun.load(Ordering::Acquire),
-                            Jitted::<Self, MC>::run_block_not_compiled as usize,
-                            "Unexpected function pointer in dispatch target"
-                        );
+                    match msg {
+                        JitRequest::Compile(CompilationRequest {
+                            instr,
+                            fun,
+                            program_counter,
+                        }) => {
+                            if let Some(jitfn) = jit.compile(&instr, program_counter) {
+                                debug_assert_eq!(
+                                    fun.load(Ordering::Acquire),
+                                    Jitted::<Self, MC>::run_block_not_compiled as usize,
+                                    "Unexpected function pointer in dispatch target"
+                                );
 
-                        // Safety: this function will be retrieved as a DispatchFn, rather than a
-                        // JitFn. The two function signatures are identical, apart from the first and
-                        // last parameters. These are both thin-pointers, and ignored by the JitFn.
-                        //
-                        // It's therefore safe to cast this function pointer to an identical ABI, where
-                        // this first and last parameter are thin-references to any value. This is the
-                        // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
-                        //
-                        // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                        // information on ABI compatability.
-                        msg.fun.store(jitfn as usize, Ordering::Release);
-                    };
+                                // Safety: this function will be retrieved as a DispatchFn, rather than a
+                                // JitFn. The two function signatures are identical, apart from the first and
+                                // last parameters. These are both thin-pointers, and ignored by the JitFn.
+                                //
+                                // It's therefore safe to cast this function pointer to an identical ABI, where
+                                // this first and last parameter are thin-references to any value. This is the
+                                // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
+                                //
+                                // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
+                                // information on ABI compatability.
+                                fun.store(jitfn as usize, Ordering::Release);
+                            };
+                        }
+                        JitRequest::MemoryPermissions(MemoryPermissionsRequest {
+                            pages: _,
+                            state: _,
+                        }) => {
+                            // TODO RV-761 - Implement handling of memory permissions in the JIT.
+                        }
+                    }
                 }
             }
             // because we used blocking recv with an asynchronous channel, this only fails when the
@@ -385,7 +423,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         // NB - any blocks already JIT compiled are safe to keep calling, as the
         // data behind the mutex (the JIT) is kept alive for as long as we maintain
         // our reference to it, despite the lock itself being poisoned.
-        let _ = self.sender.send(request);
+        let _ = self.sender.send(JitRequest::Compile(request));
 
         fun
     }
@@ -395,4 +433,16 @@ struct CompilationRequest {
     instr: Vec<Instruction>,
     fun: Arc<AtomicUsize>,
     program_counter: Address,
+}
+
+// TODO RV-761 - Implement handling of memory permissions in the JIT.
+#[expect(unused, reason = "Will Be Used Soon")]
+struct MemoryPermissionsRequest {
+    pages: RangeInclusive<usize>,
+    state: PageState,
+}
+
+enum JitRequest {
+    Compile(CompilationRequest),
+    MemoryPermissions(MemoryPermissionsRequest),
 }

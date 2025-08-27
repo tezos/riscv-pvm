@@ -308,6 +308,7 @@ mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::tests::DummyMemoryGovernanceHandler;
     use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::machine_state::registers::XRegister;
@@ -372,14 +373,11 @@ mod tests {
             // Create the states for the interpreted and jitted runs.
             let mut interpreted_state: TestMachineState<Interpreted<_, _>> =
                 MachineState::new(InterpretedBlockBuilder);
-            interpreted_state
-                .core
-                .main_memory
-                .set_all_readable_writeable();
+            interpreted_state.set_all_readable_writeable();
 
             let mut jitted_state: TestMachineState<Jitted<InlineCompiler<_>, _>> =
                 MachineState::new(InlineCompiler::default());
-            jitted_state.core.main_memory.set_all_readable_writeable();
+            jitted_state.set_all_readable_writeable();
 
             let mut interpreted_block = Interpreted::<_, _>::new();
             interpreted_block.start_block();
@@ -3116,7 +3114,8 @@ mod tests {
              -> Scenario {
                 ScenarioBuilder::default()
                     .set_setup_hook(setup_hook!(|core| {
-                        core.main_memory.set_all_readable_writeable();
+                        core.main_memory
+                            .set_all_readable_writeable(&mut DummyMemoryGovernanceHandler);
                         core.main_memory.write(addr, expected_rd).unwrap();
                         core.hart.xregisters.write(x1, addr);
                         core.hart.xregisters.write(x3, val);

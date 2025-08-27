@@ -5,6 +5,8 @@
 
 //! Interpreted blocks of instructions
 
+use std::ops::RangeInclusive;
+
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -18,6 +20,8 @@ use crate::machine_state::block_cache::block::run_block_inner;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::MemoryGovernanceListener;
+use crate::machine_state::memory::PageState;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Cell;
@@ -34,6 +38,16 @@ use crate::traps::Exception;
 /// Interpreted blocks are built automatically, and require no additional context.
 #[derive(Debug, Default)]
 pub struct InterpretedBlockBuilder;
+
+impl MemoryGovernanceListener for InterpretedBlockBuilder {
+    fn handle_memory_permission_change(
+        &mut self,
+        _pages: RangeInclusive<usize>,
+        _state: PageState,
+    ) {
+        // do nothing
+    }
+}
 
 /// Blocks that are executed via interpreting the individual instructions.
 ///

@@ -179,6 +179,7 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
+    use crate::machine_state::memory::tests::DummyMemoryGovernanceHandler;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -259,11 +260,16 @@ mod tests {
         // populating a read-only page should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
-                read: true,
-                exec: false,
-                write: false,
-            })
+            .protect_pages(
+                0,
+                PAGE_SIZE.get() as usize,
+                Permissions {
+                    read: true,
+                    exec: false,
+                    write: false,
+                },
+                &mut DummyMemoryGovernanceHandler,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -271,7 +277,12 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                PAGE_SIZE.get() as usize,
+                Permissions::READ_WRITE,
+                &mut DummyMemoryGovernanceHandler,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -279,7 +290,12 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE_EXEC)
+            .protect_pages(
+                0,
+                PAGE_SIZE.get() as usize,
+                Permissions::READ_WRITE_EXEC,
+                &mut DummyMemoryGovernanceHandler,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -287,11 +303,16 @@ mod tests {
         // populating a R+X page should succeed
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
-                read: true,
-                exec: true,
-                write: false,
-            })
+            .protect_pages(
+                0,
+                PAGE_SIZE.get() as usize,
+                Permissions {
+                    read: true,
+                    exec: true,
+                    write: false,
+                },
+                &mut DummyMemoryGovernanceHandler,
+            )
             .unwrap();
         cache.populate_page(90, &state);
         assert_eq!(count_active_pages(&cache), 1);

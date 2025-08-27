@@ -78,6 +78,7 @@ mod test {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::tests::DummyMemoryGovernanceHandler;
     use crate::machine_state::registers::fa2;
     use crate::machine_state::registers::fa3;
     use crate::machine_state::registers::parse_xregister;
@@ -103,7 +104,7 @@ mod test {
         )| {
             let mut state = state_cell.borrow_mut();
             state.reset();
-            state.main_memory.set_all_readable_writeable();
+            state.main_memory.set_all_readable_writeable(&mut DummyMemoryGovernanceHandler);
 
             let mut perform_test = |offset: i64| -> Result<(), Exception> {
                 state.hart.fregisters.write(fa2, val.into());
@@ -138,7 +139,7 @@ mod test {
         )| {
             let mut state = state_cell.borrow_mut();
             state.reset();
-            state.main_memory.set_all_readable_writeable();
+            state.main_memory.set_all_readable_writeable(&mut DummyMemoryGovernanceHandler);
 
             let mut perform_test = |offset: i64| -> Result<(), Exception> {
                 state.hart.fregisters.write(fa2, val.into());
