@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::ops::Sub;
@@ -35,6 +34,17 @@ use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
 use crate::struct_layout;
+
+/// Errors relating to handling signals
+#[derive(Debug, Eq, thiserror::Error, PartialEq)]
+pub enum SignalError {
+    #[error(transparent)]
+    Memory(#[from] BadMemoryAccess),
+    #[error("Bad signal context")]
+    BadContext,
+    #[error("Misaligned stack pointer")]
+    MisalignedStackPointer,
+}
 
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
 #[repr(C)]
@@ -219,7 +229,7 @@ struct_layout! {
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
     /// Pushes the context needed to resume after handling a signal
-    pub fn push_signal_context(&mut self, signal: Signal) -> Result<(), BadMemoryAccess> {
+    pub fn push_signal_context(&mut self, signal: Signal) -> Result<(), SignalError> {
         let signal_index: SignalIndex = signal.into();
         let signal_index: u64 = signal_index as u64;
         let mask = self.signal_actions.read_mask(signal);
@@ -249,7 +259,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
     }
 
     /// Pops the context needed to resume after handling a signal
-    pub fn pop_signal_context(&mut self) -> Result<Address, BadMemoryAccess> {
+    pub fn pop_signal_context(&mut self) -> Result<Address, SignalError> {
         let stack_pointer = VirtAddr::new(self.hart.xregisters.read(sp));
 
         let prev_stack_pointer = self
@@ -264,13 +274,14 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         let signal_index: u64 = self.main_memory.read(stack_pointer.to_machine_address())?;
 
         // SAFETY: This was stored by converting from a SignalIndex
-        let signal_index = SignalIndex::from_repr(signal_index as usize).unwrap();
+        let signal_index =
+            SignalIndex::from_repr(signal_index as usize).ok_or(SignalError::BadContext)?;
         self.signal_actions.write_mask(signal_index, mask);
 
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
             .add(32)
-            .align_up(NonZeroU64::new(16).expect("Alignment must be non-zero"))
-            .ok_or(BadMemoryAccess)?;
+            .align_up(RISCV_ABI_SP_ALIGNMENT)
+            .ok_or(SignalError::MisalignedStackPointer)?;
 
         self.hart
             .xregisters

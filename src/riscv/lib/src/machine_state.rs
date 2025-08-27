@@ -676,6 +676,7 @@ mod tests {
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::M64M;
+    use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a7;
@@ -691,6 +692,7 @@ mod tests {
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::signals::Signal;
+    use crate::pvm::linux::signals::SignalError;
     use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
     use crate::traps::Exception;
@@ -1095,5 +1097,35 @@ mod tests {
         state.core.push_signal_context(Signal::Sigfpe).unwrap();
         let pc = state.core.pop_signal_context().unwrap();
         assert_eq!(pc, init_pc);
+    });
+
+    // RV-757: Test for bugfix where previously a modified stack could cause a panic.
+    backend_test!(test_signal_index_fix, F, {
+        let mut state = MachineState::<M4K, TestCacheConfig, Interpreted<M4K, F>, F>::new(
+            InterpretedBlockBuilder,
+        );
+
+        state.reset();
+        state.core.main_memory.set_all_readable_writeable();
+
+        let stack_top = M4K::TOTAL_BYTES as u64;
+        state.core.hart.xregisters.write(sp, stack_top);
+
+        let init_pc = 0x100;
+        state.core.hart.pc.write(init_pc);
+
+        state.core.push_signal_context(Signal::Sigfpe).unwrap();
+
+        let signal_index_address = stack_top - 32;
+        let bad_signal_index: u64 = 42;
+
+        state
+            .core
+            .main_memory
+            .write(signal_index_address, bad_signal_index)
+            .unwrap();
+
+        let result = state.core.pop_signal_context();
+        assert_eq!(result, Err(SignalError::BadContext));
     });
 }
