@@ -108,6 +108,61 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         self.main_memory.reset();
         self.signal_actions.reset();
     }
+
+    /// Fetch the 16 bits of an instruction at the given physical address.
+    #[inline(always)]
+    fn fetch_instr_halfword(
+        &self,
+        phys_addr: Address,
+    ) -> Result<memory::InstructionData<u16>, Exception>
+    where
+        M: backend::ManagerRead,
+    {
+        self.main_memory
+            .read_exec(phys_addr)
+            .map_err(|_: BadMemoryAccess| Exception::InstructionAccessFault)
+    }
+
+    /// Fetch instruction from the address given by program counter
+    /// The spec stipulates translation is performed for each byte respectively.
+    /// However, we assume the `raw_pc` is 2-byte aligned.
+    #[inline]
+    fn fetch_instr(
+        &mut self,
+        addr: Address,
+    ) -> Result<memory::InstructionData<Instruction>, Exception>
+    where
+        M: backend::ManagerReadWrite,
+    {
+        let lower = self.fetch_instr_halfword(addr)?;
+
+        // The reasons to provide the second half in the lambda is
+        // because those bytes may be inaccessible or may trigger an exception when read.
+        // Hence we can't read all 4 bytes eagerly.
+        let instruction_data = if is_compressed(lower.data) {
+            let instr = parse_compressed_instruction(lower.data);
+            let instr = Instruction::from(&instr);
+
+            memory::InstructionData {
+                data: instr,
+                writable: lower.writable,
+            }
+        } else {
+            let next_addr = addr + 2;
+            let upper = self.fetch_instr_halfword(next_addr)?;
+
+            let combined = lower.combine_with_upper(upper);
+            let instr = parse_uncompressed_instruction(combined.data);
+            let instr = Instruction::from(&instr);
+
+            memory::InstructionData {
+                data: instr,
+                writable: combined.writable,
+            }
+        };
+
+        Ok(instruction_data)
+    }
 }
 
 /// The alignment of a stack pointer in RISC-V's ABI
@@ -275,80 +330,26 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         self.block_cache.reset();
     }
 
-    /// Fetch the 16 bits of an instruction at the given physical address.
-    #[inline(always)]
-    fn fetch_instr_halfword(
-        &self,
-        phys_addr: Address,
-    ) -> Result<memory::InstructionData<u16>, Exception>
-    where
-        M: backend::ManagerRead,
-    {
-        self.core
-            .main_memory
-            .read_exec(phys_addr)
-            .map_err(|_: BadMemoryAccess| Exception::InstructionAccessFault)
-    }
-
-    /// Fetch instruction from the address given by program counter
-    /// The spec stipulates translation is performed for each byte respectively.
-    /// However, we assume the `raw_pc` is 2-byte aligned.
-    #[inline]
-    fn fetch_instr(&mut self, addr: Address) -> Result<Instruction, Exception>
-    where
-        M: backend::ManagerReadWrite,
-    {
-        let lower = self.fetch_instr_halfword(addr)?;
-
-        // The reasons to provide the second half in the lambda is
-        // because those bytes may be inaccessible or may trigger an exception when read.
-        // Hence we can't read all 4 bytes eagerly.
-        let instr = if is_compressed(lower.data) {
-            let instr = parse_compressed_instruction(lower.data);
-            let instr = Instruction::from(&instr);
-
-            // Writable memory means that the instruction is not cacheable
-            if !lower.writable {
-                self.block_cache.push_instr_compressed(addr, instr);
-            }
-
-            instr
-        } else {
-            let next_addr = addr + 2;
-            let upper = self.fetch_instr_halfword(next_addr)?;
-
-            let combined = lower.combine_with_upper(upper);
-            let instr = parse_uncompressed_instruction(combined.data);
-            let instr = Instruction::from(&instr);
-
-            // Writable memory means that the instruction is not cacheable
-            if !combined.writable {
-                self.block_cache.push_instr_uncompressed(addr, instr);
-            }
-
-            instr
-        };
-
-        Ok(instr)
-    }
-
-    /// Advance [`MachineState`] by executing an [`Instr`]
+    /// Fetch & run the instruction located at address `instr_pc`.
     ///
-    /// [`Instr`]: crate::parser::instruction::Instr
-    fn run_instr(&mut self, instr: &Instruction) -> Result<ProgramCounterUpdate<Address>, Exception>
-    where
-        M: backend::ManagerReadWrite,
-    {
-        instr.run(&mut self.core)
-    }
-
-    /// Fetch & run the instruction located at address `instr_pc`
+    /// Additionally, this will push the instruction to the block cache, iff the memory address is
+    /// *not* writable.
     fn run_instr_at(&mut self, addr: Address) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
         M: backend::ManagerReadWrite,
     {
-        self.fetch_instr(addr)
-            .and_then(|instr| self.run_instr(&instr))
+        let memory::InstructionData {
+            data: instr,
+            writable,
+        } = self.core.fetch_instr(addr)?;
+
+        // If the memory backing the instruction is writable, we do not cache it as it may
+        // change at any time.
+        if !writable {
+            self.block_cache.push_instruction(addr, instr);
+        }
+
+        instr.run(&mut self.core)
     }
 
     /// Take an interrupt if available, and then

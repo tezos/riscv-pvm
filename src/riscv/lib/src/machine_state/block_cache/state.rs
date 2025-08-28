@@ -18,7 +18,6 @@ use crate::machine_state::block_cache::config::BlockCacheConfig;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::parser::instruction::InstrWidth;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -332,7 +331,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// ensure it is valid (it is part of the same fence,
     /// on the same page and that the combined block will
     /// not exceed the maximum number of instructions).
-    fn cache_inner<const WIDTH: u64>(&mut self, addr: Address, instr: Instruction)
+    fn cache_inner(&mut self, addr: Address, instr: Instruction)
     where
         M: ManagerReadWrite,
     {
@@ -361,7 +360,7 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         entry.block.push_instr(instr);
         let new_len = len_instr + 1;
 
-        let next_addr = addr + WIDTH;
+        let next_addr = addr.wrapping_add(instr.width() as u64);
         self.next_instr_addr.write(next_addr);
 
         let possible_block = Self::entry(&self.entries, next_addr);
@@ -469,42 +468,17 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         }
     }
 
-    fn push_instr_compressed(&mut self, addr: Address, instr: Instruction)
+    fn push_instruction(&mut self, addr: Address, instr: Instruction)
     where
         M: ManagerReadWrite,
     {
-        debug_assert_eq!(
-            instr.width(),
-            InstrWidth::Compressed,
-            "expected compressed instruction, found: {instr:?}"
-        );
-
         let next_addr = self.next_instr_addr.read();
 
         if addr != next_addr {
             self.reset_to(addr);
         }
 
-        self.cache_inner::<{ InstrWidth::Compressed as u64 }>(addr, instr);
-    }
-
-    fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
-    where
-        M: ManagerReadWrite,
-    {
-        debug_assert_eq!(
-            instr.width(),
-            InstrWidth::Uncompressed,
-            "expected uncompressed instruction, found: {instr:?}"
-        );
-
-        let next_addr = self.next_instr_addr.read();
-
-        if addr != next_addr {
-            self.reset_to(addr);
-        }
-
-        self.cache_inner::<{ InstrWidth::Uncompressed as u64 }>(addr, instr);
+        self.cache_inner(addr, instr);
     }
 
     fn complete_current_block(
@@ -605,7 +579,7 @@ mod tests {
         let addr = 10;
 
         for offset in 0..(CACHE_INSTR as u64) {
-            state.push_instr_uncompressed(addr + offset * 4, uncompressed);
+            state.push_instruction(addr + offset * 4, uncompressed);
         }
 
         let block = state.get_block(addr);
@@ -631,7 +605,7 @@ mod tests {
         let addr = 10;
 
         for offset in 0..(CACHE_INSTR as u64) {
-            state.push_instr_compressed(addr + offset * 2, compressed);
+            state.push_instruction(addr + offset * 2, compressed);
         }
 
         let block = state.get_block(addr);
@@ -658,7 +632,7 @@ mod tests {
         let addr = 10;
 
         for offset in 0..((CACHE_INSTR / 2) as u64) {
-            state.push_instr_compressed(addr + offset * 2, compressed);
+            state.push_instruction(addr + offset * 2, compressed);
         }
 
         let block = state.get_block(addr);
@@ -684,7 +658,7 @@ mod tests {
         let addr = 10;
 
         for offset in 0..((CACHE_INSTR * 2) as u64) {
-            state.push_instr_compressed(addr + offset * 2, compressed);
+            state.push_instruction(addr + offset * 2, compressed);
         }
 
         let block = state.get_block(addr);
@@ -714,7 +688,7 @@ mod tests {
         let block_addr = memory::FIRST_ADDRESS;
 
         for offset in 0..10 {
-            block_state.push_instr_uncompressed(block_addr + offset * 4, addiw);
+            block_state.push_instruction(block_addr + offset * 4, addiw);
         }
 
         core_state.hart.pc.write(block_addr);
@@ -793,12 +767,11 @@ mod tests {
         let preceding_num_instr: u64 = 5;
 
         for offset in 0..(CACHE_INSTR as u64 - preceding_num_instr) {
-            state.push_instr_uncompressed(addr + offset * 4, uncompressed);
+            state.push_instruction(addr + offset * 4, uncompressed);
         }
 
         for offset in 0..preceding_num_instr {
-            state
-                .push_instr_uncompressed(addr - preceding_num_instr * 4 + offset * 4, uncompressed);
+            state.push_instruction(addr - preceding_num_instr * 4 + offset * 4, uncompressed);
         }
 
         let block = state.get_block(addr - 20);
@@ -828,12 +801,11 @@ mod tests {
         let preceding_num_instr: u64 = 5;
 
         for offset in 0..(CACHE_INSTR as u64 - preceding_num_instr + 1) {
-            state.push_instr_uncompressed(addr + offset * 4, uncompressed);
+            state.push_instruction(addr + offset * 4, uncompressed);
         }
 
         for offset in 0..preceding_num_instr {
-            state
-                .push_instr_uncompressed(addr - preceding_num_instr * 4 + offset * 4, uncompressed);
+            state.push_instruction(addr - preceding_num_instr * 4 + offset * 4, uncompressed);
         }
 
         let first_block = state.get_block(addr - preceding_num_instr * 4);
@@ -868,7 +840,7 @@ mod tests {
 
         let populate_block = |block: &mut TestState<Owned>| {
             for i in 0..TestCacheConfig::CACHE_SIZE {
-                block.push_instr_uncompressed(i as Address, Instruction {
+                block.push_instruction(i as Address, Instruction {
                     opcode: OpCode::X64Add,
                     args: Args {
                         rd: nz::a1.into(),
@@ -932,7 +904,7 @@ mod tests {
         // Fetching empty block fails
         assert!(block_cache.get_block(0).is_none());
 
-        block_cache.push_instr_compressed(0, Instruction::new_nop(InstrWidth::Compressed));
+        block_cache.push_instruction(0, Instruction::new_nop(InstrWidth::Compressed));
 
         // Fetching non-empty block succeeds
         assert!(block_cache.get_block(0).is_some());
