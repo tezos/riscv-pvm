@@ -39,6 +39,8 @@ pub enum Exception {
     LoadPageFault,
     StoreAMOPageFault,
     FenceI,
+    /// Force the current instruction to be fetched from memory and executed.
+    ForceFetchRun,
 }
 
 impl core::fmt::Debug for Exception {
@@ -67,7 +69,7 @@ impl From<Exception> for SbiError {
                 SbiError::Failed
             }
 
-            Exception::FenceI => SbiError::Unknown,
+            Exception::FenceI | Exception::ForceFetchRun => SbiError::Unknown,
         }
     }
 }

@@ -493,6 +493,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                             );
                         }
 
+                        // TODO: RV-758: Handle `ForceFetchRun` by fetching an instruction and
+                        // executing it.
                         _exception => {
                             // TODO: RV-653: We trap to a "known" bad address right now. This will
                             // change once synchronous signals are implemented.

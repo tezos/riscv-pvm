@@ -342,6 +342,11 @@ pub enum OpCode {
 
     /// Raise a fence.i exception.
     FenceI,
+
+    /// Raise a [`ForceFetchRun`] exception.
+    ///
+    /// [`ForceFetchRun`]: Exception::ForceFetchRun
+    ForceFetchRun,
 }
 
 impl OpCode {
@@ -526,6 +531,7 @@ impl OpCode {
             Self::ECall => Args::run_ecall,
             Self::EBreak => Args::run_ebreak,
             Self::FenceI => Args::run_fence_i,
+            Self::ForceFetchRun => Args::run_force_fetch_run,
         }
     }
 
@@ -669,6 +675,9 @@ impl OpCode {
             Self::Unknown => Some(Args::run_illegal),
             Self::ECall => Some(Args::run_ecall),
             Self::EBreak => Some(Args::run_ebreak),
+
+            // Instruction/Data synchronisation guards
+            Self::ForceFetchRun => Some(Args::run_force_fetch_run),
 
             _ => None,
         }
@@ -1516,6 +1525,10 @@ impl Args {
 
     fn run_fence_i<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         icb.raise_exception(Exception::FenceI)
+    }
+
+    fn run_force_fetch_run<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+        icb.raise_exception(Exception::ForceFetchRun)
     }
 }
 
