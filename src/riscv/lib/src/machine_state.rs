@@ -471,53 +471,14 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     steps = steps.saturating_add(1);
                     step_bounds = bound_saturating_sub(step_bounds, 1);
 
-                    match cause {
-                        Exception::EnvCall => match handle(self) {
-                            Ok(may_continue) => {
-                                if !may_continue {
-                                    break None;
-                                }
+                    match self.handle_exception(cause, &mut handle) {
+                        Ok(may_continue) => {
+                            if !may_continue {
+                                break None;
                             }
-
-                            Err(error) => break Some(error),
-                        },
-
-                        Exception::FenceI => {
-                            self.invalidate_instruction_caches();
-
-                            // We need to advance pc by width of the Fence.I instruction because raising the exception does not do it for us.
-                            self.core.hart.pc.write(
-                                self.core
-                                    .hart
-                                    .pc
-                                    .read()
-                                    .wrapping_add(InstrWidth::Uncompressed as u64),
-                            );
                         }
 
-                        Exception::IllegalInstruction => {
-                            self.dispatch_signal_or_trap(Signal::Sigill);
-                        }
-
-                        Exception::InstructionAccessFault
-                        | Exception::LoadAccessFault
-                        | Exception::StoreAMOAccessFault
-                        | Exception::InstructionPageFault
-                        | Exception::LoadPageFault
-                        | Exception::StoreAMOPageFault => {
-                            self.dispatch_signal_or_trap(Signal::Sigsegv);
-                        }
-
-                        // There's currently no support for breakpoints - it requires SIGTRAP
-                        Exception::Breakpoint => {
-                            self.core.hart.pc.write(0);
-                        }
-
-                        // TODO: RV-758: Handle `ForceFetchRun` by fetching an instruction and
-                        // executing it.
-                        Exception::ForceFetchRun => {
-                            self.core.hart.pc.write(0);
-                        }
+                        Err(error) => break Some(error),
                     }
                 }
 
@@ -526,6 +487,53 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         };
 
         StepManyResult { steps, error }
+    }
+
+    #[inline]
+    fn handle_exception<E>(
+        &mut self,
+        cause: Exception,
+        mut handle: impl FnMut(&mut Self) -> Result<bool, E>,
+    ) -> Result<bool, E>
+    where
+        M: ManagerReadWrite,
+    {
+        match cause {
+            Exception::EnvCall => return handle(self),
+
+            Exception::FenceI => {
+                self.invalidate_instruction_caches();
+
+                // We need to advance pc by width of the Fence.I instruction because raising the exception does not do it for us.
+                self.core.hart.pc.write(
+                    self.core
+                        .hart
+                        .pc
+                        .read()
+                        .wrapping_add(InstrWidth::Uncompressed as u64),
+                );
+            }
+
+            Exception::IllegalInstruction => {
+                self.dispatch_signal_or_trap(Signal::Sigill);
+            }
+
+            Exception::InstructionAccessFault
+            | Exception::LoadAccessFault
+            | Exception::StoreAMOAccessFault
+            | Exception::InstructionPageFault
+            | Exception::LoadPageFault
+            | Exception::StoreAMOPageFault => {
+                self.dispatch_signal_or_trap(Signal::Sigsegv);
+            }
+
+            // There's currently no support for breakpoints - it requires SIGTRAP
+            Exception::Breakpoint => {
+                self.core.hart.pc.write(0);
+            }
+        }
+
+        Ok(true)
     }
 
     /// Install a program and set the program counter to its start.
