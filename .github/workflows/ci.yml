@@ -64,7 +64,7 @@ jobs:
         id: nix-cache
         uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-v1
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-v2
           restore-prefixes-first-match: |
             nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
             nix-${{ runner.os }}-${{ runner.arch }}-
@@ -89,19 +89,29 @@ jobs:
         uses: Mozilla-Actions/sccache-action@v0.0.9
 
       - name: Pre-build Nix development shell
-        run: nix develop --profile ~/dev-shell --command true
+        run: |
+          # Direnv is not installed out of the box unfortunately.
+          nix profile install nixpkgs#direnv nixpkgs#nix-direnv
+
+          # Direnv is configured through `.envrc`. We create it, or override it in case one already
+          # exists.
+          echo "use flake" > .envrc
+
+          # Subsequent steps will have their environment configured using the $GITHUB_ENV variable.
+          direnv allow .
+          direnv export gha > "$GITHUB_ENV"
 
       # All downloads should be cached. If there is a cache miss, we should ensure that the cache
       # contains all downloads.
       - name: Prefetch Cargo downloads
         if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main' 
-        run: nix develop --command find . -iname Cargo.lock -execdir cargo fetch \;
+        run: find . -iname Cargo.lock -execdir cargo fetch \;
 
       - name: Build dependencies
-        run: nix develop --command make build-deps-slim
+        run: make build-deps-slim
 
       - name: Run 'make ${{ matrix.make-target }}'
-        run: nix develop --command make ${{ matrix.make-target }}
+        run: make ${{ matrix.make-target }}
 
       - name: Save Rustup and Cargo cache
         if: github.ref_name == 'main'
