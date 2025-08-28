@@ -232,13 +232,8 @@ pub trait BlockCache<MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase> {
     where
         M: ManagerRead;
 
-    /// Insert a compressed instruction into the block cache at the given address.
-    fn push_instr_compressed(&mut self, addr: Address, instr: Instruction)
-    where
-        M: ManagerReadWrite;
-
-    /// Insert an uncompressed instruction into the block cache at the given  address.
-    fn push_instr_uncompressed(&mut self, addr: Address, instr: Instruction)
+    /// Insert an instruction into the block cache at the given address.
+    fn push_instruction(&mut self, addr: Address, instr: Instruction)
     where
         M: ManagerReadWrite;
 
