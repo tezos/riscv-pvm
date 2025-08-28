@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023-2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2023-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2024 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -40,6 +40,9 @@ pub enum Exception {
     StoreAMOPageFault,
     FenceI,
     /// Force the current instruction to be fetched from memory and executed.
+    ///
+    /// This exception *cannot* occur if executing an instruction fetched directly
+    /// from memory.
     ForceFetchRun,
 }
 

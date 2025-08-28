@@ -26,6 +26,7 @@ use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
+use crate::log;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
@@ -514,6 +515,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                 );
             }
 
+            Exception::ForceFetchRun => return self.handle_force_fetch_run(handle),
+
             Exception::IllegalInstruction => {
                 self.dispatch_signal_or_trap(Signal::Sigill);
             }
@@ -534,6 +537,47 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         }
 
         Ok(true)
+    }
+
+    /// Handle [`Exception::ForceFetchRun`] by fetching instruction data from memory directly,
+    /// then executing it.
+    ///
+    /// If this itself results in an exception, we handle this. *NB* this subsequent exception
+    /// cannot be a `ForceFetchRun`.
+    fn handle_force_fetch_run<E>(
+        &mut self,
+        handle: impl FnMut(&mut Self) -> Result<bool, E>,
+    ) -> Result<bool, E>
+    where
+        M: ManagerReadWrite,
+    {
+        let instr_pc = self.core.hart.pc.read();
+        let result = self
+            .core
+            .fetch_instr(instr_pc)
+            .and_then(|memory::InstructionData { data: instr, .. }| instr.run(&mut self.core));
+
+        let exception = match result {
+            Ok(update) => {
+                self.core.update_pc(instr_pc, update);
+                return Ok(true);
+            }
+            // this should never happen (as we do not parse instruction data into an instruction
+            // with OpCode::ForceFetchRun). If it does though, we shouldn't crash the PVM. Instead
+            // this indicates an illegal instruction has been executed.
+            Err(Exception::ForceFetchRun) => {
+                log::warning!(
+                    "handling ForceFetchRun exception resulted in another ForceFetchRun exception"
+                );
+
+                Exception::IllegalInstruction
+            }
+            Err(cause) => cause,
+        };
+
+        // SAFETY: this recursive call cannot overflow the stack as the exception has
+        // changed.
+        self.handle_exception(exception, handle)
     }
 
     /// Install a program and set the program counter to its start.
@@ -704,10 +748,12 @@ mod tests {
     use proptest::proptest;
 
     use super::MachineState;
+    use super::StepManyResult;
     use super::block_cache::block::Interpreted;
     use super::block_cache::block::InterpretedBlockBuilder;
     use super::instruction::Instruction;
     use super::instruction::OpCode;
+    use super::memory::Address;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
@@ -717,6 +763,7 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::M8K;
     use crate::machine_state::memory::M64M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
@@ -728,6 +775,8 @@ mod tests {
     use crate::machine_state::registers::t2;
     use crate::machine_state::test_helpers::ManagerTestInit;
     use crate::machine_state::test_helpers::TestMachineOf;
+    use crate::parser::instruction::InstrWidth;
+    use crate::parser::parse_uncompressed_instruction;
     use crate::program::Program;
     use crate::pvm::Pvm;
     use crate::pvm::PvmLayout;
@@ -1119,6 +1168,99 @@ mod tests {
             assert!(state.block_cache.get_block(0x100).is_some());
             assert_eq!(state.block_cache.get_block_instr(0x100), code2_instrs);
         }
+    });
+
+    // Ensure that the force-fetch-run mechanism correctly fetches instructions directly from
+    // memory, and executes them.
+    backend_test!(test_force_fetch_run, F, {
+        // li a1, 1
+        let li_bytes: u32 = 0x00100593;
+        const IMMEDIATE: i64 = 1;
+
+        let li_instr = Instruction::from(&parse_uncompressed_instruction(li_bytes));
+        assert_eq!(
+            li_instr,
+            Instruction::new_li(nz::a1, IMMEDIATE, InstrWidth::Uncompressed),
+            "Incorrect bytes {li_bytes:x} for instruction"
+        );
+
+        let li_lower = li_bytes as u16;
+        let li_upper = (li_bytes >> 16) as u16;
+
+        let run_test = |initial_pc: Address,
+                        write_lower: bool,
+                        write_upper: bool,
+                        expected_pc: Address,
+                        succeeds: bool| {
+            let mut state = MachineState::<M8K, TestCacheConfig, Interpreted<M8K, F>, F>::new(
+                InterpretedBlockBuilder,
+            );
+
+            state.core.hart.pc.write(initial_pc);
+
+            if write_lower {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc, li_lower)
+                    .unwrap();
+            }
+
+            if write_upper {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc + 2, li_upper)
+                    .unwrap();
+            }
+
+            state
+                .block_cache
+                .push_instruction(initial_pc, Instruction::DEFAULT);
+
+            let res: StepManyResult<()> =
+                state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
+
+            assert_eq!(state.core.hart.pc.read(), expected_pc);
+            assert_eq!(res.steps, 1);
+            assert_eq!(res.error, None);
+            let expected_a1 = if succeeds { IMMEDIATE as u64 } else { 0 };
+            assert_eq!(state.core.hart.xregisters.read_nz(nz::a1), expected_a1);
+        };
+
+        // TESTS
+        // we use as failure indication pc == 0 and a1 not updated
+        // -----
+
+        let pc_within_page = 100;
+        let pc_across_pages = memory::PAGE_SIZE.get().checked_sub(2).unwrap();
+
+        // force fetch run within an executable page succeeds
+        run_test(
+            pc_within_page,
+            true,
+            true,
+            pc_within_page + InstrWidth::Uncompressed as u64,
+            true,
+        );
+
+        // force fetch run within a non executable page fails
+        run_test(pc_within_page, false, false, 0, false);
+
+        // force fetch run across two executable pages succeeds
+        run_test(
+            pc_across_pages,
+            true,
+            true,
+            pc_across_pages + InstrWidth::Uncompressed as u64,
+            true,
+        );
+
+        // force fetch run across one executable page followed by a non executable page
+        run_test(pc_across_pages, true, false, 0, false);
+
+        // force fetch run across one non-executable page followed by an executable page
+        run_test(pc_across_pages, false, true, 0, false);
     });
 
     backend_test!(test_signal_context, F, {
