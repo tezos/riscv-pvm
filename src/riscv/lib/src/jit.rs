@@ -420,6 +420,16 @@ mod tests {
                 .insert_block(initial_pc, jitted_block);
             let jitted_res = jitted_state.step_max_inner(max_steps);
 
+            // Assert the JIT-compiled block was called once.
+            let jit_called_counter = jitted_state
+                .block_cache
+                .get_block_called_times(initial_pc)
+                .expect("Block at initial_pc should be valid");
+            assert_eq!(
+                jit_called_counter, 1,
+                "Expected JIT-compiled block to be called exactly once"
+            );
+
             // Assert state equality.
             assert_eq!(
                 jitted_res, interpreted_res,

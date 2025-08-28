@@ -111,6 +111,15 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
 
         block_result.steps
     }
+
+    /// Get the number of times this block has been called.
+    ///
+    /// For the case of Inline JIT, this is exactly equal to the number of times the JIT-compiled
+    /// function has been called (provided that compilation was successful).
+    #[cfg(test)]
+    pub(crate) fn called_count(&self) -> usize {
+        self.dispatch.called_times()
+    }
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> NewState<Owned> for Jitted<D, MC> {
@@ -180,6 +189,9 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Block<MC, Owned> for Jitted<D, M
         let mut result = ExceptionCode::NoException;
 
         let fun = self.dispatch.get();
+
+        #[cfg(test)]
+        self.dispatch.record_called();
 
         // SAFETY: The block builder is always the same instance, guaranteeing that any JIT-compiled
         // function is still alive.

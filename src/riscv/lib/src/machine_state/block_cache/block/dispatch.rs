@@ -52,6 +52,14 @@ pub struct DispatchTarget<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// considerations taken whilst converting pointer <--> usize.
     fun: Arc<AtomicUsize>,
     remaining_calls: usize,
+    /// A test only counter for the number of times this block has been called.
+    ///
+    /// This is used in the `jit.rs` tests to ensure that when running a scenario over InlineJit,
+    /// we *do* actually run the block. Previously this check did not exist, and a change resulted
+    /// in the tests using the partial block mechanism instead for certain classes of test, rather
+    /// than actually running the JIT-compiled function as intended.
+    #[cfg(test)]
+    call_counter: usize,
     _pd: PhantomData<(D, MC)>,
 }
 
@@ -68,6 +76,10 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
         ));
 
         self.remaining_calls = 1000;
+        #[cfg(test)]
+        {
+            self.call_counter = 0;
+        }
     }
 
     /// Set the dispatch target to use the given `block_run` function.
@@ -91,6 +103,18 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
         // Safety: the pointer is indeed a function pointer with an ABI matching `DispatchFn`.
         unsafe { std::mem::transmute::<*const (), DispatchFn<D, MC>>(fun) }
     }
+
+    /// Increase the call counter to keep track of how often it was dispatched for verification in tests.
+    #[cfg(test)]
+    pub(crate) fn record_called(&mut self) {
+        self.call_counter += 1;
+    }
+
+    /// Get the number of times this dispatch target has been called for verification in tests.
+    #[cfg(test)]
+    pub(crate) fn called_times(&self) -> usize {
+        self.call_counter
+    }
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
@@ -100,6 +124,8 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC
                 Jitted::<D, MC>::run_block_interpreted as usize,
             )),
             remaining_calls: 1000,
+            #[cfg(test)]
+            call_counter: 0,
             _pd: PhantomData,
         }
     }

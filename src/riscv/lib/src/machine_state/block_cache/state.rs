@@ -314,6 +314,26 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
         &mut entries[BlockCacheConfig::<SIZE>::cache_index(addr)]
     }
 
+    #[inline]
+    fn get_block_inner(&mut self, addr: Address) -> Option<BlockCall<'_, B, MC, M>>
+    where
+        M: ManagerRead,
+    {
+        let entry = Self::entry_mut(&mut self.entries, addr);
+
+        if entry.address.read() == addr
+            && self.fence_counter.read() == entry.fence_counter.read()
+            && entry.block.num_instr() > 0
+        {
+            Some(BlockCall {
+                entry,
+                partial: &mut self.partial_block,
+            })
+        } else {
+            None
+        }
+    }
+
     fn reset_to(&mut self, addr: Address)
     where
         M: ManagerWrite,
@@ -386,6 +406,19 @@ impl<const SIZE: usize, B: Block<MC, M>, MC: MemoryConfig, M: ManagerBase>
     }
 }
 
+#[cfg(test)]
+impl<const SIZE: usize, D: super::block::dispatch::DispatchCompiler<MC>, MC: MemoryConfig>
+    BlockCache<SIZE, super::block::Jitted<D, MC>, MC, crate::state_backend::owned_backend::Owned>
+{
+    /// Get the number of times a block was called.
+    ///
+    /// Returns `None` if the block does not correspond to a valid block.
+    pub(crate) fn get_block_called_times(&mut self, addr: Address) -> Option<usize> {
+        self.get_block_inner(addr)
+            .map(|block| block.entry.block.called_count())
+    }
+}
+
 impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
     super::BlockCache<MC, B, M> for BlockCache<SIZE, B, MC, M>
 {
@@ -453,19 +486,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             "Get block was called with a partial block in progress"
         );
 
-        let entry = Self::entry_mut(&mut self.entries, addr);
-
-        if entry.address.read() == addr
-            && self.fence_counter.read() == entry.fence_counter.read()
-            && entry.block.num_instr() > 0
-        {
-            Some(BlockCall {
-                entry,
-                partial: &mut self.partial_block,
-            })
-        } else {
-            None
-        }
+        self.get_block_inner(addr)
     }
 
     fn push_instruction(&mut self, addr: Address, instr: Instruction)
