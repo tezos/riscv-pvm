@@ -1992,7 +1992,7 @@ mod tests {
             .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
             .unwrap();
         let step_result = machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| ControlFlow::Continue(()));
         assert_eq!(step_result.error, None);
 
         // Check that the program counter is now at the handler.

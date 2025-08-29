@@ -262,13 +262,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
         let steps = self
             .machine_state
-            .step_max_handle(step_bounds, |machine_state| {
+            .step_max_handle(step_bounds, |machine_state, step_bounds| {
                 handle_system_call(
                     machine_state,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
+                    step_bounds,
                 )
             })
             .steps;
@@ -451,6 +452,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
+    step_bounds: Bound<usize>,
 ) -> ControlFlow<()>
 where
     MC: MemoryConfig,
@@ -459,7 +461,7 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request);
+        tezos::handle_tezos(core, status, reveal_request, step_bounds);
 
         if status.read() == PvmStatus::Evaluating {
             ControlFlow::Continue(())
@@ -516,6 +518,7 @@ mod tests {
                 &mut self.status,
                 &mut self.reveal_request,
                 hooks,
+                Bound::Included(1), // a single step to handle the exception
             )
             .is_continue()
         }

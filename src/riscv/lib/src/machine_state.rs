@@ -456,7 +456,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     pub fn step_max_handle<E>(
         &mut self,
         mut step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
+        mut handle: impl FnMut(&mut Self, Bound<usize>) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
@@ -477,7 +477,9 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     steps = steps.saturating_add(1);
                     step_bounds = bound_saturating_sub(step_bounds, 1);
 
-                    match self.handle_exception(cause, &mut handle) {
+                    // embed the step_bounds into the handler, as there is no other step_bounds
+                    // dependent logic in the call to `handle_exception`
+                    match self.handle_exception(cause, |machine| handle(machine, step_bounds)) {
                         ControlFlow::Continue(()) => {}
                         ControlFlow::Break(error) => break Some(error),
                     }
@@ -896,9 +898,9 @@ mod tests {
 
             state.setup_linux_process(&program).unwrap();
 
-            let res = state
-                .machine_state
-                .step_max_handle::<()>(Bound::Unbounded, |machine| {
+            let res = state.machine_state.step_max_handle::<()>(
+                Bound::Unbounded,
+                |machine, step_bounds| {
                     let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
 
                     // The `block-cache-tester` kernel will issue a system call with number -1
@@ -914,8 +916,10 @@ mod tests {
                         &mut state.status,
                         &mut state.reveal_request,
                         StdoutDebugHooks,
+                        step_bounds,
                     )
-                });
+                },
+            );
 
             assert_eq!(
                 res.error,
@@ -1219,7 +1223,7 @@ mod tests {
                 .push_instruction(initial_pc, Instruction::DEFAULT);
 
             let res: StepManyResult<()> =
-                state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
+                state.step_max_handle(Bound::Included(1), |_, _| panic!("unexpected ECall"));
 
             assert_eq!(state.core.hart.pc.read(), expected_pc);
             assert_eq!(res.steps, 1);
