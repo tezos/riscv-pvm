@@ -34,7 +34,7 @@ pub const DIGEST_SIZE: usize = 32;
 /// produced by a preset hash function, currently BLAKE2b. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord, derive_more::From)]
 pub struct Hash {
     digest: [u8; DIGEST_SIZE],
 }
@@ -71,6 +71,21 @@ impl Hash {
         let digest = hasher.finalize().into();
         Hash { digest }
     }
+
+    /// Like [`Self::combine`], but the iterator can yield errors.
+    pub fn try_combine<H: Borrow<Hash>, E, HS: IntoIterator<Item = Result<H, E>>>(
+        hashes: HS,
+    ) -> Result<Hash, E> {
+        let mut hasher = blake3::Hasher::new();
+
+        for hash in hashes {
+            let hash = hash?;
+            hasher.update(hash.borrow().as_ref());
+        }
+
+        let digest = hasher.finalize().into();
+        Ok(Hash { digest })
+    }
 }
 
 impl std::fmt::Display for Hash {
@@ -88,12 +103,6 @@ impl std::fmt::Debug for Hash {
 impl From<Hash> for [u8; DIGEST_SIZE] {
     fn from(value: Hash) -> Self {
         value.digest
-    }
-}
-
-impl From<[u8; DIGEST_SIZE]> for Hash {
-    fn from(digest: [u8; DIGEST_SIZE]) -> Self {
-        Hash { digest }
     }
 }
 
