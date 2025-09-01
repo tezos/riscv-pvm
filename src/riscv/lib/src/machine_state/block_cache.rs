@@ -77,7 +77,6 @@
 
 pub mod block;
 mod config;
-pub mod metrics;
 mod state;
 
 use std::marker::PhantomData;
