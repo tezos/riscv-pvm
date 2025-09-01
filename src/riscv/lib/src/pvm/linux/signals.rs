@@ -16,6 +16,7 @@ use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::nz;
 use crate::machine_state::registers::sp;
 use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
@@ -69,6 +70,9 @@ impl LinuxSigAction {
         }
     }
 }
+
+/// The default signal handler - NULL
+pub const NO_HANDLER: VirtAddr = VirtAddr::new(0u64);
 
 /// `size_of(struct sigaction)` on the Kernel side
 const SIZE_SIGACTION: usize = 32;
@@ -162,54 +166,64 @@ pub struct SignalActions<M: ManagerBase> {
 }
 
 impl<M: ManagerRead> SignalActions<M> {
-    fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the handler for a given signal
+    pub(crate) fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.handlers[signal_index as usize].read()
     }
 
-    fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the action for a given signal
+    pub(crate) fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].read()
     }
 
-    fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+    /// Read the mask for a given signal
+    pub(crate) fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
         let signal_index: SignalIndex = signal.into();
         self.masks[signal_index as usize].read()
     }
 
-    fn read_flags<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
+    /// Read the flags for a given signal
+    pub(crate) fn read_flags<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
         let signal_index: SignalIndex = signal.into();
         self.flags[signal_index as usize].read()
     }
 
-    fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the restorer for a given signal
+    pub(crate) fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.restorers[signal_index as usize].read()
     }
 }
 
 impl<M: ManagerWrite> SignalActions<M> {
-    fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
+    /// Write the handler for a given signal
+    pub(crate) fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.handlers[signal_index as usize].write(handler);
     }
 
-    fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
+    /// Write the action for a given signal
+    pub(crate) fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].write(action);
     }
 
-    fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
+    /// Write the mask for a given signal
+    pub(crate) fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
         let signal_index: SignalIndex = signal.into();
         self.masks[signal_index as usize].write(mask);
     }
 
-    fn write_flags<T: Into<SignalIndex>>(&mut self, signal: T, flags: u32) {
+    /// Write the flags for a given signal
+    pub(crate) fn write_flags<T: Into<SignalIndex>>(&mut self, signal: T, flags: u32) {
         let signal_index: SignalIndex = signal.into();
         self.flags[signal_index as usize].write(flags);
     }
 
-    fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
+    /// Write the restorer for a given signal
+    pub(crate) fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.restorers[signal_index as usize].write(restorer);
     }
@@ -228,12 +242,61 @@ struct_layout! {
 }
 
 impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
+    /// Set the hart state to a signal handler
+    pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
+        let handler = self.signal_actions.read_action(signal);
+
+        // Having no handler configured isn't an error, it just means we don't do anything else
+        // before continuing the consequences of the signal.
+        if handler == NO_HANDLER {
+            return Ok(());
+        }
+
+        let restorer = self.push_signal_context(signal)?;
+
+        self.hart
+            .xregisters
+            .write_nz(nz::ra, restorer.to_machine_address());
+
+        // Write handler arguments
+        // Signal number
+        self.hart.xregisters.write_nz(nz::a0, signal as u64);
+
+        // TODO RV-754: Implement storing signal information as `siginfo_t`
+        // Pointer to siginfo_t
+        self.hart.xregisters.write_nz(nz::a1, 0u64);
+
+        // TODO RV-754: Implement storing signal execution context as `ucontext_t`
+        // Pointer to ucontext_t
+        self.hart.xregisters.write_nz(nz::a2, 0u64);
+
+        // Update the program counter to the handler
+        self.hart.pc.write(handler.to_machine_address());
+        Ok(())
+    }
+
     /// Pushes the context needed to resume after handling a signal
-    pub fn push_signal_context(&mut self, signal: Signal) -> Result<(), SignalError> {
+    pub fn push_signal_context(&mut self, signal: Signal) -> Result<VirtAddr, SignalError> {
         let signal_index: SignalIndex = signal.into();
-        let signal_index: u64 = signal_index as u64;
-        let mask = self.signal_actions.read_mask(signal);
-        let pc = self.hart.pc.read();
+        let mask = self.signal_actions.read_mask(signal_index);
+
+        // TODO RV-756 Add support for changing signal disposition.
+        //
+        // For signals with a TERM or CORE disposition, we still want to change the program counter
+        // to 0 after the handler.
+        let pc = match signal {
+            Signal::Sigill
+            | Signal::Sigabrt
+            | Signal::Sigiot
+            | Signal::Sigbus
+            | Signal::Sigsegv
+            | Signal::Sigpipe
+            | Signal::Sigterm
+            | Signal::Sigsys => 0,
+            _ => self.hart.pc.read(),
+        };
+
+        let restorer = self.signal_actions.read_restorer(signal_index);
 
         let prev_stack_pointer = self.hart.xregisters.read(sp);
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
@@ -245,7 +308,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             .write(sp, stack_pointer.to_machine_address());
 
         self.main_memory
-            .write(stack_pointer.to_machine_address(), signal_index)?;
+            .write(stack_pointer.to_machine_address(), signal_index as u64)?;
         self.main_memory
             .write(stack_pointer.add(8).to_machine_address(), mask)?;
         self.main_memory
@@ -255,7 +318,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             prev_stack_pointer,
         )?;
 
-        Ok(())
+        Ok(restorer)
     }
 
     /// Pops the context needed to resume after handling a signal
@@ -277,6 +340,8 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         let signal_index =
             SignalIndex::from_repr(signal_index as usize).ok_or(SignalError::BadContext)?;
         self.signal_actions.write_mask(signal_index, mask);
+        // TODO RV-734 Restore the alternative stack
+        // TODO RV-755 Store and restore registers in push/pop_signal_context
 
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
             .add(32)
@@ -647,6 +712,24 @@ impl<M: ManagerBase> SupervisorState<M> {
             core.signal_actions.thread_mask.write(mask);
         }
 
+        // Return 0 as an indicator of success
+        Ok(0)
+    }
+
+    /// Handle `rt_sigreturn` system call.
+    /// While `rt_sigreturn` is needed for implementing signal handlers, it should never be called
+    /// directly by userspace code. The libc wrapper simply returns an error.
+    ///
+    /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigreturn.2.html>
+    pub(super) fn handle_rt_sigreturn(
+        &self,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+    ) -> Result<u64, Error>
+    where
+        M: ManagerReadWrite,
+    {
+        let pc = core.pop_signal_context().map_err(|_| Error::Fault)?;
+        core.hart.pc.write(pc);
         // Return 0 as an indicator of success
         Ok(0)
     }
