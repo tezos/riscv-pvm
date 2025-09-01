@@ -28,25 +28,16 @@ use crate::memory_config::MemoryConfigValue;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
-        /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Interpreted<MC, Owned>;
+        /// Execution strategy for blocks.
+        pub type BlockImpl<MC> = block::Interpreted<MC, Owned>;
     } else if #[cfg(feature = "inline-jit")] {
-        /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
+        /// Execution strategy for blocks.
+        pub type BlockImpl<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
     } else {
-        /// Inner execution strategy for blocks.
-        type BlockImplInner<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
+        /// Execution strategy for blocks.
+        pub type BlockImpl<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
     }
 }
-
-/// Executor of blocks
-#[cfg(not(feature = "metrics"))]
-pub type BlockImpl<MC> = BlockImplInner<MC>;
-
-/// Executor of blocks
-#[cfg(feature = "metrics")]
-pub type BlockImpl<MC> =
-    octez_riscv::machine_state::block_cache::metrics::BlockMetrics<BlockImplInner<MC>>;
 
 pub fn run_with_memory_config<MC: memory::MemoryConfig>(
     opts: RunOptions,
@@ -64,12 +55,6 @@ pub fn run_with_memory_config<MC: memory::MemoryConfig>(
     if opts.print_steps {
         println!("Run consumed {steps} steps.");
     }
-
-    #[cfg(feature = "metrics")]
-    octez_riscv::dump_block_metrics!(
-        file = &opts.metrics.block_metrics_file,
-        exclude_supported_instructions = opts.metrics.exclude_supported_instructions
-    )?;
 
     Ok(())
 }

@@ -20,8 +20,7 @@ USAGE="Usage:
        Run additional transactions before the benchmarking scenario.
        This allows performance to be measured excluding warmup-time for
        various caches to be populated or JIT compilation to take place.
-    -j <disable|inline>: disable jit / use inline jit
-    -m <all | jit-unsupported>: enable metrics"
+    -j <disable|inline>: disable jit / use inline jit"
 
 DEFAULT_ROLLUP_ADDRESS="sr163Lv22CdE8QagCwf48PWDTquk6isQwv57"
 
@@ -32,8 +31,6 @@ SANDBOX_BIN="riscv-sandbox"
 SANDBOX_ENABLE_FEATURES=()
 PROFILING_WRAPPER=""
 SAMPLY_OUT="riscv-sandbox-profile.json"
-METRICS=""
-METRICS_ARGS=()
 NATIVE=""
 JSTZ_SANDBOX_PARAMS=("--input" "kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz")
 WARMUP_TX="0"
@@ -77,21 +74,6 @@ while getopts "i:t:m:w:spnj:" OPTION; do
   w)
     WARMUP_TX="$OPTARG"
     ;;
-  m)
-    SANDBOX_ENABLE_FEATURES+=("metrics")
-    METRICS="y"
-
-    case "$OPTARG" in
-    all) ;;
-    jit-unsupported)
-      METRICS_ARGS+=("--exclude-supported-instructions")
-      ;;
-    *)
-      echo "$USAGE"
-      exit 1
-      ;;
-    esac
-    ;;
   *)
     echo "$USAGE"
     exit 1
@@ -126,11 +108,6 @@ kernels/jstz/inbox-bench generate --inbox-file "$INBOX_FILE" --transfers "$TOTAL
 
 log_file_args=()
 
-BLOCK_METRICS_FILE="${DATA_DIR}/block-metrics.out"
-if [ -n "$METRICS" ]; then
-  METRICS_ARGS+=("--block-metrics-file" "${BLOCK_METRICS_FILE}")
-fi
-
 ##########
 # RISC-V #
 ##########
@@ -150,7 +127,6 @@ run_jstz_riscv() {
     "${JSTZ_SANDBOX_PARAMS[@]}" \
     --inbox-file "$RUN_INBOX" \
     --address "$DEFAULT_ROLLUP_ADDRESS" \
-    "${METRICS_ARGS[@]}" \
     --timings > "$LOG"
   log_file_args+=("--log-file=$LOG")
 }
@@ -214,10 +190,6 @@ collect
 if [ -n "$PROFILING_WRAPPER" ]; then
   echo "[INFO]: collecting results"
   samply load $SAMPLY_OUT
-fi
-
-if [ -n "${METRICS}" ]; then
-  echo "Block metrics at ${BLOCK_METRICS_FILE}"
 fi
 
 cd "$CURR"

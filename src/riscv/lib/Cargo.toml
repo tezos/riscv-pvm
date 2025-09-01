@@ -54,5 +54,4 @@ goldenfile.workspace = true
 
 [features]
 default = []
-metrics = []
 log = ["dep:__tracing_do_not_use_directly"]

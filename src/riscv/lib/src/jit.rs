@@ -25,7 +25,6 @@ use crate::jit::builder::sequence::SequenceBuilder;
 use crate::jit::state_access::ExceptionCode;
 use crate::log;
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::block_cache::metrics::block_metrics;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -202,7 +201,6 @@ impl<MC: MemoryConfig> JIT<MC> {
         let fun = self.finalise(&name)?;
 
         self.cache.insert(*hash, Some(fun));
-        block_metrics!(hash = hash, record_jitted);
 
         Ok(fun)
     }
