@@ -19,7 +19,8 @@
 
 // TODO: RV-767 - replace block cache with page cache
 #![cfg(test)]
-#![expect(unused, reason = "Page Cache not implemented/used")]
+
+pub(crate) mod state;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
