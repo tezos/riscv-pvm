@@ -49,6 +49,9 @@ pub const PAGE_SIZE: NonZeroU64 = {
     }
 };
 
+/// Mask for obtaining a page-aligned-down address.
+pub const PAGE_MASK: u64 = !0 << OFFSET_BITS.get();
+
 /// Memory address
 pub type Address = XValue;
 

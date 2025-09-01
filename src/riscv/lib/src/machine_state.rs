@@ -8,6 +8,7 @@ pub(crate) mod csregisters;
 pub(crate) mod hart_state;
 pub mod instruction;
 pub mod memory;
+pub(crate) mod page_cache;
 pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
@@ -131,10 +132,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     /// The spec stipulates translation is performed for each byte respectively.
     /// However, we assume the `raw_pc` is 2-byte aligned.
     #[inline]
-    fn fetch_instr(
-        &mut self,
-        addr: Address,
-    ) -> Result<memory::InstructionData<Instruction>, Exception>
+    fn fetch_instr(&self, addr: Address) -> Result<memory::InstructionData<Instruction>, Exception>
     where
         M: backend::ManagerReadWrite,
     {
