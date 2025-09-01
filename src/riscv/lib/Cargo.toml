@@ -54,4 +54,5 @@ goldenfile.workspace = true
 
 [features]
 default = []
+page_cache = []
 log = ["dep:__tracing_do_not_use_directly"]
