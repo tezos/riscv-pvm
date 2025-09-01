@@ -49,6 +49,9 @@ pub const PAGE_SIZE: NonZeroU64 = {
     }
 };
 
+/// Mask for indexing into a page's memory.
+pub const PAGE_OFFSET_MASK: u64 = (1 << OFFSET_BITS.get()) - 1;
+
 /// Mask for obtaining a page-aligned-down address.
 pub const PAGE_MASK: u64 = !0 << OFFSET_BITS.get();
 
