@@ -1140,137 +1140,226 @@ mod tests {
     }
 
     #[test]
-    fn test_jump_instructions() {
+    fn test_jr() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let test_jr = |base_reg: NonZeroXRegister,
-                       base_val: i64,
-                       expected_pc: u64,
-                       instruction_width: InstrWidth|
-         -> Scenario {
+        let scenarios: &[Scenario] = &[
+            // JR not to start of block should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
-                    I::new_li(base_reg, base_val, instruction_width),
-                    I::new_jr(base_reg, instruction_width),
-                    I::new_nop(instruction_width),
+                    I::new_li(x2, 10, Compressed),
+                    I::new_jr(x2, Compressed),
+                    I::new_nop(Compressed),
+                ])
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 10) }))
+                .set_expected_steps(2)
+                .set_expected_exception(Exception::InstructionAccessFault)
+                .build(),
+            // JR to start of block should continue with evaluating the same block
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(x6, 0, Uncompressed),
+                    I::new_jr(x6, Compressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 3 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 4) }))
+                .build(),
+        ];
+
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_jr_imm() {
+        use crate::machine_state::registers::NonZeroXRegister::*;
+
+        let scenarios: &[Scenario] = &[
+            // JR_IMM not to start of block should exit
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(x2, 10, Compressed),
+                    I::new_jr_imm(x2, 10, Compressed),
+                    I::new_nop(Compressed),
+                ])
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 20) }))
+                .set_expected_steps(2)
+                .set_expected_exception(Exception::InstructionAccessFault)
+                .build(),
+            // JR_IMM to start of block should continue with evaluating the same block
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(x6, 10, Uncompressed),
+                    I::new_jr_imm(x6, -10, Uncompressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 3 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 4) }))
+                .build(),
+        ];
+
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_jalr() {
+        use crate::machine_state::registers::NonZeroXRegister::*;
+
+        let scenarios: &[Scenario] = &[
+            // JALR not to start of block should exit
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(x2, 100_000, Compressed),
+                    I::new_jalr(x1, x2, Compressed),
+                    I::new_nop(Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), expected_pc);
+                    assert_eq!(core.hart.pc.read(), 100_000);
+                    assert_eq!(core.hart.xregisters.read_nz(x1), 4);
                 }))
                 .set_expected_steps(2)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
                 .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
-
-        let test_jr_imm = |base_reg: NonZeroXRegister,
-                           base_val: i64,
-                           offset: i64,
-                           expected_pc: u64,
-                           instruction_width: InstrWidth|
-         -> Scenario {
+                .build(),
+            // JALR to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
                 .set_instructions(&[
-                    I::new_li(base_reg, base_val, instruction_width),
-                    I::new_jr_imm(base_reg, offset, instruction_width),
-                    I::new_nop(instruction_width),
+                    I::new_li(x6, 0, Uncompressed),
+                    I::new_jalr(x3, x6, Uncompressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 3 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| {
+                    assert_eq!(core.hart.pc.read(), 4);
+                    assert_eq!(core.hart.xregisters.read_nz(x3), 8);
+                }))
+                .build(),
+        ];
+
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_jalr_imm() {
+        use crate::machine_state::registers::NonZeroXRegister::*;
+
+        let scenarios: &[Scenario] = &[
+            // JALR_IMM not to start of block should exit
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(x2, 10, Compressed),
+                    I::new_jalr_imm(x1, x2, 10, Compressed),
+                    I::new_nop(Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), expected_pc);
+                    assert_eq!(core.hart.pc.read(), 20);
+                    assert_eq!(core.hart.xregisters.read_nz(x1), 4);
                 }))
                 .set_expected_steps(2)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
                 .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
-
-        let test_jalr = |base_reg: NonZeroXRegister,
-                         base_val: i64,
-                         rd: NonZeroXRegister,
-                         expected_pc: u64,
-                         expected_rd: u64,
-                         instruction_width: InstrWidth|
-         -> Scenario {
+                .build(),
+            // JALR_IMM to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
                 .set_instructions(&[
-                    I::new_li(base_reg, base_val, instruction_width),
-                    I::new_jalr(rd, base_reg, instruction_width),
-                    I::new_nop(instruction_width),
+                    I::new_li(x1, 1000, Uncompressed),
+                    I::new_jalr_imm(x6, x1, -1000, Uncompressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 3 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| {
+                    assert_eq!(core.hart.pc.read(), 4);
+                    assert_eq!(core.hart.xregisters.read_nz(x6), 8);
+                }))
+                .build(),
+        ];
+
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_jalr_absolute() {
+        use crate::machine_state::registers::NonZeroXRegister::*;
+
+        let scenarios: &[Scenario] = &[
+            // JALR_ABSOLUTE not to start of block should exit
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_nop(Uncompressed),
+                    I::new_jalr_absolute(x1, 10, Compressed),
+                    I::new_nop(Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), expected_pc);
-                    assert_eq!(core.hart.xregisters.read_nz(rd), expected_rd);
+                    assert_eq!(core.hart.pc.read(), 10);
+                    assert_eq!(core.hart.xregisters.read_nz(x1), 6);
                 }))
                 .set_expected_steps(2)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
                 .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
-
-        let test_jalr_imm = |base_reg: NonZeroXRegister,
-                             base_val: i64,
-                             offset: i64,
-                             rd: NonZeroXRegister,
-                             expected_pc: u64,
-                             expected_rd: u64,
-                             instruction_width: InstrWidth|
-         -> Scenario {
+                .build(),
+            // JALR_ABSOLUTE to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
                 .set_instructions(&[
-                    I::new_li(base_reg, base_val, instruction_width),
-                    I::new_jalr_imm(rd, base_reg, offset, instruction_width),
-                    I::new_nop(instruction_width),
+                    I::new_nop(Compressed),
+                    I::new_jalr_absolute(x3, 0, Uncompressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 3 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| {
+                    assert_eq!(core.hart.pc.read(), 2);
+                    assert_eq!(core.hart.xregisters.read_nz(x3), 6);
+                }))
+                .build(),
+        ];
+
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_j_absolute() {
+        let scenarios: &[Scenario] = &[
+            // J_ABSOLUTE not to start of block should exit
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_nop(Uncompressed),
+                    I::new_j_absolute(10, Compressed),
+                    I::new_nop(Compressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), expected_pc);
-                    assert_eq!(core.hart.xregisters.read_nz(rd), expected_rd);
+                    assert_eq!(core.hart.pc.read(), 10);
                 }))
                 .set_expected_steps(2)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
                 .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
-
-        let test_jalr_absolute = |target: i64,
-                                  rd: NonZeroXRegister,
-                                  instruction_width: InstrWidth,
-                                  expected_rd: u64|
-         -> Scenario {
+                .build(),
+            // J_ABSOLUTE to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
                 .set_instructions(&[
-                    I::new_jalr_absolute(rd, target, instruction_width),
-                    I::new_nop(instruction_width),
+                    I::new_nop(Compressed),
+                    I::new_j_absolute(0, Uncompressed),
+                    I::new_nop(Compressed),
                 ])
+                // after 3 steps we will be evaluating the jump for the second time
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), target as u64);
-                    assert_eq!(core.hart.xregisters.read_nz(rd), expected_rd);
+                    assert_eq!(core.hart.pc.read(), 2);
                 }))
-                .set_expected_steps(1)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
-                .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
+                .build(),
+        ];
 
-        let test_j_absolute = |target: i64, instruction_width: InstrWidth| -> Scenario {
-            ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_j_absolute(target, instruction_width),
-                    I::new_nop(instruction_width),
-                ])
-                .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), target as u64);
-                }))
-                .set_expected_steps(1)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
-                .set_expected_exception(Exception::InstructionAccessFault)
-                .build()
-        };
+        for scenario in scenarios {
+            scenario.run()
+        }
+    }
+
+    #[test]
+    fn test_jump_and_link_pc() {
+        use crate::machine_state::registers::NonZeroXRegister::*;
 
         let test_jump_and_link_pc = |offset: i64,
                                      initial_pc: u64,
@@ -1288,27 +1377,7 @@ mod tests {
                 .build()
         };
 
-        // FIXME: re-enable disable Jump scenarios
         let scenarios: &[Scenario] = &[
-            // Test jr
-            test_jr(x2, 10, 10, Compressed),
-            //test_jr(x6, 0, 0, Uncompressed),
-            // Test jr_imm
-            test_jr_imm(x2, 10, 10, 20, Compressed),
-            //test_jr_imm(x6, 10, -10, 0, Uncompressed),
-            // Test jalr
-            test_jalr(x2, 100_000, x1, 100_000, 8, Uncompressed),
-            //test_jalr(x6, 0, x3, 0, 4, Compressed),
-            // Test jalr_imm
-            test_jalr_imm(x1, 10, 10, x2, 20, 4, Compressed),
-            test_jalr_imm(x1, 1000, -10, x2, 990, 8, Uncompressed),
-            // Test jalr_absolute
-            test_jalr_absolute(10, x1, Compressed, 2),
-            //test_jalr_absolute(0, x3, Uncompressed, 4),
-            // Test j_absolute
-            test_j_absolute(10, Compressed),
-            //test_j_absolute(0, Uncompressed),
-            // Test jump_and_link_pc
             test_jump_and_link_pc(10, 0, 10, 2, Compressed),
             test_jump_and_link_pc(-10, 10, 0, 12, Compressed),
             test_jump_and_link_pc(1000, 1000, 2000, 1004, Uncompressed),
