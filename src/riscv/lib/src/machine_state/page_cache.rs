@@ -17,6 +17,8 @@
 //! therefore execution using the page cache is semantically identical to the fetch/parse/run
 //! cycle.
 
+pub(crate) mod state;
+
 use std::marker::PhantomData;
 
 use super::MachineCoreState;
@@ -62,7 +64,7 @@ pub trait PageCache<MC: MemoryConfig, M: ManagerBase> {
         M: ManagerRead;
 
     /// Populate a page with instruction and dispatch information, if the page has R+X permissions.
-    fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
+    fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>) -> Result<(), Exception>
     where
         M: ManagerReadWrite;
 

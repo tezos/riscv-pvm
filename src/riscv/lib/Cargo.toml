@@ -53,6 +53,6 @@ tempfile.workspace = true
 goldenfile.workspace = true
 
 [features]
-default = []
+default = ["page_cache"]
 page_cache = []
 log = ["dep:__tracing_do_not_use_directly"]
