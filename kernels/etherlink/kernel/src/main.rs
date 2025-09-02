@@ -48,6 +48,16 @@ pub fn entry(host: &mut impl Runtime) {
             host.store_write_all(&RefPath::assert_from(path.as_bytes()), &data)
                 .unwrap();
         }
+
+        #[cfg(feature = "tracing")]
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stdout)
+            .without_time()
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ACTIVE)
+            .with_target(false)
+            .with_ansi(false)
+            .json()
+            .init();
     });
 
     evm_kernel::kernel_loop(host);
