@@ -1,0 +1,16 @@
+name: Conventional Commits
+
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    name: Conventional Commits
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: wagoid/commitlint-github-action@v6.2.1
