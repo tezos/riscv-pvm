@@ -27,9 +27,10 @@ build-kernel-native: cargo-build-kernel-native
 
 build-kernel-tracing: cargo-build-kernel-tracing
 
-test: build-kernel build-kernel-native
+test: build-kernel build-kernel-native build-kernel-tracing
 	@../../scripts/etherlink-bench.sh
 	@../../scripts/etherlink-bench.sh -sn
+	@../../scripts/etherlink-bench.sh -t
 
 check: cargo-format cargo-check cargo-clippy cargo-check-docs
 
