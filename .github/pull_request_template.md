@@ -43,6 +43,6 @@ make all
 - [ ] Make sure the documentation for updated functions, methods, and types is correct.
 - [ ] Add tests for bugs that have been fixed.
 - [ ] [Explain changes](#regressions) to regression test captures when applicable.
-- [ ] Write commit messages to reflect the changes they're about.
+- [ ] Write commit messages in agreement with our guidelines.
 - [ ] Self-review your changes to ensure they are high-quality.
 - [ ] Complete all of the above before assigning this MR to reviewers.
