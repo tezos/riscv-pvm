@@ -8,8 +8,6 @@ mod reveals;
 use std::ops::Bound;
 use std::path::Path;
 
-use bincode::Decode;
-use bincode::Encode;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -53,7 +51,6 @@ use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::state_backend::verify_backend::Verifier;
 use crate::state_backend::verify_backend::handle_stepper_panics;
-use crate::storage::binary;
 
 /// Error during PVM stepping
 #[derive(Debug, derive_more::From, thiserror::Error, derive_more::Display)]
@@ -118,7 +115,7 @@ impl<H, MC: MemoryConfig, B: Block<MC, Owned>, BCC: BlockCacheConfig>
 
     /// Obtain the root hash for the PVM state.
     pub fn hash(&self) -> Hash {
-        self.pvm.hash().unwrap()
+        self.pvm.hash().expect("PVM state hash computation failed")
     }
 }
 
@@ -229,27 +226,6 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: M
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC, BCC>, Ref<'_, M>> {
         self.pvm.struct_ref::<FnManagerIdent>()
-    }
-
-    /// Re-bind the PVM type by serialising and deserialising its state in order to eliminate
-    /// ephemeral state that doesn't make it into the serialised output.
-    ///
-    /// We additionally pass a new instance of the [`BlockBuilder`], to be used in the deserialised
-    /// pvm.
-    ///
-    /// [`BlockBuilder`]: Block::BlockBuilder
-    pub fn rebind_via_bincode(&mut self, block_builder: B::BlockBuilder)
-    where
-        for<'a> AllocatedOf<PvmLayout<MC, BCC>, Ref<'a, M>>: Encode,
-        AllocatedOf<PvmLayout<MC, BCC>, M>: Decode<()>,
-    {
-        let space = {
-            let refs = self.pvm.struct_ref::<FnManagerIdent>();
-            let data = binary::serialise(&refs).unwrap();
-            binary::deserialise(&data).unwrap()
-        };
-
-        self.pvm = Pvm::bind(space, block_builder);
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.
@@ -386,14 +362,15 @@ impl<H: PvmHooks, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier
         let mutex = std::sync::Mutex::new(self);
         handle_stepper_panics(move || {
             {
-                let mut stepper = mutex.lock().unwrap();
+                let mut stepper = mutex.lock().expect("Mutex was poisoned on initialisation");
                 if !stepper.try_step() {
                     return Err(ProofVerificationFailure::StepperError);
                 };
             }
+
             // Since all panics were handled and returned as errors, at this point
             // the mutex cannot be poisoned.
-            Ok(mutex.into_inner().unwrap())
+            Ok(mutex.into_inner().expect("Unexpected poisoned mutex"))
         })?
     }
 

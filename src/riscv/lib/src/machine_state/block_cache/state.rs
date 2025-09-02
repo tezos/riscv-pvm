@@ -440,6 +440,10 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
         B: Clone,
         M: ManagerClone,
     {
+        let Ok(entries) = self.entries.to_vec().try_into() else {
+            unreachable!("mismatching vector lengths in block cache")
+        };
+
         Self {
             current_block_addr: self.current_block_addr.clone(),
             fence_counter: self.fence_counter.clone(),
@@ -448,12 +452,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
             // This may appear like a wild way to clone a boxed array. But! This way avoids that
             // the array gets temporarily allocated on the stack whhich causes a stack overflow on
             // most platforms.
-            entries: self
-                .entries
-                .to_vec()
-                .try_into()
-                .map_err(|_| "mismatching vector lengths in block cache")
-                .unwrap(),
+            entries,
         }
     }
 

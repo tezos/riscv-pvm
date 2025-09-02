@@ -6,6 +6,7 @@ exclude = ["jstz", "dummy_kernel", "etherlink"]
 [workspace.lints.clippy]
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+unwrap_used = "deny"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"

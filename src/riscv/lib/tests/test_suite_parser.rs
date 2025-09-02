@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+// This ensures that Clippy does't apply rules which are allowed in tests.
+#![cfg(test)]
+
 use core::panic;
 use std::fs::DirEntry;
 use std::process::Command;

@@ -94,7 +94,7 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
         program,
         inbox.build(),
         console,
-        rollup_address.into_hash().as_ref().try_into().unwrap(),
+        rollup_address.into_hash().as_ref().try_into()?,
         common.inbox.origination_level,
         common.preimage.preimages_dir.clone(),
         block_builder,

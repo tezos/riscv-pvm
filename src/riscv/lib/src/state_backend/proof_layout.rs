@@ -593,11 +593,12 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
             }
         }
 
-        if hashes.len() == 1 {
-            hashes.pop().unwrap()
-        } else {
-            Err(PartialHashError::Fatal)
-        }
+        // There must only be a single hash, the root hash. If there are more or less, that is an
+        // error.
+        hashes
+            .pop()
+            .filter(|_| hashes.is_empty())
+            .map_or(Err(PartialHashError::Fatal), |hash| hash)
     }
 }
 
@@ -1107,11 +1108,12 @@ where
         // Check that we iterated over all the elements of the state
         debug_assert_eq!(next_vec_index, LEN);
 
-        if hashes.len() == 1 {
-            hashes.pop().unwrap()
-        } else {
-            Err(PartialHashError::Fatal)
-        }
+        // There must only be a single hash, the root hash. If there are more or less, that is an
+        // error.
+        hashes
+            .pop()
+            .filter(|_| hashes.is_empty())
+            .map_or(Err(PartialHashError::Fatal), |hash| hash)
     }
 }
 

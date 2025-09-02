@@ -3,6 +3,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+// This ensures that Clippy does't apply rules which are allowed in tests.
+#![cfg(test)]
+
 mod common;
 
 use std::io::Write;

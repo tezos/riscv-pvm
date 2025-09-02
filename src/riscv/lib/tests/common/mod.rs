@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+// This ensures that Clippy does't apply rules which are allowed in tests.
+#![cfg(test)]
+
 use std::fs;
 
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;

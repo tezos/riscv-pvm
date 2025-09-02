@@ -75,19 +75,22 @@ impl<const SIZE: usize> super::BlockCacheConfig for BlockCacheConfig<SIZE> {
         M: ManagerBase,
         M::ManagerRoot: ManagerReadWrite,
     {
+        let Ok(entries) = space
+            .4
+            .into_iter()
+            .map(Cached::bind)
+            .collect::<Vec<_>>()
+            .try_into()
+        else {
+            unreachable!("mismatching vector lengths for instruction cache");
+        };
+
         Self::State {
             current_block_addr: space.0,
             next_instr_addr: space.1,
             fence_counter: space.2,
             partial_block: PartialBlock::bind(space.3),
-            entries: space
-                .4
-                .into_iter()
-                .map(Cached::bind)
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| "mismatching vector lengths for instruction cache")
-                .unwrap(),
+            entries,
         }
     }
 
