@@ -11,7 +11,7 @@ CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
 cd "$RISCV_DIR"
 
-USAGE="Usage: [ -s: static inbox ] [ -n: run natively ]"
+USAGE="Usage: [ -s: static inbox ] [ -n: run natively ] [ -t: produce kernel run trace ]"
 
 TX="200"
 SANDBOX_BIN="riscv-sandbox"
@@ -21,13 +21,16 @@ INBOX_FILE=$(realpath "src/riscv/assets/etherlink-erc20-inbox.json")
 STATIC_INBOX=""
 NATIVE=""
 
-while getopts "sn" OPTION; do
+while getopts "snt" OPTION; do
   case "$OPTION" in
   s)
     STATIC_INBOX="y"
     ;;
   n)
     NATIVE=$(make --silent -C kernels/jstz print-native-target | grep -wv make)
+    ;;
+  t)
+    TRACING="y"
     ;;
   *)
     echo "$USAGE"
@@ -42,12 +45,20 @@ if [ -n "$NATIVE" ] && [ -z "$STATIC_INBOX" ]; then
   exit 1
 fi
 
+if [ "$TRACING" = "y" ] && ( [ -n "$NATIVE" ] || [ -n "$STATIC_INBOX" ]); then
+  echo "Tracing only supported for RISC-V kernel"
+  echo "$USAGE"
+  exit 1
+fi
+
 ##########
 # RISC-V #
 ##########
 build_etherlink_riscv() {
   if [ "$STATIC_INBOX" = "y" ]; then
     make -C kernels/etherlink INBOX_FILE="$INBOX_FILE" build-kernel-static &> /dev/null
+  elif [ "$TRACING" = "y" ]; then
+    make -C kernels/etherlink build-kernel-tracing &> /dev/null
   else
     make -C kernels/etherlink build-kernel &> /dev/null
   fi
@@ -60,6 +71,13 @@ run_etherlink_riscv() {
     --inbox-file "$INBOX_FILE" \
     --address "$DEFAULT_ROLLUP_ADDRESS" \
     --timings > "$LOG"
+}
+
+trace_etherlink_riscv() {
+  "src/riscv/$SANDBOX_BIN" run \
+    "${ETHERLINK_SANDBOX_PARAMS[@]}" \
+    --inbox-file "$INBOX_FILE" \
+    --address "$DEFAULT_ROLLUP_ADDRESS" > "$TRACE"
 }
 
 ##########
@@ -95,23 +113,30 @@ fi
 # Run #
 #######
 run_etherlink() {
-  if [ -z "$NATIVE" ]; then
-    echo "[INFO]: running $TX transfers (riscv) "
+  if [ "$TRACING" = "y" ]; then
+    echo "[INFO]: running $TX transfers (tracing)"
+    trace_etherlink_riscv
+    echo "[INFO]: Wrote trace in $TRACE"
+  elif [ -z "$NATIVE" ]; then
+    echo "[INFO]: running $TX transfers (riscv)"
     run_etherlink_riscv
   else
-    echo "[INFO]: running $TX transfers ($NATIVE) "
+    echo "[INFO]: running $TX transfers ($NATIVE)"
     run_etherlink_native
   fi
 }
 
 DATA_DIR=${DATA_DIR:=$(mktemp -d)}
+TRACE="$DATA_DIR/etherlink.trace"
 run_etherlink
 
-echo -e "\033[1m"
-kernels/etherlink/inbox-bench results \
-  --inbox-file "$INBOX_FILE" \
-  --log-file "$LOG" \
-  --expected-transfers "$TX"
-echo -e "\033[0m"
+if [ -z "$TRACING" ]; then
+  echo -e "\033[1m"
+  kernels/etherlink/inbox-bench results \
+    --inbox-file "$INBOX_FILE" \
+    --log-file "$LOG" \
+    --expected-transfers "$TX"
+  echo -e "\033[0m"
+fi
 
 cd "$CURR"
