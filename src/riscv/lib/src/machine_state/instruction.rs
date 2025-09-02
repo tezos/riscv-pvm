@@ -105,7 +105,7 @@ impl Instruction {
 
 impl ConstDefault for Instruction {
     const DEFAULT: Self = Instruction {
-        opcode: OpCode::Unknown,
+        opcode: OpCode::ForceFetchRun,
         args: Args::DEFAULT,
     };
 }
