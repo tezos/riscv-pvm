@@ -13,6 +13,7 @@ pub(crate) mod signals;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
+use std::ops::ControlFlow;
 use std::ops::Range;
 
 use perfect_derive::perfect_derive;
@@ -518,8 +519,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
         hooks: impl PvmHooks,
-        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> bool,
-    ) -> bool
+        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<()>,
+    ) -> ControlFlow<()>
     where
         MC: MemoryConfig,
         BCC: BlockCacheConfig,
@@ -792,16 +793,16 @@ impl<M: ManagerBase> SupervisorState<M> {
                     // no handler.
                     machine.core.hart.pc.write(0);
                 }
-                true
             }
 
             Err(error) => {
                 machine.core.hart.xregisters.write_system_call_error(error);
-                true
             }
 
-            Ok(continue_eval) => continue_eval,
+            Ok(control_flow) => return control_flow,
         }
+
+        ControlFlow::Continue(())
     }
 
     /// Handle `set_tid_address` system call.
@@ -854,7 +855,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         Ok(parameters::SystemCallResultExecution {
             result: status.exit_code(),
-            control_flow: false,
+            control_flow: ControlFlow::Break(()),
         })
     }
 
@@ -875,7 +876,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // Return 0 as an indicator of success, even if this might not actually be used
         Ok(parameters::SystemCallResultExecution {
             result: 0,
-            control_flow: false,
+            control_flow: ControlFlow::Break(()),
         })
     }
 
@@ -1069,6 +1070,7 @@ impl<M: ManagerAlloc> Default for SupervisorState<M> {
 mod tests {
     use std::num::NonZeroU64;
     use std::ops::Bound;
+    use std::ops::ControlFlow;
 
     use rand::Rng;
 
@@ -1090,7 +1092,7 @@ mod tests {
     use crate::pvm::linux::signals::Signal;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
-    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> bool
+    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<()>
     where
         MC: MemoryConfig,
         M: ManagerWrite,
@@ -1098,7 +1100,7 @@ mod tests {
         core.hart
             .xregisters
             .write_system_call_error(Error::NoSystemCall);
-        true
+        ControlFlow::Continue(())
     }
 
     // Check that the `set_tid_address` system call is working correctly.
@@ -1130,7 +1132,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
 
         assert_eq!(supervisor_state.tid_address.read(), tid_address);
     });
@@ -1191,7 +1193,7 @@ mod tests {
                 StdoutDebugHooks,
                 default_on_tezos_handler,
             );
-            assert!(result);
+            assert!(result.is_continue());
 
             let ret = machine_state.core.hart.xregisters.read(registers::a0);
             assert_eq!(ret, 0);
@@ -1280,7 +1282,7 @@ mod tests {
                     StdoutDebugHooks,
                     default_on_tezos_handler,
                 );
-                assert!(result);
+                assert!(result.is_continue());
 
                 // Return the value stored in the old handler
                 machine_state
@@ -1340,7 +1342,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
     });
 
     // Check that the `sched_getaffinity` system call can accept different cpu set sizes.
@@ -1405,7 +1407,7 @@ mod tests {
                 default_on_tezos_handler,
             );
 
-            assert!(result);
+            assert!(result.is_continue());
 
             // Verify that a single bit is set in the mask
             for j in 1..i {
@@ -1472,7 +1474,7 @@ mod tests {
             default_on_tezos_handler,
         );
 
-        assert!(result);
+        assert!(result.is_continue());
 
         let result = machine_state.core.hart.xregisters.read(registers::a0);
 
@@ -1542,7 +1544,7 @@ mod tests {
             default_on_tezos_handler,
         );
 
-        assert!(result);
+        assert!(result.is_continue());
 
         let result: u64 = machine_state.core.hart.xregisters.read(registers::a0);
 
@@ -1599,7 +1601,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
     });
 
     // Check that the `rt_sigprocmask system call can accept 0 for the `old` parameter.
@@ -1651,7 +1653,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
     });
 
     // Check that the `clock_gettime` system call fills the timespec with zeros.
@@ -1709,7 +1711,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
 
         // Verify that a0 contains 0 (success)
         let ret = machine_state.core.hart.xregisters.read(registers::a0);
@@ -1788,7 +1790,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
 
         // Verify that a0 contains 0 (success)
         let ret = machine_state.core.hart.xregisters.read(registers::a0);
@@ -1962,8 +1964,8 @@ mod tests {
             .main_memory
             .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
             .unwrap();
-        let step_result =
-            machine_state.step_max_handle::<Infallible>(Bound::Included(1), |_| Ok(true));
+        let step_result = machine_state
+            .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
         assert_eq!(step_result.error, None);
 
         // Check that the program counter is now at the handler.
@@ -1997,7 +1999,7 @@ mod tests {
             StdoutDebugHooks,
             default_on_tezos_handler,
         );
-        assert!(result);
+        assert!(result.is_continue());
 
         // [`Signal::Sigill`] has a TERM disposition by default, so check that the program counter
         // has been changed to zero.

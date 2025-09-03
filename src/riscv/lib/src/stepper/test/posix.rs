@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::ops::ControlFlow;
+
 use crate::machine_state::MachineState;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
@@ -14,6 +16,15 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
+
+/// Reason for interrupting execution
+pub enum BreakReason {
+    /// The program wants to exit
+    Exit(u64),
+
+    /// An error occurred
+    Error(String),
+}
 
 /// Posix execution environment state
 pub struct PosixState<M: ManagerBase> {
@@ -42,13 +53,13 @@ impl<M: ManagerBase> PosixState<M> {
     pub fn handle_call<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
-    ) -> Result<bool, String>
+    ) -> ControlFlow<BreakReason>
     where
         M: ManagerReadWrite,
     {
         if self.exited() {
             // Can't exit twice
-            return Err("Machine has already exited".to_owned());
+            return ControlFlow::Break(BreakReason::Error("Machine has already exited".to_owned()));
         }
 
         let mut handle_exit = |code| {
@@ -56,7 +67,7 @@ impl<M: ManagerBase> PosixState<M> {
             self.exited.write(exited.saturating_add(1));
             self.code.write(code);
 
-            Ok(false)
+            ControlFlow::Break(BreakReason::Exit(code))
         };
 
         // Successful physical memory tests set
@@ -77,7 +88,9 @@ impl<M: ManagerBase> PosixState<M> {
             (93, code) | (0, code) => handle_exit(code),
 
             // Unimplemented
-            _ => Err(format!("Unknown system call number {a7_val}")),
+            _ => ControlFlow::Break(BreakReason::Error(format!(
+                "Unknown system call number {a7_val}"
+            ))),
         }
     }
 }

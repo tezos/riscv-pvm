@@ -3,9 +3,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::convert::Infallible;
 use std::fmt;
 use std::ops::Bound;
+use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -262,14 +262,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
         let steps = self
             .machine_state
-            .step_max_handle::<Infallible>(step_bounds, |machine_state| {
-                Ok(handle_system_call(
+            .step_max_handle(step_bounds, |machine_state| {
+                handle_system_call(
                     machine_state,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
-                ))
+                )
             })
             .steps;
         self.tick.write(self.tick.read().wrapping_add(steps as u64));
@@ -451,7 +451,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
-) -> bool
+) -> ControlFlow<()>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
@@ -460,7 +460,12 @@ where
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
-        status.read() == PvmStatus::Evaluating
+
+        if status.read() == PvmStatus::Evaluating {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
     })
 }
 
@@ -512,6 +517,7 @@ mod tests {
                 &mut self.reveal_request,
                 hooks,
             )
+            .is_continue()
         }
     }
 

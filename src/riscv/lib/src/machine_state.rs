@@ -13,6 +13,7 @@ pub(crate) mod reservation_set;
 
 use std::num::NonZeroU64;
 use std::ops::Bound;
+use std::ops::ControlFlow;
 
 use block_cache::BlockCache;
 use block_cache::block::Block;
@@ -447,11 +448,15 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
     /// Similar to [`Self::step_max`] but lets the user handle environment exceptions inside the
     /// inner step loop.
+    ///
+    /// The `handle` closure is called whenever an environment exception is raised. Its return value
+    /// indicates whether to exit the step loop, and thereby this function. The break reason is made
+    /// available via the [`StepManyResult::error`] field.
     #[inline]
     pub fn step_max_handle<E>(
         &mut self,
         mut step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self) -> Result<bool, E>,
+        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
@@ -473,13 +478,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     step_bounds = bound_saturating_sub(step_bounds, 1);
 
                     match self.handle_exception(cause, &mut handle) {
-                        Ok(may_continue) => {
-                            if !may_continue {
-                                break None;
-                            }
-                        }
-
-                        Err(error) => break Some(error),
+                        ControlFlow::Continue(()) => {}
+                        ControlFlow::Break(error) => break Some(error),
                     }
                 }
 
@@ -494,8 +494,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     fn handle_exception<E>(
         &mut self,
         cause: Exception,
-        mut handle: impl FnMut(&mut Self) -> Result<bool, E>,
-    ) -> Result<bool, E>
+        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
+    ) -> ControlFlow<E>
     where
         M: ManagerReadWrite,
     {
@@ -536,7 +536,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             }
         }
 
-        Ok(true)
+        ControlFlow::Continue(())
     }
 
     /// Handle [`Exception::ForceFetchRun`] by fetching instruction data from memory directly,
@@ -546,8 +546,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// cannot be a `ForceFetchRun`.
     fn handle_force_fetch_run<E>(
         &mut self,
-        handle: impl FnMut(&mut Self) -> Result<bool, E>,
-    ) -> Result<bool, E>
+        handle: impl FnMut(&mut Self) -> ControlFlow<E>,
+    ) -> ControlFlow<E>
     where
         M: ManagerReadWrite,
     {
@@ -560,7 +560,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         let exception = match result {
             Ok(update) => {
                 self.core.update_pc(instr_pc, update);
-                return Ok(true);
+                return ControlFlow::Continue(());
             }
             // this should never happen (as we do not parse instruction data into an instruction
             // with OpCode::ForceFetchRun). If it does though, we shouldn't crash the PVM. Instead
@@ -743,6 +743,7 @@ pub(crate) mod test_helpers {
 mod tests {
     use std::fs;
     use std::ops::Bound;
+    use std::ops::ControlFlow;
 
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -904,17 +905,16 @@ mod tests {
                     // to indicate that it has reached the signal point. This is our cue that we
                     // have produced the right "start" state.
                     if syscall_number == -1 {
-                        return Err(());
+                        return ControlFlow::Break(());
                     }
 
-                    let shall_continue = handle_system_call(
+                    handle_system_call(
                         machine,
                         &mut state.system_state,
                         &mut state.status,
                         &mut state.reveal_request,
                         StdoutDebugHooks,
-                    );
-                    Ok(shall_continue)
+                    )
                 });
 
             assert_eq!(
