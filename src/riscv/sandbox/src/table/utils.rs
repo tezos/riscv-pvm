@@ -18,7 +18,7 @@ use crate::commands::bench::NamedStats;
 pub fn thousand_format<N: Numeric>(content: N, num_decimals: u8) -> String {
     let mut fmt = Formatter::new()
         .separator(',')
-        .unwrap()
+        .expect("Failed to set separator")
         .precision(numfmt::Precision::Decimals(num_decimals));
     fmt.fmt2(content).to_string()
 }

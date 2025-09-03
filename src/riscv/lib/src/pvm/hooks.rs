@@ -16,6 +16,8 @@ use std::io::stdout;
 
 use tezos_smart_rollup_utils::console::Console;
 
+use crate::log;
+
 /// PVM hooks
 pub trait PvmHooks {
     /// Write bytes to the debug output.
@@ -39,7 +41,10 @@ impl<H: PvmHooks> PvmHooks for &mut H {
 
 impl PvmHooks for Console<'_> {
     fn write_debug_bytes(&mut self, bytes: &[u8]) {
-        self.write_all(bytes).unwrap();
+        let result = self.write_all(bytes);
+        if let Err(error) = result {
+            log::error!("Error writing to console: {:?}", error);
+        }
     }
 }
 
@@ -54,7 +59,10 @@ pub struct StdoutDebugHooks;
 
 impl PvmHooks for StdoutDebugHooks {
     fn write_debug_bytes(&mut self, bytes: &[u8]) {
-        stdout().write_all(bytes).unwrap();
+        let result = stdout().write_all(bytes);
+        if let Err(error) = result {
+            log::error!("Error writing to stdout: {:?}", error);
+        }
     }
 }
 

@@ -123,8 +123,9 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
         M: state_backend::ManagerReadWrite,
     {
         self.with_backend_mut(|pvm| {
-            let program = Program::from_elf(kernel).unwrap();
-            pvm.setup_linux_process(&program).unwrap()
+            let program = Program::from_elf(kernel).expect("Failed to parse boot sector ELF");
+            pvm.setup_linux_process(&program)
+                .expect("Failed to setup the machine with the boot sector");
         })
     }
 
@@ -172,7 +173,7 @@ impl NodePvm {
 
     /// Compute the root hash of the PVM state.
     pub fn hash(&self) -> Hash {
-        self.with_backend(|pvm| pvm.hash().unwrap())
+        self.with_backend(|pvm| pvm.hash().expect("Failed to compute PVM state hash"))
     }
 
     /// Produce the Merkle proof corresponding to the next step of the PVM.

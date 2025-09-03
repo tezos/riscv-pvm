@@ -171,9 +171,10 @@ pub fn impl_modify_map_collect<
 
     // No Panic: We only add a single node as root at the beginning of the algorithm
     // which corresponds to this last node in the Done-queue
-    let new_root = done.pop().unwrap();
-
-    debug_assert!(done.is_empty());
+    let new_root = done
+        .pop()
+        .filter(|_| done.is_empty())
+        .expect("Unexpected number of results");
 
     Ok(new_root)
 }

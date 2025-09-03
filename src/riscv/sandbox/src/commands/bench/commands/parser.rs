@@ -15,8 +15,7 @@ pub fn bench(opts: BenchParserRunOptions) -> Result<(), Box<dyn Error>> {
 
     let mut formatter = numfmt::Formatter::new()
         .precision(numfmt::Precision::Decimals(2))
-        .separator(',')
-        .unwrap();
+        .separator(',')?;
 
     for f in files.iter() {
         let kernel = std::fs::read(f)?;
