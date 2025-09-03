@@ -153,19 +153,9 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
             },
 
             // Evaluation function returned without error.
-            None => {
-                // Check if the machine has exited.
-                if let Some(code) = self.posix_state.exit_code() {
-                    TestStepperResult::Exit {
-                        code: code as usize,
-                        steps: result.steps,
-                    }
-                } else {
-                    TestStepperResult::Running {
-                        steps: result.steps,
-                    }
-                }
-            }
+            None => TestStepperResult::Running {
+                steps: result.steps,
+            },
         }
     }
 }
