@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "bench"]
+members = ["kernel", "bench", "xtask"]
 
 [patch.crates-io]
 tezos-smart-rollup = { git = "https://gitlab.com/tezos/tezos.git" }
@@ -12,16 +12,20 @@ tezos-smart-rollup-entrypoint = { git = "https://gitlab.com/tezos/tezos.git" }
 tezos-smart-rollup-debug = { git = "https://gitlab.com/tezos/tezos.git" }
 
 [workspace.dependencies]
+anyhow = "1.0"
 comfy-table = "7.1.4"
 evm_kernel = { git = "https://gitlab.com/tezos/tezos.git" }
 hex = "0.4.3"
 primitive-types = { version = "0.12.1", default-features = false }
 serde_json = "1.0.115"
+tempfile = "3.0"
 tracing-subscriber = { version = "0.3.19", features = ["json"] }
+which = "7.0"
+xshell = "0.2"
 
 [workspace.dependencies.clap]
 version = "4.4.6"
-features = ["derive"]
+features = ["derive", "env"]
 
 [workspace.dependencies.serde]
 version = "1.0.197"
