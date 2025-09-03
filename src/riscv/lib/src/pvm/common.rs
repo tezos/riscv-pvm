@@ -222,29 +222,11 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 
     /// Perform one evaluation step.
-    pub(crate) fn eval_one(&mut self, mut hooks: impl PvmHooks)
+    pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
         M: state_backend::ManagerReadWrite,
     {
-        // When the status is WaitingForReveal during evaluation, we know that
-        // nothing has been returned by the rollup node and the reveal request
-        // is invalid.
-        if let PvmStatus::WaitingForReveal = self.status.read() {
-            return self.provide_reveal_error_response();
-        }
-
-        self.machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |machine_state| {
-                Ok(handle_system_call(
-                    machine_state,
-                    &mut self.system_state,
-                    &mut self.status,
-                    &mut self.reveal_request,
-                    &mut hooks,
-                ))
-            });
-
-        self.tick.write(self.tick.read().wrapping_add(1u64));
+        self.eval_max(hooks, Bound::Included(1));
     }
 
     /// Perform a range of evaluation steps. Returns the actual number of steps
