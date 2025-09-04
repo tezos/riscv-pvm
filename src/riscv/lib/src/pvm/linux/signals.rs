@@ -61,8 +61,7 @@ pub struct LinuxSigAction {
     sa_restorer: VirtAddr,
 }
 
-/// Currently we only support the `sa_sigaction` field, so in tests it's useful to be able to
-/// create a sigaction using only this field.
+/// In tests it's useful to be able to create a sigaction using only this field.
 #[cfg(test)]
 impl LinuxSigAction {
     pub(crate) fn new(sa_sigaction: VirtAddr) -> Self {
@@ -75,6 +74,10 @@ impl LinuxSigAction {
 
 /// The default signal handler - NULL
 pub const NO_HANDLER: VirtAddr = VirtAddr::new(0u64);
+
+/// Flag that declares a signal handler has been set with `rt_sigaction(2)` so is called with
+/// parameters.
+pub const SA_SIGINFO: u32 = 0x4000000;
 
 /// `size_of(struct sigaction)` on the Kernel side
 const SIZE_SIGACTION: usize = 32;
@@ -197,6 +200,13 @@ impl<M: ManagerRead> SignalActions<M> {
         let signal_index: SignalIndex = signal.into();
         self.restorers[signal_index as usize].read()
     }
+
+    /// Has the [SA_SIGINFO] flag been set?
+    ///
+    /// i.e., was this signal action registered using `rt_sigaction(2)`?
+    pub fn sa_siginfo<T: Into<SignalIndex>>(&self, signal: T) -> bool {
+        self.read_flags(signal) & SA_SIGINFO != 0
+    }
 }
 
 impl<M: ManagerWrite> SignalActions<M> {
@@ -264,13 +274,15 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         // Signal number
         self.hart.xregisters.write_nz(nz::a0, signal as u64);
 
-        // TODO RV-754: Implement storing signal information as `siginfo_t`
-        // Pointer to siginfo_t
-        self.hart.xregisters.write_nz(nz::a1, 0u64);
+        if self.signal_actions.sa_siginfo(signal) {
+            // TODO RV-754: Implement storing signal information as `siginfo_t`
+            // Pointer to siginfo_t
+            self.hart.xregisters.write_nz(nz::a1, 0u64);
 
-        // TODO RV-754: Implement storing signal execution context as `ucontext_t`
-        // Pointer to ucontext_t
-        self.hart.xregisters.write_nz(nz::a2, 0u64);
+            // TODO RV-754: Implement storing signal execution context as `ucontext_t`
+            // Pointer to ucontext_t
+            self.hart.xregisters.write_nz(nz::a2, 0u64);
+        }
 
         // Update the program counter to the handler
         self.hart.pc.write(handler.to_machine_address());
