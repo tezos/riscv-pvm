@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::ops::ControlFlow;
+
 use crate::machine_state::MachineState;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
@@ -9,55 +11,34 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a7;
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
+
+/// Reason for interrupting execution
+pub enum BreakReason {
+    /// The program wants to exit
+    Exit(u64),
+
+    /// An error occurred
+    Error(String),
+}
 
 /// Posix execution environment state
 pub struct PosixState<M: ManagerBase> {
-    code: Cell<u64, M>,
-    exited: Cell<u8, M>,
+    _pd: std::marker::PhantomData<M>,
 }
 
 impl<M: ManagerBase> PosixState<M> {
-    /// If an exit has been requested, return the exit code.
-    pub fn exit_code(&self) -> Option<u64>
-    where
-        M: ManagerRead,
-    {
-        self.exited().then(|| self.code.read())
-    }
-
-    /// Has an exit been requested?
-    pub fn exited(&self) -> bool
-    where
-        M: ManagerRead,
-    {
-        self.exited.read() > 0
-    }
-
     /// Handle a POSIX system call. Returns `Ok(true)` if it makes sense to continue execution.
     pub fn handle_call<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
-    ) -> Result<bool, String>
+    ) -> ControlFlow<BreakReason>
     where
         M: ManagerReadWrite,
     {
-        if self.exited() {
-            // Can't exit twice
-            return Err("Machine has already exited".to_owned());
-        }
-
-        let mut handle_exit = |code| {
-            let exited = self.exited.read();
-            self.exited.write(exited.saturating_add(1));
-            self.code.write(code);
-
-            Ok(false)
-        };
+        let handle_exit = |code| ControlFlow::Break(BreakReason::Exit(code));
 
         // Successful physical memory tests set
         //   a7 = 93 & a0 = 0
@@ -77,7 +58,9 @@ impl<M: ManagerBase> PosixState<M> {
             (93, code) | (0, code) => handle_exit(code),
 
             // Unimplemented
-            _ => Err(format!("Unknown system call number {a7_val}")),
+            _ => ControlFlow::Break(BreakReason::Error(format!(
+                "Unknown system call number {a7_val}"
+            ))),
         }
     }
 }
@@ -88,8 +71,7 @@ impl<M: ManagerBase> NewState<M> for PosixState<M> {
         M: ManagerAlloc,
     {
         PosixState {
-            code: Cell::new(),
-            exited: Cell::new(),
+            _pd: std::marker::PhantomData,
         }
     }
 }

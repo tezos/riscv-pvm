@@ -3,9 +3,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::convert::Infallible;
 use std::fmt;
 use std::ops::Bound;
+use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -222,29 +222,11 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 
     /// Perform one evaluation step.
-    pub(crate) fn eval_one(&mut self, mut hooks: impl PvmHooks)
+    pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
         M: state_backend::ManagerReadWrite,
     {
-        // When the status is WaitingForReveal during evaluation, we know that
-        // nothing has been returned by the rollup node and the reveal request
-        // is invalid.
-        if let PvmStatus::WaitingForReveal = self.status.read() {
-            return self.provide_reveal_error_response();
-        }
-
-        self.machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |machine_state| {
-                Ok(handle_system_call(
-                    machine_state,
-                    &mut self.system_state,
-                    &mut self.status,
-                    &mut self.reveal_request,
-                    &mut hooks,
-                ))
-            });
-
-        self.tick.write(self.tick.read().wrapping_add(1u64));
+        self.eval_max(hooks, Bound::Included(1));
     }
 
     /// Perform a range of evaluation steps. Returns the actual number of steps
@@ -280,14 +262,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
         let steps = self
             .machine_state
-            .step_max_handle::<Infallible>(step_bounds, |machine_state| {
-                Ok(handle_system_call(
+            .step_max_handle(step_bounds, |machine_state| {
+                handle_system_call(
                     machine_state,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
-                ))
+                )
             })
             .steps;
         self.tick.write(self.tick.read().wrapping_add(steps as u64));
@@ -469,7 +451,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
-) -> bool
+) -> ControlFlow<()>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
@@ -478,7 +460,12 @@ where
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
-        status.read() == PvmStatus::Evaluating
+
+        if status.read() == PvmStatus::Evaluating {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
     })
 }
 
@@ -530,6 +517,7 @@ mod tests {
                 &mut self.reveal_request,
                 hooks,
             )
+            .is_continue()
         }
     }
 

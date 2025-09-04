@@ -136,30 +136,26 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
 
     fn handle_step_result(
         &mut self,
-        result: StepManyResult<(Exception, String)>,
+        result: StepManyResult<posix::BreakReason>,
     ) -> TestStepperResult {
         match result.error {
             // An error was encountered in the evaluation function.
-            Some((cause, error)) => TestStepperResult::Exception {
-                cause,
+            Some(posix::BreakReason::Error(error)) => TestStepperResult::Exception {
+                cause: Exception::EnvCall,
                 steps: result.steps,
                 message: Some(error),
             },
 
+            // An exit was requested in the evaluation function.
+            Some(posix::BreakReason::Exit(code)) => TestStepperResult::Exit {
+                code: code as usize,
+                steps: result.steps,
+            },
+
             // Evaluation function returned without error.
-            None => {
-                // Check if the machine has exited.
-                if let Some(code) = self.posix_state.exit_code() {
-                    TestStepperResult::Exit {
-                        code: code as usize,
-                        steps: result.steps,
-                    }
-                } else {
-                    TestStepperResult::Running {
-                        steps: result.steps,
-                    }
-                }
-            }
+            None => TestStepperResult::Running {
+                steps: result.steps,
+            },
         }
     }
 }
@@ -180,9 +176,7 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCach
 
     fn step_max(&mut self, steps: Bound<usize>) -> Self::StepResult {
         let result = self.machine_state.step_max_handle(steps, |machine_state| {
-            self.posix_state
-                .handle_call(machine_state)
-                .map_err(|message| (Exception::EnvCall, message))
+            self.posix_state.handle_call(machine_state)
         });
         self.handle_step_result(result)
     }
