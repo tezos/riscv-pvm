@@ -1278,7 +1278,7 @@ mod tests {
         assert!(init_pc % RISCV_ABI_SP_ALIGNMENT.get() != 0);
         state.core.hart.pc.write(init_pc);
 
-        state.core.push_signal_context(Signal::Sigfpe).unwrap();
+        state.core.push_signal_context(Signal::Sigstop).unwrap();
         let pc = state.core.pop_signal_context().unwrap();
         assert_eq!(pc, init_pc);
     });
