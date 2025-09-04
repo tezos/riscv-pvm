@@ -34,7 +34,6 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
-use crate::pvm::linux::signals::NO_HANDLER;
 use crate::pvm::linux::signals::Signal;
 use crate::pvm::linux::signals::SignalActions;
 use crate::pvm::linux::signals::SignalActionsLayout;
@@ -612,11 +611,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     where
         M: ManagerReadWrite,
     {
-        // We only currently support the `action` field.
-        // TODO RV-732 Parse `sa_flags` subset.
-        let handler = self.core.signal_actions.read_action(signal);
-
-        if handler == NO_HANDLER || self.core.dispatch_signal(signal).is_err() {
+        if self.core.dispatch_signal(signal).is_err() {
             self.core.hart.pc.write(0);
         }
     }
