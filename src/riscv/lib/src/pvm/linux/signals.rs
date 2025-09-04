@@ -296,18 +296,10 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
 
         // TODO RV-756 Add support for changing signal disposition.
         //
-        // For signals with a TERM or CORE disposition, we still want to change the program counter
-        // to 0 after the handler.
-        let pc = match signal {
-            Signal::Sigill
-            | Signal::Sigabrt
-            | Signal::Sigiot
-            | Signal::Sigbus
-            | Signal::Sigsegv
-            | Signal::Sigpipe
-            | Signal::Sigterm
-            | Signal::Sigsys => 0,
-            _ => self.hart.pc.read(),
+        // For signals with a TERM or CORE disposition, we want to change the program counter to 0.
+        let pc = match Disposition::default(signal) {
+            Disposition::Term | Disposition::Core => 0,
+            Disposition::Stop => self.hart.pc.read(),
         };
 
         let restorer = self.signal_actions.read_restorer(signal_index);
@@ -510,6 +502,33 @@ impl<M: ManagerClone> Clone for SignalActions<M> {
 ///
 /// As we're building a 64-bit system, the sigset should be 64-bit wide as well.
 pub const SIGSET_SIZE: u64 = 8;
+
+#[derive(Debug, Eq, PartialEq)]
+enum Disposition {
+    Term,
+    Core,
+    Stop,
+}
+
+impl Disposition {
+    const fn default(signal: Signal) -> Self {
+        match signal {
+            Signal::Sigill => Disposition::Core,
+            Signal::Sigabrt => Disposition::Core,
+            Signal::Sigiot => Disposition::Core,
+            Signal::Sigbus => Disposition::Core,
+            Signal::Sigfpe => Disposition::Core,
+            Signal::Sigkill => Disposition::Term,
+            Signal::Sigusr1 => Disposition::Term,
+            Signal::Sigsegv => Disposition::Core,
+            Signal::Sigusr2 => Disposition::Term,
+            Signal::Sigpipe => Disposition::Term,
+            Signal::Sigterm => Disposition::Term,
+            Signal::Sigstop => Disposition::Stop,
+            Signal::Sigsys => Disposition::Core,
+        }
+    }
+}
 
 /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
 #[derive(Debug, Clone, Copy, Eq, FromRepr, PartialEq)]
