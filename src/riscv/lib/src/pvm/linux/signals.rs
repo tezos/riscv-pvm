@@ -52,15 +52,14 @@ pub enum SignalError {
 }
 
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
+/// and <https://github.com/torvalds/linux/blob/155a3c003e555a7300d156a5252c004c392ec6b0/include/linux/signal_types.h#L37>
 #[repr(C)]
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Default, PartialEq))]
 pub struct LinuxSigAction {
-    sa_handler: VirtAddr,
-    sa_sigaction: VirtAddr,
-    sa_mask: u32,
-    sa_flags: u32,
-    sa_restorer: VirtAddr,
+    pub sa_sigaction: VirtAddr,
+    pub sa_flags: u32,
+    pub sa_mask: u64,
 }
 
 /// In tests it's useful to be able to create a sigaction using only this field.
@@ -73,6 +72,10 @@ impl LinuxSigAction {
         }
     }
 }
+
+/// The kernel struct has padding between the flags and mask that would be used by the restorer if
+/// RISC-V's ABI didn't use the vDSO for a restorer.
+const SIGRETURN_PADDING: usize = 12;
 
 /// Set the default signal disposition
 ///
@@ -94,13 +97,7 @@ pub const SA_SIGINFO: u32 = 0x4000000;
 const SIZE_SIGACTION: usize = 32;
 
 impl Elem for LinuxSigAction {
-    const STORED_SIZE: NonZeroUsize = {
-        const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(SIZE_SIGACTION).unwrap();
-        if size_of::<Self>() != STORED_SIZE.get() {
-            panic!("Expected STORED_SIZE to match size_of<LinuxSigAction>");
-        }
-        STORED_SIZE
-    };
+    const STORED_SIZE: NonZeroUsize = { NonZeroUsize::new(SIZE_SIGACTION).unwrap() };
 
     unsafe fn read_unaligned(source: *const u8) -> Self {
         // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each
@@ -108,26 +105,19 @@ impl Elem for LinuxSigAction {
         unsafe {
             let offset = 0;
 
-            let sa_handler_bits = source.cast::<u64>().read();
-            let offset = offset + size_of_val(&sa_handler_bits);
-
             let sa_sigaction_bits = source.add(offset).cast::<u64>().read();
             let offset = offset + size_of_val(&sa_sigaction_bits);
-
-            let sa_mask_bits = source.add(offset).cast::<u32>().read();
-            let offset = offset + size_of_val(&sa_mask_bits);
 
             let sa_flags_bits = source.add(offset).cast::<u32>().read();
             let offset = offset + size_of_val(&sa_flags_bits);
 
-            let sa_restorer_bits = source.add(offset).cast::<u64>().read();
+            let offset = offset + SIGRETURN_PADDING;
+            let sa_mask_bits = source.add(offset).cast::<u64>().read();
 
             Self {
-                sa_handler: VirtAddr::new(u64::from_le(sa_handler_bits)),
-                sa_sigaction: VirtAddr::new(u64::from_le(sa_sigaction_bits)),
-                sa_mask: u32::from_le(sa_mask_bits),
                 sa_flags: u32::from_le(sa_flags_bits),
-                sa_restorer: VirtAddr::new(u64::from_le(sa_restorer_bits)),
+                sa_sigaction: VirtAddr::new(u64::from_le(sa_sigaction_bits)),
+                sa_mask: u64::from_le(sa_mask_bits),
             }
         }
     }
@@ -138,24 +128,16 @@ impl Elem for LinuxSigAction {
         unsafe {
             let offset = 0;
 
-            dest.cast::<u64>()
-                .write(self.sa_handler.to_machine_address().to_le());
-            let offset = offset + size_of_val(&self.sa_handler);
-
             dest.add(offset)
                 .cast::<u64>()
                 .write(self.sa_sigaction.to_machine_address().to_le());
             let offset = offset + size_of_val(&self.sa_sigaction);
 
-            dest.add(offset).cast::<u32>().write(self.sa_mask.to_le());
-            let offset = offset + size_of_val(&self.sa_mask);
-
             dest.add(offset).cast::<u32>().write(self.sa_flags.to_le());
             let offset = offset + size_of_val(&self.sa_flags);
 
-            dest.add(offset)
-                .cast::<u64>()
-                .write(self.sa_restorer.to_machine_address().to_le());
+            let offset = offset + SIGRETURN_PADDING;
+            dest.add(offset).cast::<u64>().write(self.sa_mask.to_le());
         }
     }
 }
@@ -166,38 +148,26 @@ impl Elem for LinuxSigAction {
 
 /// Information to support handling each supported signal
 pub struct SignalActions<M: ManagerBase> {
-    /// An array of [VirtAddr]s, unused
-    handlers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
     /// An array of [VirtAddr]s, one action for each supported signal
     actions: [Cell<VirtAddr, M>; SignalIndex::COUNT],
-    /// An array of bitmasks, one mask for each supported signal
-    masks: [Cell<u32, M>; SignalIndex::COUNT],
     /// An array of bitmasks, one set of flags for each supported signal
     flags: [Cell<u32, M>; SignalIndex::COUNT],
-    /// An array of [VirtAddr]s, restorers for each signal, see
+    /// An array of bitmasks, one mask for each supported signal
+    masks: [Cell<u64, M>; SignalIndex::COUNT],
+    /// A pointer to a restorer address to jump to after returning from a signal handler. A
+    /// function to call `rt_sigreturn` should be loaded into here.
+    ///
     /// <https://www.man7.org/linux/man-pages/man2/sigreturn.2.html>
-    restorers: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+    pub restorer: Cell<VirtAddr, M>,
     /// A per-thread mask for all signals
     thread_mask: Cell<u64, M>,
 }
 
 impl<M: ManagerRead> SignalActions<M> {
-    /// Read the handler for a given signal
-    pub(crate) fn read_handler<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
-        let signal_index: SignalIndex = signal.into();
-        self.handlers[signal_index as usize].read()
-    }
-
     /// Read the action for a given signal
     pub(crate) fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].read()
-    }
-
-    /// Read the mask for a given signal
-    pub(crate) fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u32 {
-        let signal_index: SignalIndex = signal.into();
-        self.masks[signal_index as usize].read()
     }
 
     /// Read the flags for a given signal
@@ -206,10 +176,10 @@ impl<M: ManagerRead> SignalActions<M> {
         self.flags[signal_index as usize].read()
     }
 
-    /// Read the restorer for a given signal
-    pub(crate) fn read_restorer<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
+    /// Read the mask for a given signal
+    pub(crate) fn read_mask<T: Into<SignalIndex>>(&self, signal: T) -> u64 {
         let signal_index: SignalIndex = signal.into();
-        self.restorers[signal_index as usize].read()
+        self.masks[signal_index as usize].read()
     }
 
     /// Has the [SA_SIGINFO] flag been set?
@@ -221,22 +191,10 @@ impl<M: ManagerRead> SignalActions<M> {
 }
 
 impl<M: ManagerWrite> SignalActions<M> {
-    /// Write the handler for a given signal
-    pub(crate) fn write_handler<T: Into<SignalIndex>>(&mut self, signal: T, handler: VirtAddr) {
-        let signal_index: SignalIndex = signal.into();
-        self.handlers[signal_index as usize].write(handler);
-    }
-
     /// Write the action for a given signal
     pub(crate) fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
         self.actions[signal_index as usize].write(action);
-    }
-
-    /// Write the mask for a given signal
-    pub(crate) fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u32) {
-        let signal_index: SignalIndex = signal.into();
-        self.masks[signal_index as usize].write(mask);
     }
 
     /// Write the flags for a given signal
@@ -245,21 +203,20 @@ impl<M: ManagerWrite> SignalActions<M> {
         self.flags[signal_index as usize].write(flags);
     }
 
-    /// Write the restorer for a given signal
-    pub(crate) fn write_restorer<T: Into<SignalIndex>>(&mut self, signal: T, restorer: VirtAddr) {
+    /// Write the mask for a given signal
+    pub(crate) fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u64) {
         let signal_index: SignalIndex = signal.into();
-        self.restorers[signal_index as usize].write(restorer);
+        self.masks[signal_index as usize].write(mask);
     }
 }
 
 struct_layout! {
     /// Layout for [SignalActions]
     pub struct SignalActionsLayout {
-        handlers: [Atom<VirtAddr>; SignalIndex::COUNT],
         actions: [Atom<VirtAddr>; SignalIndex::COUNT],
-        masks: [Atom<u32>; SignalIndex::COUNT],
         flags: [Atom<u32>; SignalIndex::COUNT],
-        restorers: [Atom<VirtAddr>; SignalIndex::COUNT],
+        masks: [Atom<u64>; SignalIndex::COUNT],
+        restorer: Atom<VirtAddr>,
         thread_mask: Atom<u64>,
     }
 }
@@ -313,7 +270,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         let mask = self.signal_actions.read_mask(signal_index);
         let pc = self.hart.pc.read();
 
-        let restorer = self.signal_actions.read_restorer(signal_index);
+        let restorer = self.signal_actions.restorer.read();
 
         let prev_stack_pointer = self.hart.xregisters.read(sp);
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
@@ -329,9 +286,9 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
         self.main_memory
             .write(stack_pointer.add(8).to_machine_address(), mask)?;
         self.main_memory
-            .write(stack_pointer.add(12).to_machine_address(), pc)?;
+            .write(stack_pointer.add(16).to_machine_address(), pc)?;
         self.main_memory.write(
-            stack_pointer.add(20).to_machine_address(),
+            stack_pointer.add(24).to_machine_address(),
             prev_stack_pointer,
         )?;
 
@@ -344,11 +301,11 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
 
         let prev_stack_pointer = self
             .main_memory
-            .read(stack_pointer.add(20).to_machine_address())?;
+            .read(stack_pointer.add(24).to_machine_address())?;
         let pc: u64 = self
             .main_memory
-            .read(stack_pointer.add(12).to_machine_address())?;
-        let mask: u32 = self
+            .read(stack_pointer.add(16).to_machine_address())?;
+        let mask: u64 = self
             .main_memory
             .read(stack_pointer.add(8).to_machine_address())?;
         let signal_index: u64 = self.main_memory.read(stack_pointer.to_machine_address())?;
@@ -379,18 +336,14 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         M: ManagerRead,
     {
         let index: SignalIndex = signal.into();
-        let sa_handler = self.signal_actions.read_handler(index);
         let sa_sigaction = self.signal_actions.read_action(index);
-        let sa_mask = self.signal_actions.read_mask(index);
         let sa_flags = self.signal_actions.read_flags(index);
-        let sa_restorer = self.signal_actions.read_restorer(index);
+        let sa_mask = self.signal_actions.read_mask(index);
 
         LinuxSigAction {
-            sa_handler,
             sa_sigaction,
-            sa_mask,
             sa_flags,
-            sa_restorer,
+            sa_mask,
         }
     }
 
@@ -409,12 +362,9 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         }
 
         let index: SignalIndex = signal.into();
-        self.signal_actions.write_handler(index, action.sa_handler);
         self.signal_actions.write_action(index, action.sa_sigaction);
-        self.signal_actions.write_mask(index, action.sa_mask);
         self.signal_actions.write_flags(index, action.sa_flags);
-        self.signal_actions
-            .write_restorer(index, action.sa_restorer);
+        self.signal_actions.write_mask(index, action.sa_mask);
         Ok(())
     }
 }
@@ -429,11 +379,10 @@ impl<M: ManagerBase> SignalActions<M> {
     /// Bind the given allocated regions to the supervisor state.
     pub fn bind(space: AllocatedOf<SignalActionsLayout, M>) -> Self {
         SignalActions::<M> {
-            handlers: space.handlers,
             actions: space.actions,
-            masks: space.masks,
             flags: space.flags,
-            restorers: space.restorers,
+            restorer: space.restorer,
+            masks: space.masks,
             thread_mask: space.thread_mask,
         }
     }
@@ -444,26 +393,19 @@ impl<M: ManagerBase> SignalActions<M> {
         &'a self,
     ) -> AllocatedOf<SignalActionsLayout, F::Output> {
         SignalActionsLayoutF {
-            handlers: self
-                .handlers
-                .each_ref()
-                .map(|handler| Cell::struct_ref::<F>(handler)),
             actions: self
                 .actions
                 .each_ref()
                 .map(|sig_action| Cell::struct_ref::<F>(sig_action)),
-            masks: self
-                .masks
-                .each_ref()
-                .map(|mask| Cell::struct_ref::<F>(mask)),
             flags: self
                 .flags
                 .each_ref()
                 .map(|flag| Cell::struct_ref::<F>(flag)),
-            restorers: self
-                .restorers
+            restorer: self.restorer.struct_ref::<F>(),
+            masks: self
+                .masks
                 .each_ref()
-                .map(|restorer| Cell::struct_ref::<F>(restorer)),
+                .map(|mask| Cell::struct_ref::<F>(mask)),
             thread_mask: self.thread_mask.struct_ref::<F>(),
         }
     }
@@ -486,11 +428,10 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
         M: ManagerAlloc,
     {
         SignalActions::<M> {
-            handlers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
             actions: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
-            masks: core::array::from_fn(|_| Cell::new_with(0u32)),
             flags: core::array::from_fn(|_| Cell::new_with(0u32)),
-            restorers: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
+            restorer: Cell::new_with(VirtAddr::new(0)),
+            masks: core::array::from_fn(|_| Cell::new_with(0u64)),
             thread_mask: Cell::new_with(0u64),
         }
     }
@@ -499,11 +440,10 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
 impl<M: ManagerClone> Clone for SignalActions<M> {
     fn clone(&self) -> Self {
         SignalActions::<M> {
-            handlers: self.handlers.clone(),
             actions: self.actions.clone(),
-            masks: self.masks.clone(),
             flags: self.flags.clone(),
-            restorers: self.restorers.clone(),
+            restorer: self.restorer.clone(),
+            masks: self.masks.clone(),
             thread_mask: self.thread_mask.clone(),
         }
     }
@@ -637,6 +577,10 @@ pub struct SignalActionPtr(Option<VirtAddr>);
 impl SignalActionPtr {
     /// Extract the address of the signal action in the VM memory
     pub fn address(&self) -> Option<u64> {
+        if self.0?.is_null() {
+            return None;
+        }
+
         self.0.map(|addr| addr.to_machine_address())
     }
 }

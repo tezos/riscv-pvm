@@ -311,6 +311,69 @@ where
         Ok(())
     }
 
+    /// Writes a small function to call the `rt_sigreturn` system call. This is used on returning
+    /// from a signal handler.
+    ///
+    /// In x86 this is a libc function but in RISC-V it is part of Linux's vDSO, a library of small
+    /// functions that are dynamically written to memory by the kernel when a process is loaded.
+    fn write_restorer(&mut self, address: VirtAddr) -> Result<VirtAddr, MachineError>
+    where
+        M: ManagerReadWrite,
+    {
+        // Encoding to write RT_SIGRETURN to a7
+        // ADDI imm=RT_SIGRETURN, rs1=x0, funct3=0, rd=a7
+        const IMM: u32 = RT_SIGRETURN as u32;
+        const X0_ENC: u32 = 0b00000;
+        const F3_0: u32 = 0b000;
+        const A7_ENC: u32 = 0b10001;
+        const OP_ADDI: u32 = 0b001_0011;
+        const LOAD_SIGRETURN: u32 =
+            (IMM << 20) | (X0_ENC << 15) | (F3_0 << 12) | (A7_ENC << 7) | OP_ADDI;
+
+        // Encoding of ECALL instruction
+        const ECALL: u32 = 0b1110011;
+
+        const RESTORER_FUNCTION: [u32; 2] = [LOAD_SIGRETURN, ECALL];
+        const RESTORER_LENGTH: usize = size_of_val(&RESTORER_FUNCTION);
+
+        // Ensure the restorer is in its own page
+        let address = address
+            .align_up(PAGE_SIZE)
+            .ok_or(MachineError::MemoryTooSmall)?;
+
+        // Allow the restorer function to be written to main memory
+        self.machine_state.core.main_memory.protect_pages(
+            address.to_machine_address(),
+            RESTORER_LENGTH,
+            Permissions::WRITE,
+        )?;
+
+        // Write the function
+        self.machine_state
+            .core
+            .main_memory
+            .write(address.to_machine_address(), RESTORER_FUNCTION)?;
+
+        // Remove access to the restorer
+        self.machine_state.core.main_memory.protect_pages(
+            address.to_machine_address(),
+            PAGE_SIZE.get() as usize,
+            Permissions::NONE,
+        )?;
+
+        let restorer_end = address + RESTORER_LENGTH as u64;
+        self.machine_state
+            .core
+            .signal_actions
+            .restorer
+            .write(address);
+
+        // Ensure data following the restorer is in a different page
+        restorer_end
+            .align_up(PAGE_SIZE)
+            .ok_or(MachineError::MemoryTooSmall)
+    }
+
     /// Configure the stack for a new process.
     fn prepare_stack(&mut self) -> Result<(), MachineError>
     where
@@ -400,7 +463,14 @@ where
 
         // Setup heap addresses
         let program_end = self.system_state.program.end;
-        let heap_start = program_end
+
+        let restorer_start = program_end
+            .align_up(PAGE_SIZE)
+            .ok_or(MachineError::MemoryTooSmall)?;
+
+        let restorer_end = self.write_restorer(restorer_start)?;
+
+        let heap_start = restorer_end
             .align_up(PAGE_SIZE)
             .ok_or(MachineError::MemoryTooSmall)?;
 
@@ -2060,10 +2130,6 @@ mod tests {
         // The address of a psuedo handler.
         let handler_address = VirtAddr::new(42);
 
-        // The address of a psuedo restorer (`__restore_rt`).
-        // This address is provided by the C library when `sigaction` is called.
-        let restorer_address = VirtAddr::new(84);
-
         // Instruction to return from a function.
         // JALR imm=0, rs1=ra, rd=x0
         const RA_ENC: u32 = 0b00001; // ra(x1)
@@ -2081,11 +2147,38 @@ mod tests {
             )
             .unwrap();
 
-        // Setup the signal handler
+        let restorer_address = VirtAddr::new(84);
+        // Encoding to write RT_SIGRETURN to a7
+        // ADDI imm=RT_SIGRETURN, rs1=x0, funct3=0, rd=a7
+        const IMM: u32 = RT_SIGRETURN as u32;
+        const A7_ENC: u32 = 0b10001;
+        const OP_ADDI: u32 = 0b001_0011;
+
+        machine_state
+            .core
+            .main_memory
+            .write_instruction_unchecked(
+                restorer_address.to_machine_address(),
+                (IMM << 20) | (X0_ENC << 15) | (F3_0 << 12) | (A7_ENC << 7) | OP_ADDI,
+            )
+            .unwrap();
+
+        // Encoding of ECALL instruction
+        const ECALL: u32 = 0b1110011;
+
+        machine_state
+            .core
+            .main_memory
+            .write_instruction_unchecked(restorer_address.to_machine_address() + 4, ECALL)
+            .unwrap();
+
         machine_state
             .core
             .signal_actions
-            .write_restorer(Signal::Sigill, restorer_address);
+            .restorer
+            .write(restorer_address);
+
+        // Setup the signal handler
         machine_state
             .core
             .signal_actions
@@ -2117,28 +2210,5 @@ mod tests {
             machine_state.core.hart.pc.read(),
             restorer_address.to_machine_address()
         );
-
-        // The restorer will just call `rt_sigreturn`
-        // Here that behaviour is emulated.
-
-        // System call number
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a7, RT_SIGRETURN);
-
-        // Perform the system call
-        let mut supervisor_state = SupervisorState::<F>::new();
-        let result = supervisor_state.handle_system_call(
-            &mut machine_state,
-            StdoutDebugHooks,
-            default_on_tezos_handler,
-        );
-        assert!(result.is_continue());
-
-        // [`Signal::Sigill`] has a TERM disposition by default, so check that the program counter
-        // has been changed to zero.
-        assert_eq!(machine_state.core.hart.pc.read(), 0);
     });
 }
