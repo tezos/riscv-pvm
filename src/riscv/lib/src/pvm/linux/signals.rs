@@ -39,10 +39,10 @@ use crate::struct_layout;
 /// Errors relating to handling signals
 #[derive(Debug, Eq, thiserror::Error, PartialEq)]
 pub enum SignalError {
-    #[error(transparent)]
-    Memory(#[from] BadMemoryAccess),
     #[error("Bad signal context")]
     BadContext,
+    #[error(transparent)]
+    Memory(#[from] BadMemoryAccess),
     #[error("Misaligned stack pointer")]
     MisalignedStackPointer,
 }
