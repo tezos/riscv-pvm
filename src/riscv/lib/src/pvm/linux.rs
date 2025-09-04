@@ -788,11 +788,7 @@ impl<M: ManagerBase> SupervisorState<M> {
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
 
-                if machine.core.dispatch_signal(Signal::Sigsys).is_err() {
-                    // If handling the signal fails, set the program counter to zero as if there is
-                    // no handler.
-                    machine.core.hart.pc.write(0);
-                }
+                let _ = machine.core.dispatch_signal(Signal::Sigsys);
             }
 
             Err(error) => {
@@ -1085,6 +1081,7 @@ mod tests {
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::sp;
+    use crate::parser::instruction::InstrWidth;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::error::Error;
     use crate::pvm::linux::parameters::NoFileDescriptor;
@@ -1336,6 +1333,104 @@ mod tests {
         assert_eq!(
             do_sigaction(SIGSTOP, action, old),
             Err(Error::InvalidArgument.into_xvalue())
+        );
+    });
+
+    // Check that the `rt_sigaction` system call can set the disposition to ignore
+    backend_test!(rt_sigaction_ignore, F, {
+        type MemLayout = M4K;
+
+        let mut machine_state =
+            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
+                InterpretedBlockBuilder,
+            );
+        machine_state.reset();
+
+        // Make sure everything is readable and writable. Otherwise, we'd get access faults.
+        machine_state
+            .core
+            .main_memory
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .unwrap();
+
+        let mut supervisor_state = SupervisorState::<F>::new();
+
+        // Write the initial stack pointer and program counter.
+        let stack_top = M4K::TOTAL_BYTES as u64;
+        machine_state.core.hart.xregisters.write(sp, stack_top);
+        let init_pc = 0;
+        machine_state.core.hart.pc.write(init_pc);
+
+        let ignore = signals::LinuxSigAction::new(signals::SIG_IGN);
+        let nullptr = VirtAddr::new(0x0);
+        let action = VirtAddr::new(0x100);
+
+        machine_state
+            .core
+            .main_memory
+            .write::<signals::LinuxSigAction>(action.to_machine_address(), ignore.clone())
+            .unwrap();
+
+        // System call number
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a7, RT_SIGACTION);
+
+        // Signum
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, Signal::Sigill as u64);
+
+        // New handler is located at this address
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a1, action.to_machine_address());
+
+        // Old handler is nullptr
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a2, nullptr.to_machine_address());
+
+        // Size of sigset_t
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a3, signals::SIGSET_SIZE);
+
+        // Perform the system call
+        let result = supervisor_state.handle_system_call(
+            &mut machine_state,
+            StdoutDebugHooks,
+            default_on_tezos_handler,
+        );
+        assert!(result.is_continue());
+
+        // Cause the [`Exception::IllegalInstruction`].
+        // `unimp`, an illegal instruction.
+        const UNIMPLEMENTED: u32 = 0b_0000;
+
+        machine_state
+            .core
+            .main_memory
+            .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
+            .unwrap();
+
+        machine_state
+            .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+
+        // Check that the program counter increased
+        assert_eq!(
+            machine_state.core.hart.pc.read(),
+            init_pc + InstrWidth::Uncompressed as u64
         );
     });
 

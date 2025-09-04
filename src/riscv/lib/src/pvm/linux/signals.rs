@@ -47,6 +47,8 @@ pub enum SignalError {
     Memory(#[from] BadMemoryAccess),
     #[error("Misaligned stack pointer")]
     MisalignedStackPointer,
+    #[error("Execution shall terminate")]
+    Terminate,
 }
 
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
@@ -72,8 +74,17 @@ impl LinuxSigAction {
     }
 }
 
-/// The default signal handler - NULL
-pub const NO_HANDLER: VirtAddr = VirtAddr::new(0u64);
+/// Set the default signal disposition
+///
+/// Value:
+/// <https://github.com/torvalds/linux/blob/b320789d6883cc00ac78ce83bccbfe7ed58afcf0/include/uapi/asm-generic/signal-defs.h#L88>
+pub const SIG_DFL: VirtAddr = VirtAddr::new(0u64);
+
+/// Set the signal disposition to ignore
+///
+/// Value:
+/// <https://github.com/torvalds/linux/blob/b320789d6883cc00ac78ce83bccbfe7ed58afcf0/include/uapi/asm-generic/signal-defs.h#L89>
+pub const SIG_IGN: VirtAddr = VirtAddr::new(1u64);
 
 /// Flag that declares a signal handler has been set with `rt_sigaction(2)` so is called with
 /// parameters.
@@ -258,10 +269,17 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
     pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
         let handler = self.signal_actions.read_action(signal);
 
-        // Having no handler configured isn't an error, it just means we don't do anything else
-        // before continuing the consequences of the signal.
-        if handler == NO_HANDLER {
-            return Ok(());
+        match handler {
+            SIG_IGN => return Ok(()),
+            SIG_DFL => {
+                match Disposition::default(signal) {
+                    Disposition::Term | Disposition::Core => {
+                        return Err(SignalError::Terminate);
+                    }
+                    Disposition::Stop => return Ok(()),
+                };
+            }
+            _ => (),
         }
 
         let restorer = self.push_signal_context(signal)?;
@@ -293,14 +311,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
     pub fn push_signal_context(&mut self, signal: Signal) -> Result<VirtAddr, SignalError> {
         let signal_index: SignalIndex = signal.into();
         let mask = self.signal_actions.read_mask(signal_index);
-
-        // TODO RV-756 Add support for changing signal disposition.
-        //
-        // For signals with a TERM or CORE disposition, we want to change the program counter to 0.
-        let pc = match Disposition::default(signal) {
-            Disposition::Term | Disposition::Core => 0,
-            Disposition::Stop => self.hart.pc.read(),
-        };
+        let pc = self.hart.pc.read();
 
         let restorer = self.signal_actions.read_restorer(signal_index);
 
