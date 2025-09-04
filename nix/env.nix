@@ -4,6 +4,7 @@
   rustup,
   taplo,
   cargo-audit,
+  cargo-nextest,
   ocaml-ng,
   cacert,
   curl,
@@ -28,6 +29,7 @@ mkShell {
       # Utilities
       taplo
       cargo-audit
+      cargo-nextest
 
       # Make sure there is an OCaml compiler available
       ocaml-ng.ocamlPackages_5_2.ocaml
