@@ -81,11 +81,11 @@ build-deps: build-deps-slim
 test: build
 	@make -C ../.. dummy/build
 	@make -C ../.. block-cache-tester/build
-	@cargo test --workspace $(EXTRA_FLAGS)
+	@cargo nextest run --workspace $(EXTRA_FLAGS)
 
 .PHONY: test-long
 test-long:
-	@cargo test --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs -- test_jstz_determinism test_jstz_proofs_one_step --nocapture --ignored --test-threads=1
+	@cargo nextest run --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs --run-ignored only test_jstz_determinism test_jstz_proofs_one_step
 
 .PHONY: coverage
 coverage:
