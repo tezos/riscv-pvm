@@ -12,8 +12,6 @@ build-deps-slim: riscv/build-deps-slim
 
 check: riscv/check jstz/check dummy/check block-cache-tester/all etherlink/check
 
-audit: riscv/audit
-
 build: riscv/build jstz/build dummy/build block-cache-tester/build etherlink/build
 
 test: riscv/test jstz/test etherlink/test 
@@ -23,6 +21,11 @@ test-long: riscv/test-long
 test-miri: riscv/test-miri
 
 clean: riscv/clean jstz/clean dummy/clean block-cache-tester/clean etherlink/clean
+
+### Specific top-level targets
+
+audit:
+	@cargo audit
 
 ### Target proxies
 

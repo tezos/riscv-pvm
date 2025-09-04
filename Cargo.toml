@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["lib", "sandbox", "tools/analyse-jit-functions"]
-exclude = ["jstz", "dummy_kernel", "etherlink"]
+members = ["src/riscv/lib", "src/riscv/sandbox", "src/riscv/tools/analyse-jit-functions"]
+exclude = ["kernels"]
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
