@@ -677,8 +677,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         Ok(0)
     }
 
-    /// Handle `rt_sigaction` system call. This does nothing effectively. It does not support
-    /// retrieving the previous handler for a signal - it just zeroes out the memory.
+    /// Handle `rt_sigaction` system call.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/rt_sigaction.2.html>
     pub(super) fn handle_rt_sigaction(
