@@ -1089,6 +1089,8 @@ mod tests {
     use crate::pvm::linux::error::Error;
     use crate::pvm::linux::parameters::NoFileDescriptor;
     use crate::pvm::linux::parameters::Zero;
+    use crate::pvm::linux::registers::XValue;
+    use crate::pvm::linux::registers::a0;
     use crate::pvm::linux::signals::Signal;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
@@ -1239,77 +1241,102 @@ mod tests {
             .write::<signals::LinuxSigAction>(action.to_machine_address(), linux_sig_action.clone())
             .unwrap();
 
-        let mut do_sigaction =
-            |signal: u64, action: VirtAddr, old: VirtAddr| -> signals::LinuxSigAction {
-                // System call number
-                machine_state
-                    .core
-                    .hart
-                    .xregisters
-                    .write(registers::a7, RT_SIGACTION);
+        let mut do_sigaction = |signal: u64,
+                                action: VirtAddr,
+                                old: VirtAddr|
+         -> Result<signals::LinuxSigAction, XValue> {
+            // System call number
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a7, RT_SIGACTION);
 
-                // Signum
-                machine_state
-                    .core
-                    .hart
-                    .xregisters
-                    .write(registers::a0, signal);
+            // Signum
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a0, signal);
 
-                // New handler is located at this address
-                machine_state
-                    .core
-                    .hart
-                    .xregisters
-                    .write(registers::a1, action.to_machine_address());
+            // New handler is located at this address
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a1, action.to_machine_address());
 
-                // Old handler will be located at this address
-                machine_state
-                    .core
-                    .hart
-                    .xregisters
-                    .write(registers::a2, old.to_machine_address());
+            // Old handler will be located at this address
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a2, old.to_machine_address());
 
-                // Size of sigset_t
-                machine_state
-                    .core
-                    .hart
-                    .xregisters
-                    .write(registers::a3, signals::SIGSET_SIZE);
+            // Size of sigset_t
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a3, signals::SIGSET_SIZE);
 
-                // Perform the system call
-                let result = supervisor_state.handle_system_call(
-                    &mut machine_state,
-                    StdoutDebugHooks,
-                    default_on_tezos_handler,
-                );
-                assert!(result.is_continue());
+            // Perform the system call
+            let result = supervisor_state.handle_system_call(
+                &mut machine_state,
+                StdoutDebugHooks,
+                default_on_tezos_handler,
+            );
+            assert!(result.is_continue());
 
-                // Return the value stored in the old handler
-                machine_state
-                    .core
-                    .main_memory
-                    .read::<signals::LinuxSigAction>(old.to_machine_address())
-                    .unwrap()
-            };
+            let error = machine_state.core.hart.xregisters.read(a0);
+            if error != 0 {
+                return Err(error);
+            }
 
-        const SIGPIPE: u64 = 13i32 as u64;
-        const SIGUSR1: u64 = 10i32 as u64;
+            // Return the value stored in the old handler
+            Ok(machine_state
+                .core
+                .main_memory
+                .read::<signals::LinuxSigAction>(old.to_machine_address())
+                .unwrap())
+        };
+
+        const SIGPIPE: u64 = Signal::Sigpipe as u64;
+        const SIGUSR1: u64 = Signal::Sigusr1 as u64;
+        const SIGKILL: u64 = Signal::Sigkill as u64;
+        const SIGSTOP: u64 = Signal::Sigstop as u64;
         let nullptr = signals::LinuxSigAction::new(VirtAddr::new(0x0));
 
         // The sigactions are initialised to zero
         // Check that the location of the old handler is zeroed out
-        assert_eq!(do_sigaction(SIGPIPE, action, old), nullptr);
-        assert_eq!(do_sigaction(SIGUSR1, action, old), nullptr);
+        assert_eq!(do_sigaction(SIGPIPE, action, old).unwrap(), nullptr);
+        assert_eq!(do_sigaction(SIGUSR1, action, old).unwrap(), nullptr);
 
         // Then check that the new handlers can be read independently
         // SIGUSR1[linux_sigaction], SIPIPE[linux_sigaction]
-        assert_eq!(do_sigaction(SIGUSR1, old, action), linux_sig_action);
+        assert_eq!(
+            do_sigaction(SIGUSR1, old, action).unwrap(),
+            linux_sig_action
+        );
         // SIGUSR1[nullptr], SIPIPE[linux_sigaction]
-        assert_eq!(do_sigaction(SIGUSR1, old, action), nullptr);
+        assert_eq!(do_sigaction(SIGUSR1, old, action).unwrap(), nullptr);
         // SIGUSR1[nullptr], SIPIPE[linux_sigaction]
-        assert_eq!(do_sigaction(SIGPIPE, old, action), linux_sig_action);
+        assert_eq!(
+            do_sigaction(SIGPIPE, old, action).unwrap(),
+            linux_sig_action
+        );
         // SIGUSR1[nullptr], SIPIPE[nullptr]
-        assert_eq!(do_sigaction(SIGPIPE, old, action), nullptr);
+        assert_eq!(do_sigaction(SIGPIPE, old, action).unwrap(), nullptr);
+
+        // These signals can't have their handling changed
+        assert_eq!(
+            do_sigaction(SIGKILL, action, old),
+            Err(Error::InvalidArgument.into_xvalue())
+        );
+        assert_eq!(
+            do_sigaction(SIGSTOP, action, old),
+            Err(Error::InvalidArgument.into_xvalue())
+        );
     });
 
     // Check that the `sigaltstack` system call can accept 0 for the `old` parameter.
