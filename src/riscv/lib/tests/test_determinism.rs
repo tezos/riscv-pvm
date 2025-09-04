@@ -22,7 +22,6 @@ use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
 
 #[test]
-#[ignore]
 fn test_jstz_determinism() {
     let make_stepper = make_stepper_factory();
 

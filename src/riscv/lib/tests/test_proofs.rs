@@ -34,13 +34,11 @@ use octez_riscv::stepper::pvm::PvmStepper;
 use rand::Rng;
 
 #[test]
-#[ignore]
 fn test_jstz_proofs_one_step() {
     test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof)
 }
 
 #[test]
-#[ignore]
 fn test_jstz_proofs_one_step_stream() {
     test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes)
 }

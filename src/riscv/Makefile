@@ -83,10 +83,6 @@ test: build
 	@make -C ../.. block-cache-tester/build
 	@cargo nextest run --workspace $(EXTRA_FLAGS)
 
-.PHONY: test-long
-test-long:
-	@cargo nextest run --release $(EXTRA_FLAGS) --test test_determinism --test test_proofs --run-ignored only test_jstz_determinism test_jstz_proofs_one_step
-
 .PHONY: coverage
 coverage:
 	@../../scripts/isa-suite-coverage.sh
