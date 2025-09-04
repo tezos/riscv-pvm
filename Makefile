@@ -16,8 +16,6 @@ build: riscv/build jstz/build dummy/build block-cache-tester/build etherlink/bui
 
 test: riscv/test jstz/test etherlink/test 
 
-test-long: riscv/test-long
-
 test-miri: riscv/test-miri
 
 clean: riscv/clean jstz/clean dummy/clean block-cache-tester/clean etherlink/clean
@@ -45,4 +43,4 @@ etherlink/%:
 	@make -C kernels/etherlink ${@:etherlink/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check audit build test test-long test-miri clean 
+.PHONY: all build-deps build-deps-slim check audit build test test-miri clean 
