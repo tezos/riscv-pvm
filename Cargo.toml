@@ -15,7 +15,7 @@ private_intra_doc_links = "allow"
 [workspace.dependencies]
 anyhow = "1.0"
 bincode = "2.0"
-cfg-if = "1.0.1"
+cfg-if = "1.0.3"
 comfy-table = "7.2.0"
 cranelift = "0.120.2"
 cranelift-jit = "0.120.1"
