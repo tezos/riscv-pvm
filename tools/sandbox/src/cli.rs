@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2023-2025 TriliTech <contact@trili.tech>
-// SPDX-FileCopyrightText: 2024 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2024-2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -58,6 +58,14 @@ pub struct RunOptions {
     /// Print the number of steps taken by `run`.
     #[arg(long, default_value_t = false)]
     pub print_steps: bool,
+
+    /// Sampling interval in microseconds (enables profiling when set)
+    #[arg(long, short)]
+    pub sample_interval_us: Option<u64>,
+
+    /// Output profile path (used with --sample-interval-us)
+    #[arg(long, short, default_value = "profile")]
+    pub output: Box<Path>,
 }
 
 #[derive(Debug, Clone, Parser)]

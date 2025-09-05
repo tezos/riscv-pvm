@@ -3,11 +3,15 @@
 //
 // SPDX-License-Identifier: MIT
 
+mod profile;
+mod sample;
+
 use std::boxed::Box;
 use std::error;
 use std::error::Error;
 use std::fs;
 use std::ops::Bound;
+use std::time::Duration;
 
 use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
@@ -50,7 +54,20 @@ pub fn run_with_memory_config<MC: memory::MemoryConfig>(
         Default::default(),
     )?;
 
-    let steps = run_stepper(stepper, opts.common.max_steps)?;
+    // Run the profiler if a sampling interval is set
+    let steps = match opts.sample_interval_us {
+        None => run_stepper(stepper, opts.common.max_steps)?,
+        Some(sample_interval_us) => {
+            let sample_interval = Duration::from_micros(sample_interval_us);
+            profile::profile_stepper(
+                stepper,
+                program.as_slice(),
+                sample_interval,
+                opts.common.max_steps,
+                opts.output.as_ref(),
+            )?
+        }
+    };
 
     if opts.print_steps {
         println!("Run consumed {steps} steps.");
