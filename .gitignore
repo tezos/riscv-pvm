@@ -9,3 +9,7 @@ target
 # Direnv
 .direnv
 .envrc
+
+# Profiling outputs
+riscv-sandbox-profile.json
+perf.data
