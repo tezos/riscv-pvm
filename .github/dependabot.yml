@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: "cargo"
-    directory: "/src/riscv"
+    directory: "/"
     schedule:
       interval: "weekly"
   - package-ecosystem: "github-actions"

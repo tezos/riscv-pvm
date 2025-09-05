@@ -32,12 +32,12 @@ build: riscv-sandbox
 .PHONY: riscv-sandbox
 riscv-sandbox::
 	@cargo build --release --package riscv-sandbox $(NATIVE_OPT) $(SANDBOX_ENABLE_FEATURES:%=-F%)
-	@ln -f target/$(NATIVE_TARGET)/release/riscv-sandbox $@
+	@ln -f ../../target/$(NATIVE_TARGET)/release/riscv-sandbox $@
 
 .PHONY: riscv-sandbox.prof
 riscv-sandbox.prof::
 	@cargo build --profile profiling --package riscv-sandbox $(SANDBOX_ENABLE_FEATURES:%=-F%)
-	@ln -f target/profiling/riscv-sandbox $@
+	@ln -f ../../target/profiling/riscv-sandbox $@
 
 # Update checked-in binaries
 .PHONY: update-assets
@@ -93,23 +93,13 @@ coverage:
 
 .PHONY: check
 check:
-	@exec ../../scripts/format.sh --check
+	@exec ../../scripts/format.sh --all --check
 	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
 	@cargo check --workspace --all-targets $(CHECK_FLAGS) $(EXTRA_FLAGS)
 	@cargo clippy --workspace --all-targets $(CHECK_FLAGS) $(EXTRA_FLAGS) -- --deny warnings
 	@cargo doc --document-private-items --no-deps $(CHECK_FLAGS) $(EXTRA_FLAGS)
-
-.PHONY: audit
-audit:
-	@# We don't add this to the check target because it requires installation
-	@# of 'cargo-audit' via 'cargo install' which we can't control very well
-	@# on the machines of other developers. E.g. if we need to upgrade its
-	@# version, it may cause issues for developers.
-	@# For that reason we expose this as a separate target and run it only in
-	@# CI.
-	@cargo audit
 
 .PHONY: clean
 clean:

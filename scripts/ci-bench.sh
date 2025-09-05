@@ -55,7 +55,7 @@ nix develop --command cargo run --quiet --manifest-path kernels/jstz/Cargo.toml 
 result_dir=$(mktemp -d)
 result_args=()
 for i in $(seq 1 $NUM_ITERS); do
-  nix develop --command cargo run --release --quiet --manifest-path src/riscv/Cargo.toml --bin riscv-sandbox -- run --input kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz --inbox-file "$inbox_file" --timings > $result_dir/$i.json
+  nix develop --command cargo run --release --quiet --bin riscv-sandbox -- run --input kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz --inbox-file "$inbox_file" --timings > $result_dir/$i.json
   result_args+=("--log-file=$result_dir/$i.json")
 done
 
