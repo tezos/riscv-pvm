@@ -4,13 +4,13 @@
 
 use core::num::NonZeroU64;
 use std::fmt;
-use std::ops::ControlFlow;
 
 use super::MAIN_THREAD_ID;
 use super::error::Error;
+use crate::machine_state::StepManyResult;
 
 /// A type coupling the result of the system call with how the program should continue.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SystemCallResultExecution {
     /// Result value that will be returned to the caller of the system call
     pub result: u64,
@@ -19,7 +19,7 @@ pub struct SystemCallResultExecution {
     ///
     /// Breaking means leaving the step loop in the machine state. In other words, it will defer to
     /// the level above it to decide what to do.
-    pub control_flow: ControlFlow<(), usize>,
+    pub control_flow: StepManyResult<()>,
 }
 
 impl<T: Into<u64>> From<T> for SystemCallResultExecution {
@@ -29,7 +29,7 @@ impl<T: Into<u64>> From<T> for SystemCallResultExecution {
         // In cases where the execution should halt, this should be specified.
         SystemCallResultExecution {
             result: value.into(),
-            control_flow: ControlFlow::Continue(1),
+            control_flow: StepManyResult::continue_after_one_step(),
         }
     }
 }

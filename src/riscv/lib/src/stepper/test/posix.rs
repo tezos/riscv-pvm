@@ -2,9 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::ops::ControlFlow;
-
 use crate::machine_state::MachineState;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::MemoryConfig;
@@ -31,15 +30,14 @@ pub struct PosixState<M: ManagerBase> {
 
 impl<M: ManagerBase> PosixState<M> {
     /// Handle a POSIX system call. Returns `Ok(true)` if it makes sense to continue execution.
-    pub fn handle_call<T, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
+    pub fn handle_call<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
-    ) -> ControlFlow<BreakReason, T>
+    ) -> StepManyResult<BreakReason>
     where
         M: ManagerReadWrite,
     {
-        let handle_exit = |code| ControlFlow::Break(BreakReason::Exit(code));
-
+        let handle_exit = |code| StepManyResult::break_after_one_step(BreakReason::Exit(code));
         // Successful physical memory tests set
         //   a7 = 93 & a0 = 0
         // Successful virtual memory tests set
@@ -58,7 +56,7 @@ impl<M: ManagerBase> PosixState<M> {
             (93, code) | (0, code) => handle_exit(code),
 
             // Unimplemented
-            _ => ControlFlow::Break(BreakReason::Error(format!(
+            _ => StepManyResult::break_after_one_step(BreakReason::Error(format!(
                 "Unknown system call number {a7_val}"
             ))),
         }
