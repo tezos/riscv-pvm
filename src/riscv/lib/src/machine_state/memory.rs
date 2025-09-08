@@ -27,11 +27,11 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::Ref;
 
 /// Number of bits needed so you can address every byte in a page
-pub const OFFSET_BITS: u64 = 12;
+pub const OFFSET_BITS: NonZeroU64 = NonZeroU64::new(12).expect("OFFSET_BITS is non-zero");
 
 /// Size of a page
 pub const PAGE_SIZE: NonZeroU64 = {
-    const PAGE_SIZE: u64 = 1 << OFFSET_BITS;
+    const PAGE_SIZE: u64 = 1 << OFFSET_BITS.get();
 
     // Compile-time check: Page size must be positive
     const _: () = {

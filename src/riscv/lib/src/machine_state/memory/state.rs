@@ -257,7 +257,7 @@ where
         let pages = (length as u64).div_ceil(super::PAGE_SIZE.get());
 
         // Buddy memory manager works on page indices, not addresses
-        let idx = address >> super::OFFSET_BITS;
+        let idx = address >> super::OFFSET_BITS.get();
         self.allocated_pages.deallocate(idx, pages);
 
         Ok(())
@@ -283,7 +283,7 @@ where
                 Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
                 // Buddy memory manager works on page indices, not addresses
-                let idx = address >> super::OFFSET_BITS;
+                let idx = address >> super::OFFSET_BITS.get();
                 self.allocated_pages
                     .allocate_fixed(idx, pages, allow_replace)
                     .map(|()| address)
@@ -292,7 +292,7 @@ where
             // Allocate anywhere
             None => self.allocated_pages.allocate(pages).map(|idx| {
                 // Convert page index to address
-                idx << super::OFFSET_BITS
+                idx << super::OFFSET_BITS.get()
             }),
         }
         .ok_or(super::MemoryGovernanceError)
