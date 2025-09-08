@@ -39,10 +39,12 @@ use crate::struct_layout;
 /// Errors relating to handling signals
 #[derive(Debug, Eq, thiserror::Error, PartialEq)]
 pub enum SignalError {
-    #[error(transparent)]
-    Memory(#[from] BadMemoryAccess),
     #[error("Bad signal context")]
     BadContext,
+    #[error("Signals of this type cannot have their disposition changed")]
+    ImmutableDisposition,
+    #[error(transparent)]
+    Memory(#[from] BadMemoryAccess),
     #[error("Misaligned stack pointer")]
     MisalignedStackPointer,
 }
@@ -377,10 +379,20 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         }
     }
 
-    fn set_signal_action(&mut self, signal: Signal, action: LinuxSigAction)
+    fn set_signal_action(
+        &mut self,
+        signal: Signal,
+        action: LinuxSigAction,
+    ) -> Result<(), SignalError>
     where
         M: ManagerWrite,
     {
+        // These signals cannot have their dispositions changed, see
+        // <https://www.man7.org/linux/man-pages/man7/signal.7.html>
+        if signal == Signal::Sigkill || signal == Signal::Sigstop {
+            return Err(SignalError::ImmutableDisposition);
+        }
+
         let index: SignalIndex = signal.into();
         self.signal_actions.write_handler(index, action.sa_handler);
         self.signal_actions.write_action(index, action.sa_sigaction);
@@ -388,6 +400,7 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         self.signal_actions.write_flags(index, action.sa_flags);
         self.signal_actions
             .write_restorer(index, action.sa_restorer);
+        Ok(())
     }
 }
 
@@ -487,7 +500,7 @@ impl<M: ManagerClone> Clone for SignalActions<M> {
 pub const SIGSET_SIZE: u64 = 8;
 
 /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
-#[derive(Debug, Clone, Copy, FromRepr)]
+#[derive(Debug, Clone, Copy, Eq, FromRepr, PartialEq)]
 #[repr(u64)]
 pub enum Signal {
     Sigill = 4,
@@ -674,7 +687,8 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         if let Some(action) = action.address() {
             let new_action: LinuxSigAction = core.main_memory.read(action)?;
-            core.set_signal_action(signal, new_action);
+            core.set_signal_action(signal, new_action)
+                .map_err(|_| Error::InvalidArgument)?;
         }
 
         // Return 0 as an indicator of success
