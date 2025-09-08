@@ -76,8 +76,8 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
         let address = address as usize;
 
         // Extract the page index range from using the start and end addresses
-        let start_page = address >> super::OFFSET_BITS;
-        let end_page = address.wrapping_add(length).wrapping_sub(1) >> super::OFFSET_BITS;
+        let start_page = address >> super::OFFSET_BITS.get();
+        let end_page = address.wrapping_add(length).wrapping_sub(1) >> super::OFFSET_BITS.get();
 
         for page in start_page..=end_page {
             if unsafe { !self.pages.get_unchecked(page).read() } {
@@ -104,13 +104,13 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     {
         let address = address as usize;
 
-        let start_page = address >> super::OFFSET_BITS;
+        let start_page = address >> super::OFFSET_BITS.get();
         if unsafe { !self.pages.get_unchecked(start_page).read() } {
             return false;
         }
 
         let end_page =
-            address.wrapping_add(E::NARROW_SIZE.get()).wrapping_sub(1) >> super::OFFSET_BITS;
+            address.wrapping_add(E::NARROW_SIZE.get()).wrapping_sub(1) >> super::OFFSET_BITS.get();
         unsafe { self.pages.get_unchecked(end_page).read() }
     }
 
@@ -124,8 +124,8 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
         }
 
         let address = address as usize;
-        let start_page = address >> super::OFFSET_BITS;
-        let end_page = address.wrapping_add(length).wrapping_sub(1) >> super::OFFSET_BITS;
+        let start_page = address >> super::OFFSET_BITS.get();
+        let end_page = address.wrapping_add(length).wrapping_sub(1) >> super::OFFSET_BITS.get();
 
         (start_page..=end_page)
             .filter(|&page| page < PAGES)
