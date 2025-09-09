@@ -44,6 +44,7 @@ test: test-deps
 test-deps:
 	@make -C ../.. dummy/build
 	@make -C ../.. page-cache-tester/build
+	@make -C ../.. signal-tester/build
 
 .PHONY: coverage-report
 coverage-report: test-deps

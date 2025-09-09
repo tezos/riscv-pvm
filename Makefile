@@ -4,19 +4,19 @@
 
 ### Generic top-level targets
 
-all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all
+all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all signal-tester/all etherlink/all
 
 build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check check-format
+check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check signal-tester/check assets/check check-format
 
-build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
+build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build signal-tester/build
 
 test: riscv/test jstz/test etherlink/test
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean 
+clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean signal-tester/clean
 
 ### Specific top-level targets
 
@@ -41,7 +41,7 @@ codecov.json: riscv/test-deps
 
 ### Target proxies
 
-riscv/%: 
+riscv/%:
 	@make -C src/riscv ${@:riscv/%=%}
 
 sandbox/%: 
@@ -50,13 +50,16 @@ sandbox/%:
 jstz/%: 
 	@make -C kernels/jstz ${@:jstz/%=%}
 
-dummy/%: 
+dummy/%:
 	@make -C kernels/dummy ${@:dummy/%=%}
 
 page-cache-tester/%: 
 	@make -C kernels/page-cache-tester ${@:page-cache-tester/%=%}
 
-etherlink/%: 
+signal-tester/%:
+	@make -C kernels/signal-tester ${@:signal-tester/%=%}
+
+etherlink/%:
 	@make -C kernels/etherlink ${@:etherlink/%=%}
 
 assets/%:
