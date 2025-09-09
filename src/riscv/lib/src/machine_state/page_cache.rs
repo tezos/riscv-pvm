@@ -21,6 +21,7 @@
 #![cfg(test)]
 
 pub(crate) mod code_page_entry;
+pub(crate) mod jitted;
 pub(crate) mod state;
 
 use code_page_entry::CodePageEntry;
@@ -50,7 +51,7 @@ const INSTRUCTION_ENTRIES: usize = 1
         .expect("OFFSET_BITS is non-zero") as usize;
 
 /// Instance of the page cache.
-pub trait PageCache<CPE: CodePageEntry, MC: MemoryConfig, M: ManagerBase> {
+pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     /// Instantiate a new page cache instance.
     fn new() -> Self;
 
@@ -74,11 +75,11 @@ pub trait PageCache<CPE: CodePageEntry, MC: MemoryConfig, M: ManagerBase> {
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
-pub(crate) struct CodePage<'a, CPE: CodePageEntry> {
+pub(crate) struct CodePage<'a, CPE> {
     page: &'a mut [CPE; INSTRUCTION_ENTRIES],
 }
 
-impl<CPE: CodePageEntry> CodePage<'_, CPE> {
+impl<CPE> CodePage<'_, CPE> {
     /// Run a code page against the machine state.
     ///
     /// # SAFETY
@@ -95,6 +96,7 @@ impl<CPE: CodePageEntry> CodePage<'_, CPE> {
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
+        CPE: CodePageEntry<MC, M>,
         MC: MemoryConfig,
         M: ManagerReadWrite,
     {

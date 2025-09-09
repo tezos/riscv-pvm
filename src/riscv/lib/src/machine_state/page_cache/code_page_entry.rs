@@ -17,13 +17,16 @@ use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
 /// Functionality required to dispatch entrypoints in a code page.
 ///
 /// Entrypoints are semantically equivalent to instructions - but may
 /// take the opportunity to execute multiple instructions in a row before returning.
-pub trait CodePageEntry: AsRef<Instruction> + From<Instruction> + std::fmt::Debug + Sized {
+pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
+    AsRef<Instruction> + From<Instruction> + std::fmt::Debug + Sized
+{
     /// Entrypoints may be just-in-time compiled to more efficient code,
     /// if called frequently.
     ///
@@ -41,7 +44,7 @@ pub trait CodePageEntry: AsRef<Instruction> + From<Instruction> + std::fmt::Debu
     /// call to `run_entrypoint` within the same page, for the lifetime of that page. This ensures
     /// that the compiler in question is guaranteed to be alive, for as long as this entrypoint may
     /// be run.
-    unsafe fn run_entrypoint<MC, M>(
+    unsafe fn run_entrypoint(
         page: &mut [Self; INSTRUCTION_ENTRIES],
         core: &mut MachineCoreState<MC, M>,
         compiler: &mut Self::Compiler,
@@ -49,11 +52,10 @@ pub trait CodePageEntry: AsRef<Instruction> + From<Instruction> + std::fmt::Debu
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        MC: MemoryConfig,
         M: ManagerReadWrite;
 }
 
-impl CodePageEntry for Instruction {
+impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Instruction {
     type Compiler = InterpretedBlockBuilder;
 
     /// Run an entrypoint in a purely interpreted manner.
@@ -61,7 +63,7 @@ impl CodePageEntry for Instruction {
     /// # SAFETY
     ///
     /// This function is always safe to call.
-    unsafe fn run_entrypoint<MC, M>(
+    unsafe fn run_entrypoint(
         page: &mut [Self; INSTRUCTION_ENTRIES],
         core: &mut MachineCoreState<MC, M>,
         _compiler: &mut Self::Compiler,
@@ -69,7 +71,6 @@ impl CodePageEntry for Instruction {
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        MC: MemoryConfig,
         M: ManagerReadWrite,
     {
         super::run_code_page_interpreted(page, core, instr_pc, max_steps)

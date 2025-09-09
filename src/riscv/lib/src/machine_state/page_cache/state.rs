@@ -11,6 +11,8 @@
 //!
 //! [PageCache]: super::PageCache
 
+use std::marker::PhantomData;
+
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
 use crate::array_utils::boxed_from_fn;
@@ -35,7 +37,7 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
     .checked_sub(std::mem::size_of::<u16>() as u64)
     .expect("page-size must contain at least one halfword");
 
-struct PageEntry<CPE: CodePageEntry> {
+struct PageEntry<CPE> {
     // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
     // interpreted dispatch here.
     //
@@ -54,17 +56,19 @@ struct PageEntry<CPE: CodePageEntry> {
 /// connection with the concrete types that implement these traits.
 ///
 /// [`PageCache`]: super::PageCache
-pub struct PageCacheImpl<const PAGES: usize, CPE: CodePageEntry> {
+pub struct PageCacheImpl<const PAGES: usize, CPE, MC, M> {
     pages: Box<[Option<PageEntry<CPE>>; PAGES]>,
+    _pd: PhantomData<(MC, M)>,
 }
 
-impl<const PAGES: usize, CPE: CodePageEntry, MC: MemoryConfig, M: ManagerBase>
-    super::PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE>
+impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
+    super::PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE, MC, M>
 {
     /// Construct a new page cache, which will be entirely unpopulated.
     fn new() -> Self {
         Self {
             pages: boxed_from_fn(|| None),
+            _pd: PhantomData,
         }
     }
 
@@ -185,14 +189,13 @@ mod tests {
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
-    use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
     use crate::state_backend::owned_backend::Owned;
 
-    fn count_active_pages<const PAGES: usize, CPE: CodePageEntry>(
-        cache: &PageCacheImpl<PAGES, CPE>,
+    fn count_active_pages<const PAGES: usize, CPE, MC, M>(
+        cache: &PageCacheImpl<PAGES, CPE, MC, M>,
     ) -> usize {
         cache.pages.iter().fold(
             0,
@@ -204,8 +207,7 @@ mod tests {
     fn test_page_invalidation_resets_pages() {
         const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
 
-        let mut cache =
-            <PageCacheImpl<PAGES, Instruction> as PageCache<Instruction, M1M, Owned>>::new();
+        let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, Owned>::new();
 
         let make_page = || PageEntry {
             entries: boxed_array![Instruction::DEFAULT; INSTRUCTION_ENTRIES],
@@ -265,8 +267,7 @@ mod tests {
 
     backend_test!(test_populate_block_cache, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
-        let mut cache =
-            <PageCacheImpl<1, Instruction> as PageCache<Instruction, M4K, Owned>>::new();
+        let mut cache = PageCacheImpl::<1, Instruction, M4K, F>::new();
 
         // populating a non R+X page should fail
         cache.populate_page(15, &state);
@@ -322,7 +323,7 @@ mod tests {
         proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
-            let mut cache = <PageCacheImpl<PAGES, Instruction> as PageCache<Instruction, M1M, Owned>>::new();
+            let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, F>::new();
             let mut state = state.borrow_mut();
             state.reset();
 
@@ -360,7 +361,7 @@ mod tests {
                 Instruction::DEFAULT
             };
 
-            let mut code_page = PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, pc_addr).expect("code page populated");
+            let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
             let instr_from_code_page = code_page.page[pc_offset as usize / 2];
             assert_eq!(expected_instr, instr_from_code_page);
 
