@@ -88,6 +88,7 @@ test: build test-deps
 test-deps: 
 	@make -C ../.. dummy/build
 	@make -C ../.. block-cache-tester/build
+	@make -C ../.. signal-tester/build
 
 .PHONY: cobertura.xml
 cobertura.xml: test-deps
