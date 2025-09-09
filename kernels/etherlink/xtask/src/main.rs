@@ -23,10 +23,11 @@ const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
 const DEFAULT_INBOX: &str = "assets/etherlink-erc20-inbox.json";
 
 #[derive(Debug, Default)]
-struct BenchConfig {
+struct BuildConfig {
     static_inbox: bool,
     native: bool,
     tracing: bool,
+    profiling: bool,
     data_dir: Option<PathBuf>,
 }
 
@@ -49,33 +50,62 @@ enum Commands {
         /// Produce kernel run trace
         #[arg(short, long)]
         tracing: bool,
-        #[arg(env = "DATA_DIR")]
-        data_dir: Option<PathBuf>,
+        #[command(flatten)]
+        common: CommonOptions,
     },
+    Profile {
+        /// Sampling interval in microseconds
+        #[arg(short, long, default_value = "500")]
+        sample_interval_us: u64,
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct CommonOptions {
+    /// Data directory
+    #[arg(env = "DATA_DIR")]
+    data_dir: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let Commands::Bench {
-        static_inbox,
-        native,
-        tracing,
-        data_dir,
-    } = cli.command;
+    match cli.command {
+        Commands::Bench {
+            static_inbox,
+            native,
+            tracing,
+            common,
+        } => {
+            let config = BuildConfig {
+                static_inbox,
+                native,
+                tracing,
+                profiling: false,
+                data_dir: common.data_dir,
+            };
 
-    let config = BenchConfig {
-        static_inbox,
-        native,
-        tracing,
-        data_dir,
-    };
+            validate_config(&config)?;
+            run_benchmark(config)
+        }
+        Commands::Profile {
+            sample_interval_us,
+            common,
+        } => {
+            let config = BuildConfig {
+                profiling: true,
+                data_dir: common.data_dir,
+                ..BuildConfig::default()
+            };
 
-    validate_config(&config)?;
-    run_benchmark(config)
+            run_profile(config, sample_interval_us)
+        }
+    }
 }
 
-fn validate_config(config: &BenchConfig) -> Result<()> {
+fn validate_config(config: &BuildConfig) -> Result<()> {
     if config.native && !config.static_inbox {
         bail!("Native compilation without static inbox unsupported");
     }
@@ -87,7 +117,7 @@ fn validate_config(config: &BenchConfig) -> Result<()> {
     Ok(())
 }
 
-fn run_benchmark(config: BenchConfig) -> Result<()> {
+fn run_benchmark(config: BuildConfig) -> Result<()> {
     let repo_root = find_repo_root()?;
     let inbox_file = repo_root.join(DEFAULT_INBOX);
 
@@ -102,19 +132,62 @@ fn run_benchmark(config: BenchConfig) -> Result<()> {
     println!("[INFO]: Building Etherlink kernel");
     build_etherlink_kernel(&sh, &repo_root, &config, &inbox_file)?;
 
-    let data_dir = match &config.data_dir {
-        Some(dir) => dir.clone(),
-        None => {
-            let temp_dir = tempfile::tempdir()?;
-            temp_dir.keep()
-        }
-    };
+    let data_dir = init_data_dir(&config)?;
 
     run(&sh, &config, &repo_root, &inbox_file, &data_dir)?;
 
     if !config.tracing {
-        print_results(&sh, &repo_root, &inbox_file, &data_dir)?
+        print_bench_results(&sh, &repo_root, &inbox_file, &data_dir)?
     }
+
+    Ok(())
+}
+
+fn run_profile(config: BuildConfig, sample_interval_us: u64) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let inbox_file = repo_root.join(DEFAULT_INBOX);
+
+    let sh = Shell::new()?;
+
+    println!("[INFO]: Building RISC-V sandbox");
+    build_sandbox(&sh, &repo_root)?;
+
+    println!("[INFO]: Building Etherlink kernel");
+    build_etherlink_kernel(&sh, &repo_root, &config, &inbox_file)?;
+
+    let data_dir = init_data_dir(&config)?;
+
+    let sandbox_path = repo_root.join(SANDBOX_DIR).join(SANDBOX_BIN);
+    let kernel_path = repo_root
+        .join(ETHERLINK_DIR)
+        .join("target/riscv64gc-unknown-linux-musl/profiling/etherlink");
+    let output_path = data_dir.join("etherlink.profile");
+
+    let kernel_path_str = kernel_path.to_string_lossy();
+    let inbox_file_str = inbox_file.to_string_lossy();
+    let output_path_str = output_path.to_string_lossy();
+    let sample_interval_us_str = sample_interval_us.to_string();
+
+    let cmd_args = vec![
+        "run",
+        "--input",
+        kernel_path_str.as_ref(),
+        "--inbox-file",
+        inbox_file_str.as_ref(),
+        "--address",
+        DEFAULT_ROLLUP_ADDRESS,
+        "--sample-interval-us",
+        sample_interval_us_str.as_str(),
+        "--output",
+        output_path_str.as_ref(),
+    ];
+
+    println!("[INFO]: running {TX_COUNT} transfers (profiling)");
+    cmd!(sh, "{sandbox_path} {cmd_args...}")
+        .read()
+        .context("Failed to run RISC-V sandbox")?;
+
+    println!("[INFO]: Profile written to {output_path:?}");
 
     Ok(())
 }
@@ -154,7 +227,7 @@ fn build_bench_tool(sh: &Shell, repo_root: &Path) -> Result<()> {
 fn build_etherlink_kernel(
     sh: &Shell,
     repo_root: &Path,
-    config: &BenchConfig,
+    config: &BuildConfig,
     inbox_file: &Path,
 ) -> Result<()> {
     let etherlink_path = repo_root.join(ETHERLINK_DIR);
@@ -174,15 +247,24 @@ fn build_etherlink_kernel(
         None
     };
 
+    let profile_opt = if config.profiling {
+        Some("PROFILE=profiling")
+    } else {
+        None
+    };
+
     let target = if config.native {
         "build-kernel-native"
     } else {
         "build-kernel"
     };
 
-    cmd!(sh, "make -C {etherlink_path} {target} {features...}")
-        .run()
-        .context("Failed to build Etherlink kernel")
+    cmd!(
+        sh,
+        "make -C {etherlink_path} {target} {features...} {profile_opt...}"
+    )
+    .run()
+    .context("Failed to build Etherlink kernel")
 }
 
 fn get_native_target(sh: &Shell) -> Result<String> {
@@ -205,7 +287,7 @@ fn get_native_target(sh: &Shell) -> Result<String> {
 
 fn run(
     sh: &Shell,
-    config: &BenchConfig,
+    config: &BuildConfig,
     repo_root: &Path,
     inbox_file: &Path,
     data_dir: &Path,
@@ -231,7 +313,7 @@ fn run(
 
 fn run_etherlink(
     sh: &Shell,
-    config: &BenchConfig,
+    config: &BuildConfig,
     repo_root: &Path,
     inbox_file: &Path,
     data_dir: &Path,
@@ -290,7 +372,12 @@ fn run_etherlink(
     Ok(())
 }
 
-fn print_results(sh: &Shell, repo_root: &Path, inbox_file: &Path, data_dir: &Path) -> Result<()> {
+fn print_bench_results(
+    sh: &Shell,
+    repo_root: &Path,
+    inbox_file: &Path,
+    data_dir: &Path,
+) -> Result<()> {
     let log_file = data_dir.join("etherlink.log");
     let inbox_bench_path = repo_root.join(ETHERLINK_DIR).join("inbox-bench");
     let txs = TX_COUNT.to_string();
@@ -306,4 +393,14 @@ fn print_results(sh: &Shell, repo_root: &Path, inbox_file: &Path, data_dir: &Pat
     println!("\x1b[0m");
 
     Ok(())
+}
+
+fn init_data_dir(config: &BuildConfig) -> Result<PathBuf> {
+    match &config.data_dir {
+        Some(dir) => Ok(dir.clone()),
+        None => {
+            let temp_dir = tempfile::tempdir()?;
+            Ok(temp_dir.keep())
+        }
+    }
 }

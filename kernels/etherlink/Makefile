@@ -12,6 +12,13 @@ ifneq ($(FEATURES),)
 FEATURES_OPT := --features "$(FEATURES)"
 endif
 
+# Build the kernel in release mode, unless a profile is passed
+ifneq ($(PROFILE),)
+BUILD_OPT := --profile $(PROFILE)
+else
+BUILD_OPT := --release
+endif
+
 # TODO RV-769: Remove when xtask alias works in this directory
 XTASK := cargo run $(NATIVE_OPT) -p xtask
 
@@ -30,7 +37,7 @@ build-kernel: cargo-build-kernel
 
 build-kernel-native: cargo-build-kernel-native
 
-test: bench-kernel bench-kernel-native trace-kernel
+test: bench-kernel bench-kernel-native trace-kernel profile-kernel
 
 check: cargo-format cargo-check cargo-clippy cargo-check-docs
 
@@ -55,10 +62,10 @@ cargo-check-docs:
 	@INBOX_FILE=$(INBOX_FILE) cargo doc --all-features --document-private-items --no-deps
 
 cargo-build-kernel:
-	@INBOX_FILE=$(INBOX_FILE) cargo build --package etherlink --release $(FEATURES_OPT)
+	@INBOX_FILE=$(INBOX_FILE) cargo build --package etherlink $(BUILD_OPT) $(FEATURES_OPT)
 
 cargo-build-kernel-native:
-	@INBOX_FILE=$(INBOX_FILE) cargo build --package etherlink --release $(FEATURES_OPT) $(NATIVE_OPT)
+	@INBOX_FILE=$(INBOX_FILE) cargo build --package etherlink $(BUILD_OPT) $(FEATURES_OPT) $(NATIVE_OPT)
 
 cargo-build-inbox-bench:
 	@cargo build $(NATIVE_OPT) --bin inbox-bench --release
@@ -72,6 +79,9 @@ bench-kernel-native: build-kernel-native
 
 trace-kernel:
 	@$(XTASK) bench -t
+
+profile-kernel:
+	@$(XTASK) profile -s 500
 
 # Mark all targets as phony to make sure they're always executed
 .PHONY: all $(MAKECMDGOALS)
