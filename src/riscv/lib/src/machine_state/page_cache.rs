@@ -20,7 +20,10 @@
 // TODO: RV-767 - replace block cache with page cache
 #![cfg(test)]
 
+pub(crate) mod code_page_entry;
 pub(crate) mod state;
+
+use code_page_entry::CodePageEntry;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -47,13 +50,13 @@ const INSTRUCTION_ENTRIES: usize = 1
         .expect("OFFSET_BITS is non-zero") as usize;
 
 /// Instance of the page cache.
-pub trait PageCache<MC: MemoryConfig, M: ManagerBase> {
+pub trait PageCache<CPE: CodePageEntry, MC: MemoryConfig, M: ManagerBase> {
     /// Instantiate a new page cache instance.
     fn new() -> Self;
 
     /// Retrieve code page that is dispatchable against the [`MachineCoreState`]. If found, such a
     /// page will contain the code for `addr`.
-    fn get_code_page(&mut self, addr: Address) -> Option<CodePage<'_>>
+    fn get_code_page(&mut self, addr: Address) -> Option<CodePage<'_, CPE>>
     where
         M: ManagerRead;
 
@@ -71,72 +74,93 @@ pub trait PageCache<MC: MemoryConfig, M: ManagerBase> {
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
-pub(crate) struct CodePage<'a> {
-    page: &'a [Instruction; INSTRUCTION_ENTRIES],
+pub(crate) struct CodePage<'a, CPE: CodePageEntry> {
+    page: &'a mut [CPE; INSTRUCTION_ENTRIES],
 }
 
-impl CodePage<'_> {
+impl<CPE: CodePageEntry> CodePage<'_, CPE> {
     /// Run a code page against the machine state.
-    pub(crate) fn run<MC, M, B>(
-        &self,
+    ///
+    /// # SAFETY
+    ///
+    /// The `compiler` must always be the same compiler when dispatching a given page (for the
+    /// lifetime of that page).
+    ///
+    /// This ensures dispatching can ensure the compiler's state is kept alive.
+    pub(crate) unsafe fn run<MC, M>(
+        &mut self,
         core: &mut MachineCoreState<MC, M>,
-        // TODO: RV-765: add support for inline JIT
-        //       for now, we allow anything to be passed as the 'dispatch compiler'.
-        _compiler: B,
-        mut instr_pc: Address,
+        compiler: &mut CPE::Compiler,
+        instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
         MC: MemoryConfig,
         M: ManagerReadWrite,
     {
-        let mut result = StepManyResult::ZERO;
+        // SAFETY: the compiler remains the same for the lifetime of the page this code-page
+        // references
+        unsafe { CPE::run_entrypoint(self.page, core, compiler, instr_pc, max_steps) }
+    }
+}
 
-        // Since we know the instruction pc to always be halfword-aligned, there are half
-        // as many entries as the page size.
-        let mut instr_offset = (instr_pc & PAGE_OFFSET_MASK) >> 1;
+fn run_code_page_interpreted<I, MC, M>(
+    code_page: &[I; INSTRUCTION_ENTRIES],
+    core: &mut MachineCoreState<MC, M>,
+    mut instr_pc: Address,
+    max_steps: usize,
+) -> StepManyResult<Exception>
+where
+    I: AsRef<Instruction>,
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let mut result = StepManyResult::ZERO;
 
-        while max_steps > result.steps && instr_offset < INSTRUCTION_ENTRIES as u64 {
-            let instr = &self.page[instr_offset as usize];
+    // Since we know the instruction pc to always be halfword-aligned, there are half
+    // as many entries as the page size.
+    let mut instr_offset = (instr_pc & PAGE_OFFSET_MASK) >> 1;
 
-            match instr.run(core) {
-                Ok(ProgramCounterUpdate::Next(width)) => {
-                    instr_pc += width as u64;
+    while max_steps > result.steps && instr_offset < INSTRUCTION_ENTRIES as u64 {
+        let instr = code_page[instr_offset as usize].as_ref();
 
-                    // we update the offset by half the width, as the offset is halfword aligned
-                    instr_offset += (width as u64) >> 1;
+        match instr.run(core) {
+            Ok(ProgramCounterUpdate::Next(width)) => {
+                instr_pc += width as u64;
 
-                    core.hart.pc.write(instr_pc);
-                    result.steps += 1;
-                }
+                // we update the offset by half the width, as the offset is halfword aligned
+                instr_offset += (width as u64) >> 1;
 
-                Ok(ProgramCounterUpdate::Set(new_instr_pc)) => {
-                    // A jump to a new instruction requires us to exit this loop. The targeted
-                    // instruction may not be part of the current page, but either way we should
-                    // allow the target of the jump to be considered as a potential hot-spot.
-                    core.hart.pc.write(new_instr_pc);
-                    result.steps += 1;
-                    break;
-                }
+                core.hart.pc.write(instr_pc);
+                result.steps += 1;
+            }
 
-                Ok(ProgramCounterUpdate::Relative(offset)) => {
-                    // While relative jumps are likely to be in the same page, we exit at this point to allow
-                    // the jump target to be considered as a potential hot-spot.
-                    core.hart.pc.write(instr_pc.wrapping_add_signed(offset));
-                    result.steps += 1;
-                    break;
-                }
+            Ok(ProgramCounterUpdate::Set(new_instr_pc)) => {
+                // A jump to a new instruction requires us to exit this loop. The targeted
+                // instruction may not be part of the current page, but either way we should
+                // allow the target of the jump to be considered as a potential hot-spot.
+                core.hart.pc.write(new_instr_pc);
+                result.steps += 1;
+                break;
+            }
 
-                Err(exception) => {
-                    // Exceptions are handled outside of block execution. So we exit the loop.
-                    result.error = Some(exception);
-                    break;
-                }
+            Ok(ProgramCounterUpdate::Relative(offset)) => {
+                // While relative jumps are likely to be in the same page, we exit at this point to allow
+                // the jump target to be considered as a potential hot-spot.
+                core.hart.pc.write(instr_pc.wrapping_add_signed(offset));
+                result.steps += 1;
+                break;
+            }
+
+            Err(exception) => {
+                // Exceptions are handled outside of block execution. So we exit the loop.
+                result.error = Some(exception);
+                break;
             }
         }
-
-        result
     }
+
+    result
 }
 
 #[cfg(test)]
@@ -158,7 +182,7 @@ mod tests {
 
     struct DispatchTest<'a, F: TestBackendFactory> {
         state: &'a std::cell::RefCell<MachineCoreState<M4K, F>>,
-        dispatch: &'a CodePage<'a>,
+        dispatch: &'a std::cell::RefCell<CodePage<'a, Instruction>>,
         pc_addr: u64,
         max_steps: usize,
         expected_steps: usize,
@@ -171,12 +195,15 @@ mod tests {
         let mut state = test.state.borrow_mut();
         state.reset();
 
-        let res = test.dispatch.run(
-            &mut state,
-            InterpretedBlockBuilder,
-            test.pc_addr,
-            test.max_steps,
-        );
+        // SAFETY: interpreted mode is always safe to call
+        let res = unsafe {
+            test.dispatch.borrow_mut().run(
+                &mut state,
+                &mut InterpretedBlockBuilder,
+                test.pc_addr,
+                test.max_steps,
+            )
+        };
 
         assert_eq!(res.steps, test.expected_steps);
         assert_eq!(res.error, test.expected_exception);
@@ -186,10 +213,12 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> =
+        let mut page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> =
             boxed_from_fn(|| Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Compressed));
 
-        let dispatch = &CodePage { page: &page_entry };
+        let dispatch = &std::cell::RefCell::new(CodePage {
+            page: &mut page_entry,
+        });
 
         let state = MachineCoreState::<M4K, F>::new();
         let state = &std::cell::RefCell::new(state);
@@ -234,7 +263,7 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> = boxed_from_fn({
+        let mut page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> = boxed_from_fn({
             let mut idx = 0;
             move || {
                 // we put uncompressed instructions on 4-byte aligned addresses
@@ -250,7 +279,9 @@ mod tests {
             }
         });
 
-        let dispatch = &CodePage { page: &page_entry };
+        let dispatch = &std::cell::RefCell::new(CodePage {
+            page: &mut page_entry,
+        });
 
         let state = MachineCoreState::<M4K, F>::new();
         let state = &std::cell::RefCell::new(state);
@@ -343,11 +374,12 @@ mod tests {
             page_entry.push(Instruction::new_nop(InstrWidth::Compressed));
         }
 
-        let dispatch = &CodePage {
-            page: &page_entry
-                .try_into()
-                .expect("page_entry has INSTRUCTION_ENTRIES entries"),
-        };
+        let mut page_entry = page_entry
+            .try_into()
+            .expect("page_entry has INSTRUCTION_ENTRIES entries");
+        let dispatch = &std::cell::RefCell::new(CodePage {
+            page: &mut page_entry,
+        });
 
         let state = MachineCoreState::<M4K, F>::new();
         let state = &std::cell::RefCell::new(state);
