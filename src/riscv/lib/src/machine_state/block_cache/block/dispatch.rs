@@ -173,6 +173,35 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> Defaul
     }
 }
 
+impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug
+    for DispatchTarget<C, D, MC>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fun = self.get();
+
+        #[derive(Debug)]
+        enum Status {
+            Interpreted,
+            NotCompiled,
+            Compiled,
+        }
+
+        let status = if fun as usize == C::run_block_interpreted as usize {
+            Status::Interpreted
+        } else if fun as usize == C::run_block_not_compiled as usize {
+            Status::NotCompiled
+        } else {
+            Status::Compiled
+        };
+
+        f.debug_struct("DispatchTarget")
+            .field("status", &status)
+            .field("fun", &fun)
+            .field("remaining_calls", &self.remaining_calls)
+            .finish()
+    }
+}
+
 /// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
 /// said block in the given dispatch target.
 pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
@@ -397,4 +426,55 @@ struct CompilationRequest {
     instr: Vec<Instruction>,
     fun: Arc<AtomicUsize>,
     program_counter: Address,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DispatchTarget;
+    use crate::jit::state_access::ExceptionCode;
+    use crate::machine_state::MachineCoreState;
+    use crate::machine_state::block_cache::block::InlineCompiler;
+    use crate::machine_state::block_cache::block::dispatch::CodeDispatcher;
+    use crate::machine_state::memory::Address;
+    use crate::machine_state::memory::M4K;
+    use crate::machine_state::page_cache::jitted::JittedPage;
+    use crate::state_backend::owned_backend::Owned;
+
+    #[test]
+    fn test_dispatch_debug_classification() {
+        let dispatch = DispatchTarget::<JittedPage<_, _>, InlineCompiler<_>, M4K>::default();
+        let format = format!("{dispatch:?}");
+
+        assert!(
+            format.contains("status: Interpreted"),
+            "unexpected formatting \"{format}\""
+        );
+
+        dispatch.set(<JittedPage<_, _> as CodeDispatcher<_, _>>::run_block_not_compiled);
+        let format = format!("{dispatch:?}");
+
+        assert!(
+            format.contains("status: NotCompiled"),
+            "unexpected formatting \"{format}\""
+        );
+
+        unsafe extern "C" fn compiled_dummy<C, D>(
+            _: &mut C,
+            _: &mut MachineCoreState<M4K, Owned>,
+            _: Address,
+            _: usize,
+            _: &mut ExceptionCode,
+            _: &mut D,
+        ) -> usize {
+            0
+        }
+
+        dispatch.set(compiled_dummy);
+        let format = format!("{dispatch:?}");
+
+        assert!(
+            format.contains("status: Compiled"),
+            "unexpected formatting \"{format}\""
+        );
+    }
 }
