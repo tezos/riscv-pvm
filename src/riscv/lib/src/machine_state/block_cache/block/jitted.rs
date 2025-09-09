@@ -6,6 +6,7 @@
 //! JIT-compiled blocks of instructions
 
 use super::ICallPlaced;
+use super::dispatch::CodeDispatcher;
 use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
@@ -33,10 +34,21 @@ use crate::traps::Exception;
 /// Blocks are compiled upon calling [`Block::run_block`], in a *stop the world* fashion.
 pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     fallback: interpreted::Interpreted<MC, Owned>,
-    dispatch: DispatchTarget<D, MC>,
+    dispatch: DispatchTarget<Self, D, MC>,
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
+    /// Get the number of times this block has been called.
+    ///
+    /// For the case of Inline JIT, this is exactly equal to the number of times the JIT-compiled
+    /// function has been called (provided that compilation was successful).
+    #[cfg(test)]
+    pub(crate) fn called_count(&self) -> usize {
+        self.dispatch.called_times()
+    }
+}
+
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted<D, MC> {
     /// The default initial dispatcher for inline jit.
     ///
     /// This will run the block in interpreted mode by default, but will attempt to JIT-compile
@@ -48,7 +60,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this block may be run via [`Block::run_block`].
-    pub(super) unsafe extern "C" fn run_block_interpreted(
+    unsafe extern "C" fn run_block_interpreted(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -86,7 +98,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this block may be run via [`Block::run_block`].
-    pub(super) unsafe extern "C" fn run_block_not_compiled(
+    unsafe extern "C" fn run_block_not_compiled(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -110,15 +122,6 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             .unwrap_or(ExceptionCode::NoException);
 
         block_result.steps
-    }
-
-    /// Get the number of times this block has been called.
-    ///
-    /// For the case of Inline JIT, this is exactly equal to the number of times the JIT-compiled
-    /// function has been called (provided that compilation was successful).
-    #[cfg(test)]
-    pub(crate) fn called_count(&self) -> usize {
-        self.dispatch.called_times()
     }
 }
 
