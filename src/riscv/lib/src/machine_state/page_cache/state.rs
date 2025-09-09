@@ -12,6 +12,7 @@
 //! [PageCache]: super::PageCache
 
 use super::INSTRUCTION_ENTRIES;
+use super::code_page_entry::CodePageEntry;
 use crate::array_utils::boxed_from_fn;
 use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
@@ -34,10 +35,13 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
     .checked_sub(std::mem::size_of::<u16>() as u64)
     .expect("page-size must contain at least one halfword");
 
-struct PageEntry {
+struct PageEntry<CPE: CodePageEntry> {
     // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
     // interpreted dispatch here.
-    entries: Box<[Instruction; INSTRUCTION_ENTRIES]>,
+    //
+    // TODO: RV-790: consider raising this pointer (Box) out of `PageEntrye` to exploit the
+    // `Option<Box<_>>` optimisation.
+    entries: Box<[CPE; INSTRUCTION_ENTRIES]>,
 }
 
 /// Default implementor of [`PageCache`].
@@ -50,12 +54,12 @@ struct PageEntry {
 /// connection with the concrete types that implement these traits.
 ///
 /// [`PageCache`]: super::PageCache
-pub struct PageCacheImpl<const PAGES: usize> {
-    pages: Box<[Option<PageEntry>; PAGES]>,
+pub struct PageCacheImpl<const PAGES: usize, CPE: CodePageEntry> {
+    pages: Box<[Option<PageEntry<CPE>>; PAGES]>,
 }
 
-impl<const PAGES: usize, MC: MemoryConfig, M: ManagerBase> super::PageCache<MC, M>
-    for PageCacheImpl<PAGES>
+impl<const PAGES: usize, CPE: CodePageEntry, MC: MemoryConfig, M: ManagerBase>
+    super::PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE>
 {
     /// Construct a new page cache, which will be entirely unpopulated.
     fn new() -> Self {
@@ -65,7 +69,7 @@ impl<const PAGES: usize, MC: MemoryConfig, M: ManagerBase> super::PageCache<MC, 
     }
 
     /// Fetch a dispatch call, if the address corresponds to a populated page in the PageCache.
-    fn get_code_page(&mut self, address: Address) -> Option<super::CodePage<'_>>
+    fn get_code_page(&mut self, address: Address) -> Option<super::CodePage<'_, CPE>>
     where
         M: ManagerRead,
     {
@@ -87,7 +91,7 @@ impl<const PAGES: usize, MC: MemoryConfig, M: ManagerBase> super::PageCache<MC, 
     where
         M: ManagerReadWrite,
     {
-        let mut instructions = Vec::with_capacity(INSTRUCTION_ENTRIES);
+        let mut entries = Vec::with_capacity(INSTRUCTION_ENTRIES);
 
         let page_start = address & PAGE_MASK;
 
@@ -109,7 +113,7 @@ impl<const PAGES: usize, MC: MemoryConfig, M: ManagerBase> super::PageCache<MC, 
                 return;
             };
 
-            instructions.push(instr);
+            entries.push(CPE::from(instr));
         }
 
         // final halfword may need to use ForceFetchRun mechanism if it overlaps page boundary
@@ -132,14 +136,14 @@ impl<const PAGES: usize, MC: MemoryConfig, M: ManagerBase> super::PageCache<MC, 
             Instruction::DEFAULT
         };
 
-        instructions.push(final_entry);
+        entries.push(CPE::from(final_entry));
 
         if let Some(page_entry) = self
             .pages
             .get_mut((page_start >> OFFSET_BITS.get()) as usize)
         {
             *page_entry = Some(PageEntry {
-                entries: instructions
+                entries: entries
                     .try_into()
                     .expect("instructions has exactly the length expected for PageEntry::entries"),
             });
@@ -181,12 +185,15 @@ mod tests {
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
+    use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
     use crate::state_backend::owned_backend::Owned;
 
-    fn count_active_pages<const PAGES: usize>(cache: &PageCacheImpl<PAGES>) -> usize {
+    fn count_active_pages<const PAGES: usize, CPE: CodePageEntry>(
+        cache: &PageCacheImpl<PAGES, CPE>,
+    ) -> usize {
         cache.pages.iter().fold(
             0,
             |acc, page_entry| if page_entry.is_some() { acc + 1 } else { acc },
@@ -197,7 +204,8 @@ mod tests {
     fn test_page_invalidation_resets_pages() {
         const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
 
-        let mut cache = <PageCacheImpl<PAGES> as PageCache<M1M, Owned>>::new();
+        let mut cache =
+            <PageCacheImpl<PAGES, Instruction> as PageCache<Instruction, M1M, Owned>>::new();
 
         let make_page = || PageEntry {
             entries: boxed_array![Instruction::DEFAULT; INSTRUCTION_ENTRIES],
@@ -212,45 +220,53 @@ mod tests {
         //
         // we expect the final page to not be invalidated - as upper bound of the half-open range
         // ends on the first byte of the page.
-        PageCache::<M1M, Owned>::invalidate_pages(
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
             &mut cache,
             PAGE_SIZE.get()..(5 * PAGE_SIZE.get()),
         );
         assert_eq!(count_active_pages(&cache), 12);
-        assert!(PageCache::<M1M, Owned>::get_code_page(&mut cache, 0).is_some());
+        assert!(PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, 0).is_some());
 
         for i in 1..5 {
             assert!(
-                PageCache::<M1M, Owned>::get_code_page(&mut cache, i * PAGE_SIZE.get()).is_none()
+                PageCache::<Instruction, M1M, Owned>::get_code_page(
+                    &mut cache,
+                    i * PAGE_SIZE.get()
+                )
+                .is_none()
             );
         }
 
-        assert!(PageCache::<M1M, Owned>::get_code_page(&mut cache, 5 * PAGE_SIZE.get()).is_some());
+        assert!(
+            PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, 5 * PAGE_SIZE.get())
+                .is_some()
+        );
 
         // invalidate a range - non-page aligned
         //
         // in this instance, we expect both the starting and ending pages to be invalidated.
-        PageCache::<M1M, Owned>::invalidate_pages(
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
             &mut cache,
             (10 * PAGE_SIZE.get() + 1)..(11 * PAGE_SIZE.get() + 1),
         );
         assert_eq!(count_active_pages(&cache), 10);
 
         // invalidate an already invalidated range does nothing
-        PageCache::<M1M, Owned>::invalidate_pages(
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
             &mut cache,
             PAGE_SIZE.get()..(4 * PAGE_SIZE.get()),
         );
         assert_eq!(count_active_pages(&cache), 10);
 
         // invalidate all addresses clears all pages
-        PageCache::<M1M, Owned>::invalidate_pages(&mut cache, 0..u64::MAX);
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 0..u64::MAX);
         assert_eq!(count_active_pages(&cache), 0);
     }
 
     backend_test!(test_populate_block_cache, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
-        let mut cache = <PageCacheImpl<1> as PageCache<M4K, Owned>>::new();
+        let mut cache =
+            <PageCacheImpl<1, Instruction> as PageCache<Instruction, M4K, Owned>>::new();
 
         // populating a non R+X page should fail
         cache.populate_page(15, &state);
@@ -306,7 +322,7 @@ mod tests {
         proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
-            let mut cache = <PageCacheImpl<PAGES> as PageCache<M1M, Owned>>::new();
+            let mut cache = <PageCacheImpl<PAGES, Instruction> as PageCache<Instruction, M1M, Owned>>::new();
             let mut state = state.borrow_mut();
             state.reset();
 
@@ -344,7 +360,7 @@ mod tests {
                 Instruction::DEFAULT
             };
 
-            let code_page = PageCache::<M1M, Owned>::get_code_page(&mut cache, pc_addr).expect("code page populated");
+            let mut code_page = PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, pc_addr).expect("code page populated");
             let instr_from_code_page = code_page.page[pc_offset as usize / 2];
             assert_eq!(expected_instr, instr_from_code_page);
 
@@ -352,7 +368,8 @@ mod tests {
             let pc_last_halfword = page_start + (PAGE_SIZE.get() - InstrWidth::Compressed as u64);
             let last_halfword = state.fetch_instr_halfword(pc_last_halfword).unwrap();
             if !crate::parser::is_compressed(last_halfword.data) {
-                let step_res = code_page.run(&mut state, InterpretedBlockBuilder, pc_last_halfword, 1);
+                // SAFETY: interpreted is always safe to call
+                let step_res = unsafe { code_page.run(&mut state, &mut InterpretedBlockBuilder, pc_last_halfword, 1) };
                 assert_eq!(step_res.error, Some(crate::traps::Exception::ForceFetchRun));
                 assert_eq!(step_res.steps, 0, "raising an exception does not complete a step");
             }
