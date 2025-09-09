@@ -124,7 +124,7 @@ fn find_repo_root() -> Result<PathBuf> {
 
     let mut dir = current_dir.as_path();
     loop {
-        if dir.ends_with("riscv-pvm") && dir.join(".github").exists() {
+        if dir.join(".github").exists() {
             return Ok(dir.to_path_buf());
         }
 
