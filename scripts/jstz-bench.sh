@@ -95,7 +95,7 @@ if [ -n "$NATIVE" ] && [ -z "$STATIC_INBOX" ]; then
 fi
 
 echo "[INFO]: building sandbox"
-make -C src/riscv "SANDBOX_ENABLE_FEATURES=${SANDBOX_ENABLE_FEATURES[*]}" "$SANDBOX_BIN" &> /dev/null
+make -C tools/sandbox "SANDBOX_ENABLE_FEATURES=${SANDBOX_ENABLE_FEATURES[*]}" "$SANDBOX_BIN" &> /dev/null
 echo "[INFO]: building bench tool"
 make -C kernels/jstz inbox-bench &> /dev/null
 
@@ -123,7 +123,7 @@ build_jstz_riscv() {
 
 run_jstz_riscv() {
   LOG="$DATA_DIR/log.$1.log"
-  $PROFILING_WRAPPER "src/riscv/$SANDBOX_BIN" run \
+  $PROFILING_WRAPPER "tools/sandbox/$SANDBOX_BIN" run \
     "${JSTZ_SANDBOX_PARAMS[@]}" \
     --inbox-file "$RUN_INBOX" \
     --address "$DEFAULT_ROLLUP_ADDRESS" \

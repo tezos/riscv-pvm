@@ -15,7 +15,7 @@ use xshell::Shell;
 use xshell::cmd;
 
 const ETHERLINK_DIR: &str = "kernels/etherlink";
-const RISCV_DIR: &str = "src/riscv";
+const SANDBOX_DIR: &str = "tools/sandbox";
 const SANDBOX_BIN: &str = "riscv-sandbox";
 
 const TX_COUNT: usize = 200;
@@ -136,9 +136,9 @@ fn find_repo_root() -> Result<PathBuf> {
 }
 
 fn build_sandbox(sh: &Shell, repo_root: &Path) -> Result<()> {
-    let src_riscv = repo_root.join(RISCV_DIR);
+    let sandbox_dir = repo_root.join(SANDBOX_DIR);
 
-    cmd!(sh, "make -C {src_riscv} {SANDBOX_BIN}")
+    cmd!(sh, "make -C {sandbox_dir} {SANDBOX_BIN}")
         .run()
         .context("Failed to build sandbox")
 }
@@ -251,7 +251,7 @@ fn run_etherlink(
 
         (output, data_dir.join("etherlink.log"))
     } else {
-        let sandbox_path = repo_root.join(RISCV_DIR).join(SANDBOX_BIN);
+        let sandbox_path = repo_root.join(SANDBOX_DIR).join(SANDBOX_BIN);
         let kernel_path = repo_root
             .join(ETHERLINK_DIR)
             .join("target/riscv64gc-unknown-linux-musl/release/etherlink");
