@@ -7,7 +7,7 @@ pub mod error;
 mod fds;
 mod fs;
 mod memory;
-mod parameters;
+pub(crate) mod parameters;
 mod rng;
 pub(crate) mod signals;
 
@@ -16,13 +16,14 @@ use std::ffi::CStr;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
-use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 
 use self::addr::VirtAddr;
 use self::error::Error;
 use self::memory::STACK_SIZE;
+use self::parameters::ECALL_WIDTH;
+use self::parameters::SystemCallResultExecution;
 use super::Pvm;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
@@ -38,7 +39,6 @@ use crate::machine_state::memory::Permissions;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
-use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
