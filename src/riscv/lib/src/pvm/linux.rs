@@ -527,10 +527,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         B: Block<MC, M>,
         M: ManagerReadWrite,
     {
-        // We need to jump to the next instruction. The ECall instruction which triggered this
-        // function is 4 byte wide.
         let pc = machine.core.hart.pc.read().saturating_add(4);
-        machine.core.hart.pc.write(pc);
 
         /// Read an argument from a register and interpret it as a system call argument.
         /// If that fails, log the failure.
@@ -743,6 +740,12 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         // Programs targeting a Linux kernel pass the system call number in register a7
         let system_call_no = machine.core.hart.xregisters.read(registers::a7);
+
+        if system_call_no != SBI_FIRMWARE_TEZOS {
+            // We need to jump to the next instruction. The ECall instruction which triggered this
+            // function is 4 byte wide.
+            machine.core.hart.pc.write(pc);
+        }
 
         let result = match system_call_no {
             GETCWD => dispatch2!(getcwd, &mut machine.core),

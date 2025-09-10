@@ -28,6 +28,10 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_SECP256K1_VERIFY;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_secp256k1_bulk_verify`
+pub const SBI_TEZOS_SECP256K1_BULK_VERIFY: u64 = 0x0d;
+
 /// Maximum size of pvm memory access by a host function in bytes
 /// To limit size of proofs in refutation games
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
@@ -364,14 +368,26 @@ where
 {
     let sbi_function = machine.hart.xregisters.read(a6);
     match sbi_function {
-        SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
-        SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
-        SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
-        SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
-        SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
-        SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
-        SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
-        _ => handle_not_supported(&mut machine.hart.xregisters),
+        // TODO: RV-776: Introduce parallel system call handler here
+        // Below line is present to make linter happy temporarily
+        SBI_TEZOS_SECP256K1_BULK_VERIFY => 1,
+        sequential => {
+            // We need to jump to the next instruction. The ECall instruction which triggered this
+            // function is 4 byte wide.
+            let pc = machine.hart.pc.read().saturating_add(4);
+            machine.hart.pc.write(pc);
+
+            match sequential {
+                SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
+                SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
+                SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
+                SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
+                SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
+                SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
+                SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
+                _ => handle_not_supported(&mut machine.hart.xregisters),
+            }
+            1
+        }
     }
-    1
 }
