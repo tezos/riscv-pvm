@@ -87,6 +87,23 @@ impl_dyn_value_prim!(i64);
 impl_dyn_value_prim!(u128);
 impl_dyn_value_prim!(i128);
 
+impl Elem for bool {
+    const STORED_SIZE: NonZeroUsize =
+        NonZeroUsize::new(std::mem::size_of::<bool>()).expect("Type has zero size");
+
+    #[inline]
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        (unsafe { u8::read_unaligned(source) } != 0)
+    }
+
+    #[inline]
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        unsafe {
+            (if self { 1 } else { 0 }).write_unaligned(dest);
+        }
+    }
+}
+
 impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
     const STORED_SIZE: NonZeroUsize = {
         let len = NonZeroUsize::new(LEN).expect("Array length must be non-zero");
