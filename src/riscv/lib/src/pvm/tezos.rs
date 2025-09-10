@@ -34,6 +34,8 @@ pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 use super::PvmStatus;
 use super::reveals::RevealRequest;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::memory::Address;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XRegisters;
@@ -43,9 +45,60 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
+use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
+
+/// Status of a Tezos host function call
+enum CallStatus {
+    /// The call is suspended and will be resumed later.
+    Suspended,
+
+    /// The host function handler has finished successfully.
+    Success(XValue),
+
+    /// The host function handler errored.
+    Error(SbiError),
+}
+
+/// The result of handling a host function.
+/// This is similar to [`crate::pvm::linux::parameters::SystemCallResultExecution`] but there
+/// are slight differences between what we allow tezos and linux calls to do.
+struct TezosCallResult {
+    /// On success, the value is written to output register `a0`.
+    status: CallStatus,
+
+    /// Usually, handling a host function involves an increment to the pc.
+    pc_update: ProgramCounterUpdate<Address>,
+}
+
+impl TezosCallResult {
+    const SUSPENDED: Self = TezosCallResult {
+        status: CallStatus::Suspended,
+        pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+    };
+
+    /// The error is handled by the caller (kernel)
+    /// We move to the next instr (increment the pc)
+    fn error(err: SbiError) -> Self {
+        Self {
+            status: CallStatus::Error(err),
+            pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+        }
+    }
+
+    /// Usually the PC is incremented after handling an ECALL
+    fn incr_pc<T: Into<u64>>(res: Result<T, SbiError>) -> Self {
+        Self {
+            status: match res {
+                Ok(value) => CallStatus::Success(value.into()),
+                Err(err) => CallStatus::Error(err),
+            },
+            pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+        }
+    }
+}
 
 /// Write the SBI error code as the return value.
 #[inline]
@@ -171,12 +224,13 @@ where
 
 /// Handle a [SBI_TEZOS_INBOX_NEXT] call.
 #[inline]
-fn handle_tezos_inbox_next<M>(status: &mut Cell<PvmStatus, M>)
+fn handle_tezos_inbox_next<M>(status: &mut Cell<PvmStatus, M>) -> TezosCallResult
 where
     M: ManagerWrite,
 {
     // Prepare the EE state for an input tick.
     status.write(PvmStatus::WaitingForInput);
+    TezosCallResult::SUSPENDED
 }
 
 /// Produce a Ed25519 signature.
@@ -316,7 +370,8 @@ fn handle_tezos_reveal<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     reveal_request: &mut RevealRequest<M>,
     status: &mut Cell<PvmStatus, M>,
-) where
+) -> TezosCallResult
+where
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -330,24 +385,23 @@ fn handle_tezos_reveal<MC, M>(
         .read_all(request_address, &mut buffer)
         .is_err()
     {
-        return sbi_return_error(&mut machine.hart.xregisters, SbiError::InvalidAddress);
+        return TezosCallResult::error(SbiError::InvalidAddress);
     }
 
     // TODO: RV-425 Cross-page memory accesses are not translated correctly
     reveal_request.bytes.write_all(0, &buffer);
     reveal_request.size.write(request_size);
     status.write(PvmStatus::WaitingForReveal);
+
+    TezosCallResult::SUSPENDED
 }
 
 /// Handle unsupported SBI calls.
 #[inline(always)]
-fn handle_not_supported<M>(xregisters: &mut XRegisters<M>)
-where
-    M: ManagerWrite,
-{
+fn handle_not_supported() -> TezosCallResult {
     // SBI requires us to indicate that we don't support this function by returning
     // `ERR_NOT_SUPPORTED`.
-    sbi_return_error(xregisters, SbiError::NotSupported);
+    TezosCallResult::error(SbiError::NotSupported)
 }
 
 /// Handle a Tezos SBI call.
@@ -359,19 +413,26 @@ pub(super) fn handle_tezos<MC, M>(
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
-    // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
-    let pc = machine.hart.pc.read().wrapping_add(4);
-    machine.hart.pc.write(pc);
-
     let sbi_function = machine.hart.xregisters.read(a6);
-    match sbi_function {
+    let TezosCallResult { status, pc_update } = match sbi_function {
         SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
-        SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
-        SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
-        SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
-        SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
-        SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
+        SBI_TEZOS_ED25519_SIGN => TezosCallResult::incr_pc(handle_tezos_ed25519_sign(machine)),
+        SBI_TEZOS_ED25519_VERIFY => TezosCallResult::incr_pc(handle_tezos_ed25519_verify(machine)),
+        SBI_TEZOS_BLAKE2B_HASH256 => {
+            TezosCallResult::incr_pc(handle_tezos_blake2b_hash256(machine))
+        }
+        SBI_TEZOS_SECP256K1_VERIFY => {
+            TezosCallResult::incr_pc(handle_tezos_secp256k1_verify(machine))
+        }
+        SBI_TEZOS_KECCAK256_HASH => TezosCallResult::incr_pc(handle_tezos_keccak256_hash(machine)),
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
-        _ => handle_not_supported(&mut machine.hart.xregisters),
+        _ => handle_not_supported(),
+    };
+
+    machine.update_pc(machine.hart.pc.read(), pc_update);
+    match status {
+        CallStatus::Success(reg_val) => sbi_return1(&mut machine.hart.xregisters, reg_val),
+        CallStatus::Error(error) => sbi_return_error(&mut machine.hart.xregisters, error),
+        CallStatus::Suspended => {}
     }
 }
