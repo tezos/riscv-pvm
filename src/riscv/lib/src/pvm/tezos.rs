@@ -48,9 +48,20 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
+use crate::range_utils::unwrap_bound;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
+
+/// Tezos System Calls do not return `ControlFlow<..>`. They do affect the control flow but they
+/// do so by modifying PvmStatus instead.
+struct TezosCallResult {
+    /// Result value that will be returned to the caller of the system call
+    pub result: XValue,
+
+    /// Number of steps completed after a system call
+    pub steps_completed: usize,
+}
 
 /// Write the SBI error code as the return value.
 #[inline]
@@ -81,6 +92,36 @@ where
     match inner(machine) {
         Ok(value) => sbi_return1(&mut machine.hart.xregisters, value),
         Err(error) => sbi_return_error(&mut machine.hart.xregisters, error),
+    }
+}
+
+/// Like `sbi_wrap`, but also propagates the number of steps completed by `inner`, upwards.
+#[expect(dead_code, reason = "Will be used in closing RV-776")]
+#[inline]
+fn sbi_wrap_parallel<MC, M, F>(
+    machine: &mut MachineCoreState<MC, M>,
+    step_bounds: Bound<usize>,
+    inner: F,
+) -> usize
+where
+    MC: MemoryConfig,
+    M: ManagerWrite,
+    F: FnOnce(&mut MachineCoreState<MC, M>, usize) -> Result<TezosCallResult, SbiError>,
+{
+    match inner(machine, unwrap_bound(step_bounds)) {
+        Ok(TezosCallResult {
+            result,
+            steps_completed,
+        }) => {
+            sbi_return1(&mut machine.hart.xregisters, result);
+            steps_completed
+        }
+        Err(error) => {
+            sbi_return_error(&mut machine.hart.xregisters, error);
+            // On an sbi error skip that syscall AND increment the step counter.
+            // PC increment is the responsibility of the specific handler.
+            1
+        }
     }
 }
 
