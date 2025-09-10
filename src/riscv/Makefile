@@ -72,16 +72,26 @@ endif
 	# 'rustup toolchain install' (Rustup 1.28+) will install the toolchain.
 	@find . -iname 'rust-toolchain*' -execdir sh -c "rustup show active-toolchain || rustup toolchain install" \; 2>/dev/null
 
+	# Enable 'llvm-cov' subcommand for Cargo
+	@cargo install --locked cargo-llvm-cov
+
 .PHONY: build-deps
 build-deps: build-deps-slim
 	# Coverage deps
 	@../../scripts/isa-suite-coverage.sh -d
 
 .PHONY: test
-test: build
+test: build test-deps
+	@cargo nextest run --workspace $(EXTRA_FLAGS)
+
+.PHONY: test-deps
+test-deps: 
 	@make -C ../.. dummy/build
 	@make -C ../.. block-cache-tester/build
-	@cargo nextest run --workspace $(EXTRA_FLAGS)
+
+.PHONY: cobertura.xml
+cobertura.xml: test-deps
+	cargo llvm-cov --package octez-riscv --cobertura --output-path $@ nextest
 
 .PHONY: coverage
 coverage:
