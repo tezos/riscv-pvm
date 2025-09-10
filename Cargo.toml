@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["src/riscv/lib", "src/riscv/sandbox", "tools/analyse-jit-functions"]
+members = ["src/riscv/lib", "tools/sandbox", "tools/analyse-jit-functions"]
 exclude = ["kernels"]
 
 [workspace.lints.clippy]

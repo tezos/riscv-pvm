@@ -1,0 +1,7 @@
+# Profiling and benchmark results
+/*.json
+/perf.data*
+/*.run
+
+# Binaries
+/riscv-sandbox*

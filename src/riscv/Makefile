@@ -6,25 +6,12 @@
 .PHONY: all
 all: build test check
 
-# Mechanism to allow enabling additional features - for example JIT
-SANDBOX_ENABLE_FEATURES ?=
-
 # The version of nightly that we use for anything that requires it
 NIGHTLY_VERSION = nightly-2025-01-30
 
 .PHONY: build
-build: riscv-sandbox
+build:
 	@cargo build --release --workspace
-
-.PHONY: riscv-sandbox
-riscv-sandbox::
-	@cargo build --release --package riscv-sandbox $(SANDBOX_ENABLE_FEATURES:%=-F%)
-	@ln -f ../../target/release/riscv-sandbox $@
-
-.PHONY: riscv-sandbox.prof
-riscv-sandbox.prof::
-	@cargo build --profile profiling --package riscv-sandbox $(SANDBOX_ENABLE_FEATURES:%=-F%)
-	@ln -f ../../target/profiling/riscv-sandbox $@
 
 # Update checked-in binaries
 .PHONY: update-assets
@@ -64,7 +51,7 @@ build-deps: build-deps-slim
 	@../../scripts/isa-suite-coverage.sh -d
 
 .PHONY: test
-test: build test-deps
+test: test-deps
 	@cargo nextest run --workspace
 
 .PHONY: test-deps
@@ -97,4 +84,3 @@ check:
 .PHONY: clean
 clean:
 	@cargo clean
-	@rm -f riscv-sandbox
