@@ -73,7 +73,7 @@ endif
 	@find . -iname 'rust-toolchain*' -execdir sh -c "rustup show active-toolchain || rustup toolchain install" \; 2>/dev/null
 
 	# Enable 'llvm-cov' subcommand for Cargo
-	@cargo install --locked cargo-llvm-cov
+	@cargo llvm-cov --version || cargo install --locked cargo-llvm-cov
 
 .PHONY: build-deps
 build-deps: build-deps-slim
