@@ -788,7 +788,10 @@ impl<M: ManagerBase> SupervisorState<M> {
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
 
-                let _ = machine.core.dispatch_signal(Signal::Sigsys);
+                // A value is only placed in `si_code` if `[Signal::Sigsys]` is triggered by a
+                // `seccomp(2)` filter rule.
+                let siginfo = signals::LinuxSigInfo::new(Signal::Sigsys, 0);
+                let _ = machine.core.dispatch_signal(siginfo).is_err();
             }
 
             Err(error) => {
@@ -2054,7 +2057,7 @@ mod tests {
         // Write the initial stack pointer and program counter.
         let stack_top = M4K::TOTAL_BYTES as u64;
         machine_state.core.hart.xregisters.write(sp, stack_top);
-        let init_pc = 0;
+        let init_pc = 10;
         machine_state.core.hart.pc.write(init_pc);
 
         // The address of a psuedo handler.
@@ -2137,8 +2140,7 @@ mod tests {
         );
         assert!(result.is_continue());
 
-        // [`Signal::Sigill`] has a TERM disposition by default, so check that the program counter
-        // has been changed to zero.
-        assert_eq!(machine_state.core.hart.pc.read(), 0);
+        // Check that the program counter has been restored.
+        assert_eq!(machine_state.core.hart.pc.read(), init_pc);
     });
 }
