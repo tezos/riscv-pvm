@@ -19,16 +19,17 @@ pub struct SystemCallResultExecution {
     ///
     /// Breaking means leaving the step loop in the machine state. In other words, it will defer to
     /// the level above it to decide what to do.
-    pub control_flow: ControlFlow<()>,
+    pub control_flow: ControlFlow<(), usize>,
 }
 
 impl<T: Into<u64>> From<T> for SystemCallResultExecution {
     fn from(value: T) -> Self {
-        // The default action is to continue execution after the system call. In cases where the
-        // execution should halt, this should be specified.
+        // The default action is to continue execution after the system call, with the step counter
+        // advancing by 1.
+        // In cases where the execution should halt, this should be specified.
         SystemCallResultExecution {
             result: value.into(),
-            control_flow: ControlFlow::Continue(()),
+            control_flow: ControlFlow::Continue(1),
         }
     }
 }

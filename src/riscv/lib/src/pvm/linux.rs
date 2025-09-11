@@ -519,8 +519,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
         hooks: impl PvmHooks,
-        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<()>,
-    ) -> ControlFlow<()>
+        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<(), usize>,
+    ) -> ControlFlow<(), usize>
     where
         MC: MemoryConfig,
         BCC: BlockCacheConfig,
@@ -802,7 +802,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             Ok(control_flow) => return control_flow,
         }
 
-        ControlFlow::Continue(())
+        ControlFlow::Continue(1)
     }
 
     /// Handle `set_tid_address` system call.
@@ -1094,7 +1094,7 @@ mod tests {
     use crate::pvm::linux::signals::Signal;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
-    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<()>
+    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<(), usize>
     where
         MC: MemoryConfig,
         M: ManagerWrite,
@@ -1102,7 +1102,7 @@ mod tests {
         core.hart
             .xregisters
             .write_system_call_error(Error::NoSystemCall);
-        ControlFlow::Continue(())
+        ControlFlow::Continue(1)
     }
 
     // Check that the `set_tid_address` system call is working correctly.
@@ -1992,7 +1992,7 @@ mod tests {
             .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
             .unwrap();
         let step_result = machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| ControlFlow::Continue(()));
+            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| ControlFlow::Continue(1));
         assert_eq!(step_result.error, None);
 
         // Check that the program counter is now at the handler.

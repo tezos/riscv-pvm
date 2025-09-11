@@ -453,7 +453,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
     step_bounds: Bound<usize>,
-) -> ControlFlow<()>
+) -> ControlFlow<(), usize>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
@@ -461,10 +461,10 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request, step_bounds);
+        let steps_completed = tezos::handle_tezos(core, status, reveal_request, step_bounds);
 
         if status.read() == PvmStatus::Evaluating {
-            ControlFlow::Continue(())
+            ControlFlow::Continue(steps_completed)
         } else {
             ControlFlow::Break(())
         }

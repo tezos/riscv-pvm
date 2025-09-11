@@ -456,7 +456,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     pub fn step_max_handle<E>(
         &mut self,
         mut step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self, Bound<usize>) -> ControlFlow<E>,
+        mut handle: impl FnMut(&mut Self, Bound<usize>) -> ControlFlow<E, usize>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
@@ -474,14 +474,19 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                     // Raising the exception is not a completed step. Trying to handle it is.
                     // We don't have to check against `max_steps` because running the
                     // instruction that triggered the exception meant that `max_steps > 0`.
-                    steps = steps.saturating_add(1);
-                    step_bounds = bound_saturating_sub(step_bounds, 1);
 
                     // embed the step_bounds into the handler, as there is no other step_bounds
-                    // dependent logic in the call to `handle_exception`
+                    // dependent logic within `handle_exception`
                     match self.handle_exception(cause, |machine| handle(machine, step_bounds)) {
-                        ControlFlow::Continue(()) => {}
-                        ControlFlow::Break(error) => break Some(error),
+                        ControlFlow::Continue(steps_completed) => {
+                            steps = steps.saturating_add(steps_completed);
+                            step_bounds = bound_saturating_sub(step_bounds, steps_completed);
+                        }
+                        ControlFlow::Break(error) => {
+                            // Failing to handle the exception is also a step
+                            steps = steps.saturating_add(1);
+                            break Some(error);
+                        }
                     }
                 }
 
@@ -496,8 +501,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     fn handle_exception<E>(
         &mut self,
         cause: Exception,
-        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
-    ) -> ControlFlow<E>
+        mut handle: impl FnMut(&mut Self) -> ControlFlow<E, usize>,
+    ) -> ControlFlow<E, usize>
     where
         M: ManagerReadWrite,
     {
@@ -538,7 +543,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             }
         }
 
-        ControlFlow::Continue(())
+        ControlFlow::Continue(1)
     }
 
     /// Handle [`Exception::ForceFetchRun`] by fetching instruction data from memory directly,
@@ -548,8 +553,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// cannot be a `ForceFetchRun`.
     fn handle_force_fetch_run<E>(
         &mut self,
-        handle: impl FnMut(&mut Self) -> ControlFlow<E>,
-    ) -> ControlFlow<E>
+        handle: impl FnMut(&mut Self) -> ControlFlow<E, usize>,
+    ) -> ControlFlow<E, usize>
     where
         M: ManagerReadWrite,
     {
@@ -562,7 +567,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         let exception = match result {
             Ok(update) => {
                 self.core.update_pc(instr_pc, update);
-                return ControlFlow::Continue(());
+                return ControlFlow::Continue(1);
             }
             // this should never happen (as we do not parse instruction data into an instruction
             // with OpCode::ForceFetchRun). If it does though, we shouldn't crash the PVM. Instead

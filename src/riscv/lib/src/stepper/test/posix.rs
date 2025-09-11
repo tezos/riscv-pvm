@@ -31,10 +31,10 @@ pub struct PosixState<M: ManagerBase> {
 
 impl<M: ManagerBase> PosixState<M> {
     /// Handle a POSIX system call. Returns `Ok(true)` if it makes sense to continue execution.
-    pub fn handle_call<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
+    pub fn handle_call<T, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>>(
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
-    ) -> ControlFlow<BreakReason>
+    ) -> ControlFlow<BreakReason, T>
     where
         M: ManagerReadWrite,
     {
