@@ -766,7 +766,11 @@ impl<M: ManagerBase> SupervisorState<M> {
                 machine
                     .core
                     .update_pc(pc, ProgramCounterUpdate::Next(ECALL_WIDTH));
-                let _ = machine.core.dispatch_signal(Signal::Sigsys);
+
+                // A value is only placed in `si_code` if `[Signal::Sigsys]` is triggered by a
+                // `seccomp(2)` filter rule.
+                let siginfo = signals::LinuxSigInfo::new(Signal::Sigsys, 0);
+                let _ = machine.core.dispatch_signal(siginfo).is_err();
             }
 
             Err(error) => {
@@ -1098,6 +1102,7 @@ mod tests {
     use crate::pvm::linux::registers::XValue;
     use crate::pvm::linux::registers::a0;
     use crate::pvm::linux::signals::Signal;
+    use crate::state_backend::ZeroCopyElem;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
     fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<()>
@@ -1230,7 +1235,10 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .write::<signals::LinuxSigAction>(action.to_machine_address(), linux_sig_action.clone())
+            .write::<ZeroCopyElem<_>>(
+                action.to_machine_address(),
+                ZeroCopyElem(linux_sig_action.clone()),
+            )
             .unwrap();
 
         let mut do_sigaction = |signal: u64,
@@ -1289,8 +1297,9 @@ mod tests {
             Ok(machine_state
                 .core
                 .main_memory
-                .read::<signals::LinuxSigAction>(old.to_machine_address())
-                .unwrap())
+                .read::<ZeroCopyElem<_>>(old.to_machine_address())
+                .unwrap()
+                .0)
         };
 
         const SIGPIPE: u64 = Signal::Sigpipe as u64;
@@ -1358,7 +1367,7 @@ mod tests {
             machine_state
                 .core
                 .main_memory
-                .write::<signals::LinuxSigAction>(action.to_machine_address(), ignore.clone())
+                .write::<ZeroCopyElem<_>>(action.to_machine_address(), ZeroCopyElem(ignore.clone()))
                 .unwrap();
 
             // System call number

@@ -4,6 +4,10 @@
 
 use std::num::NonZeroUsize;
 
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
+use zerocopy::TryFromBytes;
+
 use crate::machine_state::memory::PAGE_SIZE;
 
 /// Types that are less than one page wide
@@ -106,6 +110,34 @@ impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
         for (i, elem) in self.into_iter().enumerate() {
             let offset = E::STORED_SIZE.get().wrapping_mul(i);
             unsafe { elem.write_unaligned(dest.add(offset)) };
+        }
+    }
+}
+
+pub(crate) struct ZeroCopyElem<T>(pub T);
+
+impl<T: Immutable + IntoBytes + TryFromBytes> Elem for ZeroCopyElem<T> {
+    const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(size_of::<T>()).unwrap();
+
+    unsafe fn read_unaligned(source: *const u8) -> Self {
+        // SAFETY: The bitwise representation is the same as `write_unaligned`.
+        unsafe {
+            ZeroCopyElem(
+                T::try_read_from_bytes(std::slice::from_raw_parts(source, Self::STORED_SIZE.get()))
+                    .expect("The input should be the same layout as the output type"),
+            )
+        }
+    }
+
+    unsafe fn write_unaligned(self, dest: *mut u8) {
+        // SAFETY: The bitwise representation is the same as `read_unaligned`.
+        unsafe {
+            self.0
+                .write_to(std::slice::from_raw_parts_mut(
+                    dest,
+                    Self::STORED_SIZE.get(),
+                ))
+                .expect("Writing to memory should not fail");
         }
     }
 }

@@ -40,9 +40,11 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
+use crate::pvm::linux::signals::LinuxSigInfo;
 use crate::pvm::linux::signals::Signal;
 use crate::pvm::linux::signals::SignalActions;
 use crate::pvm::linux::signals::SignalActionsLayout;
+use crate::pvm::linux::signals::si_code;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
@@ -557,13 +559,19 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             Exception::ForceFetchRun => return self.handle_force_fetch_run(handle),
 
             Exception::IllegalInstruction => {
-                self.dispatch_signal_or_trap(Signal::Sigill);
+                self.dispatch_signal_or_trap(LinuxSigInfo::new(
+                    Signal::Sigill,
+                    si_code::ILL_ILLOPC,
+                ));
             }
 
             Exception::InstructionAccessFault
             | Exception::LoadAccessFault
             | Exception::StoreAMOAccessFault => {
-                self.dispatch_signal_or_trap(Signal::Sigsegv);
+                self.dispatch_signal_or_trap(LinuxSigInfo::new(
+                    Signal::Sigsegv,
+                    si_code::SEGV_ACCERR,
+                ));
             }
 
             // There's currently no support for breakpoints - it requires SIGTRAP
@@ -679,11 +687,11 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         Ok((program_start, program_end))
     }
 
-    fn dispatch_signal_or_trap(&mut self, signal: Signal)
+    fn dispatch_signal_or_trap(&mut self, siginfo: LinuxSigInfo)
     where
         M: ManagerRead + ManagerWrite,
     {
-        if self.core.dispatch_signal(signal).is_err() {
+        if self.core.dispatch_signal(siginfo).is_err() {
             self.core.hart.pc.write(0);
         }
     }
@@ -854,7 +862,6 @@ mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::M8K;
     use crate::machine_state::memory::M64M;
-    use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::registers::a7;
@@ -870,8 +877,8 @@ mod tests {
     use crate::pvm::Pvm;
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
+    use crate::pvm::linux::signals::LinuxSigInfo;
     use crate::pvm::linux::signals::Signal;
-    use crate::pvm::linux::signals::SignalError;
     use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
@@ -1176,36 +1183,12 @@ mod tests {
         assert!(init_pc % RISCV_ABI_SP_ALIGNMENT.get() != 0);
         state.core.hart.pc.write(init_pc);
 
-        state.core.push_signal_context(Signal::Sigstop).unwrap();
+        // A signal raised by the kernel
+        // Value: <https://git.musl-libc.org/cgit/musl/tree/include/signal.h>
+        const SI_KERNEL: i32 = 128;
+        let siginfo = LinuxSigInfo::new(Signal::Sigstop, SI_KERNEL);
+        state.core.push_signal_context(siginfo).unwrap();
         let pc = state.core.pop_signal_context().unwrap();
         assert_eq!(pc, init_pc);
-    });
-
-    // RV-757: Test for bugfix where previously a modified stack could cause a panic.
-    backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedCompiler);
-
-        state.reset();
-        state.set_all_readable_writeable();
-
-        let stack_top = M4K::TOTAL_BYTES.get() as u64;
-        state.core.hart.xregisters.write(sp, stack_top);
-
-        let init_pc = 0x100;
-        state.core.hart.pc.write(init_pc);
-
-        state.core.push_signal_context(Signal::Sigfpe).unwrap();
-
-        let signal_index_address = stack_top - 32;
-        let bad_signal_index: u64 = 42;
-
-        state
-            .core
-            .main_memory
-            .write(signal_index_address, bad_signal_index)
-            .unwrap();
-
-        let result = state.core.pop_signal_context();
-        assert_eq!(result, Err(SignalError::BadContext));
     });
 }

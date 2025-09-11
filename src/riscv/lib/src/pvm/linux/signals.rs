@@ -5,8 +5,6 @@
 use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::ops::Sub;
-use std::slice::from_raw_parts;
-use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
 use octez_riscv_data::clone::CloneState;
@@ -14,8 +12,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use strum::EnumCount;
 use strum::FromRepr;
-use zerocopy::FromBytes;
-use zerocopy::IntoBytes;
+use zerocopy::byteorder::I32;
 use zerocopy::byteorder::LittleEndian;
 use zerocopy::byteorder::U32;
 use zerocopy::byteorder::U64;
@@ -23,6 +20,7 @@ use zerocopy_derive::FromBytes;
 use zerocopy_derive::Immutable;
 use zerocopy_derive::IntoBytes;
 use zerocopy_derive::KnownLayout;
+use zerocopy_derive::TryFromBytes;
 
 use super::MachineError;
 use super::PAGE_SIZE;
@@ -47,7 +45,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::Elem;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -55,6 +52,7 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
+use crate::state_backend::ZeroCopyElem;
 use crate::struct_layout;
 
 /// Errors relating to handling signals
@@ -68,8 +66,23 @@ pub enum SignalError {
     Memory(#[from] BadMemoryAccess),
     #[error("Misaligned stack pointer")]
     MisalignedStackPointer,
+    #[error("This signal number does not exist or is not implemented")]
+    SignoNotImplemented,
     #[error("Execution shall terminate")]
     Terminate,
+}
+
+/// Linux `si_code`s, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
+///
+/// Values: <https://git.musl-libc.org/cgit/musl/tree/include/signal.h>
+///
+/// These values are not discrete but are differentiated by the signal they are passed with.
+pub(crate) mod si_code {
+    /// [super::Signal::Sigill] raised by an illegal opcode
+    pub(crate) const ILL_ILLOPC: i32 = 1;
+
+    /// [super::Signal::Sigsegv] raised by an access error
+    pub(crate) const SEGV_ACCERR: i32 = 2;
 }
 
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
@@ -113,28 +126,61 @@ pub const SIG_IGN: VirtAddr = VirtAddr::new(1u64);
 /// parameters.
 pub const SA_SIGINFO: u32 = 0x4000000;
 
-/// `size_of(struct sigaction)` on the Kernel side
-const SIZE_SIGACTION: usize = 32;
+/// Linux siginfo_t, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
+///
+/// This struct only contains the fields that are currently used or are needed for padding. Some
+/// fields which are only used by some signals are not currently included.
+#[repr(C)]
+#[derive(Immutable, IntoBytes, KnownLayout, TryFromBytes)]
+pub struct LinuxSigInfo {
+    si_signo: SignalLe,
+    si_errno: I32<LittleEndian>, // Unused in Linux
+    si_code: I32<LittleEndian>,
+}
 
-impl Elem for LinuxSigAction {
-    const STORED_SIZE: NonZeroUsize = { NonZeroUsize::new(SIZE_SIGACTION).unwrap() };
-
-    unsafe fn read_unaligned(source: *const u8) -> Self {
-        // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each
-        // field.
-        unsafe {
-            LinuxSigAction::read_from_bytes(from_raw_parts(source, Self::STORED_SIZE.get()))
-                .expect("Bad sigaction")
+impl LinuxSigInfo {
+    /// Create a new Linux signfo_t struct using only the fields used by Linux and this PVM.
+    pub fn new(si_signo: Signal, si_code: i32) -> Self {
+        Self {
+            si_signo: si_signo.into(),
+            si_errno: Default::default(),
+            si_code: si_code.into(),
         }
     }
+}
 
-    unsafe fn write_unaligned(self, dest: *mut u8) {
-        // SAFETY: The bitwise representation is the same as `read_unaligned` and matches each
-        // field.
-        unsafe {
-            let _ = self.write_to(from_raw_parts_mut(dest, Self::STORED_SIZE.get()));
-        }
-    }
+const ALIGNED_SIGINFO_SIZE: u64 = size_of::<LinuxSigInfo>() as u64 + RISCV_ABI_SP_ALIGNMENT.get()
+    - (RISCV_ABI_SP_ALIGNMENT.get() % size_of::<LinuxSigInfo>() as u64);
+
+const ALIGNED_CONTEXT_SIZE: u64 = size_of::<LinuxUContext>() as u64 + RISCV_ABI_SP_ALIGNMENT.get()
+    - (RISCV_ABI_SP_ALIGNMENT.get() % size_of::<LinuxUContext>() as u64);
+
+const CONTEXT_STACK_SIZE: u64 = ALIGNED_SIGINFO_SIZE + ALIGNED_CONTEXT_SIZE;
+
+/// Linux ucontext_t, see <https://man7.org/linux/man-pages/man3/getcontext.3.html>
+///
+/// This struct only contains the fields that are currently used.
+#[repr(C)]
+#[derive(FromBytes, Immutable, IntoBytes, KnownLayout)]
+pub(crate) struct LinuxUContext {
+    uc_sigmask: U64<LittleEndian>,
+    uc_mcontext: MachineContext,
+}
+
+#[repr(C)]
+#[derive(FromBytes, Immutable, IntoBytes, KnownLayout)]
+pub(crate) struct MachineContext {
+    pc: U64<LittleEndian>,
+    prev_stack_pointer: U64<LittleEndian>,
+    // TODO RV-755 Store and restore registers
+}
+
+/// Pointers to the locations on the stack for the restorer, the context of [LinuxUContext] and the
+/// siginfo of [LinuxSigInfo].
+pub struct StackPointers {
+    restorer: VirtAddr,
+    context: VirtAddr,
+    siginfo: VirtAddr,
 }
 
 // For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the [LinuxSigAction]
@@ -230,7 +276,11 @@ struct_layout! {
 
 impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
     /// Set the hart state to a signal handler
-    pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
+    pub fn dispatch_signal(&mut self, siginfo: LinuxSigInfo) -> Result<(), SignalError> {
+        let signal: Signal = siginfo
+            .si_signo
+            .try_into()
+            .map_err(|_| SignalError::SignoNotImplemented)?;
         let handler = self.signal_actions.read_action(signal);
 
         match handler {
@@ -246,24 +296,26 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
             _ => (),
         }
 
-        let restorer = self.push_signal_context(signal)?;
+        let stack_pointers = self.push_signal_context(siginfo)?;
 
         self.hart
             .xregisters
-            .write_nz(nz::ra, restorer.to_machine_address());
+            .write_nz(nz::ra, stack_pointers.restorer.to_machine_address());
 
         // Write handler arguments
         // Signal number
         self.hart.xregisters.write_nz(nz::a0, signal as u64);
 
         if self.signal_actions.sa_siginfo(signal) {
-            // TODO RV-754: Implement storing signal information as `siginfo_t`
             // Pointer to siginfo_t
-            self.hart.xregisters.write_nz(nz::a1, 0u64);
+            self.hart
+                .xregisters
+                .write_nz(nz::a1, stack_pointers.siginfo.to_machine_address());
 
-            // TODO RV-754: Implement storing signal execution context as `ucontext_t`
             // Pointer to ucontext_t
-            self.hart.xregisters.write_nz(nz::a2, 0u64);
+            self.hart
+                .xregisters
+                .write_nz(nz::a2, stack_pointers.context.to_machine_address());
         }
 
         // Update the program counter to the handler
@@ -272,60 +324,89 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
     }
 
     /// Pushes the context needed to resume after handling a signal
-    pub fn push_signal_context(&mut self, signal: Signal) -> Result<VirtAddr, SignalError> {
+    pub fn push_signal_context(
+        &mut self,
+        siginfo: LinuxSigInfo,
+    ) -> Result<StackPointers, SignalError> {
+        let signal: Signal = siginfo
+            .si_signo
+            .try_into()
+            .map_err(|_| SignalError::SignoNotImplemented)?;
+
         let signal_index: SignalIndex = signal.into();
+
         let mask = self.signal_actions.read_mask(signal_index);
         let pc = self.hart.pc.read();
 
         let restorer = self.signal_actions.restorer.read();
 
-        let prev_stack_pointer = self.hart.xregisters.read(sp);
+        let prev_stack_pointer: u64 = self.hart.xregisters.read(sp);
+
+        let mcontext = MachineContext {
+            pc: pc.into(),
+            prev_stack_pointer: prev_stack_pointer.into(),
+        };
+
+        let context = LinuxUContext {
+            uc_sigmask: mask.into(),
+            uc_mcontext: mcontext,
+        };
+
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
-            .sub(32)
+            .sub(CONTEXT_STACK_SIZE)
             .align_down(RISCV_ABI_SP_ALIGNMENT);
 
         self.hart
             .xregisters
             .write(sp, stack_pointer.to_machine_address());
 
-        self.main_memory
-            .write(stack_pointer.to_machine_address(), signal_index as u64)?;
-        self.main_memory
-            .write(stack_pointer.add(8).to_machine_address(), mask)?;
-        self.main_memory
-            .write(stack_pointer.add(16).to_machine_address(), pc)?;
+        let stack_pointers = StackPointers {
+            restorer,
+            context: stack_pointer,
+            siginfo: stack_pointer.add(ALIGNED_CONTEXT_SIZE),
+        };
+
         self.main_memory.write(
-            stack_pointer.add(24).to_machine_address(),
-            prev_stack_pointer,
+            stack_pointers.context.to_machine_address(),
+            ZeroCopyElem(context),
         )?;
 
-        Ok(restorer)
+        self.main_memory.write(
+            stack_pointers.siginfo.to_machine_address(),
+            ZeroCopyElem(siginfo),
+        )?;
+
+        Ok(stack_pointers)
     }
 
     /// Pops the context needed to resume after handling a signal
     pub fn pop_signal_context(&mut self) -> Result<Address, SignalError> {
         let stack_pointer = VirtAddr::new(self.hart.xregisters.read(sp));
 
-        let prev_stack_pointer = self
+        let siginfo = self
             .main_memory
-            .read(stack_pointer.add(24).to_machine_address())?;
-        let pc: u64 = self
-            .main_memory
-            .read(stack_pointer.add(16).to_machine_address())?;
-        let mask: u64 = self
-            .main_memory
-            .read(stack_pointer.add(8).to_machine_address())?;
-        let signal_index: u64 = self.main_memory.read(stack_pointer.to_machine_address())?;
+            .read::<ZeroCopyElem<LinuxSigInfo>>(
+                stack_pointer.add(ALIGNED_CONTEXT_SIZE).to_machine_address(),
+            )?
+            .0;
 
-        // SAFETY: This was stored by converting from a SignalIndex
-        let signal_index =
-            SignalIndex::from_repr(signal_index as usize).ok_or(SignalError::BadContext)?;
-        self.signal_actions.write_mask(signal_index, mask);
+        let context = self
+            .main_memory
+            .read::<ZeroCopyElem<LinuxUContext>>(stack_pointer.to_machine_address())?
+            .0;
+
+        let signal: Signal = siginfo
+            .si_signo
+            .try_into()
+            .map_err(|_| SignalError::SignoNotImplemented)?;
+
+        self.signal_actions
+            .write_mask(signal, context.uc_sigmask.into());
+
         // TODO RV-734 Restore the alternative stack
-        // TODO RV-755 Store and restore registers in push/pop_signal_context
 
-        let stack_pointer = VirtAddr::new(prev_stack_pointer)
-            .add(32)
+        let stack_pointer = VirtAddr::new(context.uc_mcontext.prev_stack_pointer.into())
+            .add(CONTEXT_STACK_SIZE)
             .align_up(RISCV_ABI_SP_ALIGNMENT)
             .ok_or(SignalError::MisalignedStackPointer)?;
 
@@ -333,7 +414,7 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
             .xregisters
             .write(sp, stack_pointer.to_machine_address());
 
-        Ok(pc)
+        Ok(context.uc_mcontext.pc.into())
     }
 }
 
@@ -504,8 +585,10 @@ impl Disposition {
 }
 
 /// Linux signal signums in RISC-V, see <https://www.man7.org/linux/man-pages/man7/signal.7.html>
-#[derive(Debug, Clone, Copy, Eq, FromRepr, PartialEq)]
-#[repr(u64)]
+#[derive(
+    Debug, Clone, Copy, Eq, FromRepr, Immutable, IntoBytes, KnownLayout, PartialEq, TryFromBytes,
+)]
+#[repr(i32)]
 pub enum Signal {
     Sigill = 4,
     Sigabrt = 5,
@@ -522,11 +605,27 @@ pub enum Signal {
     Sigsys = 31,
 }
 
+impl TryFrom<i32> for Signal {
+    type Error = Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or(Error::InvalidArgument)
+    }
+}
+
 impl TryFrom<u64> for Signal {
     type Error = Error;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Self::from_repr(value).ok_or(Error::InvalidArgument)
+        Self::from_repr(value.try_into()?).ok_or(Error::InvalidArgument)
+    }
+}
+
+impl TryFrom<SignalLe> for Signal {
+    type Error = Error;
+
+    fn try_from(value: SignalLe) -> Result<Self, Self::Error> {
+        Self::from_repr(value.0.get()).ok_or(Error::InvalidArgument)
     }
 }
 
@@ -567,6 +666,16 @@ impl From<Signal> for SignalIndex {
             Signal::Sigstop => SignalIndex::Sigstop,
             Signal::Sigsys => SignalIndex::Sigsys,
         }
+    }
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Immutable, IntoBytes, KnownLayout, TryFromBytes)]
+pub struct SignalLe(pub I32<LittleEndian>);
+
+impl From<Signal> for SignalLe {
+    fn from(value: Signal) -> Self {
+        Self(I32::new(value as i32))
     }
 }
 
@@ -689,11 +798,14 @@ impl<M: ManagerBase> SupervisorState<M> {
     {
         if let Some(old) = old.address() {
             let old_action = core.signal_action(signal);
-            core.main_memory.write(old, old_action)?;
+            core.main_memory.write(old, ZeroCopyElem(old_action))?;
         }
 
         if let Some(action) = action.address() {
-            let new_action: LinuxSigAction = core.main_memory.read(action)?;
+            let new_action = core
+                .main_memory
+                .read::<ZeroCopyElem<LinuxSigAction>>(action)?
+                .0;
             core.set_signal_action(signal, new_action)
                 .map_err(|_| Error::InvalidArgument)?;
         }
@@ -846,6 +958,7 @@ mod tests {
     use std::ops::Bound;
     use std::ops::ControlFlow;
 
+    use super::LinuxSigInfo;
     use super::Signal;
     use crate::backend_test;
     use crate::exceptions::Exception;
@@ -952,7 +1065,7 @@ mod tests {
         // Push a signal context so the program counter is stored
         pvm.machine_state
             .core
-            .push_signal_context(Signal::Sigusr1)
+            .push_signal_context(LinuxSigInfo::new(Signal::Sigusr1, 0))
             .expect("Bad signal context");
 
         // Write and jump to a restorer
