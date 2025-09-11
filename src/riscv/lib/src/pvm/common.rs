@@ -6,7 +6,6 @@
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::ops::Bound;
-use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -18,6 +17,7 @@ use super::reveals::RevealRequest;
 use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::machine_state;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block;
 use crate::machine_state::block_cache::block::Block;
@@ -454,7 +454,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
     step_bounds: NonZeroUsize,
-) -> ControlFlow<()>
+) -> StepManyResult<()>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
@@ -462,12 +462,12 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request, step_bounds);
+        let steps = tezos::handle_tezos(core, status, reveal_request, step_bounds);
 
         if status.read() == PvmStatus::Evaluating {
-            ControlFlow::Continue(())
+            StepManyResult { steps, error: None }
         } else {
-            ControlFlow::Break(())
+            StepManyResult::break_after_one_step(())
         }
     })
 }

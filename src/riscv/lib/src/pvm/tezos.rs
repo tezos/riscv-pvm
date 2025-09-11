@@ -357,7 +357,8 @@ pub(super) fn handle_tezos<MC, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     _step_bounds: NonZeroUsize,
-) where
+) -> usize
+where
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -376,4 +377,5 @@ pub(super) fn handle_tezos<MC, M>(
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }
+    1
 }

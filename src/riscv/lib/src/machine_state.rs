@@ -15,7 +15,6 @@ pub(crate) mod reservation_set;
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::ops::Bound;
-use std::ops::ControlFlow;
 
 use block_cache::BlockCache;
 use block_cache::block::Block;
@@ -274,6 +273,33 @@ impl<E> StepManyResult<E> {
         self.error = other.error;
         self.error.is_some()
     }
+
+    /// Helper for checking if control flow should continue as normal
+    pub fn is_continue(&self) -> bool {
+        self.error.is_none()
+    }
+
+    /// Helper for checking for a control flow break and handling the error
+    pub fn is_break(&self) -> bool {
+        self.error.is_some()
+    }
+
+    /// Indicating control flow for when there is no error. Usually one step of computation takes
+    /// place in this case, and we may use this constant if so.
+    pub fn continue_after_one_step() -> Self {
+        Self {
+            steps: 1,
+            error: None,
+        }
+    }
+
+    /// A step of computation usually happens just to identify that a control flow break should occur
+    pub fn break_after_one_step(err: E) -> Self {
+        Self {
+            steps: 1,
+            error: Some(err),
+        }
+    }
 }
 
 impl<E> Default for StepManyResult<E> {
@@ -456,7 +482,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     pub fn step_max_handle<E>(
         &mut self,
         step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self, NonZeroUsize) -> ControlFlow<E>,
+        mut handle: impl FnMut(&mut Self, NonZeroUsize) -> StepManyResult<E>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
@@ -480,14 +506,14 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
                         bound_to_non_zero(calculate_bounds(steps))
                         .expect("This should be unreachable. The invariant that exception handlers must be called with max steps of at least 1, has been violated");
 
-                    steps = steps.saturating_add(1);
                     // embed the step_bounds into the handler, as there is no other step_bounds
                     // dependent logic within `handle_exception`
-                    match self
-                        .handle_exception(cause, |machine| handle(machine, non_zero_step_bounds))
-                    {
-                        ControlFlow::Continue(()) => {}
-                        ControlFlow::Break(error) => break Some(error),
+                    let exception_result = self
+                        .handle_exception(cause, |machine| handle(machine, non_zero_step_bounds));
+                    steps = steps.saturating_add(exception_result.steps);
+
+                    if exception_result.is_break() {
+                        break exception_result.error;
                     }
                 }
 
@@ -502,8 +528,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     fn handle_exception<E>(
         &mut self,
         cause: Exception,
-        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
-    ) -> ControlFlow<E>
+        mut handle: impl FnMut(&mut Self) -> StepManyResult<E>,
+    ) -> StepManyResult<E>
     where
         M: ManagerReadWrite,
     {
@@ -544,7 +570,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
             }
         }
 
-        ControlFlow::Continue(())
+        StepManyResult::continue_after_one_step()
     }
 
     /// Handle [`Exception::ForceFetchRun`] by fetching instruction data from memory directly,
@@ -554,8 +580,8 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     /// cannot be a `ForceFetchRun`.
     fn handle_force_fetch_run<E>(
         &mut self,
-        handle: impl FnMut(&mut Self) -> ControlFlow<E>,
-    ) -> ControlFlow<E>
+        handle: impl FnMut(&mut Self) -> StepManyResult<E>,
+    ) -> StepManyResult<E>
     where
         M: ManagerReadWrite,
     {
@@ -568,7 +594,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         let exception = match result {
             Ok(update) => {
                 self.core.update_pc(instr_pc, update);
-                return ControlFlow::Continue(());
+                return StepManyResult::continue_after_one_step();
             }
             // this should never happen (as we do not parse instruction data into an instruction
             // with OpCode::ForceFetchRun). If it does though, we shouldn't crash the PVM. Instead
@@ -747,7 +773,6 @@ pub(crate) mod test_helpers {
 mod tests {
     use std::fs;
     use std::ops::Bound;
-    use std::ops::ControlFlow;
 
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -909,7 +934,7 @@ mod tests {
                     // to indicate that it has reached the signal point. This is our cue that we
                     // have produced the right "start" state.
                     if syscall_number == -1 {
-                        return ControlFlow::Break(());
+                        return StepManyResult::break_after_one_step(());
                     }
 
                     handle_system_call(

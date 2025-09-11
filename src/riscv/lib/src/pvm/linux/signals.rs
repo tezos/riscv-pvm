@@ -816,10 +816,10 @@ where
 mod tests {
     use std::convert::Infallible;
     use std::ops::Bound;
-    use std::ops::ControlFlow;
 
     use super::Signal;
     use crate::backend_test;
+    use crate::machine_state::StepManyResult;
     use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -894,7 +894,9 @@ mod tests {
             .unwrap();
         let step_result = pvm
             .machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| ControlFlow::Continue(()));
+            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| {
+                StepManyResult::continue_after_one_step()
+            });
         assert_eq!(step_result.error, None);
 
         // Check that the program counter is now at the handler.
@@ -957,7 +959,9 @@ mod tests {
 
         let step_result = pvm
             .machine_state
-            .step_max_handle::<()>(Bound::Included(100), |_, _| ControlFlow::Break(()));
+            .step_max_handle::<()>(Bound::Included(100), |_, _| {
+                StepManyResult::break_after_one_step(())
+            });
 
         assert_eq!(step_result.error, Some(()));
         assert_eq!(pvm.machine_state.step(), Err(Exception::EnvCall));
