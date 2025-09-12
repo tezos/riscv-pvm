@@ -91,7 +91,7 @@ test-deps:
 
 .PHONY: cobertura.xml
 cobertura.xml: test-deps
-	cargo llvm-cov --package octez-riscv --cobertura --output-path $@ nextest
+	@cargo llvm-cov --package octez-riscv --cobertura --output-path $@ nextest
 
 .PHONY: coverage
 coverage:
