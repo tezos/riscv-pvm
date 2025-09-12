@@ -16,9 +16,6 @@ endif
 # We don't want to check all features in CI, so we provide this varible to configure it.
 CHECK_FLAGS ?= --all-features
 
-# CI needs the ability to toggle some features
-EXTRA_FLAGS ?=
-
 # Mechanism to allow enabling additional features - for example JIT
 SANDBOX_ENABLE_FEATURES ?=
 
@@ -27,7 +24,7 @@ NIGHTLY_VERSION = nightly-2025-01-30
 
 .PHONY: build
 build: riscv-sandbox
-	@cargo build --release --workspace $(NATIVE_OPT) $(EXTRA_FLAGS)
+	@cargo build --release --workspace $(NATIVE_OPT)
 
 .PHONY: riscv-sandbox
 riscv-sandbox::
@@ -82,7 +79,7 @@ build-deps: build-deps-slim
 
 .PHONY: test
 test: build test-deps
-	@cargo nextest run --workspace $(EXTRA_FLAGS)
+	@cargo nextest run --workspace
 
 .PHONY: test-deps
 test-deps: 
@@ -107,9 +104,9 @@ check:
 	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
-	@cargo check --workspace --all-targets $(CHECK_FLAGS) $(EXTRA_FLAGS)
-	@cargo clippy --workspace --all-targets $(CHECK_FLAGS) $(EXTRA_FLAGS) -- --deny warnings
-	@cargo doc --document-private-items --no-deps $(CHECK_FLAGS) $(EXTRA_FLAGS)
+	@cargo check --workspace --all-targets $(CHECK_FLAGS)
+	@cargo clippy --workspace --all-targets $(CHECK_FLAGS) -- --deny warnings
+	@cargo doc --document-private-items --no-deps $(CHECK_FLAGS)
 
 .PHONY: clean
 clean:
