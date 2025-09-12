@@ -93,6 +93,10 @@ test-deps:
 cobertura.xml: test-deps
 	@cargo llvm-cov --package octez-riscv --cobertura --output-path $@ nextest
 
+.PHONY: coverage-report
+coverage-report: test-deps
+	@cargo llvm-cov --package octez-riscv --html --open nextest
+
 .PHONY: coverage
 coverage:
 	@../../scripts/isa-suite-coverage.sh
