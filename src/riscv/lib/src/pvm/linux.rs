@@ -1355,83 +1355,97 @@ mod tests {
 
         let mut supervisor_state = SupervisorState::<F>::new();
 
-        // Write the initial stack pointer and program counter.
-        let stack_top = M4K::TOTAL_BYTES as u64;
-        machine_state.core.hart.xregisters.write(sp, stack_top);
-        let init_pc = 0;
-        machine_state.core.hart.pc.write(init_pc);
+        let mut do_ignore = |signal: Signal| {
+            // Write the initial stack pointer and program counter.
+            let stack_top = M4K::TOTAL_BYTES as u64;
+            machine_state.core.hart.xregisters.write(sp, stack_top);
+            let init_pc = 0;
+            machine_state.core.hart.pc.write(init_pc);
 
-        let ignore = signals::LinuxSigAction::new(signals::SIG_IGN);
-        let nullptr = VirtAddr::new(0x0);
-        let action = VirtAddr::new(0x100);
+            let ignore = signals::LinuxSigAction::new(signals::SIG_IGN);
+            let nullptr = VirtAddr::new(0x0);
+            let action = VirtAddr::new(0x100);
 
-        machine_state
-            .core
-            .main_memory
-            .write::<signals::LinuxSigAction>(action.to_machine_address(), ignore.clone())
-            .unwrap();
+            machine_state
+                .core
+                .main_memory
+                .write::<signals::LinuxSigAction>(action.to_machine_address(), ignore.clone())
+                .unwrap();
 
-        // System call number
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a7, RT_SIGACTION);
+            // System call number
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a7, RT_SIGACTION);
 
-        // Signum
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a0, Signal::Sigill as u64);
+            // Signum
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a0, signal as u64);
 
-        // New handler is located at this address
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a1, action.to_machine_address());
+            // New handler is located at this address
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a1, action.to_machine_address());
 
-        // Old handler is nullptr
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a2, nullptr.to_machine_address());
+            // Old handler is nullptr
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a2, nullptr.to_machine_address());
 
-        // Size of sigset_t
-        machine_state
-            .core
-            .hart
-            .xregisters
-            .write(registers::a3, signals::SIGSET_SIZE);
+            // Size of sigset_t
+            machine_state
+                .core
+                .hart
+                .xregisters
+                .write(registers::a3, signals::SIGSET_SIZE);
 
-        // Perform the system call
-        let result = supervisor_state.handle_system_call(
-            &mut machine_state,
-            StdoutDebugHooks,
-            default_on_tezos_handler,
-        );
-        assert!(result.is_continue());
+            // Perform the system call
+            let result = supervisor_state.handle_system_call(
+                &mut machine_state,
+                StdoutDebugHooks,
+                default_on_tezos_handler,
+            );
+            assert!(result.is_continue());
 
-        // Cause the [`Exception::IllegalInstruction`].
-        // `unimp`, an illegal instruction.
-        const UNIMPLEMENTED: u32 = 0b_0000;
+            // Cause the [`Exception::IllegalInstruction`].
+            // `unimp`, an illegal instruction.
+            const UNIMPLEMENTED: u32 = 0b_0000;
 
-        machine_state
-            .core
-            .main_memory
-            .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
-            .unwrap();
+            machine_state
+                .core
+                .main_memory
+                .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
+                .unwrap();
 
-        machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+            machine_state
+                .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
 
-        // Check that the program counter increased
-        assert_eq!(
-            machine_state.core.hart.pc.read(),
-            init_pc + InstrWidth::Uncompressed as u64
-        );
+            // Check that the program counter increased
+            assert_eq!(
+                machine_state.core.hart.pc.read(),
+                init_pc + InstrWidth::Uncompressed as u64
+            );
+        };
+
+        do_ignore(Signal::Sigill);
+        do_ignore(Signal::Sigabrt);
+        do_ignore(Signal::Sigiot);
+        do_ignore(Signal::Sigbus);
+        do_ignore(Signal::Sigfpe);
+        do_ignore(Signal::Sigusr1);
+        do_ignore(Signal::Sigsegv);
+        do_ignore(Signal::Sigusr2);
+        do_ignore(Signal::Sigpipe);
+        do_ignore(Signal::Sigterm);
+        do_ignore(Signal::Sigsys);
     });
 
     // Check that the `sigaltstack` system call can accept 0 for the `old` parameter.
