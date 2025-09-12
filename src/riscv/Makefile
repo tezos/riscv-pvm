@@ -13,9 +13,6 @@ ifneq ($(NATIVE_TARGET),)
 NATIVE_OPT := --target="$(NATIVE_TARGET)"
 endif
 
-# We don't want to check all features in CI, so we provide this varible to configure it.
-CHECK_FLAGS ?= --all-features
-
 # Mechanism to allow enabling additional features - for example JIT
 SANDBOX_ENABLE_FEATURES ?=
 
@@ -104,9 +101,9 @@ check:
 	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
-	@cargo check --workspace --all-targets $(CHECK_FLAGS)
-	@cargo clippy --workspace --all-targets $(CHECK_FLAGS) -- --deny warnings
-	@cargo doc --document-private-items --no-deps $(CHECK_FLAGS)
+	@cargo check --workspace --all-targets 
+	@cargo clippy --workspace --all-targets -- --deny warnings
+	@cargo doc --document-private-items --no-deps
 
 .PHONY: clean
 clean:
