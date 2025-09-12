@@ -68,8 +68,9 @@ pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
 }
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
+    /// Update the hart's pc given the update and explicitly given the current value of pc
     #[inline]
-    fn update_pc(&mut self, instr_pc: Address, update: ProgramCounterUpdate<Address>)
+    pub(crate) fn update_pc(&mut self, instr_pc: Address, update: ProgramCounterUpdate<Address>)
     where
         M: backend::ManagerWrite,
     {

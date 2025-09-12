@@ -8,9 +8,12 @@ use std::ops::ControlFlow;
 
 use super::MAIN_THREAD_ID;
 use super::error::Error;
+use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::memory::Address;
+use crate::parser::instruction::InstrWidth;
 
 /// A type coupling the result of the system call with how the program should continue.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct SystemCallResultExecution {
     /// Result value that will be returned to the caller of the system call
     pub result: u64,
@@ -20,15 +23,32 @@ pub struct SystemCallResultExecution {
     /// Breaking means leaving the step loop in the machine state. In other words, it will defer to
     /// the level above it to decide what to do.
     pub control_flow: ControlFlow<()>,
+
+    /// Not all system calls just move the PC to the next instruction
+    /// This account for that.
+    pub pc_update: ProgramCounterUpdate<Address>,
 }
+
+/// An ECALL is 4 bytes wide, ie, an uncompressed instr
+pub(crate) const ECALL_WIDTH: InstrWidth = InstrWidth::Uncompressed;
 
 impl<T: Into<u64>> From<T> for SystemCallResultExecution {
     fn from(value: T) -> Self {
         // The default action is to continue execution after the system call. In cases where the
         // execution should halt, this should be specified.
-        SystemCallResultExecution {
+        Self {
             result: value.into(),
+            ..Self::default()
+        }
+    }
+}
+
+impl Default for SystemCallResultExecution {
+    fn default() -> Self {
+        Self {
+            result: 0,
             control_flow: ControlFlow::Continue(()),
+            pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
         }
     }
 }

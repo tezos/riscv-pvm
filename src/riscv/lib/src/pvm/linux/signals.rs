@@ -12,6 +12,7 @@ use strum::FromRepr;
 
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
@@ -21,6 +22,7 @@ use crate::machine_state::registers::sp;
 use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
+use crate::pvm::linux::parameters::SystemCallResultExecution;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -779,13 +781,15 @@ impl<M: ManagerBase> SupervisorState<M> {
     pub(super) fn handle_rt_sigreturn(
         &self,
         core: &mut MachineCoreState<impl MemoryConfig, M>,
-    ) -> Result<u64, Error>
+    ) -> Result<SystemCallResultExecution, Error>
     where
         M: ManagerReadWrite,
     {
         let pc = core.pop_signal_context().map_err(|_| Error::Fault)?;
-        core.hart.pc.write(pc);
-        // Return 0 as an indicator of success
-        Ok(0)
+        Ok(SystemCallResultExecution {
+            result: 0, // indicator of success
+            pc_update: ProgramCounterUpdate::Set(pc),
+            ..SystemCallResultExecution::default()
+        })
     }
 }

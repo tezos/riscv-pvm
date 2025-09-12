@@ -16,6 +16,7 @@ use std::ffi::CStr;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
+use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 
@@ -26,6 +27,7 @@ use super::Pvm;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
+use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Address;
@@ -36,6 +38,7 @@ use crate::machine_state::memory::Permissions;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
+use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
@@ -527,10 +530,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         B: Block<MC, M>,
         M: ManagerReadWrite,
     {
-        // We need to jump to the next instruction. The ECall instruction which triggered this
-        // function is 4 byte wide.
-        let pc = machine.core.hart.pc.read().saturating_add(4);
-        machine.core.hart.pc.write(pc);
+        let pc = machine.core.hart.pc.read();
 
         /// Read an argument from a register and interpret it as a system call argument.
         /// If that fails, log the failure.
@@ -568,10 +568,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         /// Check the result of a system call. If it failed, log the error.
         macro_rules! check_result {
             ($system_call:ident, $result:expr) => {{
-                let parameters::SystemCallResultExecution {
-                    result,
-                    control_flow,
-                } = $result
+                let res: SystemCallResultExecution = $result
                     .inspect(|res| {
                         crate::log::trace! {
                             result = format!("{res:?}"),
@@ -588,8 +585,7 @@ impl<M: ManagerBase> SupervisorState<M> {
                         }
                     })?
                     .into();
-                machine.core.hart.xregisters.write(registers::a0, result);
-                control_flow
+                res
             }};
         }
 
@@ -788,14 +784,28 @@ impl<M: ManagerBase> SupervisorState<M> {
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
 
+                machine
+                    .core
+                    .update_pc(pc, ProgramCounterUpdate::Next(ECALL_WIDTH));
                 let _ = machine.core.dispatch_signal(Signal::Sigsys);
             }
 
             Err(error) => {
                 machine.core.hart.xregisters.write_system_call_error(error);
+                machine
+                    .core
+                    .update_pc(pc, ProgramCounterUpdate::Next(ECALL_WIDTH));
             }
 
-            Ok(control_flow) => return control_flow,
+            Ok(SystemCallResultExecution {
+                result,
+                control_flow,
+                pc_update,
+            }) => {
+                machine.core.hart.xregisters.write(registers::a0, result);
+                machine.core.update_pc(pc, pc_update);
+                return control_flow;
+            }
         }
 
         ControlFlow::Continue(())
@@ -852,6 +862,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         Ok(parameters::SystemCallResultExecution {
             result: status.exit_code(),
             control_flow: ControlFlow::Break(()),
+            pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH), // vacuous, never used
         })
     }
 
@@ -869,10 +880,10 @@ impl<M: ManagerBase> SupervisorState<M> {
         self.exited = true;
         self.exit_code = signal.exit_code();
 
-        // Return 0 as an indicator of success, even if this might not actually be used
         Ok(parameters::SystemCallResultExecution {
-            result: 0,
             control_flow: ControlFlow::Break(()),
+            result: 0, // indicator of success, even if this might not actually be used
+            ..SystemCallResultExecution::default()  // vacuous args, never used
         })
     }
 
