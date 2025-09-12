@@ -104,8 +104,14 @@ const SET_TID_ADDRESS: u64 = 96;
 /// System call number for `set_robust_list` on RISC-V
 const SET_ROBUST_LIST: u64 = 99;
 
+/// System call number for `kill` on RISC-V
+const KILL: u64 = 129;
+
 /// System call number for `tkill` on RISC-V
 const TKILL: u64 = 130;
+
+/// System call number for `tgkill` on RISC-V
+const TGKILL: u64 = 131;
 
 /// System call number for `sigaltstack` on RISC-V
 const SIGALTSTACK: u64 = 132;
@@ -836,7 +842,9 @@ impl<M: ManagerBase> SupervisorState<M> {
             SET_TID_ADDRESS => dispatch1!(set_tid_address, &mut machine.core),
             GETPID => dispatch0!(getpid),
             SET_ROBUST_LIST => dispatch2!(set_robust_list),
-            TKILL => dispatch2!(tkill),
+            KILL => dispatch2!(kill, &mut machine.core),
+            TKILL => dispatch2!(tkill, &mut machine.core),
+            TGKILL => dispatch3!(tgkill, &mut machine.core),
             SIGALTSTACK => dispatch2!(sigaltstack, &mut machine.core),
             RT_SIGACTION => dispatch4!(rt_sigaction, &mut machine.core),
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
@@ -933,25 +941,70 @@ impl<M: ManagerBase> SupervisorState<M> {
         })
     }
 
-    /// Handle `tkill` system call. As there is only one thread at the moment, this system call
-    /// will return an error if the thread ID is not the main thread ID.
-    fn handle_tkill(
+    /// Handle `kill` system call. As there is only one thread at the moment, this
+    /// system call will return an error if the thread ID is not the main thread ID.
+    fn handle_kill(
         &mut self,
-        _: parameters::MainThreadId,
-        signal: signals::TkillSignal,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+        _: parameters::ProcessId,
+        signal: signals::Signal,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
         M: ManagerReadWrite,
     {
-        // Indicate that we have exited
-        self.exited = true;
-        self.exit_code = signal.exit_code();
+        let siginfo = signals::LinuxSigInfo::new(signal, 0);
 
-        // Return 0 as an indicator of success, even if this might not actually be used
-        Ok(parameters::SystemCallResultExecution {
-            result: 0,
-            control_flow: ControlFlow::Break(()),
-        })
+        // We want to return 0 as an indicator of success, but the return register (a0) is the same
+        // as the register used for the first parameter of the signal handler (the signal number).
+        // To allow both, 0 is stored in a0 before the signal is dispatched. This will mean that it
+        // gets stored in the machine context on the stack and will be restored when execution
+        // returns from the signal hander - ready to be returned.
+        core.hart.xregisters.write(registers::a0, 0);
+
+        if core.dispatch_signal(siginfo).is_err() {
+            // Indicate that we have exited
+            self.exited = true;
+            self.exit_code = 0;
+
+            Ok(parameters::SystemCallResultExecution {
+                result: Some(0),
+                control_flow: ControlFlow::Break(()),
+            })
+        } else {
+            Ok(parameters::SystemCallResultExecution {
+                result: None,
+                control_flow: ControlFlow::Continue(()),
+            })
+        }
+    }
+
+    /// Handle `tkill` system call. There is only one thread and process, so this wraps
+    /// [`SupervisorState<M>::handle_kill`].
+    fn handle_tkill(
+        &mut self,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+        _tid: parameters::MainThreadId,
+        signal: signals::Signal,
+    ) -> Result<parameters::SystemCallResultExecution, Infallible>
+    where
+        M: ManagerReadWrite,
+    {
+        self.handle_kill(core, parameters::ProcessId {}, signal)
+    }
+
+    /// Handle `tgkill` system call. There is only one thread and process, so this wraps
+    /// [`SupervisorState<M>::handle_kill`].
+    fn handle_tgkill(
+        &mut self,
+        core: &mut MachineCoreState<impl MemoryConfig, M>,
+        _tgid: u64,
+        _tid: parameters::MainThreadId,
+        signal: signals::Signal,
+    ) -> Result<parameters::SystemCallResultExecution, Infallible>
+    where
+        M: ManagerReadWrite,
+    {
+        self.handle_kill(core, parameters::ProcessId {}, signal)
     }
 
     /// Handle `getpid` system call.
