@@ -13,6 +13,8 @@ use strum::FromRepr;
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
+use crate::machine_state::csregisters::CSRRepr;
+use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
@@ -21,6 +23,10 @@ use crate::machine_state::registers::sp;
 use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
+use crate::pvm::linux::registers::FRegister;
+use crate::pvm::linux::registers::FValue;
+use crate::pvm::linux::registers::XRegister;
+use crate::pvm::linux::registers::XValue;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
@@ -233,10 +239,16 @@ impl Elem for LinuxUContext {
     }
 }
 
+struct CSRegisterContext {
+    fflags: CSRRepr,
+    frm: CSRRepr,
+}
+
 struct MachineContext {
     pc: u64,
-    prev_stack_pointer: u64,
-    // TODO RV-755 Store and restore registers
+    xregisters: [XValue; 31],
+    fregisters: [FValue; 32],
+    csregisters: CSRegisterContext,
 }
 
 /// Pointers to the locations on the stack for the restorer, the context of []LinuxUContext] and
@@ -386,11 +398,24 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
 
         let restorer = self.signal_actions.restorer.read();
 
-        let prev_stack_pointer = self.hart.xregisters.read(sp);
-
+        // SAFETY: x is bounded between 0..=30, which fits in both [u8] and [XRegister]
+        //         f is bounded between 0..=31, which fits in both [u8] and [FRegister]
         let mcontext = MachineContext {
             pc,
-            prev_stack_pointer,
+            xregisters: std::array::from_fn(|x| {
+                self.hart
+                    .xregisters
+                    .read(unsafe { std::mem::transmute::<u8, XRegister>(x as u8) })
+            }),
+            fregisters: std::array::from_fn(|f| {
+                self.hart
+                    .fregisters
+                    .read(unsafe { std::mem::transmute::<u8, FRegister>(f as u8) })
+            }),
+            csregisters: CSRegisterContext {
+                fflags: self.hart.csregisters.read(CSRegister::fflags),
+                frm: self.hart.csregisters.read(CSRegister::frm),
+            },
         };
 
         let context = LinuxUContext {
@@ -398,6 +423,7 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             uc_mcontext: mcontext,
         };
 
+        let prev_stack_pointer = self.hart.xregisters.read(sp);
         let stack_pointer = VirtAddr::new(prev_stack_pointer)
             .sub(CONTEXT_STACK_SIZE)
             .align_down(RISCV_ABI_SP_ALIGNMENT);
@@ -433,13 +459,39 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
             .main_memory
             .read::<LinuxUContext>(stack_pointer.to_machine_address())?;
 
+        // SAFETY: i is bounded between 0..=30, which fits in [u8]
+        for (i, xvalue) in context.uc_mcontext.xregisters.iter().enumerate() {
+            unsafe {
+                self.hart
+                    .xregisters
+                    .write(std::mem::transmute::<u8, XRegister>(i as u8), *xvalue);
+            }
+        }
+
+        // SAFETY: i is bounded between 0..=31, which fits in both [u8] and [FRegister]
+        for (i, fvalue) in context.uc_mcontext.fregisters.iter().enumerate() {
+            unsafe {
+                self.hart
+                    .fregisters
+                    .write(std::mem::transmute::<u8, FRegister>(i as u8), *fvalue);
+            }
+        }
+
+        self.hart
+            .csregisters
+            .write(CSRegister::fflags, context.uc_mcontext.csregisters.fflags);
+        self.hart
+            .csregisters
+            .write(CSRegister::frm, context.uc_mcontext.csregisters.frm);
+
         let signal: Signal = siginfo.si_signo;
 
         self.signal_actions.write_mask(signal, context.uc_sigmask);
 
         // TODO RV-734 Restore the alternative stack
 
-        let stack_pointer = VirtAddr::new(context.uc_mcontext.prev_stack_pointer)
+        let prev_stack_pointer = self.hart.xregisters.read(sp);
+        let stack_pointer = VirtAddr::new(prev_stack_pointer)
             .add(CONTEXT_STACK_SIZE)
             .align_up(RISCV_ABI_SP_ALIGNMENT)
             .ok_or(SignalError::MisalignedStackPointer)?;
