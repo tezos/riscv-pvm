@@ -6,13 +6,6 @@
 .PHONY: all
 all: build test check
 
-# In some situations we might want to override the compilation target.
-NATIVE_TARGET ?=
-
-ifneq ($(NATIVE_TARGET),)
-NATIVE_OPT := --target="$(NATIVE_TARGET)"
-endif
-
 # Mechanism to allow enabling additional features - for example JIT
 SANDBOX_ENABLE_FEATURES ?=
 
@@ -21,12 +14,12 @@ NIGHTLY_VERSION = nightly-2025-01-30
 
 .PHONY: build
 build: riscv-sandbox
-	@cargo build --release --workspace $(NATIVE_OPT)
+	@cargo build --release --workspace
 
 .PHONY: riscv-sandbox
 riscv-sandbox::
-	@cargo build --release --package riscv-sandbox $(NATIVE_OPT) $(SANDBOX_ENABLE_FEATURES:%=-F%)
-	@ln -f ../../target/$(NATIVE_TARGET)/release/riscv-sandbox $@
+	@cargo build --release --package riscv-sandbox $(SANDBOX_ENABLE_FEATURES:%=-F%)
+	@ln -f ../../target/release/riscv-sandbox $@
 
 .PHONY: riscv-sandbox.prof
 riscv-sandbox.prof::
@@ -54,10 +47,6 @@ build-deps-slim:
 	# The second command triggers installation for Rustup 1.28+.
 	@rustup show active-toolchain || rustup toolchain install
 	@rustup component add rustfmt clippy
-
-ifneq ($(NATIVE_TARGET),)
-	@rustup target add $(NATIVE_TARGET)
-endif
 
 	# Install Nightly for formatting with its Rustfmt
 	@rustup toolchain install $(NIGHTLY_VERSION) -c rustfmt -c rust-src
