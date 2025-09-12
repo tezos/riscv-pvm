@@ -359,6 +359,10 @@ pub(super) fn handle_tezos<MC, M>(
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
+    // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
+    let pc = machine.hart.pc.read().wrapping_add(4);
+    machine.hart.pc.write(pc);
+
     let sbi_function = machine.hart.xregisters.read(a6);
     match sbi_function {
         SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
