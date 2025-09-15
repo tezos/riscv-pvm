@@ -892,3 +892,98 @@ impl<M: ManagerBase> SupervisorState<M> {
         Ok(0)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::fs;
+    use std::ops::Bound;
+
+    use super::LinuxSigAction;
+    use super::SA_SIGINFO;
+    use super::Signal;
+    use super::SignalActionPtr;
+    use crate::backend_test;
+    use crate::machine_state::block_cache::TestCacheConfig;
+    use crate::machine_state::block_cache::block::Interpreted;
+    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
+    use crate::machine_state::memory::M64M;
+    use crate::machine_state::memory::Memory;
+    use crate::program::Program;
+    use crate::pvm::Pvm;
+    use crate::pvm::handle_system_call;
+    use crate::pvm::hooks::StdoutDebugHooks;
+    use crate::pvm::linux::RT_SIGACTION;
+    use crate::pvm::linux::registers::a0;
+    use crate::pvm::linux::registers::a1;
+    use crate::pvm::linux::registers::a7;
+
+    // The `signal-tester` kernel in combination with this test validates signal actions from start
+    // to finish. It starts by setting up signal actions for [Signal::Sigusr1]. In the test below,
+    // we check that our internal representation of the data is the same as what the RISC-V ABI
+    // expects.
+    //
+    // Once that succeeds, the kernel issues a [Signal::Sigusr1] and, inside the handler, checks
+    // that the parameters passed to the handler are the same as what it expects.
+    //
+    // Once the handler returns, we check that execution continues. The kernel sets up a signal
+    // action for [Signal::Sigusr2] and checks that different values also match what we expect from
+    // the ABI.
+    backend_test!(test_sigaction_setup, F, {
+        let mut state =
+            Pvm::<M64M, TestCacheConfig, Interpreted<M64M, F>, F>::new(InterpretedBlockBuilder);
+
+        // The `signal-tester` kernel is a simple kernel that needs to be built before this
+        // test can run. It is located in the `/kernels/signal-tester` directory.
+        let contents = fs::read("../../../kernels/signal-tester/target/riscv64gc-unknown-linux-musl/debug/signal-tester").expect("Could not find `signal-tester` kernel. Perhaps you need to build it via `make -C kernels/signal-tester build`?");
+        let program = Program::from_elf(&contents).unwrap();
+
+        state.setup_linux_process(&program).unwrap();
+
+        let res = state
+            .machine_state
+            .step_max_handle::<()>(Bound::Unbounded, |machine| {
+                let syscall_number = machine.core.hart.xregisters.read(a7);
+                if syscall_number == RT_SIGACTION {
+                    let signal = machine.core.hart.xregisters.read(a0);
+                    if signal == Signal::Sigusr1 as u64 {
+                        let action_ptr: SignalActionPtr =
+                            machine.core.hart.xregisters.read(a1).into();
+                        if let Some(action_ptr) = action_ptr.address() {
+                            if let Ok(action) =
+                                machine.core.main_memory.read::<LinuxSigAction>(action_ptr)
+                            {
+                                assert_eq!(action.sa_flags, 42 | SA_SIGINFO);
+                                assert_eq!(action.sa_mask, 0);
+                            }
+                        }
+                    }
+
+                    if signal == Signal::Sigusr2 as u64 {
+                        let action_ptr: SignalActionPtr =
+                            machine.core.hart.xregisters.read(a1).into();
+                        if let Some(action_ptr) = action_ptr.address() {
+                            if let Ok(action) =
+                                machine.core.main_memory.read::<LinuxSigAction>(action_ptr)
+                            {
+                                assert_eq!(action.sa_sigaction, 0xAAAA);
+                                assert_eq!(action.sa_flags, 1337 | SA_SIGINFO);
+
+                                // The libc's representation of `sigfillset` is truly strange
+                                assert_eq!(action.sa_mask, 0xFFFFFFFC7FFFFFFF);
+                            }
+                        }
+                    }
+                }
+
+                handle_system_call(
+                    machine,
+                    &mut state.system_state,
+                    &mut state.status,
+                    &mut state.reveal_request,
+                    StdoutDebugHooks,
+                )
+            });
+
+        assert_eq!(res.error, Some(()), "Program didn't make it to the end");
+    });
+}
