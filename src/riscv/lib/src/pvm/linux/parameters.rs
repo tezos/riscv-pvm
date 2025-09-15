@@ -13,7 +13,7 @@ use super::error::Error;
 #[derive(Debug, Clone, Copy)]
 pub struct SystemCallResultExecution {
     /// Result value that will be returned to the caller of the system call
-    pub result: u64,
+    pub result: Option<u64>,
 
     /// Control flow indication for the [`crate::machine_state::MachineState`] step loop
     ///
@@ -27,7 +27,7 @@ impl<T: Into<u64>> From<T> for SystemCallResultExecution {
         // The default action is to continue execution after the system call. In cases where the
         // execution should halt, this should be specified.
         SystemCallResultExecution {
-            result: value.into(),
+            result: Some(value.into()),
             control_flow: ControlFlow::Continue(()),
         }
     }

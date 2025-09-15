@@ -658,7 +658,12 @@ impl<M: ManagerBase> SupervisorState<M> {
                         }
                     })?
                     .into();
-                machine.core.hart.xregisters.write(registers::a0, result);
+                match result {
+                    Some(result) => {
+                        machine.core.hart.xregisters.write(registers::a0, result);
+                    }
+                    _ => (),
+                }
                 control_flow
             }};
         }
@@ -923,7 +928,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         self.exited = true;
 
         Ok(parameters::SystemCallResultExecution {
-            result: status.exit_code(),
+            result: Some(status.exit_code()),
             control_flow: ControlFlow::Break(()),
         })
     }
