@@ -176,6 +176,16 @@ impl<M: ManagerRead> SignalActions<M> {
         self.masks[signal_index as usize].read()
     }
 
+    /// Should this signal be blocked?
+    ///
+    /// Note that this uses the ABI's signal number represented by [Signal] as the index into the
+    /// bitmask, not our [SignalIndex].
+    fn is_masked(&self, signal: Signal) -> bool {
+        let bit: u64 = 1 << signal as i32;
+        let mask = self.read_mask(signal) | self.thread_mask.read();
+        bit & mask != 0
+    }
+
     /// Has the [SA_SIGINFO] flag been set?
     ///
     /// i.e., was this signal action registered using `rt_sigaction(2)`?
@@ -218,6 +228,10 @@ struct_layout! {
 impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
     /// Set the hart state to a signal handler
     pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
+        if self.signal_actions.is_masked(signal) {
+            return Ok(());
+        }
+
         let handler = self.signal_actions.read_action(signal);
 
         match handler {
