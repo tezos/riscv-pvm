@@ -858,7 +858,10 @@ impl<M: ManagerBase> SupervisorState<M> {
                     .xregisters
                     .write_system_call_error(Error::NoSystemCall);
 
-                let _ = machine.core.dispatch_signal(Signal::Sigsys);
+                // A value is only placed in `si_code` if `[Signal::Sigsys]` is triggered by a
+                // `seccomp(2)` filter rule.
+                let siginfo = signals::LinuxSigInfo::new(Signal::Sigsys, 0);
+                let _ = machine.core.dispatch_signal(siginfo).is_err();
             }
 
             Err(error) => {
@@ -2124,7 +2127,7 @@ mod tests {
         // Write the initial stack pointer and program counter.
         let stack_top = M4K::TOTAL_BYTES as u64;
         machine_state.core.hart.xregisters.write(sp, stack_top);
-        let init_pc = 0;
+        let init_pc = 10;
         machine_state.core.hart.pc.write(init_pc);
 
         // The address of a psuedo handler.
@@ -2210,5 +2213,27 @@ mod tests {
             machine_state.core.hart.pc.read(),
             restorer_address.to_machine_address()
         );
+
+        // The restorer will just call `rt_sigreturn`
+        // Here that behaviour is emulated.
+
+        // System call number
+        machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a7, RT_SIGRETURN);
+
+        // Perform the system call
+        let mut supervisor_state = SupervisorState::<F>::new();
+        let result = supervisor_state.handle_system_call(
+            &mut machine_state,
+            StdoutDebugHooks,
+            default_on_tezos_handler,
+        );
+        assert!(result.is_continue());
+
+        // Check that the program counter has been restored.
+        assert_eq!(machine_state.core.hart.pc.read(), init_pc);
     });
 }
