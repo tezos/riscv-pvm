@@ -5,10 +5,21 @@
 use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::ops::Sub;
+use std::slice::from_raw_parts;
+use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
 use strum::EnumCount;
 use strum::FromRepr;
+use zerocopy::FromBytes;
+use zerocopy::IntoBytes;
+use zerocopy::byteorder::LittleEndian;
+use zerocopy::byteorder::U32;
+use zerocopy::byteorder::U64;
+use zerocopy_derive::FromBytes;
+use zerocopy_derive::Immutable;
+use zerocopy_derive::IntoBytes;
+use zerocopy_derive::KnownLayout;
 
 use super::Block;
 use super::BlockCacheConfig;
@@ -63,12 +74,15 @@ pub enum SignalError {
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
 /// and <https://github.com/torvalds/linux/blob/155a3c003e555a7300d156a5252c004c392ec6b0/include/linux/signal_types.h#L37>
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromBytes, Immutable, IntoBytes, KnownLayout)]
 #[cfg_attr(test, derive(Default, PartialEq))]
 pub struct LinuxSigAction {
-    pub sa_sigaction: VirtAddr,
-    pub sa_flags: u32,
-    pub sa_mask: u64,
+    pub sa_sigaction: U64<LittleEndian>,
+    pub sa_flags: U32<LittleEndian>,
+    /// The kernel struct has padding between the flags and mask that would be used by the restorer if
+    /// RISC-V's ABI didn't use the vDSO for a restorer.
+    __sigreturn_padding: [u8; 12],
+    pub sa_mask: U64<LittleEndian>,
 }
 
 /// In tests it's useful to be able to create a sigaction using only this field.
@@ -76,15 +90,11 @@ pub struct LinuxSigAction {
 impl LinuxSigAction {
     pub(crate) fn new(sa_sigaction: VirtAddr) -> Self {
         Self {
-            sa_sigaction,
+            sa_sigaction: sa_sigaction.to_machine_address().into(),
             ..Default::default()
         }
     }
 }
-
-/// The kernel struct has padding between the flags and mask that would be used by the restorer if
-/// RISC-V's ABI didn't use the vDSO for a restorer.
-const SIGRETURN_PADDING: usize = 12;
 
 /// Set the default signal disposition
 ///
@@ -112,22 +122,8 @@ impl Elem for LinuxSigAction {
         // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each
         // field.
         unsafe {
-            let offset = 0;
-
-            let sa_sigaction_bits = source.add(offset).cast::<u64>().read();
-            let offset = offset + size_of_val(&sa_sigaction_bits);
-
-            let sa_flags_bits = source.add(offset).cast::<u32>().read();
-            let offset = offset + size_of_val(&sa_flags_bits);
-
-            let offset = offset + SIGRETURN_PADDING;
-            let sa_mask_bits = source.add(offset).cast::<u64>().read();
-
-            Self {
-                sa_flags: u32::from_le(sa_flags_bits),
-                sa_sigaction: VirtAddr::new(u64::from_le(sa_sigaction_bits)),
-                sa_mask: u64::from_le(sa_mask_bits),
-            }
+            LinuxSigAction::read_from_bytes(from_raw_parts(source, Self::STORED_SIZE.get()))
+                .expect("Bad sigaction")
         }
     }
 
@@ -135,18 +131,7 @@ impl Elem for LinuxSigAction {
         // SAFETY: The bitwise representation is the same as `read_unaligned` and matches each
         // field.
         unsafe {
-            let offset = 0;
-
-            dest.add(offset)
-                .cast::<u64>()
-                .write(self.sa_sigaction.to_machine_address().to_le());
-            let offset = offset + size_of_val(&self.sa_sigaction);
-
-            dest.add(offset).cast::<u32>().write(self.sa_flags.to_le());
-            let offset = offset + size_of_val(&self.sa_flags);
-
-            let offset = offset + SIGRETURN_PADDING;
-            dest.add(offset).cast::<u64>().write(self.sa_mask.to_le());
+            let _ = self.write_to(from_raw_parts_mut(dest, Self::STORED_SIZE.get()));
         }
     }
 }
@@ -350,9 +335,10 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         let sa_mask = self.signal_actions.read_mask(index);
 
         LinuxSigAction {
-            sa_sigaction,
-            sa_flags,
-            sa_mask,
+            sa_sigaction: sa_sigaction.to_machine_address().into(),
+            sa_flags: sa_flags.into(),
+            __sigreturn_padding: Default::default(),
+            sa_mask: sa_mask.into(),
         }
     }
 
@@ -371,9 +357,11 @@ impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
         }
 
         let index: SignalIndex = signal.into();
-        self.signal_actions.write_action(index, action.sa_sigaction);
-        self.signal_actions.write_flags(index, action.sa_flags);
-        self.signal_actions.write_mask(index, action.sa_mask);
+        self.signal_actions
+            .write_action(index, VirtAddr::new(action.sa_sigaction.into()));
+        self.signal_actions
+            .write_flags(index, action.sa_flags.into());
+        self.signal_actions.write_mask(index, action.sa_mask.into());
         Ok(())
     }
 }
