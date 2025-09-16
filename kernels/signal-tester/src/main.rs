@@ -18,6 +18,11 @@ extern "C" fn handle_sigusr1(
     ucontext: *mut libc::ucontext_t,
 ) {
     assert_eq!(sig, libc::SIGUSR1);
+
+    unsafe {
+        assert!(libc::kill(1, libc::SIGUSR2) != 0);
+    }
+
     unsafe {
         assert_eq!((*info).si_signo, libc::SIGUSR1);
         assert_eq!((*info).si_code, 0);
@@ -66,6 +71,33 @@ extern "C" fn handle_sigusr1(
     }
 }
 
+extern "C" fn handle_sigusr1_nested(
+    _sig: libc::c_int,
+    _info: *mut libc::siginfo_t,
+    _ucontext: *mut libc::ucontext_t,
+) {
+    unsafe {
+        assert!(libc::kill(1, libc::SIGUSR2) == 0);
+    }
+}
+
+extern "C" fn unhandled_sigusr2(
+    _sig: libc::c_int,
+    _info: *mut libc::siginfo_t,
+    _ucontext: *mut libc::ucontext_t,
+) {
+    // This shouldn't be called
+    panic!()
+}
+
+extern "C" fn handle_sigusr2(
+    _sig: libc::c_int,
+    _info: *mut libc::siginfo_t,
+    _ucontext: *mut libc::ucontext_t,
+) {
+    // noop
+}
+
 pub fn main() {
     let mut code_page = memmap2::MmapOptions::new().len(0x1000).map_anon().unwrap();
     let code_ptr = code_page.as_ptr();
@@ -87,10 +119,12 @@ pub fn main() {
     let value = code();
     assert_eq!(value, foo());
 
+    // Set `SIGUSR1` to `handle_sigusr1` and an empty mask
+    //
     // SAFETY: The sigset is initialised and the sigaction parameters are tested
     unsafe {
         let mut mask = MaybeUninit::<libc::sigset_t>::uninit();
-        libc::sigemptyset(mask.as_mut_ptr());
+        libc::sigfillset(mask.as_mut_ptr());
 
         let new = libc::sigaction {
             sa_sigaction: handle_sigusr1 as libc::sighandler_t,
@@ -100,23 +134,71 @@ pub fn main() {
         };
 
         libc::sigaction(libc::SIGUSR1, &new, core::ptr::null_mut());
-
-        libc::kill(1, libc::SIGUSR1);
     }
 
+    // Set `SIGUSR2` to `unhandled_sigusr2`
+    //
     // SAFETY: The sigset is initialised and the sigaction parameters are tested
     unsafe {
         let mut mask = MaybeUninit::<libc::sigset_t>::uninit();
-        libc::sigfillset(mask.as_mut_ptr());
+        libc::sigemptyset(mask.as_mut_ptr());
 
         let new = libc::sigaction {
-            sa_sigaction: 0xAAAA,
+            sa_sigaction: unhandled_sigusr2 as libc::sighandler_t,
             sa_mask: mask.assume_init(),
             sa_flags: 1337,
             sa_restorer: None,
         };
 
         libc::sigaction(libc::SIGUSR2, &new, core::ptr::null_mut());
+    }
+
+    // Call the `SIGUSR1` handler which will block calling `SIGUSR2`
+    unsafe {
+        libc::kill(1, libc::SIGUSR1);
+    }
+
+    // Set `SIGUSR1` to `handle_sigusr1_nested` and a mask that allows `SIGUSR2`
+    //
+    // SAFETY: The sigset is initialised and the sigaction parameters are tested
+    unsafe {
+        let mut mask = MaybeUninit::<libc::sigset_t>::uninit();
+        libc::sigfillset(mask.as_mut_ptr());
+        let mut mask = mask.assume_init();
+
+        // Remove SIGUSR2 from the set of blocked signals
+        libc::sigdelset(&mut mask, libc::SIGUSR2);
+
+        let new = libc::sigaction {
+            sa_sigaction: handle_sigusr1_nested as libc::sighandler_t,
+            sa_mask: mask,
+            sa_flags: 42,
+            sa_restorer: None,
+        };
+
+        libc::sigaction(libc::SIGUSR1, &new, core::ptr::null_mut());
+    }
+
+    // Set `SIGUSR2` to `handle_sigusr2`
+    //
+    // SAFETY: The sigset is initialised and the sigaction parameters are tested.
+    unsafe {
+        let mut mask = MaybeUninit::<libc::sigset_t>::uninit();
+        libc::sigemptyset(mask.as_mut_ptr());
+
+        let new = libc::sigaction {
+            sa_sigaction: handle_sigusr2 as libc::sighandler_t,
+            sa_mask: mask.assume_init(),
+            sa_flags: 1337,
+            sa_restorer: None,
+        };
+
+        libc::sigaction(libc::SIGUSR2, &new, core::ptr::null_mut());
+    }
+
+    // Call the `SIGUSR1` handler which then calls the `SIGUSR2` handler
+    unsafe {
+        libc::kill(1, libc::SIGUSR1);
     }
 
     unsafe { libc::exit(0) }
