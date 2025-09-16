@@ -13,6 +13,7 @@ pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 use std::ops::Bound;
 use std::ops::ControlFlow;
 
@@ -39,6 +40,7 @@ use crate::pvm::linux::signals::Signal;
 use crate::pvm::linux::signals::SignalActions;
 use crate::pvm::linux::signals::SignalActionsLayout;
 use crate::range_utils::bound_saturating_sub;
+use crate::range_utils::bound_to_non_zero;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
@@ -453,29 +455,37 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     #[inline]
     pub fn step_max_handle<E>(
         &mut self,
-        mut step_bounds: Bound<usize>,
-        mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
+        step_bounds: Bound<usize>,
+        mut handle: impl FnMut(&mut Self, NonZeroUsize) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
         M: backend::ManagerReadWrite,
     {
+        let calculate_bounds = |steps: usize| bound_saturating_sub(step_bounds, steps);
+
         let mut steps = 0usize;
 
         let error = loop {
-            let result = self.step_max(step_bounds);
+            let result = self.step_max(calculate_bounds(steps));
 
             steps = steps.saturating_add(result.steps);
-            step_bounds = bound_saturating_sub(step_bounds, result.steps);
 
             match result.error {
                 Some(cause) => {
-                    // Raising the exception is not a completed step. Trying to handle it is.
-                    // We don't have to check against `max_steps` because running the
-                    // instruction that triggered the exception meant that `max_steps > 0`.
-                    steps = steps.saturating_add(1);
-                    step_bounds = bound_saturating_sub(step_bounds, 1);
+                    // SAFETY: Raising the exception is not a completed step. Trying to handle it is.
+                    // The `unwrap()` is safe because `steps_remaining = calculate_bounds(steps_completed) > 0`
+                    // This is because running the instruction that triggered the exception
+                    // meant that `steps_completed < step_bounds`
+                    let non_zero_step_bounds =
+                        bound_to_non_zero(calculate_bounds(steps))
+                        .expect("This should be unreachable. The invariant that exception handlers must be called with max steps of at least 1, has been violated");
 
-                    match self.handle_exception(cause, &mut handle) {
+                    steps = steps.saturating_add(1);
+                    // embed the step_bounds into the handler, as there is no other step_bounds
+                    // dependent logic within `handle_exception`
+                    match self
+                        .handle_exception(cause, |machine| handle(machine, non_zero_step_bounds))
+                    {
                         ControlFlow::Continue(()) => {}
                         ControlFlow::Break(error) => break Some(error),
                     }
@@ -890,9 +900,9 @@ mod tests {
 
             state.setup_linux_process(&program).unwrap();
 
-            let res = state
-                .machine_state
-                .step_max_handle::<()>(Bound::Unbounded, |machine| {
+            let res = state.machine_state.step_max_handle::<()>(
+                Bound::Unbounded,
+                |machine, step_bounds| {
                     let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
 
                     // The `block-cache-tester` kernel will issue a system call with number -1
@@ -908,8 +918,10 @@ mod tests {
                         &mut state.status,
                         &mut state.reveal_request,
                         StdoutDebugHooks,
+                        step_bounds,
                     )
-                });
+                },
+            );
 
             assert_eq!(
                 res.error,
@@ -1213,7 +1225,7 @@ mod tests {
                 .push_instruction(initial_pc, Instruction::DEFAULT);
 
             let res: StepManyResult<()> =
-                state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
+                state.step_max_handle(Bound::Included(1), |_, _| panic!("unexpected ECall"));
 
             assert_eq!(state.core.hart.pc.read(), expected_pc);
             assert_eq!(res.steps, 1);

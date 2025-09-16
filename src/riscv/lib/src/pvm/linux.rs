@@ -1443,8 +1443,9 @@ mod tests {
                 .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
                 .unwrap();
 
-            machine_state
-                .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+            machine_state.step_max_handle::<Infallible>(Bound::Included(1), |_, _| {
+                ControlFlow::Continue(())
+            });
 
             // Check that the program counter increased
             assert_eq!(

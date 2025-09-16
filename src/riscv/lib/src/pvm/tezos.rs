@@ -5,6 +5,7 @@
 //! Tezos-specific host functions for the PVM
 
 use std::cmp::min;
+use std::num::NonZeroUsize;
 
 use ed25519_dalek::Signature;
 use ed25519_dalek::Signer;
@@ -355,6 +356,7 @@ pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
+    _step_bounds: NonZeroUsize,
 ) where
     MC: MemoryConfig,
     M: ManagerReadWrite,

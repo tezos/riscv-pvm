@@ -894,7 +894,7 @@ mod tests {
             .unwrap();
         let step_result = pvm
             .machine_state
-            .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+            .step_max_handle::<Infallible>(Bound::Included(1), |_, _| ControlFlow::Continue(()));
         assert_eq!(step_result.error, None);
 
         // Check that the program counter is now at the handler.
@@ -957,7 +957,7 @@ mod tests {
 
         let step_result = pvm
             .machine_state
-            .step_max_handle::<()>(Bound::Included(100), |_| ControlFlow::Break(()));
+            .step_max_handle::<()>(Bound::Included(100), |_, _| ControlFlow::Break(()));
 
         assert_eq!(step_result.error, Some(()));
         assert_eq!(pvm.machine_state.step(), Err(Exception::EnvCall));
