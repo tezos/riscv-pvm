@@ -56,6 +56,8 @@ capstone = "0.13"
 memmap2 = "0.9.8"
 blake3 = "1.8.2"
 perfect-derive = "0.1.5"
+zerocopy = "0.8.27"
+zerocopy-derive = "0.8.27"
 
 [workspace.dependencies.tezos-smart-rollup-constants]
 git = "https://gitlab.com/tezos/tezos.git"
