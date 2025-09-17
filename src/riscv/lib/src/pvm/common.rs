@@ -474,9 +474,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use libsecp256k1::Message;
+    use libsecp256k1::PublicKey;
+    use libsecp256k1::SecretKey;
+    use libsecp256k1::Signature;
+    use libsecp256k1::curve::Scalar;
+    use libsecp256k1::util::FULL_PUBLIC_KEY_SIZE as PK_SIZE;
+    use libsecp256k1::util::MESSAGE_SIZE as MSG_SIZE;
+    use libsecp256k1::util::SIGNATURE_SIZE as SIG_SIZE;
     use proptest::proptest;
     use rand::Fill;
+    use rand::Rng;
     use rand::rng;
+    use rand::seq::SliceRandom;
     use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
     use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
     use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
@@ -493,11 +504,15 @@ mod tests {
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
     use crate::machine_state::registers::a3;
+    use crate::machine_state::registers::a4;
     use crate::machine_state::registers::a6;
     use crate::machine_state::registers::a7;
     use crate::pvm::common::tests::memory::Address;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
+    // TODO: RV-691: Move constant to kernel_sdk
+    /// Function ID for `sbi_tezos_secp256k1_par_verify`
+    use crate::pvm::tezos::SBI_TEZOS_SECP256K1_PAR_VERIFY;
     use crate::state_backend::owned_backend::Owned;
 
     impl<
@@ -829,4 +844,160 @@ mod tests {
         // Reveal data returned correctly
         assert_eq!(reveal_result_buffer, reveal_data[..OUTPUT_BUFFER_SIZE]);
     });
+
+    // Test all the invariants of executing a parallel host functions.
+    // Specifically there is a single ECALL to the parallel host function, `secp256k1_par_verify`.
+    // There are invariants on each of registers, pc, and step counter, between repeated executions
+    // of this ECALL, that must be upheld.
+    // `secp256k1_par_verify` is  a realistic example used to perform a batch signature verification.
+    // It is executed manually by calling `handle_system_call` repeatedly with various permutations
+    // summing to `N`.
+    // We do `NUM_RUNS + 2` such permutations, with extra 2 being the `N of 1` and `1 of N` edge
+    // cases.
+    backend_test!(test_par_host_function, F, {
+        const N: usize = 50;
+        const NUM_RUNS: usize = 10;
+
+        // setup the data required for signature verification
+        let mut pks = Vec::new();
+        let mut sigs = Vec::new();
+        let mut msgs = Vec::new();
+        let mut rng = rand::rng();
+        for n in 0..N {
+            // A more sensible way to do this is like so
+            // let sk = SecretKey::random(&mut rng);
+            // But there's a dependency mismatch for `Rng` trait because `libsecp256k1` uses an old
+            // version of `rand`, 0.8.5
+            // `from_int(0)` is the only invalid case
+            let sk = SecretKey::try_from(Scalar::from_int(n as u32 + 1)).unwrap();
+            let pk = PublicKey::from_secret_key(&sk);
+            let mut hash_bytes = [0u8; 32];
+            hash_bytes.fill(&mut rng);
+            let msg = Message::parse(&hash_bytes);
+            let sig: Signature = libsecp256k1::sign(&msg, &sk).0;
+
+            pks.push(pk.serialize());
+            sigs.push(sig.serialize());
+            msgs.push(hash_bytes);
+        }
+        let len = pks.len() as u64; // = sigs.len() = msgs.len()
+        let pks_addr = memory::FIRST_ADDRESS;
+        let sigs_addr = pks_addr + PK_SIZE as u64 * len;
+        let msgs_addr = sigs_addr + SIG_SIZE as u64 * len;
+        let out_addr = msgs_addr + MSG_SIZE as u64 * len;
+
+        // Initializes a Pvm and runs the same host function with the specified order of step_bounds
+        let execute_pvm = |steps: Vec<usize>| {
+            // Setup PVM
+            type MC = M1M;
+            type B<F> = block::Interpreted<MC, F>;
+            let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F>::new(InterpretedBlockBuilder);
+            pvm.reset();
+            let old_pc = pvm.machine_state.core.hart.pc.read();
+            pvm.machine_state
+                .core
+                .main_memory
+                .set_all_readable_writeable();
+
+            pvm.machine_state
+                .core
+                .main_memory
+                .write_all(pks_addr, &pks)
+                .unwrap();
+            pvm.machine_state
+                .core
+                .main_memory
+                .write_all(sigs_addr, &sigs)
+                .unwrap();
+            pvm.machine_state
+                .core
+                .main_memory
+                .write_all(msgs_addr, &msgs)
+                .unwrap();
+
+            let xregisters = &mut pvm.machine_state.core.hart.xregisters;
+
+            // Configure machine for 'sbi_tezos_reveal'
+            xregisters.write(a7, SBI_FIRMWARE_TEZOS);
+            xregisters.write(a6, SBI_TEZOS_SECP256K1_PAR_VERIFY);
+            xregisters.write(a0, len);
+            xregisters.write(a1, pks_addr);
+            xregisters.write(a2, sigs_addr);
+            xregisters.write(a3, msgs_addr);
+            xregisters.write(a4, out_addr);
+
+            assert_eq!(pvm.status(), PvmStatus::Evaluating);
+
+            let mut steps_remaining = N;
+            for i in steps {
+                assert_eq!(pvm.machine_state.core.hart.pc.read(), old_pc);
+
+                // handle syscall
+                let res = handle_system_call(
+                    &mut pvm.machine_state,
+                    &mut pvm.system_state,
+                    &mut pvm.status,
+                    &mut pvm.reveal_request,
+                    StdoutDebugHooks,
+                    NonZeroUsize::new(i).unwrap(),
+                );
+                assert_eq!(res.steps, i);
+
+                steps_remaining -= i;
+
+                assert_eq!(
+                    pvm.machine_state.core.hart.xregisters.read(a0),
+                    steps_remaining as u64
+                );
+            }
+
+            // at the end of `MAX_STEPS` the pc should have incremented by width of ECALL instr
+            assert_eq!(pvm.machine_state.core.hart.pc.read(), old_pc + 4);
+            // at the end there are no remaining steps to complete
+            assert_eq!(pvm.machine_state.core.hart.xregisters.read(a0), 0);
+
+            // Check if output was written correctly. In this every sig verification should have
+            // succeeded. Read it as a u8 instead of a bool. Otherwise it's highly likely that
+            // random data is non-zero and that would be interpreted as true
+            let output: [u8; N] = pvm.machine_state.core.main_memory.read(out_addr).unwrap();
+            assert!(output.iter().all(|&b| b == 1));
+
+            pvm
+        };
+
+        // define `NUM_RUNS` random sequences which sum to `MAX_STEPS`
+        // Run the pvm on each of them and ensure we get back the same state everytime, by
+        // comparing that every neighbor in the list is equal
+        let mut run_data: Vec<Vec<usize>> = std::iter::repeat_with(|| dissect_steps(N, 1))
+            .take(NUM_RUNS)
+            .collect();
+        // ensure presence of edge cases
+        run_data.push(vec![N]); // 1 of n
+        run_data.push(std::iter::repeat_n(1, N).collect()); // n of 1
+
+        let pvm_end_states: Vec<_> = run_data.into_iter().map(execute_pvm).collect();
+        // zip with next: assert equality of all states by comparing neighbors
+        for (pvm1, pvm2) in pvm_end_states.iter().tuple_windows() {
+            assert!(pvm1.struct_ref::<FnManagerIdent>() == pvm2.struct_ref::<FnManagerIdent>());
+        }
+    });
+
+    fn dissect_steps(mut max_steps: usize, min_step_size: usize) -> Vec<usize> {
+        let mut rng = rand::rng();
+        let mut steps: Vec<usize> = std::iter::from_fn(|| {
+            if max_steps == 0 {
+                return None;
+            }
+
+            let steps = max_steps.div_euclid(2).max(min_step_size);
+            let steps = rng.random_range(min_step_size..=steps);
+
+            max_steps = max_steps.saturating_sub(steps);
+
+            Some(steps)
+        })
+        .collect();
+        steps.shuffle(&mut rng);
+        steps
+    }
 }
