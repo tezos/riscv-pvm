@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Mapping between physical instruction addresses and instruction information.
+//! Data structures for managing addressed instructions
 //!
 //! This module provides data structures and utilities to maintain a mapping between
 //! instruction addresses and their associated information. It includes [`AddrMap`] for storing
@@ -57,6 +57,11 @@ pub struct InstrMap<V> {
 }
 
 impl<V> InstrMap<V> {
+    /// Get the number of instructions in the map.
+    pub fn len(&self) -> usize {
+        self.instructions.len()
+    }
+
     /// Iterate over the instructions, yielding pairs of (`InstrId`, `&V`).
     pub fn iter(&self) -> impl Iterator<Item = (InstrId, &V)> {
         self.instructions
@@ -74,13 +79,29 @@ impl<V> InstrMap<V> {
     }
 
     /// Transform the values in the `InstrMap` using the provided function, producing a new `InstrMap`.
-    pub fn map<F, U>(&self, f: F) -> InstrMap<U>
+    pub fn map<F, U>(&self, mut f: F) -> InstrMap<U>
     where
-        F: Fn(InstrId, &V) -> U,
+        F: FnMut(InstrId, &V) -> U,
     {
         let instructions = self
             .iter()
             .map(|(instr_id, val)| f(instr_id, val))
+            .collect();
+        InstrMap { instructions }
+    }
+
+    /// Combine 2 `InstrMap`s into one by applying a function to the values at each index.
+    pub fn zip2_into_with<V2, R, F>(self, snd: InstrMap<V2>, mut f: F) -> InstrMap<R>
+    where
+        F: FnMut(InstrId, V, V2) -> R,
+    {
+        assert_eq!(self.instructions.len(), snd.instructions.len());
+        let instructions = self
+            .instructions
+            .into_iter()
+            .zip(snd.instructions)
+            .enumerate()
+            .map(|(idx, (fst, snd))| f(InstrId(idx), fst, snd))
             .collect();
         InstrMap { instructions }
     }
