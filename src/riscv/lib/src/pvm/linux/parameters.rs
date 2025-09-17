@@ -4,11 +4,11 @@
 
 use core::num::NonZeroU64;
 use std::fmt;
-use std::ops::ControlFlow;
 
 use super::MAIN_THREAD_ID;
 use super::error::Error;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::memory::Address;
 use crate::parser::instruction::InstrWidth;
 
@@ -20,9 +20,9 @@ pub struct SystemCallResultExecution {
 
     /// Control flow indication for the [`crate::machine_state::MachineState`] step loop
     ///
-    /// Breaking means leaving the step loop in the machine state. In other words, it will defer to
+    /// `control_flow.is_break()` means leaving the step loop in the machine state. In other words, it will defer to
     /// the level above it to decide what to do.
-    pub control_flow: ControlFlow<()>,
+    pub control_flow: StepManyResult<()>,
 
     /// Not all system calls just move the PC to the next instruction
     /// This account for that.
@@ -34,8 +34,6 @@ pub(crate) const ECALL_WIDTH: InstrWidth = InstrWidth::Uncompressed;
 
 impl<T: Into<u64>> From<T> for SystemCallResultExecution {
     fn from(value: T) -> Self {
-        // The default action is to continue execution after the system call. In cases where the
-        // execution should halt, this should be specified.
         Self {
             result: value.into(),
             ..Self::default()
@@ -47,7 +45,7 @@ impl Default for SystemCallResultExecution {
     fn default() -> Self {
         Self {
             result: 0,
-            control_flow: ControlFlow::Continue(()),
+            control_flow: StepManyResult::continue_after_one_step(),
             pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
         }
     }

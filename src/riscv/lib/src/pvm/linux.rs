@@ -13,7 +13,6 @@ pub(crate) mod signals;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
-use std::ops::ControlFlow;
 use std::ops::Range;
 
 use perfect_derive::perfect_derive;
@@ -29,6 +28,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
 use crate::machine_state::ProgramCounterUpdate;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Address;
@@ -529,8 +529,8 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         machine: &mut MachineState<MC, BCC, B, M>,
         hooks: impl PvmHooks,
-        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<()>,
-    ) -> ControlFlow<()>
+        on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> StepManyResult<()>,
+    ) -> StepManyResult<()>
     where
         MC: MemoryConfig,
         BCC: BlockCacheConfig,
@@ -815,7 +815,7 @@ impl<M: ManagerBase> SupervisorState<M> {
             }
         }
 
-        ControlFlow::Continue(())
+        StepManyResult::continue_after_one_step()
     }
 
     /// Handle `set_tid_address` system call.
@@ -868,8 +868,8 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         Ok(parameters::SystemCallResultExecution {
             result: status.exit_code(),
-            control_flow: ControlFlow::Break(()),
-            pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH), // vacuous, never used
+            control_flow: StepManyResult::break_after_one_step(()),
+            ..SystemCallResultExecution::default() // vacuous args, never used
         })
     }
 
@@ -888,9 +888,9 @@ impl<M: ManagerBase> SupervisorState<M> {
         self.exit_code = signal.exit_code();
 
         Ok(parameters::SystemCallResultExecution {
-            control_flow: ControlFlow::Break(()),
             result: 0, // indicator of success, even if this might not actually be used
-            ..SystemCallResultExecution::default()  // vacuous args, never used
+            control_flow: StepManyResult::break_after_one_step(()),
+            ..SystemCallResultExecution::default() // vacuous args, never used
         })
     }
 
@@ -1084,7 +1084,6 @@ impl<M: ManagerAlloc> Default for SupervisorState<M> {
 mod tests {
     use std::num::NonZeroU64;
     use std::ops::Bound;
-    use std::ops::ControlFlow;
 
     use rand::Rng;
 
@@ -1109,7 +1108,7 @@ mod tests {
     use crate::pvm::linux::signals::Signal;
 
     /// Default handler for the `on_tezos` parameter of [`SupervisorState::handle_system_call`]
-    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<()>
+    fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> StepManyResult<()>
     where
         MC: MemoryConfig,
         M: ManagerWrite,
@@ -1117,7 +1116,7 @@ mod tests {
         core.hart
             .xregisters
             .write_system_call_error(Error::NoSystemCall);
-        ControlFlow::Continue(())
+        StepManyResult::continue_after_one_step()
     }
 
     // Check that the `set_tid_address` system call is working correctly.
@@ -1443,8 +1442,9 @@ mod tests {
                 .write_instruction_unchecked(init_pc, UNIMPLEMENTED)
                 .unwrap();
 
-            machine_state
-                .step_max_handle::<Infallible>(Bound::Included(1), |_| ControlFlow::Continue(()));
+            machine_state.step_max_handle::<Infallible>(Bound::Included(1), |_, _| {
+                StepManyResult::continue_after_one_step()
+            });
 
             // Check that the program counter increased
             assert_eq!(

@@ -175,9 +175,11 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCach
     type StepResult = TestStepperResult;
 
     fn step_max(&mut self, steps: Bound<usize>) -> Self::StepResult {
-        let result = self.machine_state.step_max_handle(steps, |machine_state| {
-            self.posix_state.handle_call(machine_state)
-        });
+        let result = self
+            .machine_state
+            .step_max_handle(steps, |machine_state, _| {
+                self.posix_state.handle_call(machine_state)
+            });
         self.handle_step_result(result)
     }
 }

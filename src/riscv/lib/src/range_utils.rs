@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroUsize;
 use std::ops::Bound;
 
 /// Shift the bound towards zero by the given amount without wrapping.
@@ -36,4 +37,11 @@ pub fn unwrap_bound(bound: Bound<usize>) -> usize {
         Bound::Excluded(x) => x.saturating_sub(1),
         Bound::Unbounded => usize::MAX,
     }
+}
+
+/// Turn a bound into a NonZeroUsize using `unwrap_bound`
+///
+#[inline(always)]
+pub fn bound_to_non_zero(bound: Bound<usize>) -> Option<NonZeroUsize> {
+    NonZeroUsize::new(unwrap_bound(bound))
 }

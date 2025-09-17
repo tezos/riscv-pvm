@@ -4,8 +4,8 @@
 // SPDX-License-Identifier: MIT
 
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::ops::Bound;
-use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -17,6 +17,7 @@ use super::reveals::RevealRequest;
 use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::machine_state;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block;
 use crate::machine_state::block_cache::block::Block;
@@ -262,13 +263,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
 
         let steps = self
             .machine_state
-            .step_max_handle(step_bounds, |machine_state| {
+            .step_max_handle(step_bounds, |machine_state, step_bounds| {
                 handle_system_call(
                     machine_state,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
+                    step_bounds,
                 )
             })
             .steps;
@@ -451,7 +453,8 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
-) -> ControlFlow<()>
+    step_bounds: NonZeroUsize,
+) -> StepManyResult<()>
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig,
@@ -459,12 +462,12 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request);
+        let steps = tezos::handle_tezos(core, status, reveal_request, step_bounds);
 
         if status.read() == PvmStatus::Evaluating {
-            ControlFlow::Continue(())
+            StepManyResult { steps, error: None }
         } else {
-            ControlFlow::Break(())
+            StepManyResult::break_after_one_step(())
         }
     })
 }
@@ -516,6 +519,7 @@ mod tests {
                 &mut self.status,
                 &mut self.reveal_request,
                 hooks,
+                NonZeroUsize::new(1).unwrap(), // a single step to handle the exception
             )
             .is_continue()
         }
