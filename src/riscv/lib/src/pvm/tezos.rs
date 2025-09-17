@@ -72,12 +72,19 @@ struct TezosCallResult {
 
     /// Usually, handling a host function involves an increment to the pc.
     pc_update: ProgramCounterUpdate<Address>,
+
+    /// Usually a single step is completed.
+    /// Comparing with `SystemCallResultExecution`, the corresponding field is `StepManyResult`.
+    /// That isn't used here since, Tezos calls influence the control flow only by writing
+    /// `PvmStatus`, not by passing `StepManyResult`
+    steps_completed: usize,
 }
 
 impl TezosCallResult {
     const SUSPENDED: Self = TezosCallResult {
         status: CallStatus::Suspended,
         pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+        steps_completed: 1,
     };
 
     /// The error is handled by the caller (kernel)
@@ -86,6 +93,7 @@ impl TezosCallResult {
         Self {
             status: CallStatus::Error(err),
             pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+            steps_completed: 1,
         }
     }
 
@@ -97,6 +105,7 @@ impl TezosCallResult {
                 Err(err) => CallStatus::Error(err),
             },
             pc_update: ProgramCounterUpdate::Next(ECALL_WIDTH),
+            steps_completed: 1,
         }
     }
 }
@@ -417,7 +426,11 @@ where
     M: ManagerReadWrite,
 {
     let sbi_function = machine.hart.xregisters.read(a6);
-    let TezosCallResult { status, pc_update } = match sbi_function {
+    let TezosCallResult {
+        status,
+        pc_update,
+        steps_completed,
+    } = match sbi_function {
         SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
         SBI_TEZOS_ED25519_SIGN => TezosCallResult::incr_pc(handle_tezos_ed25519_sign(machine)),
         SBI_TEZOS_ED25519_VERIFY => TezosCallResult::incr_pc(handle_tezos_ed25519_verify(machine)),
@@ -438,5 +451,5 @@ where
         CallStatus::Error(error) => sbi_return_error(&mut machine.hart.xregisters, error),
         CallStatus::Suspended => {}
     }
-    1
+    steps_completed
 }
