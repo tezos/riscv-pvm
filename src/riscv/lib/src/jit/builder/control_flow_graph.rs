@@ -181,10 +181,10 @@ where
     /// Classify the backward facing edges of a node.
     fn classify_backward(&self, idx: InstrId) -> EdgeClass<'_, 'info, T> {
         let node = &self.nodes[idx];
-        match node.backward_edges.len() {
-            0 => EdgeClass::Orphan,
-            1 if !node.info.is_entrypoint => EdgeClass::SingleEdge(&node.backward_edges[0]),
-            _ => EdgeClass::MultipleEdges,
+        if node.backward_edges.len() == 1 && !node.info.is_entrypoint {
+            EdgeClass::Unambiguous(&node.backward_edges[0])
+        } else {
+            EdgeClass::AmbiguousOrNone
         }
     }
 
@@ -205,7 +205,7 @@ where
                     continue;
                 }
 
-                let EdgeClass::SingleEdge(backward) = self.classify_backward(pos) else {
+                let EdgeClass::Unambiguous(backward) = self.classify_backward(pos) else {
                     // Join points require their incoming edges to flush the step counter, thereby
                     // setting delta back to 0. Unreachable nodes get set to 0 as well, as their
                     // step delta is irrelevant.
@@ -300,12 +300,17 @@ struct Node<'info, T> {
 
 /// Classification of edges from a node
 enum EdgeClass<'edge, 'info, E> {
-    /// No attached edges (explicit or implicit)
-    Orphan,
+    /// Has exactly one explicit edge and no implicit edges
+    Unambiguous(&'edge ResolvedDirectedEdge<'info, E>),
 
-    // Exactly one explicit edge
-    SingleEdge(&'edge ResolvedDirectedEdge<'info, E>),
-
-    // Multiple explicit edges, or one explicit edge and one implicit edge (entrypoint)
-    MultipleEdges,
+    /// Has implicit edges or not exactly 1 explicit edge
+    AmbiguousOrNone,
 }
+
+// By convention, test modules are at the end of the file.
+//
+// We don't put the conditional compilaton attribute here to avoid issues with Clippy. Instead, we
+// put it into the module file itself. Clippy doesn't look at the module declaration in the parent
+// file to determine whether the module is test-only or not. That means some non-test lints would
+// trigger in the tests module.
+mod tests;
