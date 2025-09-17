@@ -4,6 +4,8 @@
 
 //! Tezos-specific host functions for the PVM
 
+mod parallel_capable;
+
 use std::cmp::min;
 use std::num::NonZeroUsize;
 
@@ -14,6 +16,10 @@ use ed25519_dalek::VerifyingKey;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
+use libsecp256k1::util::FULL_PUBLIC_KEY_SIZE as SECP256K1_PK_SIZE;
+use libsecp256k1::util::MESSAGE_SIZE as SECP256K1_MSG_SIZE;
+use libsecp256k1::util::SIGNATURE_SIZE as SECP256K1_SIG_SIZE;
+use rayon::prelude::*;
 use sha3::Digest;
 use sha3::Keccak256;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
@@ -27,6 +33,10 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_KECCAK256_HASH;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_SECP256K1_VERIFY;
 use tezos_smart_rollup_constants::riscv::SbiError;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_secp256k1_par_verify`
+pub const SBI_TEZOS_SECP256K1_PAR_VERIFY: u64 = 0x0c;
 
 /// Maximum size of pvm memory access by a host function in bytes
 /// To limit size of proofs in refutation games
@@ -45,7 +55,9 @@ use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
+use crate::machine_state::registers::a4;
 use crate::machine_state::registers::a6;
+use crate::mk_parallel_host_fn;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerReadWrite;
@@ -98,7 +110,7 @@ impl TezosCallResult {
     }
 
     /// Usually the PC is incremented after handling an ECALL
-    fn incr_pc<T: Into<u64>>(res: Result<T, SbiError>) -> Self {
+    fn incr_pc_and_step<T: Into<u64>>(res: Result<T, SbiError>) -> Self {
         Self {
             status: match res {
                 Ok(value) => CallStatus::Success(value.into()),
@@ -349,6 +361,28 @@ where
     Ok(valid as u64)
 }
 
+mk_parallel_host_fn!(
+    /// Verify a Secp256k1 signatures in parallel
+    /// Register mapping:
+    /// `a0` : number of signatures to verify (length of all below arrays)
+    /// `a1` : pointer to array of serialized public keys
+    /// `a2` : pointer to array of serialized signatures
+    /// `a3` : pointer to array of message hashes
+    /// `a4` : pointer to output array of `bool`s
+    handle_tezos_secp256k1_par_verify,
+    map: |(pk_bytes, sig_bytes, msg_bytes)| {
+        let res: Result<bool, libsecp256k1::Error> = try_blocks::try_block! {
+            let pk = PublicKey::parse(pk_bytes)?;
+            let sig = SecpSig::parse_standard(sig_bytes)?;
+            let msg = Message::parse(msg_bytes);
+            libsecp256k1::verify(&msg, &sig, &pk)
+        };
+        res.unwrap_or(false)
+    },
+    inputs: [(pks, SECP256K1_PK_SIZE, a1), (sigs, SECP256K1_SIG_SIZE, a2), (msg_hashes, SECP256K1_MSG_SIZE, a3)],
+    output: (bool, std::mem::size_of::<bool>(), a4)
+);
+
 /// Compute a Keccak-256 digest.
 #[inline]
 fn handle_tezos_keccak256_hash<MC, M>(
@@ -419,7 +453,7 @@ pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
-    _step_bounds: NonZeroUsize,
+    step_bounds: NonZeroUsize,
 ) -> usize
 where
     MC: MemoryConfig,
@@ -432,15 +466,22 @@ where
         steps_completed,
     } = match sbi_function {
         SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
-        SBI_TEZOS_ED25519_SIGN => TezosCallResult::incr_pc(handle_tezos_ed25519_sign(machine)),
-        SBI_TEZOS_ED25519_VERIFY => TezosCallResult::incr_pc(handle_tezos_ed25519_verify(machine)),
+        SBI_TEZOS_ED25519_SIGN => {
+            TezosCallResult::incr_pc_and_step(handle_tezos_ed25519_sign(machine))
+        }
+        SBI_TEZOS_ED25519_VERIFY => {
+            TezosCallResult::incr_pc_and_step(handle_tezos_ed25519_verify(machine))
+        }
+        SBI_TEZOS_SECP256K1_PAR_VERIFY => handle_tezos_secp256k1_par_verify(machine, step_bounds),
         SBI_TEZOS_BLAKE2B_HASH256 => {
-            TezosCallResult::incr_pc(handle_tezos_blake2b_hash256(machine))
+            TezosCallResult::incr_pc_and_step(handle_tezos_blake2b_hash256(machine))
         }
         SBI_TEZOS_SECP256K1_VERIFY => {
-            TezosCallResult::incr_pc(handle_tezos_secp256k1_verify(machine))
+            TezosCallResult::incr_pc_and_step(handle_tezos_secp256k1_verify(machine))
         }
-        SBI_TEZOS_KECCAK256_HASH => TezosCallResult::incr_pc(handle_tezos_keccak256_hash(machine)),
+        SBI_TEZOS_KECCAK256_HASH => {
+            TezosCallResult::incr_pc_and_step(handle_tezos_keccak256_hash(machine))
+        }
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(),
     };

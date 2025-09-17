@@ -244,6 +244,10 @@ pub enum ProgramCounterUpdate<AddressRepr> {
     Relative(i64),
 }
 
+impl<T> ProgramCounterUpdate<T> {
+    pub const REMAIN: Self = Self::Relative(0);
+}
+
 /// Result type when running multiple steps at a time with [`MachineState::step_max`]
 #[derive(Debug, PartialEq, Eq)]
 pub struct StepManyResult<E> {

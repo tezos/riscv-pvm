@@ -22,6 +22,7 @@ ieee-apsqrt.workspace = true
 num_enum.workspace = true
 paste.workspace = true
 libsecp256k1.workspace = true
+rayon.workspace = true
 rustc_apfloat.workspace = true
 sha2.workspace = true
 sha3.workspace = true
