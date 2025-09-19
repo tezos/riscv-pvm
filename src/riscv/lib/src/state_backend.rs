@@ -72,7 +72,6 @@
 
 pub mod clone_layout;
 mod commitment_layout;
-mod effects;
 mod elems;
 pub mod hash;
 mod layout;
@@ -93,7 +92,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use clone_layout::*;
 pub use commitment_layout::*;
-pub use effects::*;
 pub use elems::*;
 pub use layout::*;
 pub use proof_layout::*;
