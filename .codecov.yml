@@ -1,0 +1,16 @@
+comment:
+  # Ensure the project coverage is displayed in the PR comment.
+  hide_project_coverage: false
+
+coverage:
+  status:
+    project:
+      default:
+        # There is no fixed target, the default branch coverage sets the base line.
+        target: auto
+        # Project-wide coverage may drop by 1%
+        threshold: 1%
+    patch:
+      default:
+        # PRs must have newly added code covered sufficiently
+        target: 80%

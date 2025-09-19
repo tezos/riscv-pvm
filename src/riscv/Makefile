@@ -59,9 +59,9 @@ test-deps:
 	@make -C ../.. dummy/build
 	@make -C ../.. block-cache-tester/build
 
-.PHONY: cobertura.xml
-cobertura.xml: test-deps
-	@cargo llvm-cov --package octez-riscv --cobertura --output-path $@ nextest
+.PHONY: codecov.json
+codecov.json: test-deps
+	@cargo llvm-cov --package octez-riscv --codecov --output-path $@ nextest
 
 .PHONY: coverage-report
 coverage-report: test-deps
