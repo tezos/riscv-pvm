@@ -5,6 +5,9 @@
 # Cargo
 target
 
+# Rust LSP
+.rust-analyzer.json
+
 # Direnv
 .direnv
 .envrc
