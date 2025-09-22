@@ -50,8 +50,8 @@ impl PvmHooks for MintCaptureHooks {
 fn regression_frozen_jstz() {
     test_regression(
         "tests/expected/jstz",
-        "../assets/jstz",
-        "../assets/regression-inbox.json",
+        "../../../assets/jstz",
+        "../../../assets/regression-inbox.json",
         true,
     )
 }
@@ -60,8 +60,8 @@ fn regression_frozen_jstz() {
 fn regression_frozen_dummy_kernel() {
     test_regression(
         "tests/expected/dummy",
-        "../assets/riscv-dummy.elf",
-        "../assets/dummy-kernel-inbox.json",
+        "../../../assets/riscv-dummy.elf",
+        "../../../assets/dummy-kernel-inbox.json",
         true,
     )
 }
@@ -71,7 +71,7 @@ fn regression_dummy_kernel() {
     test_regression(
         "tests/expected/dummy-volatile",
         "../../../kernels/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy",
-        "../assets/dummy-kernel-inbox.json",
+        "../../../assets/dummy-kernel-inbox.json",
         false,
     )
 }
@@ -135,7 +135,7 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
             hooks,
             ROLLUP_ADDRESS,
             ORIGINATION_LEVEL,
-            Some(PathBuf::from("../assets/preimages").into_boxed_path()),
+            Some(PathBuf::from("../../../assets/preimages").into_boxed_path()),
             block_builder,
         )
         .unwrap();

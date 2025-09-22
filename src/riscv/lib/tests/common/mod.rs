@@ -18,11 +18,11 @@ use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
 pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
 -> impl Fn() -> PvmStepper<NoHooks, MC, BCC> {
-    let program = fs::read("../assets/jstz").unwrap();
+    let program = fs::read("../../../assets/jstz").unwrap();
 
     let mut inbox = InboxBuilder::new();
     inbox
-        .load_from_file("../assets/regression-inbox.json")
+        .load_from_file("../../../assets/regression-inbox.json")
         .unwrap();
     let inbox = inbox.build();
 

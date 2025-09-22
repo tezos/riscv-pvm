@@ -23,7 +23,7 @@ use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
 use crate::stepper::test::TestStepperResult::*;
 
-const TESTS_DIR: &str = "../assets/generated";
+const TESTS_DIR: &str = "../../../assets/generated";
 const GOLDEN_DIR: &str = "tests/expected";
 const MAX_STEPS: usize = 1_000_000;
 
