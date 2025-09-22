@@ -2,12 +2,12 @@
 //!
 //! Chapter 9 - Unprivileged spec
 
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::arithmetic::Arithmetic;
 use crate::machine_state::csregisters;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::registers;
-use crate::traps::Exception;
 
 /// Checks that `csr` is write-able. If it is, executes the `body` closure. Otherwise, raises an
 /// [`Exception::IllegalInstruction`].

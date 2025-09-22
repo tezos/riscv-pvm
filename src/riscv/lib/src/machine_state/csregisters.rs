@@ -381,10 +381,10 @@ mod tests {
     use strum::IntoEnumIterator;
 
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::csregisters::CSRegisters;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     /// Checks that `reg` is write-able.
     ///

@@ -7,9 +7,9 @@
 //!
 //! U:C-16
 
+use crate::exceptions::Exception;
 use crate::machine_state::hart_state::HartState;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 impl<M> HartState<M>
 where

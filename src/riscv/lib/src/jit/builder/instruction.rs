@@ -31,6 +31,7 @@ use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
 
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::MulHighType;
 use crate::instruction_context::StoreLoadInt;
@@ -53,7 +54,6 @@ use crate::parser::instruction::InstrWidth;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
-use crate::traps::Exception;
 
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]

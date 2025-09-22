@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use perfect_derive::perfect_derive;
 
 use crate::cache_utils::FenceCounter;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::StepManyResult;
@@ -30,7 +31,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::Exception;
 
 /// Layout of a partial block.
 pub type PartialBlockLayout = (Atom<Address>, Atom<bool>, Atom<u8>);
@@ -523,6 +523,7 @@ impl<const SIZE: usize, MC: MemoryConfig, B: Block<MC, M>, M: ManagerBase>
 mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
     use crate::machine_state::StepManyResult;
@@ -552,7 +553,6 @@ mod tests {
     use crate::state_backend::ManagerRead;
     use crate::state_backend::ManagerReadWrite;
     use crate::state_backend::owned_backend::Owned;
-    use crate::traps::Exception;
 
     type TestState<M> = <TestCacheConfig as BlockCacheConfig>::State<M4K, Interpreted<M4K, M>, M>;
 

@@ -30,6 +30,7 @@ use super::registers::XRegister;
 use super::registers::nz;
 use super::registers::sp;
 use crate::default::ConstDefault;
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::IcbFnResult;
 use crate::instruction_context::IcbLoweringFn;
@@ -74,7 +75,6 @@ use crate::parser::instruction::UJTypeArgs;
 use crate::parser::instruction::XRegToFRegArgs;
 use crate::parser::instruction::XRegToFRegArgsWithRounding;
 use crate::state_backend::ManagerReadWrite;
-use crate::traps::Exception;
 
 /// An instruction formed of an opcode and flat arguments.
 ///

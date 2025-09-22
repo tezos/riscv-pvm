@@ -4,6 +4,7 @@
 
 //! Core logic for atomic instructions
 
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::Predicate;
 use crate::instruction_context::StoreLoadInt;
@@ -18,7 +19,6 @@ use crate::state_backend::CellProj;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
-use crate::traps::Exception;
 
 pub const SC_SUCCESS: u64 = 0;
 pub const SC_FAILURE: u64 = 1;

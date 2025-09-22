@@ -19,6 +19,7 @@ pub use jitted::Jitted;
 use super::CACHE_INSTR;
 use super::ICallPlaced;
 use super::run_instr;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::StepManyResult;
@@ -35,7 +36,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::Exception;
 
 /// State Layout for Blocks
 pub type BlockLayout = (Atom<u8>, [Atom<Instruction>; CACHE_INSTR]);

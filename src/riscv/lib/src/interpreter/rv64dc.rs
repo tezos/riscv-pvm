@@ -7,13 +7,13 @@
 //!
 //! U:C-16
 
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::sp;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 impl<MC, M> MachineCoreState<MC, M>
 where
@@ -75,6 +75,7 @@ mod test {
     use proptest::prelude::*;
 
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
@@ -83,7 +84,6 @@ mod test {
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::sp;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     const ZERO_OFFSET: i64 = 0;
 

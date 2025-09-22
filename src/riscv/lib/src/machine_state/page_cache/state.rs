@@ -370,7 +370,7 @@ mod tests {
             if !crate::parser::is_compressed(last_halfword.data) {
                 // SAFETY: interpreted is always safe to call
                 let step_res = unsafe { code_page.run(&mut state, &mut InterpretedBlockBuilder, pc_last_halfword, 1) };
-                assert_eq!(step_res.error, Some(crate::traps::Exception::ForceFetchRun));
+                assert_eq!(step_res.error, Some(crate::exceptions::Exception::ForceFetchRun));
                 assert_eq!(step_res.steps, 0, "raising an exception does not complete a step");
             }
         });

@@ -3,13 +3,13 @@
 //
 // SPDX-License-Identifier: MIT
 
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::registers::XRegister;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 impl<MC, M> MachineCoreState<MC, M>
 where

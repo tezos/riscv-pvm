@@ -7,6 +7,7 @@
 
 use super::ICallPlaced;
 use super::dispatch::CodeDispatcher;
+use crate::exceptions::Exception;
 use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
@@ -24,7 +25,6 @@ use crate::state_backend::EnrichedCell;
 use crate::state_backend::FnManager;
 use crate::state_backend::Ref;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::Exception;
 
 /// Blocks that are compiled to native code for execution, when possible.
 ///

@@ -36,10 +36,10 @@ use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 use perfect_derive::perfect_derive;
 
+use crate::exceptions::Exception;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::registers::FValue;
-use crate::traps::Exception;
 
 /// Any value of type `T: StackAddressable` may be placed on the stack, and
 /// a pointer to it obtained.
