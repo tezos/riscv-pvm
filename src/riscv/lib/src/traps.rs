@@ -21,12 +21,8 @@
 //! A trap which causes the execution environment to halt the machine.
 //!
 
-use std::fmt::Formatter;
-
-use tezos_smart_rollup_constants::riscv::SbiError;
-
 /// RISC-V Exceptions (also known as synchronous exceptions)
-#[derive(PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
 #[repr(i64)]
 pub enum Exception {
     InstructionAccessFault = 1,
@@ -35,44 +31,10 @@ pub enum Exception {
     LoadAccessFault,
     StoreAMOAccessFault,
     EnvCall,
-    InstructionPageFault,
-    LoadPageFault,
-    StoreAMOPageFault,
     FenceI,
     /// Force the current instruction to be fetched from memory and executed.
     ///
     /// This exception *cannot* occur if executing an instruction fetched directly
     /// from memory.
     ForceFetchRun,
-}
-
-impl core::fmt::Debug for Exception {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            Self::InstructionPageFault => write!(f, "InstructionPageFault"),
-            Self::LoadPageFault => write!(f, "LoadPageFault"),
-            Self::StoreAMOPageFault => write!(f, "StoreAMOPageFault"),
-            Self::LoadAccessFault => write!(f, "LoadAccessFault"),
-            other => write!(f, "{other}"),
-        }
-    }
-}
-
-impl From<Exception> for SbiError {
-    fn from(value: Exception) -> Self {
-        match value {
-            Exception::InstructionAccessFault
-            | Exception::InstructionPageFault
-            | Exception::LoadAccessFault
-            | Exception::LoadPageFault
-            | Exception::StoreAMOAccessFault
-            | Exception::StoreAMOPageFault => SbiError::InvalidAddress,
-
-            Exception::IllegalInstruction | Exception::Breakpoint | Exception::EnvCall => {
-                SbiError::Failed
-            }
-
-            Exception::FenceI | Exception::ForceFetchRun => SbiError::Unknown,
-        }
-    }
 }
