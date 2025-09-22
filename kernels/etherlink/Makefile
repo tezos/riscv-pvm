@@ -15,7 +15,7 @@ endif
 # TODO RV-769: Remove when xtask alias works in this directory
 XTASK := cargo run $(NATIVE_OPT) -p xtask
 
-INBOX_FILE ?= "../../../../src/riscv/assets/etherlink-erc20-inbox.json"
+INBOX_FILE ?= "../../../../assets/etherlink-erc20-inbox.json"
 
 all: check build test inbox-bench
 

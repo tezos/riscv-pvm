@@ -20,7 +20,7 @@ const SANDBOX_BIN: &str = "riscv-sandbox";
 
 const TX_COUNT: usize = 200;
 const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
-const DEFAULT_INBOX: &str = "src/riscv/assets/etherlink-erc20-inbox.json";
+const DEFAULT_INBOX: &str = "assets/etherlink-erc20-inbox.json";
 
 #[derive(Debug, Default)]
 struct BenchConfig {
