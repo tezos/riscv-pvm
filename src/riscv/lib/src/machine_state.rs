@@ -521,10 +521,7 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
 
             Exception::InstructionAccessFault
             | Exception::LoadAccessFault
-            | Exception::StoreAMOAccessFault
-            | Exception::InstructionPageFault
-            | Exception::LoadPageFault
-            | Exception::StoreAMOPageFault => {
+            | Exception::StoreAMOAccessFault => {
                 self.dispatch_signal_or_trap(Signal::Sigsegv);
             }
 
