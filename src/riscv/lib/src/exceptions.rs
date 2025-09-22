@@ -3,35 +3,33 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Traps doc
-//! There are 4 types of traps, depending on where they are handled and visibility to the hart.
-//! ### Contained:
-//! A trap which is handled by the normal procedure of
-//! trap handling without interacting with the execution environment.
-//! (Software knows a trap is taken e.g. U -> M/S, S -> M/S, M -> M)
-//!
-//! ### Requested:
-//! A trap requested by the software to the execution environment.
-//! so the software is aware of traps like U/S/M -> EE -> M/S
-//!
-//! ### Invisible:
-//! A trap is handled by the execution environment without software being aware of this.
-//!
-//! ### Fatal:
-//! A trap which causes the execution environment to halt the machine.
-//!
+//! Exceptions that may arise during execution
 
 /// RISC-V Exceptions (also known as synchronous exceptions)
 #[derive(Debug, PartialEq, Eq, thiserror::Error, strum::Display, Clone, Copy)]
 #[repr(i64)]
 pub enum Exception {
+    /// Could not access instruction memory.
     InstructionAccessFault = 1,
+
+    /// Encountered an illegal instruction.
     IllegalInstruction,
+
+    /// Breakpoint has been triggered.
     Breakpoint,
+
+    /// Reading from data memory failed.
     LoadAccessFault,
+
+    /// Writing to data memory failed.
     StoreAMOAccessFault,
+
+    /// Call out to the execution environment.
     EnvCall,
+
+    /// Synchronise data and instruction memory.
     FenceI,
+
     /// Force the current instruction to be fetched from memory and executed.
     ///
     /// This exception *cannot* occur if executing an instruction fetched directly
