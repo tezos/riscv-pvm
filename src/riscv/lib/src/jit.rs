@@ -295,6 +295,7 @@ mod tests {
     use rustc_apfloat::ieee::Double;
 
     use super::*;
+    use crate::exceptions::Exception;
     use crate::instruction_context::LoadStoreWidth;
     use crate::interpreter::float::RoundingMode;
     use crate::machine_state::MachineCoreState;
@@ -318,7 +319,6 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerRead;
-    use crate::traps::Exception;
 
     fn instructions<MC: MemoryConfig, M>(block: &Interpreted<MC, M>) -> Vec<Instruction>
     where

@@ -33,10 +33,10 @@ use super::memory;
 use super::memory::Address;
 use super::memory::MemoryConfig;
 use super::memory::PAGE_OFFSET_MASK;
+use crate::exceptions::Exception;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-use crate::traps::Exception;
 
 /// Per page, we store exactly the number of instruction halfwords we could fetch from that page's
 /// memory.
@@ -169,6 +169,7 @@ mod tests {
     use super::INSTRUCTION_ENTRIES;
     use crate::array_utils::boxed_from_fn;
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::instruction::Instruction;
@@ -178,7 +179,6 @@ mod tests {
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
     use crate::state_backend::test_helpers::TestBackendFactory;
-    use crate::traps::Exception;
 
     struct DispatchTest<'a, F: TestBackendFactory> {
         state: &'a std::cell::RefCell<MachineCoreState<M4K, F>>,

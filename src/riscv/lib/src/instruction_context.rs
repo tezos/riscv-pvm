@@ -19,6 +19,7 @@ use rustc_apfloat::StatusAnd;
 use rustc_apfloat::ieee::Double;
 
 pub use self::value::StoreLoadInt;
+use crate::exceptions::Exception;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::float::RoundingMode;
 use crate::machine_state::MachineCoreState;
@@ -34,7 +35,6 @@ use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_context::StateContext;
-use crate::traps::Exception;
 
 /// Type of function that may be used to lower [`Instructions`] to IR.
 ///

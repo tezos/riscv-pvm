@@ -293,7 +293,7 @@ pub struct CSSDTypeArgs {
 /// These instructions are successfully parsed, but will raise an
 /// [`IllegalInstruction`] exception if run.
 ///
-/// [`IllegalInstruction`]: crate::traps::Exception::IllegalInstruction
+/// [`IllegalInstruction`]: crate::exceptions::Exception::IllegalInstruction
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumTag, Hash, Encode, Decode)]
 pub enum Instr {
     // RV64I R-type instructions

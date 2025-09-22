@@ -8,6 +8,7 @@
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::CACHE_INSTR;
@@ -29,7 +30,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Ref;
-use crate::traps::Exception;
 
 /// Interpreted blocks are built automatically, and require no additional context.
 #[derive(Debug, Default)]

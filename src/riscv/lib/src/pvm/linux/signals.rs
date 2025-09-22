@@ -820,6 +820,7 @@ mod tests {
 
     use super::Signal;
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -830,7 +831,6 @@ mod tests {
     use crate::pvm::Pvm;
     use crate::pvm::linux::Permissions;
     use crate::pvm::linux::VirtAddr;
-    use crate::traps::Exception;
 
     backend_test!(test_step_into_handler, F, {
         type MC = M1M;

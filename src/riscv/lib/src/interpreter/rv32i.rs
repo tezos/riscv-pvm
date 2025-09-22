@@ -6,12 +6,12 @@
 //!
 //! Chapter 2 - Unprivileged spec
 
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::HartState;
 use crate::machine_state::memory;
 use crate::parser::instruction::FenceSet;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 impl<M> HartState<M>
 where
@@ -51,6 +51,7 @@ mod tests {
     use proptest::proptest;
 
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::interpreter::integer::run_andi;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
@@ -63,7 +64,6 @@ mod tests {
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::FenceSet;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     backend_test!(test_bitwise, F, {
         proptest!(|(val in any::<u64>(), imm in any::<u64>())| {

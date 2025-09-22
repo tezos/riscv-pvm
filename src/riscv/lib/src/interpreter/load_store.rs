@@ -94,6 +94,7 @@ mod test {
 
     use super::*;
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::a1;
@@ -107,7 +108,6 @@ mod test {
     use crate::machine_state::registers::t3;
     use crate::machine_state::registers::t4;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     backend_test!(test_run_li, F, {
         let imm_rdrs1_res = [

@@ -19,6 +19,7 @@ use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
 
 use super::builder::errno::ErrnoImpl;
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::StoreLoadInt;
 use crate::interpreter::float::RoundRDN;
@@ -42,7 +43,6 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::Exception;
 
 /// Exception codes used for efficient exception handling in JIT-compiled code
 ///

@@ -10,6 +10,7 @@
 // TODO: RV-765: add support for inline JIT
 
 use super::INSTRUCTION_ENTRIES;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -17,7 +18,6 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerReadWrite;
-use crate::traps::Exception;
 
 /// Functionality required to dispatch entrypoints in a code page.
 ///

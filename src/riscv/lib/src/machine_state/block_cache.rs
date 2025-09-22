@@ -93,6 +93,7 @@ use super::instruction::Instruction;
 use super::instruction::RunInstr;
 use super::memory::Address;
 use super::memory::MemoryConfig;
+use crate::exceptions::Exception;
 use crate::machine_state::instruction::Args;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
@@ -105,7 +106,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::Ref;
-use crate::traps::Exception;
 
 /// The maximum number of instructions that may be contained in a block.
 pub const CACHE_INSTR: usize = 20;

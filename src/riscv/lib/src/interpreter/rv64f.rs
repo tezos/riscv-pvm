@@ -12,6 +12,7 @@ use rustc_apfloat::StatusAnd;
 use rustc_apfloat::ieee::Single;
 
 use super::float::FloatExt;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::HartState;
 use crate::machine_state::memory;
@@ -20,7 +21,6 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XRegister;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::state_backend as backend;
-use crate::traps::Exception;
 
 impl From<Single> for FValue {
     fn from(f: Single) -> Self {
@@ -403,6 +403,7 @@ mod tests {
 
     use super::f32_to_fvalue;
     use crate::backend_test;
+    use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
@@ -412,7 +413,6 @@ mod tests {
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::t0;
     use crate::state::NewState;
-    use crate::traps::Exception;
 
     backend_test!(test_fmv_f, F, {
         proptest!(|(

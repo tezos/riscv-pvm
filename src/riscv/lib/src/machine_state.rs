@@ -28,6 +28,7 @@ use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
 
 use crate::bits::u64;
+use crate::exceptions::Exception;
 use crate::log;
 use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::parser::instruction::InstrWidth;
@@ -44,7 +45,6 @@ use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerReadWrite;
-use crate::traps::Exception;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
 /// instructions.
@@ -748,6 +748,7 @@ mod tests {
     use super::memory::Address;
     use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::exceptions::Exception;
     use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
     use crate::machine_state::block_cache::BlockCache;
     use crate::machine_state::block_cache::TestCacheConfig;
@@ -778,7 +779,6 @@ mod tests {
     use crate::pvm::linux::signals::SignalError;
     use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
-    use crate::traps::Exception;
 
     backend_test!(test_step, F, {
         let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);

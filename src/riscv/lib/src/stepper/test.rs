@@ -15,6 +15,7 @@ use posix::PosixState;
 use super::StepResult;
 use super::Stepper;
 use super::StepperStatus;
+use crate::exceptions::Exception;
 use crate::kernel_loader;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
@@ -31,7 +32,6 @@ use crate::machine_state::memory::Permissions;
 use crate::program::Program;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
-use crate::traps::Exception;
 
 #[derive(Clone, Debug)]
 pub enum TestStepperResult {
