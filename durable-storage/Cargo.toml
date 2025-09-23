@@ -8,3 +8,8 @@ rust-version = "1.88.0"
 workspace = true
 
 [dependencies]
+blake3.workspace = true
+log.workspace = true
+rocksdb.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true

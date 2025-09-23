@@ -22,3 +22,8 @@
 //!
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
+
+#![expect(dead_code, reason = "Stubbed API - will be implemented in RV-793")]
+
+mod persistence_layer;
+mod repo;
