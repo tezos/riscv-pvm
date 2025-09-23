@@ -1515,6 +1515,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "octez-riscv-durable-storage"
+version = "0.0.0"
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
