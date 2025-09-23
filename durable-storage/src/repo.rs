@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
+use crate::persistence_layer::CommitId;
+
 #[derive(Debug, thiserror::Error)]
 pub enum DirectoryManagerError {
     #[error("Failed instantiating a new directory manager: {0}")]
@@ -20,8 +22,11 @@ pub enum DirectoryManagerError {
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
 pub struct DirectoryManager {
-    /// The path of for the `temporary` subdirectory managed by this [`DirectoryManager`].
+    /// The path for the `temporary` subdirectory managed by this [`DirectoryManager`].
     temp_dir: PathBuf,
+
+    /// The path for the `commits` subdirectory managed by this [`DirectoryManager`].
+    commits_dir: PathBuf,
 }
 
 impl DirectoryManager {
@@ -32,13 +37,24 @@ impl DirectoryManager {
     /// - If the folder exists, it will assume a valid repository for the paths managed, i.e.
     ///   `<repo>/temporary/db_<id>/checkpoint` is a valid rocksdb checkpoint.
     pub fn new(path: &Path) -> Result<Self, DirectoryManagerError> {
+        let ensure_dir_exists = |dir: &PathBuf| -> Result<(), DirectoryManagerError> {
+            if !dir.exists() {
+                std::fs::create_dir_all(dir).map_err(DirectoryManagerError::New)?;
+            }
+
+            Ok(())
+        };
+
         let temp_dir = path.join("temporary");
+        let commits_dir = path.join("commits");
 
-        if !temp_dir.exists() {
-            std::fs::create_dir_all(&temp_dir).map_err(DirectoryManagerError::New)?;
-        }
+        ensure_dir_exists(&temp_dir)?;
+        ensure_dir_exists(&commits_dir)?;
 
-        Ok(Self { temp_dir })
+        Ok(Self {
+            temp_dir,
+            commits_dir,
+        })
     }
 
     /// Create the new random directory for `temporary/db_<random>` under the root of the
@@ -56,5 +72,10 @@ impl DirectoryManager {
             .map_err(DirectoryManagerError::Temporary)?;
 
         Ok(tempdir)
+    }
+
+    /// Obtain the path to the commit directory for the given `id`.
+    pub fn commit_dir(&self, id: &CommitId) -> PathBuf {
+        self.commits_dir.join(id.hex_encode())
     }
 }

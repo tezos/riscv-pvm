@@ -17,14 +17,18 @@
 //! - checkout a specific commit
 //!
 //! The folder structure of the [`DirectoryManager`] is:
-//! ```
+//! ```text
 //! <repo_path>:
 //!    temporary/
 //!        db_<random>/checkpoint/
 //!            <rocksdb internals>
+//!    commits/
+//!       <commit_id>/
+//!          <rocksdb internals>
 //! ```
 
 use std::mem::ManuallyDrop;
+use std::path::Path;
 
 use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
@@ -34,6 +38,24 @@ use crate::repo::DirectoryManagerError;
 
 /// Type alias for a 32-byte hash used for identifying key-value blobs & commits.
 type Hash = [u8; 32];
+
+/// [`CommitId`]'s are used to generate [`PersistenceLayer`] commits & to checkout specific commits
+/// from a [`DirectoryManager`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommitId(Hash);
+
+impl From<blake3::Hash> for CommitId {
+    fn from(hash: blake3::Hash) -> Self {
+        Self(hash.into())
+    }
+}
+
+impl CommitId {
+    /// Returns the hex encoded commit id.
+    pub fn hex_encode(&self) -> String {
+        hex::encode(self.0)
+    }
+}
 
 /// Represents a key-value blob to be stored in the persistence layer.
 ///
@@ -58,6 +80,9 @@ impl<'d> HashedData<'d> {
 /// Errors encountered when interacting with the persistence layer.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Commit not found")]
+    CommitNotFound,
+
     #[error("Key not found")]
     KeyNotFound,
 
@@ -69,7 +94,7 @@ pub enum Error {
 }
 
 /// Mode in which the [`PersistenceLayer`] was instantiated.
-enum Mode {
+enum Mode<'a> {
     /// Either a new database, or a clone of an existing database.
     Temporary {
         /// We keep it here to keep it alive for the lifetime of the rockdb instance
@@ -77,11 +102,13 @@ enum Mode {
     },
 
     /// A database checked out from a specific commit.
-    #[expect(dead_code, reason = "TODO: RV-797 Will be used for checkouts")]
-    FromCommit,
+    FromCommit {
+        /// The underlying directory manager where the commit was checked out from.
+        repo: &'a DirectoryManager,
+    },
 }
 
-/// These options are used for opening and closing a rocksdb instance.
+/// These options are used for opening and closing a newly created rocksdb instance.
 ///
 /// Although different fields are used for opening vs. destroying a rocksdb instance, you need to
 /// ensure that the options used for destroying are valid with respect to the options used when
@@ -89,7 +116,7 @@ enum Mode {
 /// open/close, may need to investigate rocksdb source code:
 /// <https://github.com/facebook/rocksdb/blob/a1dad12c8c9a7a65fa19d3bc78a5f7687ce6c1bd/db/db_impl/db_impl.cc#L5185>
 /// (look for the function destroying a rocksdb instance)
-fn rocksdb_options() -> rocksdb::Options {
+fn rocksdb_creation_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     options.create_if_missing(true);
     options.set_error_if_exists(true);
@@ -101,7 +128,7 @@ fn rocksdb_options() -> rocksdb::Options {
 /// Invariants:
 /// - The path in `temp_initial_db_path` is unique for each instance of [`PersistenceLayer`] and is
 ///   assumed to not be modified / known outside of this instance.
-pub struct PersistenceLayer {
+pub struct PersistenceLayer<'a> {
     /// The underlying handle to the RocksDB instance.
     ///
     /// [`ManuallyDrop`] is used to ensure safety when dropping [`PersistenceLayer`]. Calling
@@ -110,17 +137,24 @@ pub struct PersistenceLayer {
     db_instance: ManuallyDrop<rocksdb::DB>,
 
     /// What mode was the [`PersistenceLayer`] opened in.
-    mode: Mode,
+    mode: Mode<'a>,
 }
 
-impl PersistenceLayer {
+impl<'a> PersistenceLayer<'a> {
+    /// Creates a checkpoint of the current database at the given `path`.
+    fn checkpoint_at(&self, path: &Path) -> Result<(), Error> {
+        // Note that we want the checkpoint object to be dropped before opening the DB in order to
+        // call its destroy method to avoid UB. This happens in this unit expression.
+        Ok(Checkpoint::new(&self.db_instance)?.create_checkpoint(path)?)
+    }
+
     /// Creates a new `PersistenceLayer` instance within the given `repo`.
     pub fn new(repo: &DirectoryManager) -> Result<Self, Error> {
         let tempdir = repo.new_temporary_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
 
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
-        let options = rocksdb_options();
+        let options = rocksdb_creation_options();
         let db = rocksdb::DB::open(&options, &new_db_path)?;
 
         Ok(Self {
@@ -149,6 +183,49 @@ impl PersistenceLayer {
         })
     }
 
+    /// Whenever a mutable operation is performed, we need to ensure that the persistence layer is
+    /// in [`Mode::Temporary`] mode.
+    fn make_temporary(&mut self) -> Result<(), Error> {
+        if let Mode::FromCommit { repo } = &self.mode {
+            *self = self.try_clone(repo)?;
+        };
+
+        Ok(())
+    }
+
+    /// Checks out a specific commit in the repository from the given `repo`
+    pub fn checkout(repo: &'a DirectoryManager, id: &CommitId) -> Result<Self, Error> {
+        let db_path = repo.commit_dir(id);
+
+        // We assume the commit is not found if the folder does not exist.
+        if !Path::exists(&db_path) {
+            return Err(Error::CommitNotFound);
+        };
+
+        let db = rocksdb::DB::open(&rocksdb::Options::default(), &db_path)?;
+
+        Ok(Self {
+            db_instance: ManuallyDrop::new(db),
+            mode: Mode::FromCommit { repo },
+        })
+    }
+
+    /// Commits the current state to the repository within the given `repo`
+    pub fn commit(&self, repo: &DirectoryManager, id: &CommitId) -> Result<(), Error> {
+        let checkpoint_path = repo.commit_dir(id);
+
+        // If the path already exists, we overwrite the existing commit. This is highly unlikely to
+        // happen anyway if the commits are a hash of the content.
+        if Path::exists(&checkpoint_path) {
+            std::fs::remove_dir_all(&checkpoint_path)
+                .expect("Should be able to remove existing commit directory");
+
+            log::warn!("Overwriting existing commit: {}", id.hex_encode());
+        }
+
+        self.checkpoint_at(&checkpoint_path)
+    }
+
     /// Retrieves a value associated with the given key.
     pub fn get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, Error> {
         self.db_instance.get_pinned(key)?.ok_or(Error::KeyNotFound)
@@ -156,16 +233,20 @@ impl PersistenceLayer {
 
     /// Sets a value for the given key.
     pub fn set(&mut self, blob: &HashedData) -> Result<(), Error> {
+        self.make_temporary()?;
+
         Ok(self.db_instance.put(blob.hash, blob.value)?)
     }
 
     /// Deletes a value associated with the given key.
     pub fn delete(&mut self, key: &Hash) -> Result<(), Error> {
+        self.make_temporary()?;
+
         Ok(self.db_instance.delete(key)?)
     }
 }
 
-impl Drop for PersistenceLayer {
+impl Drop for PersistenceLayer<'_> {
     /// Databases created from a new or clone operation will have `temp_initial_db_path` set. These
     /// databases do not have to be saved on disk as they have not been committed to storage.
     fn drop(&mut self) {
@@ -183,7 +264,7 @@ impl Drop for PersistenceLayer {
             // Destroy the rocksdb at this path. The parent folder will be deleted by the drop
             // method of the tempdir in the mode field.
 
-            let options = rocksdb_options();
+            let options = rocksdb_creation_options();
             if let Err(e) = rocksdb::DB::destroy(&options, &db_path) {
                 log::error!("Failed to destroy temporary rocksdb at {db_path:?}: {e}");
             }
@@ -237,6 +318,13 @@ mod tests {
 
     fn string_of_length(len: usize) -> impl Strategy<Value = String> {
         proptest::collection::vec(any::<char>(), len).prop_map(|v| v.into_iter().collect())
+    }
+
+    fn create_and_clear_dir(path: &Path) {
+        if path.exists() {
+            std::fs::remove_dir_all(path).expect("Should be able to remove dir");
+        }
+        std::fs::create_dir_all(path).expect("Should be able to create dir");
     }
 
     #[test]
@@ -360,7 +448,6 @@ mod tests {
 
         // We delete and recreate the directory to flush the metadb
         let tempdir = TestableTmpdir::new();
-
         let repo =
             DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
 
@@ -446,5 +533,187 @@ mod tests {
         let checkpoint_path = checkpoint_db_path(&db_c);
         drop(db_c);
         assert!(!checkpoint_path.exists());
+    }
+
+    #[test]
+    fn test_commit_and_checkout() {
+        let tempdir = TestableTmpdir::new();
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let blob = &HashedData::from_value(b"some_value");
+        db_a.set(blob).expect("Failed to set blob in A");
+
+        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        db_a.commit(&repo, &commit_id)
+            .expect("Failed to commit DB A");
+        let path_a = checkpoint_db_path(&db_a);
+        drop(db_a);
+        eprintln!("Path A: {path_a:?}");
+        assert!(!path_a.exists());
+
+        let db_b = PersistenceLayer::checkout(&repo, &commit_id)
+            .expect("Failed to checkout commit into DB B");
+
+        {
+            let retrieved_b = db_b.get(&blob.hash).expect("Failed to get blob from B");
+            assert_eq!(retrieved_b.as_ref(), blob.value);
+            let retrieved_nonexistent = db_b.get(&[0u8; 32]);
+            assert!(matches!(retrieved_nonexistent, Err(Error::KeyNotFound)));
+        }
+
+        let path_b = repo.commit_dir(&commit_id);
+        drop(db_b);
+        assert!(path_b.exists(), "Checked out DB should persist on disk");
+    }
+
+    #[test]
+    fn test_nonexistent_checkout() {
+        let tempdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let commit_id: CommitId = blake3::hash(b"nonexistent_commit").into();
+        let db_result = PersistenceLayer::checkout(&repo, &commit_id);
+        assert!(matches!(db_result, Err(Error::CommitNotFound)));
+    }
+
+    #[test]
+    fn test_clone_commit_and_checkout() {
+        // A -> (mutate A) -> B (clone) -> (mutate B) -> B (commit: "commit_1") -> (mutate B)
+        // D (checkout: "commit_1")
+
+        let temp_dir_str = "/tmp/persistence_layer_test_clone_commit_checkout";
+        let temp_dir = Path::new(temp_dir_str);
+        create_and_clear_dir(temp_dir);
+        let repo = DirectoryManager::new(temp_dir).expect("Failed to create directory manager");
+
+        let blob_a = &HashedData::from_value(b"some_value");
+        let blob_b = &HashedData::from_value(b"another_value");
+        let blob_c = &HashedData::from_value(b"third_value");
+
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        db_a.set(blob_a).expect("Failed to set blob in A");
+
+        let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+        db_b.set(blob_b).expect("Failed to set blob in B");
+
+        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        db_b.commit(&repo, &commit_id)
+            .expect("Failed to commit DB B");
+
+        db_b.set(blob_c).expect("Failed to set blob in B");
+
+        drop(db_a);
+        drop(db_b);
+
+        // We should observe blob a & b after checking out the commit, but not c.
+        let db_c = PersistenceLayer::checkout(&repo, &commit_id)
+            .expect("Failed to checkout commit into DB C");
+        {
+            let retrieved_a = db_c.get(&blob_a.hash).expect("Failed to get blob a from C");
+            assert_eq!(retrieved_a.as_ref(), blob_a.value);
+            let retrieved_b = db_c.get(&blob_b.hash).expect("Failed to get blob b from C");
+            assert_eq!(retrieved_b.as_ref(), blob_b.value);
+            let retrieved_c = db_c.get(&blob_c.hash);
+            assert!(matches!(retrieved_c, Err(Error::KeyNotFound)));
+        }
+
+        let path_c = repo.commit_dir(&commit_id);
+        drop(db_c);
+        assert!(path_c.exists(), "Checked out DB should persist on disk");
+    }
+
+    #[test]
+    fn test_implied_mutability() {
+        // A -> (mutate A) -> commit A (commit: "commit_1")
+        // C (load "commit_1") -> (mutate C) -> commit C (commit: "commit_2") -> (mutate C)
+        // Check commit_1 && commit_2
+
+        let tempdir = TestableTmpdir::new();
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let blob_a = &HashedData::from_value(b"some_value");
+        let blob_b = &HashedData::from_value(b"another_value");
+        let commit_id_1: CommitId = blake3::hash(b"commit_1").into();
+        let commit_id_2: CommitId = blake3::hash(b"commit_2").into();
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        db_a.set(blob_a).expect("Failed to set blob in A");
+        db_a.commit(&repo, &commit_id_1)
+            .expect("Failed to commit DB A");
+
+        let mut db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
+            .expect("Failed to checkout commit into DB C");
+        db_c.set(blob_b).expect("Failed to set blob in C");
+        db_c.commit(&repo, &commit_id_2)
+            .expect("Failed to commit DB C");
+        db_c.delete(&blob_a.hash)
+            .expect("Failed to delete blob a in C");
+        drop(db_a);
+        drop(db_c);
+
+        // check commit 1
+        let db_check_1 =
+            PersistenceLayer::checkout(&repo, &commit_id_1).expect("Failed to checkout commit 1");
+        {
+            let retrieved_a = db_check_1
+                .get(&blob_a.hash)
+                .expect("Failed to get blob a from check 1");
+            assert_eq!(retrieved_a.as_ref(), blob_a.value);
+            let retrieved_b = db_check_1.get(&blob_b.hash);
+            assert!(matches!(retrieved_b, Err(Error::KeyNotFound)));
+        }
+
+        // check commit 2
+        let db_check_2 =
+            PersistenceLayer::checkout(&repo, &commit_id_2).expect("Failed to checkout commit 2");
+        {
+            let retrieved_a = db_check_2
+                .get(&blob_a.hash)
+                .expect("Failed to get blob a from check 2");
+            assert_eq!(retrieved_a.as_ref(), blob_a.value);
+            let retrieved_b = db_check_2
+                .get(&blob_b.hash)
+                .expect("Failed to get blob b from check 2");
+            assert_eq!(retrieved_b.as_ref(), blob_b.value);
+        }
+    }
+
+    #[test]
+    fn test_duplicate_commit() {
+        let tempdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+
+        let blob = &HashedData::from_value(b"some_value");
+        db_a.set(blob).expect("Failed to set blob in A");
+
+        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        db_a.commit(&repo, &commit_id)
+            .expect("Failed to commit DB A");
+
+        let blob_2 = &HashedData::from_value(b"another_value");
+        db_a.set(blob_2).expect("Failed to set blob 2 in A");
+
+        // Committing again with the same id should work
+        let result = db_a.commit(&repo, &commit_id);
+        assert!(result.is_ok());
+
+        drop(db_a);
+
+        // Loading after the second commit should contain both blobs
+        let db_a = PersistenceLayer::checkout(&repo, &commit_id)
+            .expect("Failed to checkout commit into DB A");
+
+        let retrieved = db_a.get(&blob.hash).expect("Failed to get blob from A");
+        assert_eq!(retrieved.as_ref(), blob.value);
+
+        let retrieved_2 = db_a.get(&blob_2.hash).expect("Failed to get blob 2 from A");
+        assert_eq!(retrieved_2.as_ref(), blob_2.value);
     }
 }
