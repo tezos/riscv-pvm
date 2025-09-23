@@ -8,6 +8,7 @@
   ocaml-ng,
   cacert,
   curl,
+  libclang,
   libiconv,
   fswatch,
   inotify-tools,
@@ -17,6 +18,8 @@ mkShell {
   name = "tezos-shell";
 
   hardeningDisable = ["stackprotector" "zerocallusedregs"];
+
+  LIBCLANG_PATH = "${libclang.lib}/lib";
 
   packages =
     [
