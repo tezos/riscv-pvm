@@ -26,6 +26,7 @@
 
 use std::mem::ManuallyDrop;
 
+use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
 use crate::repo::DirectoryManager;
@@ -121,6 +122,26 @@ impl PersistenceLayer {
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
         let options = rocksdb_options();
         let db = rocksdb::DB::open(&options, &new_db_path)?;
+
+        Ok(Self {
+            mode: Mode::Temporary { _tempdir: tempdir },
+            db_instance: ManuallyDrop::new(db),
+        })
+    }
+
+    /// Clones the current `PersistenceLayer` instance.
+    ///
+    /// Operations on the cloned instance will have no effect on the original instance.
+    pub fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, Error> {
+        let tempdir = repo.new_temporary_dir()?;
+        let checkpoint_path = tempdir.path().join("checkpoint");
+
+        // Note that we want the checkpoint object to be dropped before opening the DB in order to
+        // call its destroy method to avoid UB. This happens in this unit expression.
+        Checkpoint::new(&self.db_instance)?.create_checkpoint(&checkpoint_path)?;
+
+        // We expect the db at this checkpoint to exist.
+        let db = rocksdb::DB::open(&rocksdb::Options::default(), &checkpoint_path)?;
 
         Ok(Self {
             mode: Mode::Temporary { _tempdir: tempdir },
@@ -323,5 +344,107 @@ mod tests {
         proptest!(|(value_a in string_of_length(10), value_b in string_of_length(12))| {
             test(value_a, value_b);
         });
+    }
+
+    #[test]
+    fn test_clone_semantics() {
+        // Create database A.
+        // Perform operations on A.
+        // Clone A to B.
+
+        // Perform operations on B.
+        // Ensure A's state is unchanged.
+
+        // Perform operations on A.
+        // Ensure B's state is unchanged.
+
+        // We delete and recreate the directory to flush the metadb
+        let tempdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let initial_blob = &HashedData::from_value(b"initial_value");
+        let another_blob = &HashedData::from_value(b"another_value");
+        let third_blob = &HashedData::from_value(b"third_value");
+
+        db_a.set(initial_blob)
+            .expect("Failed to set initial blob in A");
+        let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+
+        db_b.set(another_blob)
+            .expect("Failed to set another blob in B");
+
+        // get methods borrow the db so we have to drop the borrow to mutate the db in the next scope
+        {
+            let retrieved_a = db_a
+                .get(&initial_blob.hash)
+                .expect("Failed to get initial blob from A");
+            assert_eq!(retrieved_a.as_ref(), b"initial_value");
+        }
+
+        // Wrap in a scope so we can drop the db's later
+        {
+            let retrieved_b = db_b
+                .get(&initial_blob.hash)
+                .expect("Failed to get initial blob from B");
+            assert_eq!(retrieved_b.as_ref(), b"initial_value");
+
+            db_a.set(third_blob).expect("Failed to set third blob in A");
+            let retrieved_third_from_b = db_b.get(&third_blob.hash);
+            assert!(
+                retrieved_third_from_b.is_err()
+                    && matches!(retrieved_third_from_b.err(), Some(Error::KeyNotFound))
+            );
+        }
+
+        let path_a = checkpoint_db_path(&db_a);
+        let path_b = checkpoint_db_path(&db_b);
+
+        // We are dropping a db connection which is tied to a checkpoint directory, but not a commit.
+        // Hence, when we drop the db, we also no longer care about this ephemeral checkpoint
+        drop(db_b);
+        assert!(!path_b.exists());
+
+        // We created db_a with `new`, so dropping it should also delete its directory - if there are no checkpoints depending on it.
+        drop(db_a);
+        assert!(!path_a.exists());
+    }
+
+    #[test]
+    fn test_multiple_checkpoints() {
+        let tempdir = TestableTmpdir::new();
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let blob = &HashedData::from_value(b"some_value");
+
+        // A -> (B, C)
+        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        db_a.set(blob).expect("Failed to set blob in A");
+
+        let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+        let db_c = db_a.try_clone(&repo).expect("Failed to clone DB A to C");
+
+        let checkpoint_path = checkpoint_db_path(&db_a);
+        drop(db_a);
+        assert!(!checkpoint_path.exists());
+
+        {
+            let retrieved_b = db_b.get(&blob.hash).expect("Failed to get blob from B");
+            assert_eq!(retrieved_b.as_ref(), b"some_value");
+
+            let retrieved_c = db_c.get(&blob.hash).expect("Failed to get blob from C");
+            assert_eq!(retrieved_c.as_ref(), b"some_value");
+        }
+
+        let checkpoint_path = checkpoint_db_path(&db_b);
+        drop(db_b);
+        assert!(!checkpoint_path.exists());
+
+        let checkpoint_path = checkpoint_db_path(&db_c);
+        drop(db_c);
+        assert!(!checkpoint_path.exists());
     }
 }
