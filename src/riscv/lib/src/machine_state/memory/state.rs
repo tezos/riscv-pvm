@@ -220,6 +220,10 @@ where
         for i in 0..outstanding {
             self.data.write(address.saturating_add(i), 0u8);
         }
+
+        self.readable_pages.reset();
+        self.writable_pages.reset();
+        self.executable_pages.reset();
     }
 
     fn protect_pages(
@@ -346,6 +350,7 @@ pub mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
     use crate::state::NewState;
+    use crate::state_backend::FnManagerIdent;
     use crate::state_backend::owned_backend::Owned;
 
     #[test]
@@ -432,5 +437,34 @@ pub mod tests {
         check_address!(u8, 5, 0x33);
         check_address!(u8, 6, 0x22);
         check_address!(u8, 7, 0x11);
+    });
+
+    backend_test!(test_memory_reset, F, {
+        let clean_memory = <<M4K as MemoryConfig>::State<F>>::new();
+
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
+
+        // setting readable permissions should reset
+        memory.set_all_readable_writeable();
+        memory.write(5, 0xFFu8).unwrap();
+        memory.reset();
+
+        assert!(
+            M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)
+                == M4K::struct_ref::<F, FnManagerIdent>(&memory),
+            "RW memory did not reset correctly"
+        );
+
+        // setting executable permissions should reset
+        memory
+            .write_instruction_unchecked(17, 0x1122334455667788u64)
+            .unwrap();
+        memory.reset();
+
+        assert!(
+            M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)
+                == M4K::struct_ref::<F, FnManagerIdent>(&memory),
+            "X memory did not reset correctly"
+        );
     });
 }

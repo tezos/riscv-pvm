@@ -133,6 +133,14 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
                 self.pages[page].write(accessible);
             })
     }
+
+    /// Reset access permissions on all pages.
+    pub fn reset(&mut self)
+    where
+        M: ManagerWrite,
+    {
+        self.pages.iter_mut().for_each(|page| page.write(false));
+    }
 }
 
 impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, M> {
