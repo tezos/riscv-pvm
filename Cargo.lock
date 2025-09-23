@@ -1712,6 +1712,7 @@ name = "octez-riscv-durable-storage"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "hex",
  "log",
  "proptest",
  "rocksdb",
