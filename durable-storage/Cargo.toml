@@ -13,3 +13,6 @@ log.workspace = true
 rocksdb.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

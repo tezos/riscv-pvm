@@ -34,9 +34,32 @@ use crate::repo::DirectoryManagerError;
 /// Type alias for a 32-byte hash used for identifying key-value blobs & commits.
 type Hash = [u8; 32];
 
+/// Represents a key-value blob to be stored in the persistence layer.
+///
+/// Invariant: [`HashedData`] is content-addressable by the stored hash.
+#[derive(Debug, Clone)]
+pub struct HashedData<'d> {
+    /// The BLAKE3 hash of the value.
+    hash: Hash,
+
+    /// The addressable content of the blob.
+    value: &'d [u8],
+}
+
+impl<'d> HashedData<'d> {
+    /// Create a new [`HashedData`] instance from the given byte-array.
+    pub fn from_value(value: &'d [u8]) -> Self {
+        let hash = blake3::hash(value).into();
+        Self { hash, value }
+    }
+}
+
 /// Errors encountered when interacting with the persistence layer.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Key not found")]
+    KeyNotFound,
+
     #[error("RocksDB error: {0}")]
     RocksDB(#[from] rocksdb::Error),
 
@@ -48,11 +71,12 @@ pub enum Error {
 enum Mode {
     /// Either a new database, or a clone of an existing database.
     Temporary {
-        /// The path to the temporary directory for the rocksdb checkpoint.
-        tempdir: TempDir,
+        /// We keep it here to keep it alive for the lifetime of the rockdb instance
+        _tempdir: TempDir,
     },
 
     /// A database checked out from a specific commit.
+    #[expect(dead_code, reason = "TODO: RV-797 Will be used for checkouts")]
     FromCommit,
 }
 
@@ -99,9 +123,24 @@ impl PersistenceLayer {
         let db = rocksdb::DB::open(&options, &new_db_path)?;
 
         Ok(Self {
-            mode: Mode::Temporary { tempdir },
+            mode: Mode::Temporary { _tempdir: tempdir },
             db_instance: ManuallyDrop::new(db),
         })
+    }
+
+    /// Retrieves a value associated with the given key.
+    pub fn get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, Error> {
+        self.db_instance.get_pinned(key)?.ok_or(Error::KeyNotFound)
+    }
+
+    /// Sets a value for the given key.
+    pub fn set(&mut self, blob: &HashedData) -> Result<(), Error> {
+        Ok(self.db_instance.put(blob.hash, blob.value)?)
+    }
+
+    /// Deletes a value associated with the given key.
+    pub fn delete(&mut self, key: &Hash) -> Result<(), Error> {
+        Ok(self.db_instance.delete(key)?)
     }
 }
 
@@ -133,18 +172,58 @@ impl Drop for PersistenceLayer {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::path::PathBuf;
 
+    use proptest::prelude::Strategy;
+    use proptest::prelude::any;
+    use proptest::proptest;
+    use rocksdb::properties::ESTIMATE_NUM_KEYS;
+
     use super::*;
+
+    struct TestableTmpdir {
+        tempdir: TempDir,
+    }
+
+    impl TestableTmpdir {
+        fn new() -> Self {
+            let tempdir = TempDir::new().expect("Should be able to create temp dir");
+
+            Self { tempdir }
+        }
+
+        fn path(&self) -> &Path {
+            self.tempdir.path()
+        }
+    }
+
+    impl Drop for TestableTmpdir {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                eprintln!(
+                    "Test failed, preserving temp dir at {:?} for inspection",
+                    self.tempdir.path()
+                );
+                self.tempdir.disable_cleanup(true);
+            }
+        }
+    }
 
     fn checkpoint_db_path(db: &PersistenceLayer) -> PathBuf {
         db.db_instance.path().to_path_buf()
     }
 
+    fn string_of_length(len: usize) -> impl Strategy<Value = String> {
+        proptest::collection::vec(any::<char>(), len).prop_map(|v| v.into_iter().collect())
+    }
+
     #[test]
     fn test_new_persistence_layer() {
-        let repo = DirectoryManager::new(std::path::Path::new("/tmp/test_new_pl"))
-            .expect("Failed to create directory manager");
+        let tmpdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
         let db_a =
             PersistenceLayer::new(&repo).expect("Should be able to create new persistence layer");
 
@@ -160,7 +239,8 @@ mod tests {
         drop(db_a);
         drop(db_b);
 
-        // Check that after dropping the databases, the directories are removed - since they are not a committed database.
+        // Check that after dropping the databases, the directories are removed - since they are not
+        // a committed database.
         assert!(!path_a.exists());
         assert!(
             !path_a
@@ -175,5 +255,73 @@ mod tests {
                 .expect("Should have a db_<random> parent")
                 .exists()
         );
+    }
+
+    #[test]
+    fn test_basic_ops() {
+        let tmpdir = TestableTmpdir::new();
+
+        let test = |value_a: String, value_b: String| {
+            let repo =
+                DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+            let mut db = PersistenceLayer::new(&repo)
+                .expect("Should be able to create new persistence layer");
+
+            let blob = HashedData::from_value(value_a.as_bytes());
+            let key = blob.hash;
+
+            // Initially the key should not be found
+            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+
+            db.set(&blob).expect("Should be able to set a value");
+
+            {
+                // Now the key should be found
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                assert_eq!(retrieved.as_ref(), value_a.as_bytes());
+            }
+
+            let blob2 = HashedData::from_value(value_b.as_bytes());
+            let key2 = blob2.hash;
+            db.set(&blob2).expect("Should be able to set another value");
+
+            {
+                // Now the second key should be found
+                let retrieved = db.get(&key2).expect("Should be able to get the value");
+                assert_eq!(retrieved.as_ref(), value_b.as_bytes());
+
+                let retrieved = db.get(&key).expect("Should be able to get the first value");
+                assert_eq!(retrieved.as_ref(), value_a.as_bytes());
+            }
+
+            assert_eq!(
+                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                Ok(Some("2".to_string()))
+            );
+
+            db.delete(&key).expect("Should be able to delete the value");
+            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+
+            assert_eq!(
+                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                Ok(Some("1".to_string()))
+            );
+
+            db.delete(&key2)
+                .expect("Should be able to delete the second value");
+            assert!(matches!(db.get(&key2), Err(Error::KeyNotFound)));
+
+            let nonexistent_blob = HashedData::from_value(b"non_existent");
+            assert!(matches!(db.delete(&nonexistent_blob.hash), Ok(())));
+
+            assert_eq!(
+                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                Ok(Some("0".to_string()))
+            );
+        };
+
+        proptest!(|(value_a in string_of_length(10), value_b in string_of_length(12))| {
+            test(value_a, value_b);
+        });
     }
 }
