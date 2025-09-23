@@ -1,0 +1,10 @@
+[package]
+name = "octez-riscv-durable-storage"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88.0"
+
+[lints]
+workspace = true
+
+[dependencies]
