@@ -267,7 +267,12 @@ fn run_sparse_program(
         }
     }
 
-    for update in step_updates.iter() {
+    for (_, outcome) in step_updates.iter() {
+        let Some(update) = outcome.data() else {
+            // The analysis determined there is nothing to do for this edge.
+            continue;
+        };
+
         let outcome = update.edge().info;
 
         let step_delta = match outcome.action {

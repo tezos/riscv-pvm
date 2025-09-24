@@ -89,22 +89,6 @@ impl<V> InstrMap<V> {
             .collect();
         InstrMap { instructions }
     }
-
-    /// Combine 2 `InstrMap`s into one by applying a function to the values at each index.
-    pub fn zip2_into_with<V2, R, F>(self, snd: InstrMap<V2>, mut f: F) -> InstrMap<R>
-    where
-        F: FnMut(InstrId, V, V2) -> R,
-    {
-        assert_eq!(self.instructions.len(), snd.instructions.len());
-        let instructions = self
-            .instructions
-            .into_iter()
-            .zip(snd.instructions)
-            .enumerate()
-            .map(|(idx, (fst, snd))| f(InstrId(idx), fst, snd))
-            .collect();
-        InstrMap { instructions }
-    }
 }
 
 impl<V> Index<InstrId> for InstrMap<V> {

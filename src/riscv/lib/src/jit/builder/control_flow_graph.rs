@@ -18,6 +18,11 @@ use crate::jit::builder::graph_walker::GraphWalker;
 use crate::jit::builder::instr_map::InstrId;
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
+use crate::jit::builder::outcome_map::Graph;
+use crate::jit::builder::outcome_map::OutcomeMap;
+use crate::jit::builder::outcome_map::OutcomeMapBuilder;
+use crate::jit::builder::outcome_map::SourceInstrLoc;
+use crate::jit::builder::outcome_map::TargetInstrLoc;
 use crate::machine_state::memory::Address;
 
 /// Destination of a directed edge
@@ -44,7 +49,7 @@ pub enum Target {
 /// jump to another address, or continue to the next instruction. Each of these would be represented
 /// as a different edge in the control flow graph.
 #[derive(Debug)]
-pub struct DirectedEdgeInfo<Info, Target = self::Target> {
+pub struct DirectedEdgeInfo<Info> {
     /// Destination of the edge
     pub target: Target,
 
@@ -104,7 +109,13 @@ impl<'info, T> StepCounterUpdate<'info, T> {
 /// Control flow graph of instructions
 pub struct ControlFlowGraph<'info, T> {
     /// Nodes in the control flow graph, indexed by instruction ID
-    nodes: InstrMap<Node<'info, T>>,
+    nodes: InstrMap<&'info NodeInfo<T>>,
+
+    /// Edges in the control flow graph, indexed by outcome ID
+    outcomes: OutcomeMap<Option<&'info DirectedEdgeInfo<T>>>,
+
+    /// Underlying graph structure for efficient traversal
+    graph: Graph,
 }
 
 impl<'info, T> ControlFlowGraph<'info, T>
@@ -116,75 +127,68 @@ where
         // We need to put all the information we're given into an initial graph for more efficient
         // retrieval. `InstrMapBuilder` also provides us with a mechanism to translate addresses
         // such that we know whether they're in the current graph context or not.
-        let (addrs, infos) = {
+        let (addrs, nodes) = {
             let mut infos_builder = InstrMapBuilder::new();
 
             for instr in instrs {
                 infos_builder.insert(instr.location, instr);
             }
+
             infos_builder.build()
         };
 
-        // The various graph analysis mechanisms require both forward and backward edges for
-        // traversal. This allows them to be expressed more intuitively.
-        let mut backward_edges = infos.map(|_, _| Vec::new());
-        let forward_edges = infos.map(|source_idx, source_info| {
-            let mut exit_edges = Vec::new();
-            let success_edges = source_info
-                .outgoing
-                .iter()
-                .filter_map(|edge_info| {
-                    let Target::Known(target_addr) = edge_info.target else {
-                        // Edge target is outside of the known context. It will exit the JIT
-                        // function.
-                        exit_edges.push(edge_info);
-                        return None;
+        let (graph, outcomes) = {
+            let mut builder = OutcomeMapBuilder::new(nodes.len());
+
+            for (idx, node) in nodes.iter() {
+                if node.is_entrypoint {
+                    // Entry points are presented as having an edge from outside the context.
+                    builder.insert(SourceInstrLoc::Entry, TargetInstrLoc::Internal(idx), None);
+                }
+
+                let from_loc = SourceInstrLoc::Internal(idx);
+
+                for edge in node.outgoing.iter() {
+                    let to_loc = match edge.target {
+                        Target::Known(addr) => addrs
+                            .translate(addr)
+                            // If the address is known, we create an internal edge.
+                            .map(TargetInstrLoc::Internal)
+                            // If the address is not known, we create an exit edge.
+                            .unwrap_or(TargetInstrLoc::Exit),
+
+                        Target::Unknown => {
+                            // If the target is not known to the current context, we treat it as an
+                            // exit. Commonly unknown targets used to represent exceptions. The JIT
+                            // function will exit in this case.
+                            TargetInstrLoc::Exit
+                        }
                     };
 
-                    // Is the target address part of the graph context? If not, it'll become an
-                    // exit edge.
-                    let Some(target_idx) = addrs.translate(target_addr) else {
-                        exit_edges.push(edge_info);
-                        return None;
-                    };
+                    builder.insert(from_loc, to_loc, Some(edge));
+                }
+            }
 
-                    // It's more efficient to build the backward edges while we're iterating forward
-                    // edges, rather than iterating the entire graph multiple times.
-                    backward_edges[target_idx].push(DirectedEdgeInfo {
-                        target: source_idx,
-                        info: edge_info,
-                    });
+            builder.build()
+        };
 
-                    Some(DirectedEdgeInfo {
-                        target: target_idx,
-                        info: edge_info,
-                    })
-                })
-                .collect();
-
-            (exit_edges, success_edges)
-        });
-
-        // Combine all the information into a more convenient structure for analysis.
-        let nodes = backward_edges.zip2_into_with(
-            forward_edges,
-            |idx, backward_edges, (exit_edges, forward_edges)| Node {
-                backward_edges: backward_edges.into_boxed_slice(),
-                forward_edges,
-                exit_edges: exit_edges.into_boxed_slice(),
-                info: infos[idx],
-            },
-        );
-        Self { nodes }
+        Self {
+            nodes,
+            outcomes,
+            graph,
+        }
     }
 
-    /// Classify the backward facing edges of a node.
-    fn classify_backward(&self, idx: InstrId) -> EdgeClass<'_, 'info, T> {
-        let node = &self.nodes[idx];
-        if node.backward_edges.len() == 1 && !node.info.is_entrypoint {
-            EdgeClass::Unambiguous(&node.backward_edges[0])
-        } else {
-            EdgeClass::AmbiguousOrNone
+    /// Classify the incoming edges of a node. The goal is to find the previous node if it is
+    /// unambiguous.
+    fn classify_incoming(&self, idx: InstrId) -> EdgeClass {
+        let [one] = self.graph.incoming_outcomes(TargetInstrLoc::Internal(idx)) else {
+            return EdgeClass::AmbiguousOrNone;
+        };
+
+        match self.outcomes[*one].from() {
+            SourceInstrLoc::Internal(source) => EdgeClass::Unambiguous(source),
+            SourceInstrLoc::Entry => EdgeClass::AmbiguousOrNone,
         }
     }
 
@@ -205,7 +209,7 @@ where
                     continue;
                 }
 
-                let EdgeClass::Unambiguous(backward) = self.classify_backward(pos) else {
+                let EdgeClass::Unambiguous(source) = self.classify_incoming(pos) else {
                     // Join points require their incoming edges to flush the step counter, thereby
                     // setting delta back to 0. Unreachable nodes get set to 0 as well, as their
                     // step delta is irrelevant.
@@ -213,14 +217,14 @@ where
                     continue;
                 };
 
-                if let Some(delta) = step_deltas[backward.target] {
+                if let Some(delta) = step_deltas[source] {
                     // If the previous node already has a step delta, we can just use that to
                     // determine the current node's step delta.
                     step_deltas[pos] = Some(delta + 1);
                     continue;
                 }
 
-                if cursor.already_seen(backward.target) {
+                if cursor.already_seen(source) {
                     // We have encountered a cycle. That means it is impossible to resolve an
                     // accurate delta. We simply require the incoming edge to flush the step
                     // counter. This makes the step delta 0.
@@ -228,7 +232,7 @@ where
                     continue;
                 }
 
-                cursor.not_done_yet([backward.target]);
+                cursor.not_done_yet([source]);
             }
         }
 
@@ -236,72 +240,58 @@ where
     }
 
     /// Find all the edges where the step counter needs updating.
-    pub fn find_step_counter_updates(&self) -> Box<[StepCounterUpdate<'info, T>]> {
+    pub fn find_step_counter_updates(&self) -> OutcomeMap<Option<StepCounterUpdate<'_, T>>> {
         let step_deltas = self.find_step_deltas();
 
-        // We pre-allocate space for the updates somewhat optimistically to avoid frequent
-        // re-allocations at the cost of some potential overallocation.
-        let mut updates = Vec::with_capacity(self.nodes.len().saturating_mul(2));
+        self.outcomes.map(|_idx, outcome| {
+            let Some(edge) = outcome.data() else {
+                // There is nothing to do for edges that don't have corresponding data on caller
+                // side.
+                return None;
+            };
 
-        for (idx, node) in self.nodes.iter() {
-            let source_delta = step_deltas[idx];
+            let SourceInstrLoc::Internal(source) = outcome.from() else {
+                // There is nothing to do for edges from outside of the graph context. These would
+                // target entrypoints anyway.
+                return None;
+            };
+            let source_delta = step_deltas[source];
 
-            // First, let's consider all forward edges to other nodes in the graph context. Those
-            // are eligible to update the step counter.
-            for edge in node.forward_edges.iter() {
-                let target_delta = step_deltas[edge.target];
+            match outcome.to() {
+                TargetInstrLoc::Internal(target) => {
+                    let target_delta = step_deltas[target];
 
-                // When the target delta is less or equal, that means the step counter is expected
-                // to be updated through edges to the target.
-                // The equal case is important for loops of instructions onto themselves. Those are
-                // step delta 0 -> 0 transitions.
-                if target_delta <= source_delta {
-                    updates.push(StepCounterUpdate {
-                        base_diff: source_delta - target_delta,
-                        edge: edge.info,
-                    });
+                    // When the target delta is less or equal, that means the step counter is expected
+                    // to be updated through edges to the target.
+                    // The equal case is important for loops of instructions onto themselves. Those are
+                    // step delta 0 -> 0 transitions.
+                    if target_delta <= source_delta {
+                        return Some(StepCounterUpdate {
+                            base_diff: source_delta - target_delta,
+                            edge,
+                        });
+                    }
+
+                    None
+                }
+
+                TargetInstrLoc::Exit => {
+                    // Exit transitions need to ensure the step counter is updated to reflect the
+                    // number of executed instructions in the current context.
+                    Some(StepCounterUpdate {
+                        base_diff: step_deltas[source],
+                        edge,
+                    })
                 }
             }
-
-            // We mustn't forget exit edges as those are important points for updating the step
-            // counter as well. Forgetting these would mean that exiting a sequence of instructions
-            // would not update the step counter correctly.
-            for exit_edge in self.nodes[idx].exit_edges.iter() {
-                updates.push(StepCounterUpdate {
-                    base_diff: step_deltas[idx],
-                    edge: exit_edge,
-                });
-            }
-        }
-
-        updates.into_boxed_slice()
+        })
     }
 }
 
-/// Directed edge where the target has been resolved to a node within the graph context
-type ResolvedDirectedEdge<'info, T> = self::DirectedEdgeInfo<&'info DirectedEdgeInfo<T>, InstrId>;
-
-/// Node in the control flow graph
-///
-/// This is usually information relating to an instruction.
-struct Node<'info, T> {
-    /// Edges to this node that originate from another node in this graph context
-    backward_edges: Box<[ResolvedDirectedEdge<'info, T>]>,
-
-    /// Edges from this node that target another node in the graph context
-    forward_edges: Box<[ResolvedDirectedEdge<'info, T>]>,
-
-    /// Exiting edges from this node that target outside of the graph context
-    exit_edges: Box<[&'info DirectedEdgeInfo<T>]>,
-
-    /// Information about this node
-    info: &'info NodeInfo<T>,
-}
-
 /// Classification of edges from a node
-enum EdgeClass<'edge, 'info, E> {
+enum EdgeClass {
     /// Has exactly one explicit edge and no implicit edges
-    Unambiguous(&'edge ResolvedDirectedEdge<'info, E>),
+    Unambiguous(InstrId),
 
     /// Has implicit edges or not exactly 1 explicit edge
     AmbiguousOrNone,
