@@ -20,7 +20,7 @@ use std::ops::IndexMut;
 use crate::machine_state::memory::Address;
 
 /// A unique identifier for an instruction in an [`InstrMap`] or the associated [`AddrMap`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct InstrId(usize);
 
 /// An array type holding [`Address`]es of instr-info types

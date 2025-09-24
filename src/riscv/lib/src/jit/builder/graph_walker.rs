@@ -69,6 +69,11 @@ impl<P: Eq + Hash + Copy> GraphCursor<'_, P> {
         self.walker.works.extend(work_before);
         self.walker.works.push_back(self.idx);
     }
+
+    /// Mark the current node as done. The graph walker will navigate to the given nodes next.
+    pub fn done(self, next: impl IntoIterator<Item = P>) {
+        self.walker.works.extend(next);
+    }
 }
 
 #[cfg(test)]
