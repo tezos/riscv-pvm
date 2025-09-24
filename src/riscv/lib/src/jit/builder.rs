@@ -14,6 +14,7 @@ pub(crate) mod ext_calls;
 mod graph_walker;
 mod instr_map;
 pub(crate) mod instruction;
+mod outcome_map;
 pub(crate) mod sequence;
 pub(crate) mod typed;
 
