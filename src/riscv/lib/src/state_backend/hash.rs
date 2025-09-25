@@ -34,7 +34,20 @@ pub const DIGEST_SIZE: usize = 32;
 /// produced by a preset hash function, currently BLAKE2b. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord, derive_more::From)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Encode,
+    Decode,
+    Hash,
+    PartialOrd,
+    Ord,
+    derive_more::From,
+    derive_more::Debug,
+)]
+#[debug("{}", self)]
 pub struct Hash {
     digest: [u8; DIGEST_SIZE],
 }
@@ -91,12 +104,6 @@ impl Hash {
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         hex::encode(self.digest).fmt(f)
-    }
-}
-
-impl std::fmt::Debug for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
     }
 }
 

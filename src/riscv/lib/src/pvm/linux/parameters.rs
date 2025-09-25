@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 use core::num::NonZeroU64;
-use std::fmt;
 use std::ops::ControlFlow;
 
 use super::MAIN_THREAD_ID;
@@ -311,19 +310,14 @@ impl TryFrom<u64> for FileDescriptorWriteable {
 }
 
 /// The number (count) of file descriptors
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, derive_more::Debug)]
+#[debug("{}", self.0)]
 pub struct FileDescriptorCount(u64);
 
 impl FileDescriptorCount {
     /// Extract the file descriptor count as a [`u64`].
     pub fn count(&self) -> u64 {
         self.0
-    }
-}
-
-impl fmt::Debug for FileDescriptorCount {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

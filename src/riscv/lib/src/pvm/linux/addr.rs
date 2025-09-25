@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fmt;
 use std::num::NonZeroU64;
 use std::ops::Add;
 use std::ops::Deref;
@@ -15,9 +14,23 @@ use crate::default::ConstDefault;
 use crate::machine_state;
 
 /// Virtual address
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, derive_more::From)]
+#[derive(
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Encode,
+    Decode,
+    derive_more::From,
+    derive_more::Debug,
+    derive_more::Display,
+)]
 #[repr(transparent)]
 #[cfg_attr(test, derive(Default))]
+#[debug("{}", self)]
+#[display("{:#x}", self.0)]
 pub struct VirtAddr(u64);
 
 impl VirtAddr {
@@ -67,18 +80,6 @@ impl VirtAddr {
 
 impl ConstDefault for VirtAddr {
     const DEFAULT: Self = VirtAddr(u64::MAX);
-}
-
-impl fmt::Debug for VirtAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
-    }
-}
-
-impl fmt::Display for VirtAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
-    }
 }
 
 impl Add<u64> for VirtAddr {
