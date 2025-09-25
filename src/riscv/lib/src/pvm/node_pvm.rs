@@ -3,7 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::fmt;
 use std::ops::Bound;
 use std::path::Path;
 
@@ -47,6 +46,8 @@ pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheConfig>;
 type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheConfig, Interpreted<NodePvmMemConfig, M>, M>;
 
 #[perfect_derive(Clone)]
+#[derive(derive_more::Debug)]
+#[debug("NodePvm(<unknown state>)")]
 pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
     state: Box<NodePvmState<M>>,
 }
@@ -230,12 +231,6 @@ impl NodePvm<Verifier> {
 
             Some(pvm.input_request())
         })
-    }
-}
-
-impl<M: state_backend::ManagerSerialise> fmt::Debug for NodePvm<M> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "NodePvm(<unknown state>)")
     }
 }
 
