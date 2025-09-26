@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-update-assets: riscv-dummy.elf jstz
+update-assets: riscv-dummy.elf jstz etherlink
 
 riscv-dummy.elf riscv-dummy.elf.checksum:
 	@make -C .. dummy/build
@@ -15,8 +15,13 @@ jstz jstz.checksum:
 	@cp ../kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz $@
 	@sha256sum $@ > $@.checksum
 
+etherlink etherlink.checksum:
+	@make -C .. etherlink/build-kernel
+	@cp ../kernels/etherlink/target/riscv64gc-unknown-linux-musl/release/etherlink $@
+	@sha256sum $@ > $@.checksum
+
 check:
 	@echo "Verifying asset checksums..."
-	@sha256sum -c jstz.checksum riscv-dummy.elf.checksum
+	@sha256sum -c riscv-dummy.elf.checksum jstz.checksum etherlink.checksum
 
-.PHONY: update-assets riscv-dummy.elf riscv-dummy.elf.checksum jstz jstz.checksum check
+.PHONY: update-assets riscv-dummy.elf riscv-dummy.elf.checksum jstz jstz.checksum etherlink etherlink.checksum check
