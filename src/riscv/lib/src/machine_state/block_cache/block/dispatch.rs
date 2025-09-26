@@ -86,7 +86,7 @@ pub trait CodeDispatcher<D: DispatchCompiler<MC>, MC: MemoryConfig>: Sized {
 /// Dispatch target that wraps a [`DispatchFn`].
 ///
 /// This is the target used for compilation - see [`DispatchCompiler::compile`].
-pub struct DispatchTarget<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> {
+pub struct DispatchTarget<C, D, MC> {
     /// Function pointer stored as an atomic usize.
     ///
     /// This will allow the `fun` to be updated from a background thread.
@@ -121,7 +121,9 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> Dispat
             self.call_counter = 0;
         }
     }
+}
 
+impl<C, D, MC: MemoryConfig> DispatchTarget<C, D, MC> {
     /// Set the dispatch target to use the given `block_run` function.
     pub fn set(&self, fun: DispatchFn<C, D, MC>) {
         // casting a function pointer as usize is ok to do.
