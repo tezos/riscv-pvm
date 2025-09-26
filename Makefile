@@ -10,7 +10,7 @@ build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check sandbox/check jstz/check dummy/check block-cache-tester/all etherlink/check
+check: riscv/check sandbox/check jstz/check dummy/check block-cache-tester/all etherlink/check assets/check
 
 build: sandbox/build jstz/build dummy/build block-cache-tester/build etherlink/build
 
@@ -44,6 +44,9 @@ block-cache-tester/%:
 
 etherlink/%: 
 	@make -C kernels/etherlink ${@:etherlink/%=%}
+
+assets/%:
+	@make -C assets ${@:assets/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
 .PHONY: all build-deps build-deps-slim check audit build test test-miri clean 

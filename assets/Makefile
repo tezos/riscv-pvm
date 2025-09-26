@@ -15,4 +15,8 @@ jstz jstz.checksum:
 	@cp ../kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz $@
 	@sha256sum $@ > $@.checksum
 
-.PHONY: update-assets riscv-dummy.elf riscv-dummy.elf.checksum jstz jstz.checksum
+check:
+	@echo "Verifying asset checksums..."
+	@sha256sum -c jstz.checksum riscv-dummy.elf.checksum
+
+.PHONY: update-assets riscv-dummy.elf riscv-dummy.elf.checksum jstz jstz.checksum check
