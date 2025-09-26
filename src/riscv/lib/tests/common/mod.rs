@@ -22,7 +22,7 @@ pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
 
     let mut inbox = InboxBuilder::new();
     inbox
-        .load_from_file("../../../assets/regression-inbox.json")
+        .load_from_file("../../../assets/jstz-regression-inbox.json")
         .unwrap();
     let inbox = inbox.build();
 
