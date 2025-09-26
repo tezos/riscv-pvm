@@ -25,6 +25,11 @@ fn test_jstz_determinism() {
     test_determinism(JSTZ)
 }
 
+#[test]
+fn test_etherlink_determinism() {
+    test_determinism(ETHERLINK)
+}
+
 fn test_determinism(inputs: TestConfig) {
     let make_stepper = make_stepper_factory(&inputs);
 

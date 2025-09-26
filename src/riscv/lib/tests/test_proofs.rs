@@ -30,6 +30,8 @@ use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv_test_utils::*;
 use rand::Rng;
 
+// Jstz tests
+
 #[test]
 fn test_jstz_proofs_one_step() {
     test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof, JSTZ)
@@ -55,6 +57,35 @@ fn test_jstz_proofs_full_stream() {
 #[test]
 fn test_jstz_initial_proof_regression() {
     test_initial_proof_regression(JSTZ)
+}
+
+// Etherlink tests
+
+#[test]
+fn test_etherlink_proofs_one_step() {
+    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof, ETHERLINK)
+}
+
+#[test]
+fn test_etherlink_proofs_one_step_stream() {
+    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
+}
+
+#[test]
+#[ignore]
+fn test_etherlink_proofs_full() {
+    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof, ETHERLINK)
+}
+
+#[test]
+#[ignore]
+fn test_etherlink_proofs_full_stream() {
+    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
+}
+
+#[test]
+fn test_etherlink_initial_proof_regression() {
+    test_initial_proof_regression(ETHERLINK)
 }
 
 fn test_initial_proof_regression(inputs: TestConfig) {
