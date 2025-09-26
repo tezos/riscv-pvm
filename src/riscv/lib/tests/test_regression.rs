@@ -62,6 +62,11 @@ fn regression_frozen_jstz() {
     test_regression(JSTZ, true)
 }
 
+#[test]
+fn regression_frozen_etherlink() {
+    test_regression(ETHERLINK, true)
+}
+
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
     test_regression_for_block::<Interpreted<M64M, Owned>>(
         InterpretedBlockBuilder,

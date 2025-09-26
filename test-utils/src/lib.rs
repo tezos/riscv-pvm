@@ -55,6 +55,13 @@ pub const JSTZ: TestConfig = TestConfig {
     inbox_path: concatcp!(ASSETS_DIR, "/jstz-regression-inbox.json"),
 };
 
+/// Test configuration for the Etherlink kernel
+pub const ETHERLINK: TestConfig = TestConfig {
+    golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/etherlink"),
+    kernel_path: concatcp!(ASSETS_DIR, "/etherlink"),
+    inbox_path: concatcp!(ASSETS_DIR, "/etherlink-regression-inbox.json"),
+};
+
 /// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
 pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>(
     inputs: &TestConfig,
