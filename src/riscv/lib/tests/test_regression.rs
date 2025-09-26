@@ -51,7 +51,7 @@ fn regression_frozen_jstz() {
     test_regression(
         "tests/expected/jstz",
         "../../../assets/jstz",
-        "../../../assets/regression-inbox.json",
+        "../../../assets/jstz-regression-inbox.json",
         true,
     )
 }
