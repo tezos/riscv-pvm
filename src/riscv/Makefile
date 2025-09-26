@@ -13,21 +13,6 @@ NIGHTLY_VERSION = nightly-2025-01-30
 build:
 	@cargo build --release --workspace
 
-# Update checked-in binaries
-.PHONY: update-assets
-update-assets: assets/riscv-dummy.elf assets/jstz
-
-# Update the compiled dummy kernel used in CI tests
-assets/riscv-dummy.elf assets/riscv-dummy.elf.checksum::
-	@make -C ../.. dummy/build
-	@cp ../../kernels/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy $@
-	@sha256sum $@ > $@.checksum
-
-assets/jstz assets/jstz.checksum::
-	@make -C ../.. jstz/build-kernel
-	@cp ../../kernels/jstz/target/riscv64gc-unknown-linux-musl/release/jstz $@
-	@sha256sum $@ > $@.checksum
-
 .PHONY: build-deps-slim
 build-deps-slim:
 	# Ensure the toolchain is installed.
@@ -55,7 +40,7 @@ test: test-deps
 	@cargo nextest run --workspace
 
 .PHONY: test-deps
-test-deps: 
+test-deps:
 	@make -C ../.. dummy/build
 	@make -C ../.. block-cache-tester/build
 
@@ -77,7 +62,7 @@ check:
 	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
-	@cargo check --workspace --all-targets 
+	@cargo check --workspace --all-targets
 	@cargo clippy --workspace --all-targets -- --deny warnings
 	@cargo doc --document-private-items --no-deps
 
