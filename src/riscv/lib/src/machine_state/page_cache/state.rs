@@ -25,6 +25,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::OFFSET_BITS;
 use crate::machine_state::memory::PAGE_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
+use crate::machine_state::memory::address_to_page_index;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::state_backend::ManagerBase;
@@ -77,11 +78,10 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     where
         M: ManagerRead,
     {
-        // TODO: RV-779: add & use utility to retreiving page_idx & offset from address.
-        let page_index = address >> OFFSET_BITS.get();
+        let page_index = address_to_page_index(address);
 
         self.pages
-            .get_mut(page_index as usize)
+            .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
             .map(|page| super::CodePage {
                 page: &mut page.entries,
@@ -156,14 +156,14 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
 
     /// Invalidate a range of pages corresponding to the provided range of memory.
     fn invalidate_pages(&mut self, addresses: std::ops::Range<u64>) {
-        let start_page = addresses.start >> OFFSET_BITS.get();
-        let end_page = addresses.end.wrapping_sub(1) >> OFFSET_BITS.get();
+        let start_page = address_to_page_index(addresses.start);
+        let end_page = address_to_page_index(addresses.end.wrapping_sub(1));
 
         // shortcut in-case of ranges out of bounds of memory
-        let end_page = end_page.min(self.pages.len().saturating_sub(1) as u64);
+        let end_page = end_page.min(self.pages.len().saturating_sub(1));
 
         for page_idx in start_page..=end_page {
-            if let Some(entry) = self.pages.get_mut(page_idx as usize) {
+            if let Some(entry) = self.pages.get_mut(page_idx) {
                 *entry = None;
             }
         }

@@ -33,7 +33,7 @@ use super::instruction::Instruction;
 use super::memory;
 use super::memory::Address;
 use super::memory::MemoryConfig;
-use super::memory::PAGE_OFFSET_MASK;
+use super::memory::address_to_page_offset;
 use crate::exceptions::Exception;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
@@ -119,19 +119,21 @@ where
 {
     let mut result = StepManyResult::ZERO;
 
+    let page_offset = address_to_page_offset(instr_pc);
+
     // Since we know the instruction pc to always be halfword-aligned, there are half
     // as many entries as the page size.
-    let mut instr_offset = (instr_pc & PAGE_OFFSET_MASK) >> 1;
+    let mut instr_offset = page_offset >> 1;
 
-    while max_steps > result.steps && instr_offset < INSTRUCTION_ENTRIES as u64 {
-        let instr = code_page[instr_offset as usize].as_ref();
+    while max_steps > result.steps && instr_offset < INSTRUCTION_ENTRIES {
+        let instr = code_page[instr_offset].as_ref();
 
         match instr.run(core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 instr_pc += width as u64;
 
                 // we update the offset by half the width, as the offset is halfword aligned
-                instr_offset += (width as u64) >> 1;
+                instr_offset += (width as usize) >> 1;
 
                 core.hart.pc.write(instr_pc);
                 result.steps += 1;

@@ -61,6 +61,20 @@ pub type Address = XValue;
 /// Lowest address
 pub const FIRST_ADDRESS: Address = 0;
 
+/// Convert an address into the page index.
+///
+/// The address will be contained within the page pointed to by this index.
+#[inline]
+pub fn address_to_page_index(address: Address) -> usize {
+    (address >> OFFSET_BITS.get()) as usize
+}
+
+/// Isolate the 'page offset' component of an address.
+#[inline]
+pub fn address_to_page_offset(address: Address) -> usize {
+    (address & PAGE_OFFSET_MASK) as usize
+}
+
 /// Memory access permissions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Permissions {
@@ -323,3 +337,25 @@ pub use config::M16G;
 pub use config::M32G;
 pub use config::M64G;
 pub use config::M64M;
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use crate::machine_state::memory::Address;
+    use crate::machine_state::memory::OFFSET_BITS;
+    use crate::machine_state::memory::PAGE_SIZE;
+
+    #[test]
+    fn split_address_to_page_and_offset() {
+        proptest!(|(address: Address)| {
+            let page_idx = super::address_to_page_index(address);
+            let offset = super::address_to_page_offset(address);
+
+            let original_address = (page_idx as u64) << OFFSET_BITS.get() | (offset as u64);
+
+            prop_assert_eq!(address, original_address);
+            prop_assert!((offset as u64) < PAGE_SIZE.get());
+        });
+    }
+}

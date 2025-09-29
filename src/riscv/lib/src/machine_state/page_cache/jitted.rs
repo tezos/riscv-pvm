@@ -6,7 +6,6 @@
 //! JIT-compilation support for entrypoints in pages.
 
 use super::INSTRUCTION_ENTRIES;
-use super::PAGE_OFFSET_MASK;
 use super::code_page_entry::CodePageEntry;
 use crate::exceptions::Exception;
 use crate::jit::state_access::ExceptionCode;
@@ -18,6 +17,7 @@ use crate::machine_state::block_cache::block::dispatch::DispatchTarget;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::address_to_page_offset;
 use crate::state_backend::owned_backend::Owned;
 
 /// Maximum number of instructions we pass to a compilation request
@@ -66,9 +66,12 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         result: &mut ExceptionCode,
         compiler: &mut D,
     ) -> usize {
-        let offset = (instr_pc & PAGE_OFFSET_MASK) >> 1;
+        let page_offset = address_to_page_offset(instr_pc);
 
-        if !compiler.should_compile(&mut self[offset as usize].dispatch) {
+        // instr_pc is always halfword aligned
+        let offset = page_offset >> 1;
+
+        if !compiler.should_compile(&mut self[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
             // lifetime of the entrypoint
             return unsafe {
@@ -79,12 +82,12 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         // trigger JIT compilation
         let instr = self
             .iter()
-            .skip(offset as usize)
+            .skip(offset)
             .take(MAX_INSTR_COMPILED)
             .map(|entry| entry.instruction)
             .collect::<Vec<_>>();
 
-        let fun = compiler.compile(&mut self[offset as usize].dispatch, instr, instr_pc);
+        let fun = compiler.compile(&mut self[offset].dispatch, instr, instr_pc);
 
         // Safety: the compiler passed to this function is always the same for the
         // lifetime of the entrypoint
@@ -149,11 +152,13 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jit
             return super::run_code_page_interpreted(page, core, instr_pc, max_steps);
         }
 
+        let page_offset = address_to_page_offset(instr_pc);
+
         // Since we know the instruction pc to always be halfword-aligned, there are half
         // as many entries as the page size.
-        let instr_offset = (instr_pc & PAGE_OFFSET_MASK) >> 1;
+        let instr_offset = page_offset >> 1;
 
-        let entrypoint = &mut page[instr_offset as usize];
+        let entrypoint = &mut page[instr_offset];
 
         let fun = entrypoint.dispatch.get();
 
