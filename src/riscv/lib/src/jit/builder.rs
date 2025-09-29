@@ -19,6 +19,7 @@ pub(crate) mod sequence;
 pub(crate) mod typed;
 
 use cranelift::codegen::ir::condcodes::IntCC;
+use cranelift::codegen::ir::immediates::Offset32;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
@@ -60,10 +61,12 @@ where
     P: MachineCoreProjection,
     P::Target: typed::Typed,
 {
-    let (base, offset) = P::normal_pointer_offset::<MC>(param).build_base_and_offset(
+    let (base, offset) = P::build_owned_pointer_offset::<MC>(
         target_config,
         builder,
         base.to_value(),
+        Offset32::new(0),
+        param,
     );
 
     // The `offset` when added to the final `base` pointer must result in a valid pointer to the
@@ -91,10 +94,12 @@ fn write_proj<MC, P>(
     MC: MemoryConfig,
     P: MachineCoreProjection,
 {
-    let (base, offset) = P::normal_pointer_offset::<MC>(param).build_base_and_offset(
+    let (base, offset) = P::build_owned_pointer_offset::<MC>(
         target_config,
         builder,
         base.to_value(),
+        Offset32::new(0),
+        param,
     );
 
     // The `offset` when added to the final `base` pointer must result in a valid pointer to the

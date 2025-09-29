@@ -100,103 +100,6 @@ impl TypeCons for MachineCoreCons {
     type Applied<MC: MemoryConfig, M: ManagerBase> = MachineCoreState<MC, M>;
 }
 
-/// Offset from a base pointer to a [projection's] subject with a state in normal mode.
-///
-/// Additional offsets may be added to an existing one, to build up offsets within
-/// layered projections. All such additions will panic on overflowing the `i32` range.
-///
-/// [projection's]: Projection
-#[derive(Debug, Clone)]
-pub enum ProjectionOffset {
-    /// Target value is directly accessible from the base pointer
-    ///
-    /// Adding the offset to the base pointer will yield the address of the target value.
-    Direct {
-        /// Offset from the base in bytes
-        offset: i32,
-    },
-
-    /// Target value is accessible via an indirection
-    ///
-    /// Adding the offset to the base pointer will yield the address of the next base pointer. The
-    /// `inner` projection then needs to proceed with the new base pointer.
-    Indirect {
-        /// Offset from the base in bytes
-        offset: i32,
-
-        /// Inner projection to be applied after resolving the indirection
-        inner: Box<ProjectionOffset>,
-    },
-}
-
-impl ProjectionOffset {
-    /// Create a new projection offset from the given offset.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the offset overflows the `i32` range.
-    pub fn direct(offset: usize) -> Self {
-        let offset = offset
-            .try_into()
-            .expect("Projection offset overflows i32 range");
-        Self::Direct { offset }
-    }
-
-    /// Resolve the projection offset to a base pointer and an offset relative to the base. Adding
-    /// the offset to the base pointer will yield the address of the target value.
-    pub fn build_base_and_offset(
-        &self,
-        target_config: &TargetFrontendConfig,
-        builder: &mut FunctionBuilder,
-        base: ir::Value,
-    ) -> (ir::Value, Offset32) {
-        match self {
-            ProjectionOffset::Direct { offset } => {
-                let offset = Offset32::new(*offset);
-                (base, offset)
-            }
-
-            ProjectionOffset::Indirect { offset, inner } => {
-                let new_base = builder.ins().load(
-                    target_config.pointer_type(),
-                    MemFlags::trusted(),
-                    base,
-                    *offset,
-                );
-                inner.build_base_and_offset(target_config, builder, new_base)
-            }
-        }
-    }
-}
-
-impl std::ops::Add<usize> for ProjectionOffset {
-    type Output = Self;
-
-    fn add(self, offset: usize) -> Self {
-        let offset: u32 = offset
-            .try_into()
-            .expect("Projection offset overflows u32 range");
-
-        match self {
-            ProjectionOffset::Direct { offset: raw_offset } => ProjectionOffset::Direct {
-                offset: raw_offset
-                    .checked_add_unsigned(offset)
-                    .expect("Projection offset overflow"),
-            },
-
-            ProjectionOffset::Indirect {
-                offset: base_offset,
-                inner,
-            } => ProjectionOffset::Indirect {
-                offset: base_offset
-                    .checked_add_unsigned(offset)
-                    .expect("Projection offset overflow"),
-                inner,
-            },
-        }
-    }
-}
-
 /// Projections give you access to a value of the target type within the value of a subject type.
 pub trait Projection {
     /// Subject that contains the target value
@@ -236,7 +139,13 @@ pub trait Projection {
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
     /// value. This is exclusive to the [`octez_riscv_data::mode::Normal`] mode.
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        base: ir::Value,
+        offset: Offset32,
+        param: Self::Parameter,
+    ) -> (ir::Value, Offset32);
 }
 
 /// A projection from [`Box`] to its inner type
@@ -274,12 +183,24 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_write::<MC, M>(state.deref_mut(), param, value);
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        let offset = P::normal_pointer_offset::<MC>(param);
-        ProjectionOffset::Indirect {
-            offset: 0,
-            inner: Box::new(offset),
-        }
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        base: ir::Value,
+        offset: Offset32,
+        param: Self::Parameter,
+    ) -> (ir::Value, Offset32) {
+        let new_base = builder.ins().load(
+            target_config.pointer_type(),
+            MemFlags::trusted(),
+            base,
+            offset,
+        );
+
+        // The previous offset does not apply anymore, since we have loaded a new base pointer.
+        let new_offset = Offset32::new(0);
+
+        P::build_owned_pointer_offset::<MC>(target_config, builder, new_base, new_offset, param)
     }
 }
 
@@ -330,23 +251,21 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         P::project_write::<MC, M>(inner_state, param.inner_param, value);
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        assert!(
-            param.index < LEN,
-            "Array index out of bounds: {} >= {}",
-            param.index,
-            LEN
-        );
-
-        let inner_offset = P::normal_pointer_offset::<MC>(param.inner_param);
-
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        target_config: &TargetFrontendConfig,
+        builder: &mut FunctionBuilder,
+        base: ir::Value,
+        offset: Offset32,
+        param: Self::Parameter,
+    ) -> (ir::Value, Offset32) {
         let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>();
-        let offset = param
+        let elem_offset = param
             .index
             .checked_mul(elem_size)
-            .expect("Array index overflow");
+            .expect("Element offset should not overflow");
 
-        inner_offset + offset
+        let offset = offset32_try_add(offset, elem_offset);
+        P::build_owned_pointer_offset::<MC>(target_config, builder, base, offset, param.inner_param)
     }
 }
 
@@ -507,9 +426,13 @@ macro_rules! impl_projection {
                 )
             }
 
-            fn normal_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
-                param: Self::Parameter
-            ) -> $crate::state_context::projection::ProjectionOffset {
+            fn build_owned_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
+                target_config: &cranelift::prelude::isa::TargetFrontendConfig,
+                builder: &mut cranelift::prelude::FunctionBuilder,
+                base: cranelift::codegen::ir::Value,
+                offset: cranelift::codegen::ir::immediates::Offset32,
+                param: Self::Parameter,
+            ) -> (cranelift::codegen::ir::Value, cranelift::codegen::ir::immediates::Offset32) {
                 let field_offset = std::mem::offset_of!(
                     $crate::state_context::projection::ApplyCons<
                         $subject,
@@ -518,8 +441,15 @@ macro_rules! impl_projection {
                     >,
                     $($field).+
                 );
+                let offset = $crate::state_context::projection::offset32_try_add(offset, field_offset);
 
-                <$target>::normal_pointer_offset::<MC>(param) + field_offset
+                <$target>::build_owned_pointer_offset::<MC>(
+                    target_config,
+                    builder,
+                    base,
+                    offset,
+                    param,
+                )
             }
         }
     };
@@ -530,4 +460,12 @@ pub(crate) use impl_projection;
 trait_set::trait_set! {
     /// Alias for [`Projection`] with `MachineCoreCons` as subject type
     pub trait MachineCoreProjection = Projection<Subject = MachineCoreCons>;
+}
+
+/// TODO
+pub(crate) fn offset32_try_add(offset: Offset32, addend: usize) -> Offset32 {
+    let addend: i64 = addend.try_into().expect("Addend should fit in i64");
+    offset
+        .try_add_i64(addend)
+        .expect("Offset addition should not overflow")
 }

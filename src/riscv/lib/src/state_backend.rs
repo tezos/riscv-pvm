@@ -47,6 +47,9 @@ use std::marker::PhantomData;
 use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
+use cranelift::codegen::ir::immediates::Offset32;
+use cranelift::prelude as cranelift_prelude;
+use cranelift::prelude::isa as cranelift_isa;
 pub use elems::*;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -58,8 +61,8 @@ pub use region::*;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::Projection;
-use crate::state_context::projection::ProjectionOffset;
 use crate::state_context::projection::RegionCons;
+use crate::state_context::projection::offset32_try_add;
 
 /// Manager of the state backend storage
 pub trait ManagerBase: Mode + Sized {
@@ -285,19 +288,19 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
         M::region_write(state, param.0, value);
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        assert!(
-            param.0 < LEN,
-            "Region index out of bounds: {} >= {}",
-            param.0,
-            LEN
-        );
-
-        let offset = std::mem::size_of::<E>()
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        _target_config: &cranelift_isa::TargetFrontendConfig,
+        _builder: &mut cranelift_prelude::FunctionBuilder,
+        base: cranelift_prelude::Value,
+        offset: Offset32,
+        param: Self::Parameter,
+    ) -> (cranelift_prelude::Value, Offset32) {
+        let elem_offset = std::mem::size_of::<E>()
             .checked_mul(param.0)
-            .expect("Region offset exceeds usize range");
+            .expect("Element offset does not overflow");
+        let offset = offset32_try_add(offset, elem_offset);
 
-        ProjectionOffset::direct(offset)
+        (base, offset)
     }
 }
 

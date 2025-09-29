@@ -13,6 +13,9 @@ use bincode::de::read::Reader;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use cranelift::codegen::ir::immediates::Offset32;
+use cranelift::prelude as cranelift_prelude;
+use cranelift::prelude::isa as cranelift_isa;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -56,7 +59,7 @@ use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
 use crate::state_context::projection::Projection;
-use crate::state_context::projection::ProjectionOffset;
+use crate::state_context::projection::offset32_try_add;
 
 /// Single element of type `E`
 #[perfect_derive(Clone, PartialEq, Eq)]
@@ -227,10 +230,23 @@ impl<E: 'static> Projection for CellProj<E> {
         state.write(value);
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        target_config: &cranelift_isa::TargetFrontendConfig,
+        builder: &mut cranelift_prelude::FunctionBuilder,
+        base: cranelift_prelude::Value,
+        offset: Offset32,
+        _param: Self::Parameter,
+    ) -> (cranelift_prelude::Value, Offset32) {
         let field_offset = std::mem::offset_of!(Cell<E, Normal>, region.region);
+        let offset = offset32_try_add(offset, field_offset);
 
-        RegionProj::<E, 1>::normal_pointer_offset::<MC>((0,)) + field_offset
+        RegionProj::<E, 1>::build_owned_pointer_offset::<MC>(
+            target_config,
+            builder,
+            base,
+            offset,
+            (0,),
+        )
     }
 }
 
@@ -487,10 +503,23 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
         RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+    fn build_owned_pointer_offset<MC: MemoryConfig>(
+        target_config: &cranelift_isa::TargetFrontendConfig,
+        builder: &mut cranelift_prelude::FunctionBuilder,
+        base: cranelift_prelude::Value,
+        offset: Offset32,
+        param: Self::Parameter,
+    ) -> (cranelift_prelude::Value, Offset32) {
         let field_offset = std::mem::offset_of!(Cells<E, LEN, Normal>, region);
+        let offset = offset32_try_add(offset, field_offset);
 
-        RegionProj::<E, LEN>::normal_pointer_offset::<MC>(param) + field_offset
+        RegionProj::<E, LEN>::build_owned_pointer_offset::<MC>(
+            target_config,
+            builder,
+            base,
+            offset,
+            param,
+        )
     }
 }
 
