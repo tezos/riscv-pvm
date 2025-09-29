@@ -9,7 +9,7 @@ use super::buddy::BuddyLayoutProxy;
 use super::protection::PagePermissions;
 use super::protection::PagePermissionsLayout;
 use super::state::MemoryImpl;
-use crate::machine_state::page_cache::EmptyPageCache;
+use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::DynArray;
@@ -64,7 +64,7 @@ where
     type PageCache<
         CPE: crate::machine_state::page_cache::code_page_entry::CodePageEntry<Self, M>,
         M: ManagerBase,
-    > = EmptyPageCache;
+    > = PageCacheImpl<PAGES, CPE, Self, M>;
 
     fn bind<M: ManagerBase>(space: AllocatedOf<Self::Layout, M>) -> Self::State<M> {
         if TOTAL_BYTES == 0 {

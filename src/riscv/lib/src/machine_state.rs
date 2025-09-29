@@ -745,9 +745,12 @@ mod tests {
     use super::instruction::Instruction;
     use super::memory::Address;
     use super::page_cache::Interpreted;
+    use super::page_cache::state::PageEntry;
     use crate::backend_test;
+    use crate::default::ConstDefault;
     use crate::exceptions::Exception;
     use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
+    use crate::machine_state::StepManyResult;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -755,6 +758,7 @@ mod tests {
     use crate::machine_state::memory::M64M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::sp;
@@ -810,6 +814,13 @@ mod tests {
             state.core.main_memory.write_instruction_unchecked(init_pc_addr, (T2_ENC << 15) | (F3_0 << 12) | (T0_ENC << 7) | OP_JALR).unwrap();
 
             state.core.hart.xregisters.write(t2, jump_addr);
+             let page_index = crate::machine_state::memory::address_to_page_index(init_pc_addr) as u64;
+
+            // Since we've written a new instruction to the init_pc_addr - we need to
+            // invalidate the page cache entry for that page.
+            state.page_cache.invalidate_pages(page_index..=page_index);
+
+            state.core.hart.xregisters.write(t2, jump_addr);
 
             state.step().expect("should not raise trap to EE");
             prop_assert_eq!(state.core.hart.xregisters.read(t0), init_pc_addr + 4);
@@ -863,103 +874,96 @@ mod tests {
         });
     });
 
-    // This test checks that view on the instruction memory is preserved across rebindings of the
-    // PVM state. There are more details in the `block-cache-tester` kernel's source that is used
-    // to test this.
-    //
-    // FIXME: enable this with the actual block cache
-    backend_test!(
-        #[ignore]
-        test_block_cache_state,
-        F,
-        {
-            let base_state = {
-                let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new(InterpretedBlockBuilder);
+    // This test checks that view on the instruction memory is synchronised with data memory,
+    // including across rebindings of the PVM state. There are more details in the
+    // `page-cache-tester` kernel's source that is used to test this.
+    backend_test!(test_page_cache_state, F, {
+        let base_state = {
+            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new(InterpretedBlockBuilder);
 
-                // The `block-cache-tester` kernel is a simple kernel that needs to be built before
-                // this test can run. It is located in the `/kernels/block-cache-tester` directory.
-                let contents = fs::read("../../../kernels/block-cache-tester/target/riscv64gc-unknown-linux-musl/debug/block-cache-tester").expect("Could not find `block-cache-tester` kernel. Perhaps you need to build it via `make -C kernels/block-cache-tester build`?");
-                let program = Program::from_elf(&contents).unwrap();
+            // The `page-cache-tester` kernel is a simple kernel that needs to be built before
+            // this test can run. It is located in the `/kernels/page-cache-tester` directory.
+            let contents = fs::read("../../../kernels/page-cache-tester/target/riscv64gc-unknown-linux-musl/debug/page-cache-tester").expect("Could not find `page-cache-tester` kernel. Perhaps you need to build it via `make -C kernels/page-cache-tester build`?");
+            let program = Program::from_elf(&contents).unwrap();
 
-                state.setup_linux_process(&program).unwrap();
+            state.setup_linux_process(&program).unwrap();
 
-                let res = state
-                    .machine_state
-                    .step_max_handle::<()>(Bound::Unbounded, |machine| {
-                        let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
+            let res = state
+                .machine_state
+                .step_max_handle::<()>(Bound::Unbounded, |machine| {
+                    let syscall_number = machine.core.hart.xregisters.read(a7) as i64;
 
-                        // The `block-cache-tester` kernel will issue a system call with number -1
-                        // to indicate that it has reached the signal point. This is our cue that we
-                        // have produced the right "start" state.
-                        if syscall_number == -1 {
-                            return ControlFlow::Break(());
-                        }
-
-                        handle_system_call(
-                            machine,
-                            &mut state.system_state,
-                            &mut state.status,
-                            &mut state.reveal_request,
-                            StdoutDebugHooks,
-                        )
-                    });
-
-                assert_eq!(
-                    res.error,
-                    Some(()),
-                    "Program didn't make it to the signal point"
-                );
-
-                state
-            };
-
-            let alt_state = {
-                // Clone the base state to get rid of any ephemeral state that was created.
-                let refs = base_state.struct_ref::<FnManagerIdent>();
-                let refs = PvmLayout::<M64M>::clone_allocated(refs);
-                let mut state =
-                    Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedBlockBuilder);
-
-                // We want to run the kernel until it exits as that is a good point to compare.
-                loop {
-                    let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
-
-                    if unsafe { state.has_exited().is_some() } {
-                        break;
+                    // The `page-cache-tester` kernel will issue a system call with number -1
+                    // to indicate that it has reached the signal point. This is our cue that we
+                    // have produced the right "start" state.
+                    if syscall_number == -1 {
+                        return ControlFlow::Break(());
                     }
-                }
 
-                state
-            };
-
-            let state = {
-                // Take ownership within this code block.
-                let mut state = base_state;
-
-                // We want to run the kernel until it exits as that is a good point to compare.
-                loop {
-                    let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
-
-                    if unsafe { state.has_exited().is_some() } {
-                        break;
-                    }
-                }
-
-                state
-            };
+                    handle_system_call(
+                        machine,
+                        &mut state.system_state,
+                        &mut state.status,
+                        &mut state.reveal_request,
+                        StdoutDebugHooks,
+                    )
+                });
 
             assert_eq!(
-                unsafe { state.has_exited() },
-                Some(0),
-                "State didn't exit cleanly"
+                res.error,
+                Some(()),
+                "Program didn't make it to the signal point"
             );
 
-            assert!(
-                state.struct_ref::<FnManagerIdent>() == alt_state.struct_ref::<FnManagerIdent>(),
-                "States aren't equal"
-            );
-        }
-    );
+            state
+        };
+
+        let alt_state = {
+            // Clone the base state to get rid of any ephemeral state that was created.
+            let refs = base_state.struct_ref::<FnManagerIdent>();
+            let refs = PvmLayout::<M64M>::clone_allocated(refs);
+            let mut state =
+                Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedBlockBuilder);
+
+            // We want to run the kernel until it exits as that is a good point to compare.
+            loop {
+                let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
+
+                if unsafe { state.has_exited().is_some() } {
+                    break;
+                }
+            }
+
+            state
+        };
+
+        let state = {
+            // Take ownership within this code block.
+            let mut state = base_state;
+
+            // We want to run the kernel until it exits as that is a good point to compare.
+            loop {
+                let _steps = state.eval_max(StdoutDebugHooks, Bound::Unbounded);
+
+                if unsafe { state.has_exited().is_some() } {
+                    break;
+                }
+            }
+
+            state
+        };
+
+        assert_eq!(
+            unsafe { state.has_exited() },
+            Some(0),
+            "State didn't exit cleanly"
+        );
+
+        assert!(
+            state.struct_ref::<FnManagerIdent>() == alt_state.struct_ref::<FnManagerIdent>(),
+            "States aren't equal"
+        );
+    });
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
@@ -975,103 +979,97 @@ mod tests {
 
     // Ensure that the force-fetch-run mechanism correctly fetches instructions directly from
     // memory, and executes them.
-    backend_test!(
-        #[ignore]
-        test_force_fetch_run,
-        F,
-        {
-            // li a1, 1
-            let li_bytes: u32 = 0x00100593;
-            const IMMEDIATE: i64 = 1;
+    backend_test!(test_force_fetch_run, F, {
+        // li a1, 1
+        let li_bytes: u32 = 0x00100593;
+        const IMMEDIATE: i64 = 1;
 
-            let li_instr = Instruction::from(&parse_uncompressed_instruction(li_bytes));
-            assert_eq!(
-                li_instr,
-                Instruction::new_li(nz::a1, IMMEDIATE, InstrWidth::Uncompressed),
-                "Incorrect bytes {li_bytes:x} for instruction"
-            );
+        let li_instr = Instruction::from(&parse_uncompressed_instruction(li_bytes));
+        assert_eq!(
+            li_instr,
+            Instruction::new_li(nz::a1, IMMEDIATE, InstrWidth::Uncompressed),
+            "Incorrect bytes {li_bytes:x} for instruction"
+        );
 
-            let li_lower = li_bytes as u16;
-            let li_upper = (li_bytes >> 16) as u16;
+        let li_lower = li_bytes as u16;
+        let li_upper = (li_bytes >> 16) as u16;
 
-            let run_test = |initial_pc: Address,
-                            write_lower: bool,
-                            write_upper: bool,
-                            _expected_pc: Address,
-                            _succeeds: bool| {
-                let mut state =
-                    MachineState::<M8K, Interpreted<M8K, F>, F>::new(InterpretedBlockBuilder);
+        let run_test = |initial_pc: Address,
+                        write_lower: bool,
+                        write_upper: bool,
+                        expected_pc: Address,
+                        succeeds: bool| {
+            let mut state =
+                MachineState::<M8K, Interpreted<M8K, F>, F>::new(InterpretedBlockBuilder);
 
-                state.core.hart.pc.write(initial_pc);
+            state.core.hart.pc.write(initial_pc);
 
-                if write_lower {
-                    state
-                        .core
-                        .main_memory
-                        .write_instruction_unchecked(initial_pc, li_lower)
-                        .unwrap();
-                }
+            if write_lower {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc, li_lower)
+                    .unwrap();
+            }
 
-                if write_upper {
-                    state
-                        .core
-                        .main_memory
-                        .write_instruction_unchecked(initial_pc + 2, li_upper)
-                        .unwrap();
-                }
+            if write_upper {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc + 2, li_upper)
+                    .unwrap();
+            }
 
-                todo!("FIXME: switch 'push instruction' mechanism to the new page cache");
-                //state
-                //    .block_cache
-                //    .push_instruction(initial_pc, Instruction::DEFAULT);
+            let mut page = PageEntry::zeroed();
+            page.push_instructions(initial_pc, [Instruction::DEFAULT].into_iter());
 
-                //let res: StepManyResult<()> =
-                //    state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
+            state.page_cache.overwrite_page(initial_pc, page);
 
-                //assert_eq!(state.core.hart.pc.read(), expected_pc);
-                //assert_eq!(res.steps, 1);
-                //assert_eq!(res.error, None);
-                //let expected_a1 = if succeeds { IMMEDIATE as u64 } else { 0 };
-                //assert_eq!(state.core.hart.xregisters.read_nz(nz::a1), expected_a1);
-            };
+            let res: StepManyResult<()> =
+                state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
 
-            // TESTS
-            // we use as failure indication pc == 0 and a1 not updated
-            // -----
+            assert_eq!(state.core.hart.pc.read(), expected_pc);
+            assert_eq!(res.steps, 1);
+            assert_eq!(res.error, None);
+            let expected_a1 = if succeeds { IMMEDIATE as u64 } else { 0 };
+            assert_eq!(state.core.hart.xregisters.read_nz(nz::a1), expected_a1);
+        };
 
-            let pc_within_page = 100;
+        // TESTS
+        // we use as failure indication pc == 0 and a1 not updated
+        // -----
 
-            #[expect(unused, reason = "will be used once tests are restored")]
-            let pc_across_pages = memory::PAGE_SIZE.get().checked_sub(2).unwrap();
+        let pc_within_page = 100;
 
-            // force fetch run within an executable page succeeds
-            run_test(
-                pc_within_page,
-                true,
-                true,
-                pc_within_page + InstrWidth::Uncompressed as u64,
-                true,
-            );
+        let pc_across_pages = memory::PAGE_SIZE.get().checked_sub(2).unwrap();
 
-            // force fetch run within a non executable page fails
-            run_test(pc_within_page, false, false, 0, false);
+        // force fetch run within an executable page succeeds
+        run_test(
+            pc_within_page,
+            true,
+            true,
+            pc_within_page + InstrWidth::Uncompressed as u64,
+            true,
+        );
 
-            // force fetch run across two executable pages succeeds
-            run_test(
-                pc_across_pages,
-                true,
-                true,
-                pc_across_pages + InstrWidth::Uncompressed as u64,
-                true,
-            );
+        // force fetch run within a non executable page fails
+        run_test(pc_within_page, false, false, 0, false);
 
-            // force fetch run across one executable page followed by a non executable page
-            run_test(pc_across_pages, true, false, 0, false);
+        // force fetch run across two executable pages succeeds
+        run_test(
+            pc_across_pages,
+            true,
+            true,
+            pc_across_pages + InstrWidth::Uncompressed as u64,
+            true,
+        );
 
-            // force fetch run across one non-executable page followed by an executable page
-            run_test(pc_across_pages, false, true, 0, false);
-        }
-    );
+        // force fetch run across one executable page followed by a non executable page
+        run_test(pc_across_pages, true, false, 0, false);
+
+        // force fetch run across one non-executable page followed by an executable page
+        run_test(pc_across_pages, false, true, 0, false);
+    });
 
     backend_test!(test_signal_context, F, {
         let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedBlockBuilder);
