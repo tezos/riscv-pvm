@@ -26,6 +26,8 @@ use memory::BadMemoryAccess;
 use memory::Memory;
 use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
+use memory::listener::MemoryGovernanceListener;
+use memory::listener::NoopMemoryGovernanceListener;
 
 use crate::bits::u64;
 use crate::exceptions::Exception;
@@ -105,12 +107,12 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     }
 
     /// Reset the machine state.
-    pub fn reset(&mut self)
+    pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
         M: backend::ManagerReadWrite,
     {
         self.hart.reset(memory::FIRST_ADDRESS);
-        self.main_memory.reset();
+        self.main_memory.reset(listener);
         self.signal_actions.reset();
     }
 
@@ -328,8 +330,20 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
     where
         M: backend::ManagerReadWrite,
     {
-        self.core.reset();
+        self.core.reset(NoopMemoryGovernanceListener);
         self.block_cache.reset();
+    }
+
+    /// Get access to the main memory, with a listener to hook into any permission updates.
+    ///
+    /// This is required to keep parts of [`MachineState`], that do not form part of the PVM state,
+    /// synchronised with main memory so as to ensure determinism regardless of whether these
+    /// additional parts of the state are populated or not.
+    pub(crate) fn memory_with_listener(
+        &mut self,
+    ) -> (&mut MC::State<M>, impl MemoryGovernanceListener) {
+        // TODO: RV-767: replace Noop listener with page cache
+        (&mut self.core.main_memory, NoopMemoryGovernanceListener)
     }
 
     /// Fetch & run the instruction located at address `instr_pc`.
@@ -610,6 +624,18 @@ impl<MC: memory::MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: backen
         if self.core.dispatch_signal(signal).is_err() {
             self.core.hart.pc.write(0);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_all_readable_writeable<const PAGES: usize, const TOTAL_BYTES: usize, MB>(
+        &mut self,
+    ) where
+        MB: memory::buddy::Buddy<M>,
+        MC: MemoryConfig<State<M> = memory::state::MemoryImpl<PAGES, TOTAL_BYTES, MB, M>>,
+        M: ManagerReadWrite,
+    {
+        let (main_memory, listener) = self.memory_with_listener();
+        main_memory.set_all_readable_writeable(listener);
     }
 }
 
@@ -1260,7 +1286,7 @@ mod tests {
         );
 
         state.reset();
-        state.core.main_memory.set_all_readable_writeable();
+        state.set_all_readable_writeable();
 
         let stack_top = M4K::TOTAL_BYTES.get() as u64;
         state.core.hart.xregisters.write(sp, stack_top);
@@ -1281,7 +1307,7 @@ mod tests {
         );
 
         state.reset();
-        state.core.main_memory.set_all_readable_writeable();
+        state.set_all_readable_writeable();
 
         let stack_top = M4K::TOTAL_BYTES.get() as u64;
         state.core.hart.xregisters.write(sp, stack_top);

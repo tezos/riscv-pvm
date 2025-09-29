@@ -3,13 +3,16 @@
 // SPDX-License-Identifier: MIT
 
 use std::num::NonZeroUsize;
+use std::ops::RangeInclusive;
 
 use super::Address;
 use super::BadMemoryAccess;
 use super::Memory;
 use super::PAGE_SIZE;
 use super::Permissions;
+use super::address_to_page_index;
 use super::buddy::Buddy;
+use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
@@ -52,7 +55,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
 
     /// Mark the whole memory as readable and writeable
     #[cfg(test)]
-    pub(crate) fn set_all_readable_writeable(&mut self)
+    pub(crate) fn set_all_readable_writeable(&mut self, listener: impl MemoryGovernanceListener)
     where
         B: Buddy<M>,
         M: ManagerReadWrite,
@@ -60,11 +63,14 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         let length =
             NonZeroUsize::new(TOTAL_BYTES).expect("`TOTAL_BYTES` must be greater than zero");
 
-        self.protect_pages(0, length, Permissions::READ_WRITE)
+        self.protect_pages(0, length, Permissions::READ_WRITE, listener)
             .unwrap();
     }
 
     /// Update an element in the region without checking memory protections. `address` is in bytes.
+    ///
+    /// Caution: this bypasses the usual `protect_pages` mechanism - including skipping notifying
+    /// any memory governance listener.
     #[cfg(test)]
     pub(crate) fn write_instruction_unchecked<E>(
         &mut self,
@@ -78,10 +84,11 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         let length = E::STORED_SIZE;
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
+        let pages = page_range(address, length);
 
         self.data.write(address as usize, value);
-        self.readable_pages.modify_access(address, length, true);
-        self.executable_pages.modify_access(address, length, true);
+        self.readable_pages.modify_access(pages.clone(), true);
+        self.executable_pages.modify_access(pages, true);
         Ok(())
     }
 }
@@ -148,9 +155,11 @@ where
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
+        let pages = page_range(address, length);
+
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self.readable_pages.can_access(address, length) {
+            if !self.readable_pages.can_access(pages) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -191,9 +200,11 @@ where
         let length = E::STORED_SIZE.saturating_mul(values_len);
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
+        let pages = page_range(address, length);
+
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
-            if !self.writable_pages.can_access(address, length) {
+            if !self.writable_pages.can_access(pages) {
                 return Err(BadMemoryAccess);
             }
         }
@@ -215,7 +226,7 @@ where
         }
     }
 
-    fn reset(&mut self)
+    fn reset(&mut self, mut listener: impl MemoryGovernanceListener)
     where
         M: ManagerWrite,
     {
@@ -239,6 +250,10 @@ where
         self.readable_pages.reset();
         self.writable_pages.reset();
         self.executable_pages.reset();
+
+        let last_page_index = PAGES.saturating_sub(1) as u64;
+
+        listener.handle_permissions_update(0..=last_page_index, Permissions::NONE);
     }
 
     fn protect_pages(
@@ -246,18 +261,23 @@ where
         address: Address,
         length: NonZeroUsize,
         perms: Permissions,
+        mut listener: impl MemoryGovernanceListener,
     ) -> Result<(), super::MemoryGovernanceError>
     where
         M: ManagerWrite,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
+        let pages = page_range(address, length);
+
         self.readable_pages
-            .modify_access(address, length, perms.can_read());
+            .modify_access(pages.clone(), perms.can_read());
         self.writable_pages
-            .modify_access(address, length, perms.can_write());
+            .modify_access(pages.clone(), perms.can_write());
         self.executable_pages
-            .modify_access(address, length, perms.can_exec());
+            .modify_access(pages.clone(), perms.can_exec());
+
+        listener.handle_permissions_update(pages, perms);
 
         Ok(())
     }
@@ -323,6 +343,7 @@ where
         length: NonZeroUsize,
         perms: Permissions,
         allow_replace: bool,
+        listener: impl MemoryGovernanceListener,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
         M: ManagerReadWrite,
@@ -331,7 +352,10 @@ where
         let address = self.allocate_pages(address_hint, length, allow_replace)?;
 
         // Configure the permissions on the page range
-        if self.protect_pages(address, length, perms).is_err() {
+        if self
+            .protect_pages(address, length, perms, listener)
+            .is_err()
+        {
             self.deallocate_pages(address, length)?;
         }
 
@@ -359,12 +383,24 @@ where
     }
 }
 
+fn page_range(address: Address, length: NonZeroUsize) -> RangeInclusive<u64> {
+    let start_page = address_to_page_index(address) as u64;
+
+    let end_address = address
+        .wrapping_add(length.get() as Address)
+        .wrapping_sub(1);
+    let end_page = address_to_page_index(end_address) as u64;
+
+    start_page..=end_page
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use crate::backend_test;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::owned_backend::Owned;
@@ -396,7 +432,13 @@ pub mod tests {
         let requested_size = (PAGE_SIZE.get() as usize) - 100;
         let requested_size = NonZeroUsize::new(requested_size).unwrap();
         let address = memory
-            .allocate_and_protect_pages(None, requested_size, Permissions::READ_WRITE, false)
+            .allocate_and_protect_pages(
+                None,
+                requested_size,
+                Permissions::READ_WRITE,
+                false,
+                NoopMemoryGovernanceListener,
+            )
             .expect("Memory allocation should succeed");
 
         // Verify that memory is zeroed for the entire page, not just the requested length
@@ -453,9 +495,9 @@ pub mod tests {
         let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
 
         // setting readable permissions should reset
-        memory.set_all_readable_writeable();
+        memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
         memory.write(5, 0xFFu8).unwrap();
-        memory.reset();
+        memory.reset(NoopMemoryGovernanceListener);
 
         assert!(
             M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)
@@ -467,7 +509,7 @@ pub mod tests {
         memory
             .write_instruction_unchecked(17, 0x1122334455667788u64)
             .unwrap();
-        memory.reset();
+        memory.reset(NoopMemoryGovernanceListener);
 
         assert!(
             M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)

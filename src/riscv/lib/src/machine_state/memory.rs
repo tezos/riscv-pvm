@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: MIT
 
-mod buddy;
+pub(crate) mod buddy;
 mod config;
+pub(crate) mod listener;
 mod protection;
-mod state;
+pub(crate) mod state;
 
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
+use listener::MemoryGovernanceListener;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
@@ -247,7 +249,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         M: ManagerClone;
 
     /// Zero-out all memory.
-    fn reset(&mut self)
+    fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
         M: ManagerWrite;
 
@@ -257,6 +259,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         address: Address,
         length: NonZeroUsize,
         perms: Permissions,
+        listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerWrite;
@@ -287,6 +290,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         length: NonZeroUsize,
         perms: Permissions,
         allow_replace: bool,
+        listener: impl MemoryGovernanceListener,
     ) -> Result<Address, MemoryGovernanceError>
     where
         M: ManagerReadWrite;
@@ -296,12 +300,13 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         &mut self,
         address: Address,
         length: NonZeroUsize,
+        listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite,
     {
         self.deallocate_pages(address, length)?;
-        self.protect_pages(address, length, Permissions::NONE)
+        self.protect_pages(address, length, Permissions::NONE, listener)
     }
 }
 

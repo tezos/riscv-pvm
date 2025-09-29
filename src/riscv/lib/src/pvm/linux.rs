@@ -273,25 +273,29 @@ where
             .max()
             .unwrap_or(0);
 
+        let (main_memory, mut listener) = self.machine_state.memory_with_listener();
+
         let program_length = program_end.saturating_sub(program_start) as usize;
         if let Some(program_length) = NonZeroUsize::new(program_length) {
             // Allow the program to be written to main memory
-            self.machine_state.core.main_memory.protect_pages(
+            main_memory.protect_pages(
                 program_start,
                 program_length,
                 Permissions::WRITE,
+                &mut listener,
             )?;
 
             // Write program to main memory
             for (&addr, data) in program.segments.iter() {
-                self.machine_state.core.main_memory.write_all(addr, data)?;
+                main_memory.write_all(addr, data)?;
             }
 
             // Remove access to the program that has just been placed into memory
-            self.machine_state.core.main_memory.protect_pages(
+            main_memory.protect_pages(
                 program_start,
                 program_length,
                 Permissions::NONE,
+                &mut listener,
             )?;
         };
 
@@ -302,10 +306,11 @@ where
                     continue;
                 };
 
-                self.machine_state.core.main_memory.protect_pages(
+                main_memory.protect_pages(
                     mem_perms.start_address,
                     length,
                     mem_perms.permissions,
+                    &mut listener,
                 )?;
             }
         }
@@ -352,18 +357,22 @@ where
         // At this point we know that `stack_top` >= `stack_bottom`
         let stack_space = (stack_top - stack_bottom) as usize;
         if let Some(stack_space) = NonZeroUsize::new(stack_space) {
-            self.machine_state.core.main_memory.protect_pages(
+            let (main_memory, mut listener) = self.machine_state.memory_with_listener();
+
+            main_memory.protect_pages(
                 stack_guard.to_machine_address(),
                 // TODO: RV-561: use u64 everywhere in the PVM
                 PAGE_SIZE.try_into().expect("`PAGE_SIZE` fits into usize"),
                 Permissions::NONE,
+                &mut listener,
             )?;
 
             // Make sure the stack region is readable and writable
-            self.machine_state.core.main_memory.protect_pages(
+            main_memory.protect_pages(
                 stack_bottom.to_machine_address(),
                 stack_space,
                 Permissions::READ_WRITE,
+                listener,
             )?;
         }
 
@@ -783,9 +792,9 @@ impl<M: ManagerBase> SupervisorState<M> {
             RT_SIGPROCMASK => dispatch4!(rt_sigprocmask, &mut machine.core),
             RT_SIGRETURN => dispatch0!(rt_sigreturn, &mut machine.core),
             BRK => dispatch0!(brk),
-            MMAP => dispatch6!(mmap, &mut machine.core),
-            MPROTECT => dispatch3!(mprotect, &mut machine.core),
-            MUNMAP => dispatch2!(munmap, &mut machine.core),
+            MMAP => dispatch6!(mmap, machine),
+            MPROTECT => dispatch3!(mprotect, machine),
+            MUNMAP => dispatch2!(munmap, machine),
             MADVISE => dispatch0!(madvise),
             GETRANDOM => dispatch2!(getrandom, &mut machine.core),
             CLOCK_GETTIME => dispatch2!(clock_gettime, &mut machine.core),
@@ -1174,11 +1183,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         for fd in [0i32, 1, 2] {
             let mut supervisor_state = SupervisorState::<F>::new();
@@ -1244,11 +1249,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         let mut supervisor_state = SupervisorState::<F>::new();
 
@@ -1374,11 +1375,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         let mut supervisor_state = SupervisorState::<F>::new();
 
@@ -1519,11 +1516,7 @@ mod tests {
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         // Mask pointer (must be non-zero)
         let mask_address = VirtAddr::new(0x100);
@@ -1830,11 +1823,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         let mut supervisor_state = SupervisorState::new();
 
@@ -1900,11 +1889,7 @@ mod tests {
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
-        machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        machine_state.set_all_readable_writeable();
 
         let mut supervisor_state = SupervisorState::new();
 
@@ -1987,14 +1972,14 @@ mod tests {
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail
-        machine_state
-            .core
-            .main_memory
+        let (main_memory, listener) = machine_state.memory_with_listener();
+        main_memory
             .allocate_and_protect_pages(
                 Some(0),
                 MemLayout::TOTAL_BYTES,
                 Permissions::READ_WRITE,
                 true,
+                listener,
             )
             .unwrap();
 
@@ -2021,7 +2006,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 addr.into(),
                 length,
                 perms,
@@ -2049,7 +2034,7 @@ mod tests {
 
             // Call the function under test
             let result = supervisor_state.handle_mmap(
-                &mut machine_state.core,
+                &mut machine_state,
                 VirtAddr::new(addr),
                 length,
                 perms,

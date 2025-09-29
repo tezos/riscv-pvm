@@ -56,6 +56,7 @@ mod tests {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
@@ -100,7 +101,7 @@ mod tests {
             succ in prop::array::uniform4(any::<bool>())
         )| {
             let mut state = state_cell.borrow_mut();
-            state.reset();
+            state.reset(NoopMemoryGovernanceListener);
 
             let pred = FenceSet { i: pred[0], o: pred[1], r: pred[2], w: pred[3] };
             let succ = FenceSet { i: succ[0], o: succ[1], r: succ[2], w: succ[3] };
