@@ -11,13 +11,12 @@ use std::io::Write;
 use std::ops::Bound;
 use std::path::PathBuf;
 
-use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
-use octez_riscv::machine_state::block_cache::block::Block;
-use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
-use octez_riscv::machine_state::block_cache::block::Jitted;
 use octez_riscv::machine_state::block_cache::block::OutlineCompiler;
 use octez_riscv::machine_state::memory::M64M;
+use octez_riscv::machine_state::page_cache::CodePageEntry;
+use octez_riscv::machine_state::page_cache::Interpreted;
+use octez_riscv::machine_state::page_cache::Jitted;
 use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::Stepper;
@@ -83,8 +82,8 @@ fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
     );
 }
 
-fn test_regression_for_block<B: Block<M64M, Owned>>(
-    block_builder: B::BlockBuilder,
+fn test_regression_for_block<CPE: CodePageEntry<M64M, Owned>>(
+    compiler: CPE::Compiler,
     inputs: &TestConfig,
     capture_volatile_properties: bool,
 ) {
@@ -109,14 +108,14 @@ fn test_regression_for_block<B: Block<M64M, Owned>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<_, M64M, DefaultCacheConfig, Owned, B>::new(
+        let mut stepper = PvmStepper::<_, M64M, Owned, CPE>::new(
             &program,
             inbox,
             hooks,
             ROLLUP_ADDRESS,
             ORIGINATION_LEVEL,
             Some(PathBuf::from("../../../assets/preimages").into_boxed_path()),
-            block_builder,
+            compiler,
         )
         .unwrap();
 

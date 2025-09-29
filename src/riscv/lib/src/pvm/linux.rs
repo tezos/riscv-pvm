@@ -29,13 +29,12 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
 use crate::machine_state::ProgramCounterUpdate;
-use crate::machine_state::block_cache::BlockCacheConfig;
-use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
+use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
@@ -173,9 +172,7 @@ enum AuxVectorKey {
     ProgramHeadersPtr = 3,
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
-    MachineState<MC, BCC, B, M>
-{
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> MachineState<MC, CPE, M> {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
     where
@@ -250,11 +247,10 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, M>, M: ManagerBase>
     }
 }
 
-impl<MC, BCC, B, M> Pvm<MC, BCC, B, M>
+impl<MC, CPE, M> Pvm<MC, CPE, M>
 where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig,
-    B: Block<MC, M>,
+    CPE: CodePageEntry<MC, M>,
     M: ManagerBase,
 {
     /// Load the program into memory and set the PC to its entrypoint.
@@ -547,16 +543,15 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 
     /// Handle a Linux system call.
-    pub fn handle_system_call<MC, BCC, B>(
+    pub fn handle_system_call<MC, CPE>(
         &mut self,
-        machine: &mut MachineState<MC, BCC, B, M>,
+        machine: &mut MachineState<MC, CPE, M>,
         hooks: impl PvmHooks,
         on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<()>,
     ) -> ControlFlow<()>
     where
         MC: MemoryConfig,
-        BCC: BlockCacheConfig,
-        B: Block<MC, M>,
+        CPE: CodePageEntry<MC, M>,
         M: ManagerReadWrite,
     {
         let pc = machine.core.hart.pc.read();
@@ -1112,10 +1107,9 @@ mod tests {
     use super::parameters::Visibility;
     use super::*;
     use crate::backend_test;
-    use crate::machine_state::block_cache::TestCacheConfig;
-    use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::registers::sp;
     use crate::parser::instruction::InstrWidth;
     use crate::pvm::hooks::StdoutDebugHooks;
@@ -1144,9 +1138,7 @@ mod tests {
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get();
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::<F>::new();
 
         machine_state
@@ -1177,9 +1169,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1243,9 +1233,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1369,9 +1357,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1477,9 +1463,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // System call number
@@ -1510,9 +1494,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1591,9 +1573,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1643,9 +1623,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1713,9 +1691,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1765,9 +1741,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1817,9 +1791,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1883,9 +1855,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1966,9 +1936,7 @@ mod tests {
         type MemLayout = M4K;
 
         let mut machine_state =
-            MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
-                InterpretedBlockBuilder,
-            );
+            MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new(InterpretedBlockBuilder);
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail

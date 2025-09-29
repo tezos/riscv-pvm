@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -8,7 +8,6 @@
 use std::fs;
 
 use const_format::concatcp;
-use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::pvm::hooks::NoHooks;
@@ -63,9 +62,9 @@ pub const ETHERLINK: TestConfig = TestConfig {
 };
 
 /// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
-pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>(
+pub fn make_stepper_factory<MC: MemoryConfig>(
     inputs: &TestConfig,
-) -> impl Fn() -> PvmStepper<NoHooks, MC, BCC> {
+) -> impl Fn() -> PvmStepper<NoHooks, MC> {
     let program = fs::read(inputs.kernel_path).expect("Kernel path should be valid");
 
     let mut inbox = InboxBuilder::new();
@@ -77,18 +76,10 @@ pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>(
     let address = [0; 20];
 
     move || {
-        let block_builder = InterpretedBlockBuilder;
+        let compiler = InterpretedBlockBuilder;
 
-        PvmStepper::<NoHooks, MC, BCC>::new(
-            &program,
-            inbox.clone(),
-            NoHooks,
-            address,
-            1,
-            None,
-            block_builder,
-        )
-        .expect("PvmStepper initialisation arguments should be valid")
+        PvmStepper::<NoHooks, MC>::new(&program, inbox.clone(), NoHooks, address, 1, None, compiler)
+            .expect("PvmStepper initialisation arguments should be valid")
     }
 }
 

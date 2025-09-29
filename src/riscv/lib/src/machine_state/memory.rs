@@ -14,6 +14,8 @@ use std::num::NonZeroUsize;
 use listener::MemoryGovernanceListener;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
+use super::page_cache::PageCache;
+use super::page_cache::code_page_entry::CodePageEntry;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
@@ -311,7 +313,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 }
 
 /// Memory configuration
-pub trait MemoryConfig: Send + 'static {
+pub trait MemoryConfig: Send + Sized + 'static {
     /// Number of bytes in the memory
     const TOTAL_BYTES: NonZeroUsize;
 
@@ -320,6 +322,9 @@ pub trait MemoryConfig: Send + 'static {
 
     /// Memory instance
     type State<M: ManagerBase>: Memory<M>;
+
+    /// Page Cache instance
+    type PageCache<CPE: CodePageEntry<Self, M>, M: ManagerBase>: PageCache<CPE, Self, M>;
 
     /// Bind the allocated regions to produce a memory instance.
     fn bind<M: ManagerBase>(space: AllocatedOf<Self::Layout, M>) -> Self::State<M>;

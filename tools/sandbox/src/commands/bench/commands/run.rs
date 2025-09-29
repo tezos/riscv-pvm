@@ -30,7 +30,7 @@ use crate::commands::bench::data::InstrType;
 use crate::commands::bench::data::SimpleBenchData;
 use crate::commands::bench::save_to_file;
 use crate::commands::bench::show_results;
-use crate::commands::run::BlockImpl;
+use crate::commands::run::CodePageEntryImpl;
 use crate::commands::run::make_pvm_stepper;
 use crate::format_status;
 
@@ -141,7 +141,7 @@ fn bench_simple<S: Stepper>(interpreter: &mut S, opts: &BenchRunOptions) -> Benc
 fn bench_iteration(path: &Path, opts: &BenchRunOptions) -> Result<BenchData, Box<dyn Error>> {
     let program = std::fs::read(path)?;
 
-    let mut stepper = make_pvm_stepper::<M1G, BlockImpl<M1G>>(
+    let mut stepper = make_pvm_stepper::<M1G, CodePageEntryImpl<M1G>>(
         program.as_slice(),
         &opts.common,
         Default::default(),
