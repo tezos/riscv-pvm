@@ -37,17 +37,6 @@ pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     dispatch: DispatchTarget<Self, D, MC>,
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
-    /// Get the number of times this block has been called.
-    ///
-    /// For the case of Inline JIT, this is exactly equal to the number of times the JIT-compiled
-    /// function has been called (provided that compilation was successful).
-    #[cfg(test)]
-    pub(crate) fn called_count(&self) -> usize {
-        self.dispatch.called_times()
-    }
-}
-
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted<D, MC> {
     /// The default initial dispatcher for inline jit.
     ///

@@ -11,9 +11,8 @@ use thiserror::Error;
 
 use super::Pvm;
 use super::PvmLayout;
-use crate::machine_state::block_cache::TestCacheConfig;
-use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
+use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
@@ -41,9 +40,9 @@ pub enum PvmError {
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
-pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig, TestCacheConfig>;
+pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig>;
 
-type NodePvmState<M> = Pvm<NodePvmMemConfig, TestCacheConfig, Interpreted<NodePvmMemConfig, M>, M>;
+type NodePvmState<M> = Pvm<NodePvmMemConfig, Interpreted<NodePvmMemConfig, M>, M>;
 
 #[perfect_derive(Clone)]
 #[derive(derive_more::Debug)]

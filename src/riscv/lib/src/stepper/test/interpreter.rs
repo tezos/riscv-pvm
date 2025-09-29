@@ -10,11 +10,11 @@ use std::ops::Bound;
 use goldenfile::Mint;
 use paste::paste;
 
-use crate::machine_state::block_cache::block::Block;
-use crate::machine_state::block_cache::block::Interpreted;
-use crate::machine_state::block_cache::block::Jitted;
 use crate::machine_state::block_cache::block::dispatch::InlineCompiler;
 use crate::machine_state::memory::M1M;
+use crate::machine_state::page_cache::CodePageEntry;
+use crate::machine_state::page_cache::Interpreted;
+use crate::machine_state::page_cache::Jitted;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::ManagerRead;
@@ -44,11 +44,11 @@ where
     };
 }
 
-fn run_test_with_check<B: Block<M1M, Owned>>(
+fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
     path: &str,
     check_xregs: &[(XRegister, u64)],
-    block_builder: B::BlockBuilder,
-) -> B::BlockBuilder {
+    compiler: CPE::Compiler,
+) -> CPE::Compiler {
     // Create a Mint instance: when it goes out of scope (at the end of interpret_test_with_check),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
@@ -56,8 +56,8 @@ fn run_test_with_check<B: Block<M1M, Owned>>(
 
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
-    let mut interpreter: TestStepper<M1M, _, B> =
-        TestStepper::new(&contents, block_builder).expect("Boot failed");
+    let mut interpreter: TestStepper<M1M, CPE> =
+        TestStepper::new(&contents, compiler).expect("Boot failed");
 
     let res = interpreter.step_max(Bound::Included(MAX_STEPS));
     // Record the result to compare to the expected result
@@ -84,19 +84,19 @@ fn run_test_with_check<B: Block<M1M, Owned>>(
 }
 
 fn interpret_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
-    let block_builder = Default::default();
-    run_test_with_check::<Interpreted<M1M, Owned>>(path, check_xregs, block_builder);
+    let compiler = Default::default();
+    run_test_with_check::<Interpreted<M1M, Owned>>(path, check_xregs, compiler);
 }
 
 /// For the JIT, we run it twice - the first run to build up the blocks, and the
 /// second to run with these blocks already compiled (so that we actually use them).
 fn inline_jit_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
-    type BlockImpl = Jitted<InlineCompiler<M1M>, M1M>;
+    type EntrypointImpl = Jitted<InlineCompiler<M1M>, M1M>;
 
-    let block_builder = Default::default();
-    let block_builder = run_test_with_check::<BlockImpl>(path, check_xregs, block_builder);
+    let compiler = Default::default();
+    let compiler = run_test_with_check::<EntrypointImpl>(path, check_xregs, compiler);
 
-    run_test_with_check::<BlockImpl>(path, check_xregs, block_builder);
+    run_test_with_check::<EntrypointImpl>(path, check_xregs, compiler);
 }
 
 macro_rules! test_case {

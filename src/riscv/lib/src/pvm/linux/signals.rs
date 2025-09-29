@@ -21,8 +21,6 @@ use zerocopy_derive::Immutable;
 use zerocopy_derive::IntoBytes;
 use zerocopy_derive::KnownLayout;
 
-use super::Block;
-use super::BlockCacheConfig;
 use super::MachineError;
 use super::PAGE_SIZE;
 use super::Permissions;
@@ -34,6 +32,7 @@ use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::registers::nz;
 use crate::machine_state::registers::sp;
 use crate::pvm::Pvm;
@@ -733,11 +732,10 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 }
 
-impl<MC, BCC, B, M> Pvm<MC, BCC, B, M>
+impl<MC, CPE, M> Pvm<MC, CPE, M>
 where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig,
-    B: Block<MC, M>,
+    CPE: CodePageEntry<MC, M>,
     M: ManagerBase,
 {
     /// Writes a small function to call the `rt_sigreturn` system call to a provided address, then
@@ -825,20 +823,19 @@ mod tests {
     use super::Signal;
     use crate::backend_test;
     use crate::exceptions::Exception;
-    use crate::machine_state::block_cache::TestCacheConfig;
-    use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
     use crate::pvm::linux::VirtAddr;
 
     backend_test!(test_step_into_handler, F, {
         type MC = M1M;
-        type B = Interpreted<MC, Owned>;
+        type Cpe = Interpreted<MC, Owned>;
 
-        let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
 
         pvm.machine_state.reset();
 
@@ -912,9 +909,9 @@ mod tests {
 
     backend_test!(test_jump_to_restorer, F, {
         type MC = M1M;
-        type B = Interpreted<MC, Owned>;
+        type Cpe = Interpreted<MC, Owned>;
 
-        let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
 
         pvm.machine_state.reset();
 

@@ -29,12 +29,11 @@ use super::parameters::NoFileDescriptor;
 use super::parameters::Visibility;
 use super::parameters::Zero;
 use crate::machine_state::MachineState;
-use crate::machine_state::block_cache::BlockCacheConfig;
-use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
+use crate::machine_state::page_cache::CodePageEntry;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
@@ -76,17 +75,16 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
     ///
     /// A length of 0 means no protections need to be changed.
-    pub(super) fn handle_mprotect<MC, BCC, B>(
+    pub(super) fn handle_mprotect<MC, CPE>(
         &mut self,
-        state: &mut MachineState<MC, BCC, B, M>,
+        state: &mut MachineState<MC, CPE, M>,
         addr: PageAligned<VirtAddr>,
         length: u64,
         perms: Permissions,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
-        BCC: BlockCacheConfig,
-        B: Block<MC, M>,
+        CPE: CodePageEntry<MC, M>,
         M: ManagerReadWrite,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
@@ -106,9 +104,9 @@ impl<M: ManagerBase> SupervisorState<M> {
         clippy::too_many_arguments,
         reason = "The system call dispatch mechanism needs these arguments to exist, they can't be on a nested structure"
     )]
-    pub(super) fn handle_mmap<MC, BCC, B>(
+    pub(super) fn handle_mmap<MC, CPE>(
         &mut self,
-        state: &mut MachineState<MC, BCC, B, M>,
+        state: &mut MachineState<MC, CPE, M>,
         addr: VirtAddr,
         length: NonZeroU64,
         perms: Permissions,
@@ -118,8 +116,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
-        BCC: BlockCacheConfig,
-        B: Block<MC, M>,
+        CPE: CodePageEntry<MC, M>,
         M: ManagerReadWrite,
     {
         // We don't allow shared mappings
@@ -165,9 +162,9 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `munmap` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mmap.2.html>
-    pub(super) fn handle_munmap<MC, BCC, B>(
+    pub(super) fn handle_munmap<MC, CPE>(
         &mut self,
-        state: &mut MachineState<MC, BCC, B, M>,
+        state: &mut MachineState<MC, CPE, M>,
         addr: u64,
         // while not explicitly required to be non-zero, this does partially match the
         // linux implementation which requires both page-aligned addresses and length > 0
@@ -177,8 +174,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
-        BCC: BlockCacheConfig,
-        B: Block<MC, M>,
+        CPE: CodePageEntry<MC, M>,
         M: ManagerReadWrite,
     {
         // TODO: RV-561: use u64 everywhere in the PVM

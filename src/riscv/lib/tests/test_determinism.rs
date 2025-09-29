@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
 use std::ops::Bound;
 
-use octez_riscv::machine_state::block_cache::BlockCacheConfig;
-use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
@@ -53,20 +51,19 @@ fn test_determinism(inputs: TestConfig) {
 
     // Create multiple series of bisections that we will evaluate.
     let ladder = dissect_steps(steps, 0);
-    run_steps_ladder::<M64M, TestCacheConfig, _>(&make_stepper, &ladder, &base_refs, base_hash);
+    run_steps_ladder::<M64M, _>(&make_stepper, &ladder, &base_refs, base_hash);
 }
 
-fn run_steps_ladder<MC, BCC, F>(
+fn run_steps_ladder<MC, F>(
     make_stepper: F,
     ladder: &[usize],
-    expected_refs: &RefOwnedAlloc<PvmLayout<MC, BCC>>,
+    expected_refs: &RefOwnedAlloc<PvmLayout<MC>>,
     expected_hash: hash::Hash,
 ) where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig,
-    PvmLayout<MC, BCC>: CloneLayout,
-    for<'a> RefOwnedAlloc<'a, PvmLayout<MC, BCC>>: PartialEq,
-    F: Fn() -> PvmStepper<NoHooks, MC, BCC>,
+    PvmLayout<MC>: CloneLayout,
+    for<'a> RefOwnedAlloc<'a, PvmLayout<MC>>: PartialEq,
+    F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper_lhs = make_stepper();
@@ -106,16 +103,16 @@ fn run_steps_ladder<MC, BCC, F>(
         stepper_lhs.rebind_via_clone(block_builder);
     }
 
-    assert_eq_struct_wrapper::<MC, BCC>(stepper_lhs.struct_ref(), expected_refs);
+    assert_eq_struct_wrapper::<MC>(stepper_lhs.struct_ref(), expected_refs);
     assert_eq!(stepper_lhs.hash(), expected_hash);
     assert_eq!(stepper_rhs.hash(), expected_hash);
 }
 
-fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig, BCC: BlockCacheConfig>(
-    refs: RefOwnedAlloc<'regions1, PvmLayout<MC, BCC>>,
-    expected: &'a RefOwnedAlloc<'regions2, PvmLayout<MC, BCC>>,
+fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig>(
+    refs: RefOwnedAlloc<'regions1, PvmLayout<MC>>,
+    expected: &'a RefOwnedAlloc<'regions2, PvmLayout<MC>>,
 ) where
-    RefOwnedAlloc<'regions2, PvmLayout<MC, BCC>>: PartialEq,
+    RefOwnedAlloc<'regions2, PvmLayout<MC>>: PartialEq,
 {
     // SAFETY: Rust does not allow us to compare two references with different lifetimes.
     // Theoretically this should be possible and safe thanks to `PartialEq`. However, Rust's
@@ -125,6 +122,6 @@ fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig, BCC: Blo
     // the `==` operator need to be identical in type. This also means lifetimes are forcibly
     // unified. We can work around this by transmuting the references to the same lifetime. This is
     // safe because lifetimes are not violated as dictated by the interface of this function.
-    let refs: RefOwnedAlloc<'regions2, PvmLayout<MC, BCC>> = unsafe { std::mem::transmute(refs) };
+    let refs: RefOwnedAlloc<'regions2, PvmLayout<MC>> = unsafe { std::mem::transmute(refs) };
     assert!(&refs == expected);
 }

@@ -21,14 +21,12 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::MachineState;
 use crate::machine_state::StepManyResult;
-use crate::machine_state::block_cache::BlockCacheConfig;
-use crate::machine_state::block_cache::TestCacheConfig;
-use crate::machine_state::block_cache::block::Block;
-use crate::machine_state::block_cache::block::Interpreted;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::Permissions;
+use crate::machine_state::page_cache::CodePageEntry;
+use crate::machine_state::page_cache::Interpreted;
 use crate::program::Program;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
@@ -84,18 +82,17 @@ pub enum TestStepperError {
 
 pub struct TestStepper<
     MC: MemoryConfig = M1G,
-    BCC: BlockCacheConfig = TestCacheConfig,
-    B: Block<MC, Owned> = Interpreted<MC, Owned>,
+    CPE: CodePageEntry<MC, Owned> = Interpreted<MC, Owned>,
 > {
-    machine_state: MachineState<MC, BCC, B, Owned>,
+    machine_state: MachineState<MC, CPE, Owned>,
     posix_state: PosixState<Owned>,
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
     /// Initialise an interpreter with a given `program`.
     #[inline]
-    pub fn new(program: &[u8], block_builder: B::BlockBuilder) -> Result<Self, TestStepperError> {
-        Ok(Self::new_with_parsed_program(program, block_builder)?.0)
+    pub fn new(program: &[u8], compiler: CPE::Compiler) -> Result<Self, TestStepperError> {
+        Ok(Self::new_with_parsed_program(program, compiler)?.0)
     }
 
     /// Consumes the stepper, returning the [`BlockBuilder`] used internally.
@@ -103,8 +100,8 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
     /// This allows the block builder to be re-used with a second stepper.
     ///
     /// [`BlockBuilder`]: Block::BlockBuilder
-    pub fn recover_builder(self) -> B::BlockBuilder {
-        self.machine_state.block_builder
+    pub fn recover_builder(self) -> CPE::Compiler {
+        self.machine_state.compiler
     }
 
     /// Initialise an interpreter with a given `program`. Returns both the interpreter and the fully
@@ -112,11 +109,11 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
     #[inline]
     pub fn new_with_parsed_program(
         program: &[u8],
-        block_builder: B::BlockBuilder,
+        compiler: CPE::Compiler,
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
             posix_state: PosixState::<Owned>::new(),
-            machine_state: MachineState::new(block_builder),
+            machine_state: MachineState::new(compiler),
         };
 
         // The interpreter needs a program to run.
@@ -158,10 +155,8 @@ impl<MC: MemoryConfig, B: Block<MC, Owned>> TestStepper<MC, TestCacheConfig, B> 
     }
 }
 
-impl<MC: MemoryConfig, B: Block<MC, Owned>> Stepper for TestStepper<MC, TestCacheConfig, B> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Stepper for TestStepper<MC, CPE> {
     type MemoryConfig = MC;
-
-    type BlockCacheConfig = TestCacheConfig;
 
     type Manager = Owned;
 
