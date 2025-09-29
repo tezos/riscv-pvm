@@ -90,6 +90,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
+#[derive(Debug)]
 pub struct CodePage<'a, CPE> {
     page: &'a mut [CPE; INSTRUCTION_ENTRIES],
 }
@@ -180,41 +181,6 @@ where
     }
 
     result
-}
-
-/// A page cache which is never populated.
-pub struct EmptyPageCache;
-
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE, MC, M>
-    for EmptyPageCache
-{
-    fn new() -> Self {
-        Self {}
-    }
-
-    fn get_code_page(&mut self, _addr: Address) -> Option<CodePage<'_, CPE>>
-    where
-        M: ManagerRead,
-    {
-        None
-    }
-
-    fn populate_page(&mut self, _address: Address, _core: &MachineCoreState<MC, M>)
-    where
-        M: ManagerReadWrite,
-    {
-    }
-
-    fn invalidate_pages(&mut self, _addresses: std::ops::RangeInclusive<u64>) {}
-}
-
-impl MemoryGovernanceListener for EmptyPageCache {
-    fn handle_permissions_update(
-        &mut self,
-        _pages: std::ops::RangeInclusive<u64>,
-        _permissions: memory::Permissions,
-    ) {
-    }
 }
 
 #[cfg(test)]

@@ -305,6 +305,7 @@ mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::Jitted;
@@ -317,6 +318,7 @@ mod tests {
     use crate::parser::instruction::InstrWidth;
     use crate::parser::instruction::InstrWidth::*;
     use crate::state::NewState;
+    use crate::state_backend::FnManagerIdent;
 
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Owned>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Owned>);
@@ -324,7 +326,6 @@ mod tests {
     /// Machine state for test scenarios with a configurable [`Block`] type.
     type TestMachineState<CPE> = MachineState<M4K, CPE, Owned>;
 
-    #[expect(unused, reason = "will be used once tests are restored")]
     struct Scenario {
         initial_pc: Option<u64>,
         expected_steps: Option<usize>,
@@ -342,7 +343,13 @@ mod tests {
                 instructions: instructions.to_vec(),
                 setup_hook: None,
                 assert_hook: None,
-                expected_exception: None,
+                // TODO: RV-803:
+                //     due to the overestimate we are forced to make in terms of budget checks,
+                //     we expect most scenarios to move past the end of the instructions and encounter
+                //     this exception when running `Unknown`.
+                //
+                //     We should revert to `None` once this is tackled
+                expected_exception: Some(Exception::IllegalInstruction),
             }
         }
 
@@ -377,11 +384,20 @@ mod tests {
 
             let initial_pc = self.initial_pc.unwrap_or_default();
 
+            // Push the given instructions to the correct page
             let mut interpreted_page = PageEntry::<Interpreted<M4K, Owned>>::zeroed();
             interpreted_page.push_instructions(initial_pc, self.instructions.iter().cloned());
 
+            interpreted_state
+                .page_cache
+                .overwrite_page(initial_pc, interpreted_page);
+
             let mut jitted_page = PageEntry::<Jitted<InlineCompiler<_>, M4K>>::zeroed();
             jitted_page.push_instructions(initial_pc, self.instructions.iter().cloned());
+
+            jitted_state
+                .page_cache
+                .overwrite_page(initial_pc, jitted_page);
 
             // Run the setup hooks.
             if let Some(hook) = &self.setup_hook {
@@ -390,74 +406,76 @@ mod tests {
             }
 
             // initialise starting parameters: pc and expected_steps
-            let max_steps = self.instructions.len();
-            let _expected_steps = self.expected_steps.unwrap_or(max_steps);
+
+            // TODO: RV-803:
+            //     we are forced to run for `MAX_INSTR_COMPILED` steps as the jitted code page
+            //     entry is extremely coarse in terms of the upper bound for size of entrypoints
+            //
+            //     Once we move the initial budget check into the JIT-compiled functions directly,
+            //     we can remove this coarse bound
+            //
+            //     As a result, by default we expect most scenarios to end with an
+            //     `Exception::IllegalInstruction` error as they move past the compiled entrypoint
+            let max_steps = self.instructions.len().max(40);
+            let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
 
             interpreted_state.core.hart.pc.write(initial_pc);
             jitted_state.core.hart.pc.write(initial_pc);
 
-            todo!("we need to be using the 'actual' page cache here to run these test");
             // Run the sequence in interpreted mode and Jitted mode.
-            //interpreted_state
-            //    .page_cache
-            //    .overwrite_page(initial_pc, interpreted_page);
-            //let interpreted_res = interpreted_state.step_max_inner(max_steps);
+            let interpreted_res = interpreted_state.step_max_inner(max_steps);
 
-            //jitted_state
-            //    .page_cache
-            //    .overwrite_page(initial_pc, jitted_page);
-            //let jitted_res = jitted_state.step_max_inner(max_steps);
+            let jitted_res = jitted_state.step_max_inner(max_steps);
 
             // Assert the JIT-compiled block was called once.
-            //let jit_called_counter = jitted_state
-            //    .block_cache
-            //    .get_block_called_times(initial_pc)
-            //    .expect("Block at initial_pc should be valid");
-            //assert_eq!(
-            //    jit_called_counter, 1,
-            //    "Expected JIT-compiled block to be called exactly once"
-            //);
+            let jit_called_counter = jitted_state
+                .page_cache
+                .get_entrypoint_called_times(initial_pc)
+                .expect("Block at initial_pc should be valid");
+            assert_eq!(
+                jit_called_counter, 1,
+                "Expected JIT-compiled block to be called exactly once"
+            );
 
-            //// Assert state equality.
-            //assert_eq!(
-            //    jitted_res, interpreted_res,
-            //    "JittedRes {jitted_res:?} should equal InterpretedRes {interpreted_res:?}"
-            //);
-            //assert_eq!(
-            //    jitted_res.steps, expected_steps,
-            //    "Expected {expected_steps} steps; scenarios ran for {}",
-            //    jitted_res.steps
-            //);
-            //assert_eq!(
-            //    jitted_res.error, self.expected_exception,
-            //    "Expected exception: {:?}, got {:?}",
-            //    self.expected_exception, jitted_res.error
-            //);
+            // Assert state equality.
+            assert_eq!(
+                jitted_res, interpreted_res,
+                "JittedRes {jitted_res:?} should equal InterpretedRes {interpreted_res:?}"
+            );
+            assert_eq!(
+                jitted_res.steps, expected_steps,
+                "Expected {expected_steps} steps; scenarios ran for {}",
+                jitted_res.steps
+            );
+            assert_eq!(
+                jitted_res.error, self.expected_exception,
+                "Expected exception: {:?}, got {:?}",
+                self.expected_exception, jitted_res.error
+            );
 
-            //assert!(
-            //    interpreted_state.struct_ref::<FnManagerIdent>()
-            //        == jitted_state.struct_ref::<FnManagerIdent>(),
-            //    "Interpreted and Jitted states should be equal."
-            //);
+            assert!(
+                interpreted_state.struct_ref::<FnManagerIdent>()
+                    == jitted_state.struct_ref::<FnManagerIdent>(),
+                "Interpreted and Jitted states should be equal."
+            );
 
-            //// Only check steps against one state, as we know both interpreted/jit steps are equal.
-            //let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
-            //assert_eq!(
-            //    interpreted_res.steps, expected_steps,
-            //    "Scenario ran for {} steps, but expected {expected_steps}",
-            //    interpreted_res.steps
-            //);
+            // Only check steps against one state, as we know both interpreted/jit steps are equal.
+            let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
+            assert_eq!(
+                interpreted_res.steps, expected_steps,
+                "Scenario ran for {} steps, but expected {expected_steps}",
+                interpreted_res.steps
+            );
 
-            //// Run the assert hooks. Since we have already verified that the states are equal,
-            //// we can run the assert hooks on just the interpreted state.
-            //if let Some(hook) = &self.assert_hook {
-            //    (hook)(&mut interpreted_state.core);
-            //}
+            // Run the assert hooks. Since we have already verified that the states are equal,
+            // we can run the assert hooks on just the interpreted state.
+            if let Some(hook) = &self.assert_hook {
+                (hook)(&mut interpreted_state.core);
+            }
         }
     }
 
     /// A builder for creating scenarios.
-    #[derive(Default)]
     struct ScenarioBuilder {
         initial_pc: Option<u64>,
         expected_steps: Option<usize>,
@@ -498,6 +516,13 @@ mod tests {
             self
         }
 
+        // TODO: RV-803: remove workaround for assuming exception by default once
+        //     JIT has better budget checks
+        fn unset_expected_exception(mut self) -> Self {
+            self.expected_exception = None;
+            self
+        }
+
         fn build(self) -> Scenario {
             Scenario {
                 initial_pc: self.initial_pc,
@@ -506,6 +531,25 @@ mod tests {
                 setup_hook: self.setup_hook,
                 assert_hook: self.assert_hook,
                 expected_exception: self.expected_exception,
+            }
+        }
+    }
+
+    impl Default for ScenarioBuilder {
+        fn default() -> Self {
+            Self {
+                initial_pc: None,
+                expected_steps: None,
+                instructions: vec![],
+                setup_hook: None,
+                assert_hook: None,
+                // TODO: RV-803:
+                //     due to the overestimate we are forced to make in terms of budget checks,
+                //     we expect most scenarios to move past the end of the instructions and encounter
+                //     this exception when running `Unknown`.
+                //
+                //     We should revert to `None` once this is tackled
+                expected_exception: Some(Exception::IllegalInstruction),
             }
         }
     }
@@ -523,7 +567,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_cnop() {
         let scenarios: &[Scenario] = &[
             Scenario::simple(&[I::new_nop(Compressed)]),
@@ -541,7 +584,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_cmv() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -578,7 +620,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_negate() {
         use Instruction as I;
 
@@ -625,7 +666,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jit_x64_add() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -648,7 +688,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_add_word() {
         use Instruction as I;
 
@@ -692,7 +731,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_add_word_i() {
         use Instruction as I;
 
@@ -733,7 +771,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jit_x64_sub() {
         use Instruction as I;
 
@@ -777,7 +814,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_sub_word() {
         use Instruction as I;
 
@@ -818,7 +854,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x64_and() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -864,7 +899,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x64_or() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -928,7 +962,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x64_mul() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -973,7 +1006,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x32_mul() {
         use crate::machine_state::registers::a0;
         use crate::machine_state::registers::a1;
@@ -1019,7 +1051,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_div_jit() {
         use crate::machine_state::registers::nz;
         use crate::machine_state::registers::*;
@@ -1062,7 +1093,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jump_pc() {
         let scenarios: &[Scenario] = &[
             ScenarioBuilder::default()
@@ -1082,6 +1112,8 @@ mod tests {
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), u64::MAX - 3);
                 }))
+                // we jump to outside of main memory
+                .set_expected_exception(Exception::InstructionAccessFault)
                 .build(),
             ScenarioBuilder::default()
                 // Jump past u64::MAX - in both worlds we should wrap around but not
@@ -1089,18 +1121,20 @@ mod tests {
                 .set_instructions(&[
                     I::new_nop(Uncompressed),
                     I::new_nop(Uncompressed),
-                    I::new_jump_pc(i64::MAX, Uncompressed),
+                    I::new_jump_pc((u64::MAX - 1) as i64, Uncompressed),
                     I::new_nop(Compressed),
                     I::new_nop(Uncompressed),
                 ])
-                .set_initial_pc((i64::MAX - 5) as u64)
+                .set_initial_pc(PAGE_SIZE.get() - 18)
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), 1);
+                    let expected =
+                        (PAGE_SIZE.get() - 18 - 1 + 2 * Uncompressed as u64).wrapping_add(u64::MAX);
+                    assert_eq!(core.hart.pc.read(), expected);
                 }))
                 .set_expected_steps(3)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
-                .set_expected_exception(Exception::InstructionAccessFault)
+                // we jump, back to the page but outside of instructions we pushed.
+                // we therefore encounter an illegal instruction
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             ScenarioBuilder::default()
                 // jump by nothing
@@ -1110,19 +1144,20 @@ mod tests {
                     I::new_nop(Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
+                    // we jump, but repeatedly to the current jump instruction
+                    // this will run until the end of the scenario
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
-                .set_expected_steps(2)
-                // we jump, and all memory is set as non-executable.
-                // since we exit the block, we fall back to fetch/run - which will fail
-                .set_expected_exception(Exception::InstructionAccessFault)
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
             ScenarioBuilder::default()
                 // jumping to start of the block should exit the block in both interpreted and jitted world
                 //
                 // since we jump to the start of the block, however, we will fallback to partial
                 // block evaluation on the 4th step. Therefore, we do not expect an
-                // InstructionAccessFault
+                // IllegalInstruction for executing an `Unknown` instruction.
                 .set_instructions(&[
                     I::new_nop(Compressed),
                     I::new_nop(Compressed),
@@ -1130,9 +1165,12 @@ mod tests {
                     I::new_nop(Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
+                    // after 40 steps we will be executing the second no-op
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
-                .set_expected_steps(4)
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1142,7 +1180,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jr() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1156,7 +1193,7 @@ mod tests {
                 ])
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 10) }))
                 .set_expected_steps(2)
-                .set_expected_exception(Exception::InstructionAccessFault)
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JR to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
@@ -1165,8 +1202,11 @@ mod tests {
                     I::new_jr(x6, Compressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
-                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 4) }))
+                // after 40 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1176,7 +1216,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jr_imm() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1190,7 +1229,7 @@ mod tests {
                 ])
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 20) }))
                 .set_expected_steps(2)
-                .set_expected_exception(Exception::InstructionAccessFault)
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JR_IMM to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
@@ -1199,8 +1238,11 @@ mod tests {
                     I::new_jr_imm(x6, -10, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
-                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 4) }))
+                // after 40 steps we will be evaluating the jump for the second time
+                .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1210,7 +1252,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jalr() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1236,11 +1277,14 @@ mod tests {
                     I::new_jalr(x3, x6, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
+                // after 40 steps we will be evaluating the first instruction
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), 4);
+                    assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x3), 8);
                 }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1250,7 +1294,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jalr_imm() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1267,7 +1310,7 @@ mod tests {
                     assert_eq!(core.hart.xregisters.read_nz(x1), 4);
                 }))
                 .set_expected_steps(2)
-                .set_expected_exception(Exception::InstructionAccessFault)
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JALR_IMM to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
@@ -1276,11 +1319,14 @@ mod tests {
                     I::new_jalr_imm(x6, x1, -1000, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
+                // after 40 steps we will be evaluating the jump for the second time
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), 4);
+                    assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x6), 8);
                 }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1290,7 +1336,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jalr_absolute() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1307,7 +1352,7 @@ mod tests {
                     assert_eq!(core.hart.xregisters.read_nz(x1), 6);
                 }))
                 .set_expected_steps(2)
-                .set_expected_exception(Exception::InstructionAccessFault)
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JALR_ABSOLUTE to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
@@ -1316,11 +1361,14 @@ mod tests {
                     I::new_jalr_absolute(x3, 0, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
+                // after 40 steps we will be evaluating the jump for the second time
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), 2);
+                    assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x3), 6);
                 }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1330,7 +1378,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_j_absolute() {
         let scenarios: &[Scenario] = &[
             // J_ABSOLUTE not to start of block should exit
@@ -1344,7 +1391,7 @@ mod tests {
                     assert_eq!(core.hart.pc.read(), 10);
                 }))
                 .set_expected_steps(2)
-                .set_expected_exception(Exception::InstructionAccessFault)
+                .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // J_ABSOLUTE to start of block should continue with evaluating the same block
             ScenarioBuilder::default()
@@ -1353,10 +1400,13 @@ mod tests {
                     I::new_j_absolute(0, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 3 steps we will be evaluating the jump for the second time
+                // after 40 steps we will be evaluating first instruction
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.pc.read(), 2);
+                    assert_eq!(core.hart.pc.read(), 0);
                 }))
+                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
+                .set_expected_steps(40)
+                .unset_expected_exception()
                 .build(),
         ];
 
@@ -1366,7 +1416,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jump_and_link_pc() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1390,8 +1439,14 @@ mod tests {
             test_jump_and_link_pc(10, 0, 10, 2, Compressed),
             test_jump_and_link_pc(-10, 10, 0, 12, Compressed),
             test_jump_and_link_pc(1000, 1000, 2000, 1004, Uncompressed),
-            test_jump_and_link_pc(-1000, 500, -500_i64 as u64, 504, Uncompressed),
-            test_jump_and_link_pc(10, u64::MAX - 1, 8, 0, Compressed),
+            test_jump_and_link_pc(-((u64::MAX - 1) as i64), 500, 502, 504, Uncompressed),
+            test_jump_and_link_pc(
+                (u64::MAX - 1) as i64,
+                PAGE_SIZE.get() - 2,
+                4092,
+                4096,
+                Compressed,
+            ),
         ];
 
         for scenario in scenarios {
@@ -1400,7 +1455,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_addi() {
         use Instruction as I;
 
@@ -1441,7 +1495,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_andi() {
         use Instruction as I;
 
@@ -1487,7 +1540,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_set_less_than() {
         use crate::machine_state::registers::XRegister::*;
 
@@ -1601,7 +1653,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_branch() {
         let test_branch =
             |non_branch: fn(NonZeroXRegister, NonZeroXRegister, i64, InstrWidth) -> I,
@@ -1609,7 +1660,7 @@ mod tests {
              lhs: i64,
              rhs: i64|
              -> Scenario {
-                let initial_pc: u64 = 0x1000;
+                let initial_pc: u64 = 0x100;
                 let imm: i64 = -0x2000;
                 let expected_pc_branch = initial_pc.wrapping_add_signed(imm).wrapping_add(8);
 
@@ -1693,13 +1744,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_branch_compare_zero() {
         let test_branch_compare_zero = |non_branch: fn(NonZeroXRegister, i64, InstrWidth) -> I,
                                         branch: fn(NonZeroXRegister, i64, InstrWidth) -> I,
                                         val: i64|
          -> Scenario {
-            let initial_pc: u64 = 0x1000;
+            let initial_pc: u64 = 0x100;
             let imm: i64 = 0x2000;
             let expected_pc_branch = initial_pc + imm as u64 + 4;
 
@@ -1769,7 +1819,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_unknown() {
         let scenarios: &[Scenario] = &[ScenarioBuilder::default()
             .set_expected_steps(
@@ -1790,7 +1839,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_ecall() {
         let scenario: Scenario = ScenarioBuilder::default()
             .set_expected_steps(1)
@@ -1867,7 +1915,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_add_immediate_to_pc() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -1907,7 +1954,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_shift_reg() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -2088,7 +2134,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_shift_imm() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -2191,7 +2236,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_store() {
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::*;
@@ -2275,7 +2319,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_load() {
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::*;
@@ -2363,7 +2406,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_xor() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -2415,7 +2457,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x64_atomic() {
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::*;
@@ -2589,7 +2630,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_mul_high() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
@@ -2694,7 +2734,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jit_x32_atomic_loadstore() {
         use Instruction as I;
 
@@ -2845,7 +2884,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_jit_x64_atomic_loadstore() {
         use Instruction as I;
 
@@ -3017,7 +3055,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_rem() {
         use crate::machine_state::registers::NonZeroXRegister::x2;
         use crate::machine_state::registers::XRegister::x1;
@@ -3116,7 +3153,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_atomic_swap() {
         use crate::machine_state::instruction::Instruction as I;
         use crate::machine_state::registers::XRegister::x1;
@@ -3196,7 +3232,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_x32_atomic_arithmetic() {
         use Instruction as I;
 
@@ -3331,7 +3366,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_f64_from_x64_unsigned_jit() {
         use Instruction as I;
 

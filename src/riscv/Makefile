@@ -42,7 +42,7 @@ test: test-deps
 .PHONY: test-deps
 test-deps:
 	@make -C ../.. dummy/build
-	@make -C ../.. block-cache-tester/build
+	@make -C ../.. page-cache-tester/build
 
 .PHONY: codecov.json
 codecov.json: test-deps
