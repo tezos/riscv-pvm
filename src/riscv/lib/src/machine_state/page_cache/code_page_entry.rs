@@ -29,7 +29,7 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ///
     /// We require the compiler capable of doing so to be passed in when
     /// dispatching.
-    type Compiler;
+    type Compiler: Default;
 
     /// Run a code-page entrypoint against the [`MachineCoreState`].
     ///

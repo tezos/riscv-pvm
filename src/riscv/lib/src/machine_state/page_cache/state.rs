@@ -41,13 +41,71 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
     .checked_sub(std::mem::size_of::<u16>() as u64)
     .expect("page-size must contain at least one halfword");
 
-struct PageEntry<CPE> {
+/// A `PageEntry` is an entry in the [page cache].
+///
+/// It corresponds to a complete page of executable memory, represented as entrypoints at
+/// every halfword. These entrypoints are dispatchable: running them is the equivalent to
+/// performing a _fetch/run/parse_ cycle, starting at the equivalent address.
+///
+/// We only have entries for every _halfword_, as the instruction pc is always halfword
+/// aligned.
+///
+/// [page cache]: super::PageCache
+pub(crate) struct PageEntry<CPE> {
     // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
     // interpreted dispatch here.
     //
     // TODO: RV-790: consider raising this pointer (Box) out of `PageEntrye` to exploit the
     // `Option<Box<_>>` optimisation.
     entries: Box<[CPE; INSTRUCTION_ENTRIES]>,
+}
+
+#[cfg(test)]
+impl<CPE: From<Instruction>> PageEntry<CPE> {
+    /// TEST ONLY
+    ///
+    /// Construct a new page entry as if it were populated from a memory of entirely zeroes.
+    pub(crate) fn zeroed() -> Self {
+        use crate::machine_state::instruction::Instruction;
+        use crate::parser::parse_compressed_instruction;
+
+        const ZEROED_HALFWORD: u16 = 0;
+        assert!(is_compressed(ZEROED_HALFWORD));
+
+        let instruction = parse_compressed_instruction(ZEROED_HALFWORD);
+        let instruction = Instruction::from(&instruction);
+
+        Self {
+            entries: boxed_from_fn(|| CPE::from(instruction)),
+        }
+    }
+
+    /// TEST ONLY
+    ///
+    /// Push a sequence of instructions to a page entry, starting from the page offset given by the
+    /// address.
+    pub(crate) fn push_instructions(
+        &mut self,
+        address: Address,
+        instructions: impl Iterator<Item = Instruction>,
+    ) {
+        use crate::machine_state::memory::address_to_page_offset;
+
+        let mut offset = address_to_page_offset(address);
+
+        for instr in instructions {
+            if offset > INSTRUCTION_ENTRIES {
+                panic!(
+                    "Instructions cannot all fit within a single page, starting at the given address"
+                );
+            }
+
+            self.entries[offset] = CPE::from(instr);
+
+            // we update the offset by half the width, as the offset is halfword aligned
+            offset += (instr.width() as usize) >> 1;
+        }
+    }
 }
 
 /// Default implementor of [`PageCache`].
@@ -63,6 +121,22 @@ struct PageEntry<CPE> {
 pub struct PageCacheImpl<const PAGES: usize, CPE, MC, M> {
     pages: Box<[Option<PageEntry<CPE>>; PAGES]>,
     _pd: PhantomData<(MC, M)>,
+}
+
+#[cfg(test)]
+impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
+    PageCacheImpl<PAGES, CPE, MC, M>
+{
+    /// TEST ONLY
+    ///
+    /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
+    /// the given address.
+    #[expect(unused, reason = "will be used by next commit")]
+    pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: PageEntry<CPE>) {
+        let page_index = crate::machine_state::memory::address_to_page_index(address);
+
+        self.pages[page_index] = Some(page_entry);
+    }
 }
 
 impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>

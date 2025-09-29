@@ -13,10 +13,10 @@ use std::fs;
 use std::ops::Bound;
 use std::time::Duration;
 
-use octez_riscv::machine_state::block_cache::DefaultCacheConfig;
 use octez_riscv::machine_state::block_cache::block;
-use octez_riscv::machine_state::block_cache::block::Block;
 use octez_riscv::machine_state::memory;
+use octez_riscv::machine_state::page_cache;
+use octez_riscv::machine_state::page_cache::CodePageEntry;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
@@ -33,13 +33,13 @@ use crate::memory_config::MemoryConfigValue;
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Execution strategy for blocks.
-        pub type BlockImpl<MC> = block::Interpreted<MC, Owned>;
+        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::owned_backend::Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Execution strategy for blocks.
-        pub type BlockImpl<MC> = block::Jitted<block::InlineCompiler<MC>, MC>;
+        pub type CodePageEntryImpl<MC> = page_cache::Jitted<block::InlineCompiler<MC>, MC>;
     } else {
         /// Execution strategy for blocks.
-        pub type BlockImpl<MC> = block::Jitted<block::OutlineCompiler<MC>, MC>;
+        pub type CodePageEntryImpl<MC> = page_cache::Jitted<block::OutlineCompiler<MC>, MC>;
     }
 }
 
@@ -48,7 +48,7 @@ pub fn run_with_memory_config<MC: memory::MemoryConfig>(
 ) -> Result<(), Box<dyn Error>> {
     let program = fs::read(&opts.input)?;
 
-    let stepper = make_pvm_stepper::<MC, BlockImpl<MC>>(
+    let stepper = make_pvm_stepper::<MC, CodePageEntryImpl<MC>>(
         program.as_slice(),
         &opts.common,
         Default::default(),
@@ -87,13 +87,13 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, B> = PvmStepper<Console<'static>, MC, DefaultCacheConfig, Owned, B>;
+type PvmStepperRunner<MC, CPE> = PvmStepper<Console<'static>, MC, Owned, CPE>;
 
-pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
+pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Owned>>(
     program: &[u8],
     common: &CommonOptions,
-    block_builder: B::BlockBuilder,
-) -> Result<PvmStepperRunner<MC, B>, Box<dyn error::Error>> {
+    compiler: CPE::Compiler,
+) -> Result<PvmStepperRunner<MC, CPE>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -107,14 +107,14 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, B: Block<MC, Owned>>(
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, DefaultCacheConfig, Owned, B>::new(
+    let stepper = PvmStepper::<_, MC, Owned, CPE>::new(
         program,
         inbox.build(),
         console,
         rollup_address.into_hash().as_ref().try_into()?,
         common.inbox.origination_level,
         common.preimage.preimages_dir.clone(),
-        block_builder,
+        compiler,
     )?;
 
     Ok(stepper)

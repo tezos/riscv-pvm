@@ -17,18 +17,17 @@ use super::reveals::RevealRequest;
 use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::machine_state;
-use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::block_cache::block;
-use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
+use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CommitmentLayout;
@@ -59,8 +58,8 @@ pub enum PvmInput<'a> {
 }
 
 struct_layout! {
-    pub struct PvmLayout<MC, CL> {
-        machine_state: machine_state::MachineStateLayout<MC, CL>,
+    pub struct PvmLayout<MC> {
+        machine_state: machine_state::MachineStateLayout<MC>,
         reveal_request: RevealRequestLayout,
         system_state: linux::SupervisorStateLayout,
         version: Atom<u64>,
@@ -102,17 +101,16 @@ const INITIAL_VERSION: u64 = 0;
 /// Proof generator for the PVM.
 ///
 /// Uses the interpreted block backend by default.
-pub(crate) type PvmProofGen<'a, MC, CL, M> = Pvm<
+pub(crate) type PvmProofGen<'a, MC, M> = Pvm<
     MC,
-    CL,
-    block::Interpreted<MC, ProofGen<state_backend::Ref<'a, M>>>,
+    Interpreted<MC, ProofGen<state_backend::Ref<'a, M>>>,
     ProofGen<state_backend::Ref<'a, M>>,
 >;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone)]
-pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: ManagerBase> {
-    pub(crate) machine_state: machine_state::MachineState<MC, BCC, B, M>,
+pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
+    pub(crate) machine_state: machine_state::MachineState<MC, CPE, M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
     version: Cell<u64, M>,
@@ -123,16 +121,14 @@ pub struct Pvm<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, 
     pub(crate) status: Cell<PvmStatus, M>,
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_backend::ManagerBase>
-    Pvm<MC, BCC, B, M>
-{
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
     /// Allocate a new PVM.
-    pub fn new(block_builder: B::BlockBuilder) -> Self
+    pub fn new(compiler: CPE::Compiler) -> Self
     where
         M: state_backend::ManagerAlloc,
     {
         Self {
-            machine_state: machine_state::MachineState::new(block_builder),
+            machine_state: machine_state::MachineState::new(compiler),
             reveal_request: RevealRequest::new(),
             system_state: linux::SupervisorState::new(),
             version: Cell::new_with(INITIAL_VERSION),
@@ -148,14 +144,14 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     ///
     /// [block builder]: block::Block::BlockBuilder
     pub(crate) fn bind(
-        space: state_backend::AllocatedOf<PvmLayout<MC, BCC>, M>,
-        block_builder: B::BlockBuilder,
+        space: state_backend::AllocatedOf<PvmLayout<MC>, M>,
+        compiler: CPE::Compiler,
     ) -> Self
     where
         M::ManagerRoot: state_backend::ManagerReadWrite,
     {
         Self {
-            machine_state: machine_state::MachineState::bind(space.machine_state, block_builder),
+            machine_state: machine_state::MachineState::bind(space.machine_state, compiler),
             reveal_request: RevealRequest::bind(space.reveal_request),
             system_state: linux::SupervisorState::bind(space.system_state),
             version: space.version,
@@ -171,7 +167,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub(crate) fn struct_ref<'a, F: state_backend::FnManager<state_backend::Ref<'a, M>>>(
         &'a self,
-    ) -> state_backend::AllocatedOf<PvmLayout<MC, BCC>, F::Output> {
+    ) -> state_backend::AllocatedOf<PvmLayout<MC>, F::Output> {
         PvmLayoutF {
             machine_state: self.machine_state.struct_ref::<F>(),
             reveal_request: self.reveal_request.struct_ref::<F>(),
@@ -186,7 +182,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 
     /// Generate a proof-generating version of this PVM.
-    pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, BCC, M>
+    pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, M>
     where
         M: state_backend::ManagerRead,
     {
@@ -385,33 +381,30 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
     }
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Owned>> Pvm<MC, BCC, B, Owned> {
-    pub(crate) fn empty(block_builder: B::BlockBuilder) -> Self {
-        Self::new(block_builder)
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Pvm<MC, CPE, Owned> {
+    pub(crate) fn empty(compiler: CPE::Compiler) -> Self {
+        Self::new(compiler)
     }
 
     pub(crate) fn hash(&self) -> Result<Hash, HashError> {
         let refs = self.struct_ref::<FnManagerIdent>();
-        PvmLayout::<MC, BCC>::state_hash(refs)
+        PvmLayout::<MC>::state_hash(refs)
     }
 }
 
-impl<'a, MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, ProofGen<Ref<'a, Owned>>>>
-    Pvm<MC, BCC, B, ProofGen<Ref<'a, Owned>>>
+impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
+    Pvm<MC, CPE, ProofGen<Ref<'a, Owned>>>
 {
     /// Produce a proof.
-    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
+    pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
         // This read guarantees that the input request can be recovered from the proof.
         let _ = self.input_request();
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC, BCC>::to_merkle_tree(refs)?.to_merkle_proof()?;
+        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof()?;
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC, BCC>::state_hash(refs)?;
+        let final_hash = PvmLayout::<MC>::state_hash(refs)?;
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
@@ -431,22 +424,19 @@ pub enum InputRequest {
     NeedsReveal(Box<[u8]>),
 }
 
-impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: Block<MC, Verifier>> Pvm<MC, BCC, B, Verifier> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verifier>> Pvm<MC, CPE, Verifier> {
     /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, block_builder: B::BlockBuilder) -> Option<Self>
-    where
-        AllocatedOf<BCC::Layout, Verifier>: 'static,
-    {
-        let space = deserialise_owned::deserialise::<PvmLayout<MC, BCC>>(ProofTree::Present(proof))
+    pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
+        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))
             .ok()?
             .0;
-        Some(Self::bind(space, block_builder))
+        Some(Self::bind(space, compiler))
     }
 }
 
 /// Handle a system call in the PVM.
-pub(crate) fn handle_system_call<MC, BCC, B, M>(
-    machine: &mut machine_state::MachineState<MC, BCC, B, M>,
+pub(crate) fn handle_system_call<MC, CPE, M>(
+    machine: &mut machine_state::MachineState<MC, CPE, M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
@@ -454,8 +444,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
 ) -> ControlFlow<()>
 where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig,
-    B: Block<MC, M>,
+    CPE: CodePageEntry<MC, M>,
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
@@ -481,11 +470,12 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
-    use crate::machine_state::block_cache::TestCacheConfig;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
+    use crate::machine_state::page_cache;
+    use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
@@ -497,13 +487,7 @@ mod tests {
     use crate::pvm::linux;
     use crate::state_backend::owned_backend::Owned;
 
-    impl<
-        MC: MemoryConfig,
-        BCC: BlockCacheConfig,
-        B: block::Block<MC, M>,
-        M: state_backend::ManagerBase,
-    > Pvm<MC, BCC, B, M>
-    {
+    impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
         /// Handle an exception using the defined Execution Environment.
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
@@ -524,10 +508,10 @@ mod tests {
     #[test]
     fn test_read_input() {
         type MC = M1M;
-        type B = block::Interpreted<MC, Owned>;
+        type Cpe = page_cache::Interpreted<MC, Owned>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -628,12 +612,12 @@ mod tests {
             written: [u8; WRITTEN_SIZE],
         )|{
             type MC = M1M;
-            type B = block::Interpreted<MC, Owned>;
+            type Cpe = page_cache::Interpreted<MC, Owned>;
 
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, TestCacheConfig, B, Owned>::new(InterpretedBlockBuilder);
+            let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -675,10 +659,10 @@ mod tests {
 
     backend_test!(test_reveal, F, {
         type MC = M1M;
-        type B<F> = block::Interpreted<MC, F>;
+        type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -745,10 +729,10 @@ mod tests {
 
     backend_test!(test_reveal_insufficient_buffer_size, F, {
         type MC = M1M;
-        type B<F> = block::Interpreted<MC, F>;
+        type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, TestCacheConfig, B<F>, F>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedBlockBuilder);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

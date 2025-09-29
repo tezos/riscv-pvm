@@ -10,20 +10,16 @@ use std::io::Write;
 use std::ops::Bound;
 use std::time::Instant;
 
-use octez_riscv::machine_state::block_cache::BlockCacheConfig;
-use octez_riscv::machine_state::block_cache::TestCacheConfig;
-use octez_riscv::machine_state::block_cache::block::Interpreted;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
+use octez_riscv::machine_state::page_cache::Interpreted;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::NotFound;
 use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
-use octez_riscv::state_backend::verify_backend::Verifier;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
@@ -34,24 +30,24 @@ use rand::Rng;
 
 #[test]
 fn test_jstz_proofs_one_step() {
-    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof, JSTZ)
+    test_proofs::<M64M>(false, PvmStepper::verify_proof, JSTZ)
 }
 
 #[test]
 fn test_jstz_proofs_one_step_stream() {
-    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
+    test_proofs::<M64M>(false, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full() {
-    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof, JSTZ)
+    test_proofs::<M64M>(true, PvmStepper::verify_proof, JSTZ)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full_stream() {
-    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
+    test_proofs::<M64M>(true, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
 }
 
 #[test]
@@ -63,24 +59,24 @@ fn test_jstz_initial_proof_regression() {
 
 #[test]
 fn test_etherlink_proofs_one_step() {
-    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof, ETHERLINK)
+    test_proofs::<M64M>(false, PvmStepper::verify_proof, ETHERLINK)
 }
 
 #[test]
 fn test_etherlink_proofs_one_step_stream() {
-    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
+    test_proofs::<M64M>(false, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
 }
 
 #[test]
 #[ignore]
 fn test_etherlink_proofs_full() {
-    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof, ETHERLINK)
+    test_proofs::<M64M>(true, PvmStepper::verify_proof, ETHERLINK)
 }
 
 #[test]
 #[ignore]
 fn test_etherlink_proofs_full_stream() {
-    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
+    test_proofs::<M64M>(true, PvmStepper::verify_proof_using_raw_bytes, ETHERLINK)
 }
 
 #[test]
@@ -91,7 +87,7 @@ fn test_etherlink_initial_proof_regression() {
 fn test_initial_proof_regression(inputs: TestConfig) {
     // Configuring the stepper with `TestCacheConfig` to match the node PVM
     // and make the test run faster.
-    let make_stepper = make_stepper_factory::<M64M, TestCacheConfig>(&inputs);
+    let make_stepper = make_stepper_factory::<M64M>(&inputs);
     let mut stepper = make_stepper();
 
     eprintln!("> Producing proof ...");
@@ -106,12 +102,11 @@ fn test_initial_proof_regression(inputs: TestConfig) {
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_proofs<MC, BCC>(full: bool, verify_fn: StepperVerifyFn<MC, BCC, Owned>, inputs: TestConfig)
+fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC, Owned>, inputs: TestConfig)
 where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig + 'static,
 {
-    let make_stepper = make_stepper_factory::<MC, BCC>(&inputs);
+    let make_stepper = make_stepper_factory::<MC>(&inputs);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);
@@ -133,15 +128,14 @@ where
     }
 }
 
-fn run_steps_ladder<MC, BCC, F>(
+fn run_steps_ladder<MC, F>(
     make_stepper: F,
     ladder: &[usize],
     expected_hash: Option<hash::Hash>,
-    verify_fn: StepperVerifyFn<MC, BCC, Owned>,
+    verify_fn: StepperVerifyFn<MC, Owned>,
 ) where
     MC: MemoryConfig,
-    BCC: BlockCacheConfig + 'static,
-    F: Fn() -> PvmStepper<NoHooks, MC, BCC>,
+    F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
     let mut stepper = make_stepper();
@@ -208,19 +202,17 @@ fn run_steps_ladder<MC, BCC, F>(
     }
 }
 
-type StepperVerifyFn<MC, BCC, M> = fn(
-    &PvmStepper<NoHooks, MC, BCC, M, Interpreted<MC, M>>,
+type StepperVerifyFn<MC, M> = fn(
+    &PvmStepper<NoHooks, MC, M, Interpreted<MC, M>>,
     proof: Proof,
 ) -> Result<(), ProofVerificationFailure>;
 
-fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
-    stepper: &PvmStepper<NoHooks, MC, BCC>,
+fn basic_invalid_proofs_are_rejected<MC: MemoryConfig>(
+    stepper: &PvmStepper<NoHooks, MC>,
     proof: &Proof,
     state_hash: hash::Hash,
-    verify_fn: StepperVerifyFn<MC, BCC, Owned>,
-) where
-    AllocatedOf<BCC::Layout, Verifier>: 'static,
-{
+    verify_fn: StepperVerifyFn<MC, Owned>,
+) {
     // A fully blinded proof could only be valid if every single leaf
     // in the state is written to and proof compression were to optimise
     // for this case.

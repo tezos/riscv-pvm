@@ -6,7 +6,6 @@ use std::ops::AddAssign;
 use std::ops::Bound;
 
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::block_cache::BlockCacheConfig;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
@@ -88,9 +87,6 @@ impl StepResult for StepperStatus {
 pub trait Stepper {
     /// Memory config of the underlying machine state
     type MemoryConfig: MemoryConfig;
-
-    /// Block cache config
-    type BlockCacheConfig: BlockCacheConfig;
 
     /// State backend with which the stepper was instantiated
     type Manager: ManagerBase + ManagerRead;
