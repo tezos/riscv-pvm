@@ -81,7 +81,9 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
     ) {
         use crate::machine_state::memory::address_to_page_offset;
 
-        let mut offset = address_to_page_offset(address);
+        // we only store entries for halfword-aligned addresses, since pc is always halfword
+        // aligned
+        let mut offset = address_to_page_offset(address) >> 1;
 
         for instr in instructions {
             if offset > INSTRUCTION_ENTRIES {
@@ -95,6 +97,28 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
             // we update the offset by half the width, as the offset is halfword aligned
             offset += (instr.width() as usize) >> 1;
         }
+    }
+}
+
+#[cfg(test)]
+impl<const PAGES: usize, D, MC>
+    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, crate::state_backend::owned_backend::Owned>
+where
+    MC: MemoryConfig,
+    D: crate::machine_state::block_cache::block::dispatch::DispatchCompiler<MC>,
+{
+    /// TEST ONLY
+    ///
+    /// Get the number of times that an entrypoint has been called
+    pub(crate) fn get_entrypoint_called_times(&self, address: Address) -> Option<usize> {
+        let page_index = address_to_page_index(address);
+        let page = self.pages[page_index].as_ref()?;
+
+        // we only store entries for halfword-aligned addresses, since pc is always halfword
+        // aligned
+        let offset = crate::machine_state::memory::address_to_page_offset(address) >> 1;
+
+        Some(page.entries[offset].dispatch.called_times())
     }
 }
 
@@ -121,7 +145,6 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     ///
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
     /// the given address.
-    #[expect(unused, reason = "will be used by next commit")]
     pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: PageEntry<CPE>) {
         let page_index = crate::machine_state::memory::address_to_page_index(address);
 

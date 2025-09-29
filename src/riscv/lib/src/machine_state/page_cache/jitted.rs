@@ -24,7 +24,7 @@ use crate::state_backend::owned_backend::Owned;
 ///
 /// Doubles as a coarse upper-bound for the minimum number of steps required to safely dispatch
 /// the entrypoints.
-const MAX_INSTR_COMPILED: usize = 20;
+const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
 pub type JittedPage<D, MC> = [Jitted<D, MC>; INSTRUCTION_ENTRIES];
@@ -37,7 +37,7 @@ pub type JittedPage<D, MC> = [Jitted<D, MC>; INSTRUCTION_ENTRIES];
 #[derive(derive_more::Debug)]
 pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     instruction: Instruction,
-    dispatch: DispatchTarget<[Self; INSTRUCTION_ENTRIES], D, MC>,
+    pub(super) dispatch: DispatchTarget<[Self; INSTRUCTION_ENTRIES], D, MC>,
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<Instruction> for Jitted<D, MC> {

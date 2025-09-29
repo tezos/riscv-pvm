@@ -17,22 +17,11 @@
 //!
 //! Once we have established that the code works, we make the page mutable again and copy the code
 //! of `bar` into it. We make the page executable and call the function pointer again. Again, we
-//! check the return value. Despite the fact that the code has changed, we expect the return value
-//! to still be the value of `foo` because the PVM has not yet invalidated the block cache. In
-//! other words, the instruction memory is not synchronised with the data memory. Only after calling
-//! `fence.i` to invalidate the block cache and thereby implicitly synchronising the instruction
-//! memory with the data memory, we expect the return value to be that of `bar`.
+//! check the return value. The code has changed, and we expect the return value
+//! to now be the value of `bar` because the PVM's instruction memory is automatically
+//! synchronised with data memory.
 //!
-//! A really dangerous bug here would be if the PVM were to be rebound (e.g. by saving it to disk
-//! and restoring it), and the instruction memory were to be implicitly synchronised with the data
-//! memory. That would mean, stopping the PVM, serialising it, and restoring it would change the
-//! semantics of the code that is executed. This is a bug that we want to avoid. You can think of a
-//! proof generation as such serialisation; hence it is a realistic risk.
-//!
-//! # Note for future semantics of the PVM
-//!
-//! In the future, we may want to change the semantics of the PVM such that instruction memory
-//! always synchronises with data memory immediately and automatically.
+//! The calling of `fence.i` therefore has no effect.
 
 #![no_std]
 
@@ -92,10 +81,13 @@ pub fn main() {
         libc::syscall(-1);
     }
 
+    // instruction memory is implicitly synchronized with data memory
     let value = code();
-    assert_eq!(value, foo());
+    assert_eq!(value, bar());
 
     // SAFETY: This assembly is safe to run.
+    //
+    // This will have no effect.
     unsafe {
         asm!("fence.i");
     }

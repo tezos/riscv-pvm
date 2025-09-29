@@ -32,7 +32,7 @@ use crate::memory_config::MemoryConfigValue;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
-        /// Execution strategy for blocks.
+        /// Execution strategy for entrypoints.
         pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::owned_backend::Owned>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Execution strategy for blocks.

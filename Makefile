@@ -4,21 +4,21 @@
 
 ### Generic top-level targets
 
-all: riscv/all sandbox/all jstz/all dummy/all block-cache-tester/all etherlink/all
+all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all
 
 build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check sandbox/check jstz/check dummy/check block-cache-tester/all etherlink/check assets/check
+check: riscv/check sandbox/check jstz/check dummy/check page-cache-tester/all etherlink/check assets/check
 
-build: sandbox/build jstz/build dummy/build block-cache-tester/build etherlink/build
+build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
 test: riscv/test jstz/test etherlink/test 
 
 test-miri: riscv/test-miri
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean block-cache-tester/clean etherlink/clean
+clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
 ### Specific top-level targets
 
@@ -39,8 +39,8 @@ jstz/%:
 dummy/%: 
 	@make -C kernels/dummy ${@:dummy/%=%}
 
-block-cache-tester/%: 
-	@make -C kernels/block-cache-tester ${@:block-cache-tester/%=%}
+page-cache-tester/%: 
+	@make -C kernels/page-cache-tester ${@:page-cache-tester/%=%}
 
 etherlink/%: 
 	@make -C kernels/etherlink ${@:etherlink/%=%}
