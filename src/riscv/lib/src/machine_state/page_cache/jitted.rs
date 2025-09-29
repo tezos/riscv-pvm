@@ -69,7 +69,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         let page_offset = address_to_page_offset(instr_pc);
 
         // instr_pc is always halfword aligned
-        let offset = page_offset >> 1;
+        let mut offset = page_offset >> 1;
 
         if !compiler.should_compile(&mut self[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
@@ -80,14 +80,16 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         }
 
         // trigger JIT compilation
-        let instr = self
-            .iter()
-            .skip(offset)
-            .take(MAX_INSTR_COMPILED)
-            .map(|entry| entry.instruction)
-            .collect::<Vec<_>>();
+        let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
+        while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
+            let entry = &self[offset];
 
-        let fun = compiler.compile(&mut self[offset].dispatch, instr, instr_pc);
+            offset += (entry.instruction.width() as usize) >> 1;
+
+            instructions.push(entry.instruction);
+        }
+
+        let fun = compiler.compile(&mut self[page_offset >> 1].dispatch, instructions, instr_pc);
 
         // Safety: the compiler passed to this function is always the same for the
         // lifetime of the entrypoint
@@ -272,5 +274,63 @@ mod tests {
             info.contains("status: NotCompiled"),
             "unexpected status: \"{info}\""
         );
+    }
+
+    /// The compilation we send to the jit must be formed of continguous instructions in memory,
+    /// not contiguous instructions in the page cache entry.
+    ///
+    /// This is because the page cache entry contains entrypoints for _every_ half-word.
+    ///
+    /// Therefore, naively sending just a 'slice' of entries to the JIT will include an extra
+    /// instruction (ie the upper half word) whenever there is an uncompressed instruction in the
+    /// request.
+    #[test]
+    fn test_compilation_request_respects_instruction_width() {
+        let mut page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>({
+            let mut index = 0;
+            move || {
+                let instruction = if index % 2 == 0 {
+                    Instruction::new_nop(InstrWidth::Uncompressed)
+                } else {
+                    Instruction::new_unknown(InstrWidth::Compressed)
+                };
+                index += 1;
+                Jitted::<_, M4K>::from(instruction)
+            }
+        });
+
+        let mut jit = InlineCompiler::default();
+        let mut core = MachineCoreState::new();
+
+        // Run Noops only
+
+        // Safety: we only ever use the above JIT instance
+        let result = unsafe {
+            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 0, MAX_INSTR_COMPILED)
+        };
+
+        assert!(result.error.is_none());
+        assert_eq!(result.steps, MAX_INSTR_COMPILED);
+
+        assert_eq!(
+            core.hart.pc.read(),
+            (MAX_INSTR_COMPILED as u64) * InstrWidth::Uncompressed as u64
+        );
+
+        assert_eq!(page[0].dispatch.called_times(), 1);
+
+        // This time, start with a `Unknown` instruction
+
+        // Safety: we only ever use the above JIT instance
+        let result = unsafe {
+            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 2, MAX_INSTR_COMPILED)
+        };
+
+        assert_eq!(result.error, Some(Exception::IllegalInstruction));
+        assert_eq!(result.steps, 0);
+
+        assert_eq!(core.hart.pc.read(), 2);
+
+        assert_eq!(page[2 >> 1].dispatch.called_times(), 1);
     }
 }
