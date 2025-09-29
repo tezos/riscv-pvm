@@ -179,6 +179,7 @@ mod tests {
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
@@ -197,7 +198,7 @@ mod tests {
 
     fn run_test<F: TestBackendFactory>(test: DispatchTest<'_, F>) {
         let mut state = test.state.borrow_mut();
-        state.reset();
+        state.reset(NoopMemoryGovernanceListener);
 
         // SAFETY: interpreted mode is always safe to call
         let res = unsafe {

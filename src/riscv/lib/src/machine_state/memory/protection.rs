@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::num::NonZeroUsize;
+use std::ops::RangeInclusive;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -67,20 +67,12 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     /// The address and length must be valid for an address space consisting of a number of `PAGES`.
     /// This function is not defined for address and length combinations which are out of bounds.
     #[inline]
-    pub unsafe fn can_access(&self, address: Address, length: NonZeroUsize) -> bool
+    pub unsafe fn can_access(&self, pages: RangeInclusive<u64>) -> bool
     where
         M: ManagerRead,
     {
-        // Extract the page index range from using the start and end addresses
-        let start_page = address_to_page_index(address);
-
-        let end_address = address
-            .wrapping_add(length.get() as Address)
-            .wrapping_sub(1);
-        let end_page = address_to_page_index(end_address);
-
-        for page in start_page..=end_page {
-            if unsafe { !self.pages.get_unchecked(page).read() } {
+        for page in pages {
+            if unsafe { !self.pages.get_unchecked(page as usize).read() } {
                 return false;
             }
         }
@@ -116,22 +108,13 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     }
 
     /// Change the access permissions for the given range.
-    pub fn modify_access(&mut self, address: Address, length: NonZeroUsize, accessible: bool)
+    pub fn modify_access(&mut self, pages: RangeInclusive<u64>, accessible: bool)
     where
         M: ManagerWrite,
     {
-        let start_page = address_to_page_index(address);
-
-        let end_address = address
-            .wrapping_add(length.get() as Address)
-            .wrapping_sub(1);
-        let end_page = address_to_page_index(end_address);
-
-        (start_page..=end_page)
-            .filter(|&page| page < PAGES)
-            .for_each(|page| {
-                self.pages[page].write(accessible);
-            })
+        pages.filter(|&page| page < PAGES as u64).for_each(|page| {
+            self.pages[page as usize].write(accessible);
+        })
     }
 
     /// Reset access permissions on all pages.

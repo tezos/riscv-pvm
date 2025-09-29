@@ -189,6 +189,7 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -279,11 +280,17 @@ mod tests {
         let page_size: NonZeroUsize = PAGE_SIZE.try_into().unwrap();
         state
             .main_memory
-            .protect_pages(0, page_size, Permissions {
-                read: true,
-                exec: false,
-                write: false,
-            })
+            .protect_pages(
+                0,
+                page_size,
+                Permissions {
+                    read: true,
+                    exec: false,
+                    write: false,
+                },
+                // TODO: replace with PageCache once implementing the listener
+                NoopMemoryGovernanceListener,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -291,7 +298,13 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(0, page_size, Permissions::READ_WRITE)
+            .protect_pages(
+                0,
+                page_size,
+                Permissions::READ_WRITE,
+                // TODO: replace with PageCache once implementing the listener
+                NoopMemoryGovernanceListener,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -299,7 +312,13 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(0, page_size, Permissions::READ_WRITE_EXEC)
+            .protect_pages(
+                0,
+                page_size,
+                Permissions::READ_WRITE_EXEC,
+                // TODO: replace with PageCache once implementing the listener
+                NoopMemoryGovernanceListener,
+            )
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -307,11 +326,17 @@ mod tests {
         // populating a R+X page should succeed
         state
             .main_memory
-            .protect_pages(0, page_size, Permissions {
-                read: true,
-                exec: true,
-                write: false,
-            })
+            .protect_pages(
+                0,
+                page_size,
+                Permissions {
+                    read: true,
+                    exec: true,
+                    write: false,
+                },
+                // TODO: replace with PageCache once implementing the listener
+                NoopMemoryGovernanceListener,
+            )
             .unwrap();
         cache.populate_page(90, &state);
         assert_eq!(count_active_pages(&cache), 1);
@@ -328,7 +353,7 @@ mod tests {
             // Arrange
             let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, F>::new();
             let mut state = state.borrow_mut();
-            state.reset();
+            state.reset(NoopMemoryGovernanceListener);
 
             // clear lowest bit - address is always halfword aligned
             let pc_addr = pc_addr & !1;

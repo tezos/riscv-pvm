@@ -28,7 +28,9 @@ use super::parameters::Flags;
 use super::parameters::NoFileDescriptor;
 use super::parameters::Visibility;
 use super::parameters::Zero;
-use crate::machine_state::MachineCoreState;
+use crate::machine_state::MachineState;
+use crate::machine_state::block_cache::BlockCacheConfig;
+use crate::machine_state::block_cache::block::Block;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
@@ -74,20 +76,23 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
     ///
     /// A length of 0 means no protections need to be changed.
-    pub(super) fn handle_mprotect<MC>(
+    pub(super) fn handle_mprotect<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        state: &mut MachineState<MC, BCC, B, M>,
         addr: PageAligned<VirtAddr>,
         length: u64,
         perms: Permissions,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
-            core.main_memory
-                .protect_pages(addr.to_machine_address(), length, perms)?;
+            let (main_memory, listener) = state.memory_with_listener();
+
+            main_memory.protect_pages(addr.to_machine_address(), length, perms, listener)?;
         }
 
         // Return 0 to indicate success.
@@ -101,9 +106,9 @@ impl<M: ManagerBase> SupervisorState<M> {
         clippy::too_many_arguments,
         reason = "The system call dispatch mechanism needs these arguments to exist, they can't be on a nested structure"
     )]
-    pub(super) fn handle_mmap<MC>(
+    pub(super) fn handle_mmap<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        state: &mut MachineState<MC, BCC, B, M>,
         addr: VirtAddr,
         length: NonZeroU64,
         perms: Permissions,
@@ -113,6 +118,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // We don't allow shared mappings
@@ -129,22 +136,24 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         // TODO: RV-561: use u64 everywhere in the PVM
         let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");
+        let (main_memory, listener) = state.memory_with_listener();
 
         let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => core
-                .main_memory
-                .allocate_and_protect_pages(None, length, perms, false)?,
+            AddressHint::Hint => {
+                main_memory.allocate_and_protect_pages(None, length, perms, false, listener)?
+            }
 
             AddressHint::Fixed { allow_replace } => {
                 if !addr.is_aligned(PAGE_SIZE) {
                     return Err(Error::InvalidArgument);
                 }
 
-                core.main_memory.allocate_and_protect_pages(
+                main_memory.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
                     length,
                     perms,
                     allow_replace,
+                    listener,
                 )?
             }
         }
@@ -156,9 +165,9 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `munmap` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mmap.2.html>
-    pub(super) fn handle_munmap<MC>(
+    pub(super) fn handle_munmap<MC, BCC, B>(
         &mut self,
-        core: &mut MachineCoreState<MC, M>,
+        state: &mut MachineState<MC, BCC, B, M>,
         addr: u64,
         // while not explicitly required to be non-zero, this does partially match the
         // linux implementation which requires both page-aligned addresses and length > 0
@@ -168,13 +177,16 @@ impl<M: ManagerBase> SupervisorState<M> {
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
+        BCC: BlockCacheConfig,
+        B: Block<MC, M>,
         M: ManagerReadWrite,
     {
         // TODO: RV-561: use u64 everywhere in the PVM
         let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");
+        let (main_memory, listener) = state.memory_with_listener();
 
-        core.main_memory
-            .deallocate_and_protect_pages(addr, length)
+        main_memory
+            .deallocate_and_protect_pages(addr, length, listener)
             .map_err(|_| Error::InvalidArgument)?;
 
         Ok(0)

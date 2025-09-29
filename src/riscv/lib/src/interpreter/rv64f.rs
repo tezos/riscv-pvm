@@ -407,6 +407,7 @@ mod tests {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::registers::fa1;
     use crate::machine_state::registers::fa4;
     use crate::machine_state::registers::parse_fregister;
@@ -456,8 +457,8 @@ mod tests {
         )|
         {
             let mut state = state_cell.borrow_mut();
-            state.reset();
-            state.main_memory.set_all_readable_writeable();
+            state.reset(NoopMemoryGovernanceListener);
+            state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
 
             let mut perform_test = |offset: u64| -> Result<(), Exception> {
                 // Save test values v_i in registers ai

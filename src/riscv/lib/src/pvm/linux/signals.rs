@@ -775,20 +775,19 @@ where
             .ok_or(MachineError::MemoryTooSmall)?;
 
         // Allow the restorer function to be written to main memory
-        self.machine_state.core.main_memory.protect_pages(
+        let (main_memory, mut listener) = self.machine_state.memory_with_listener();
+        main_memory.protect_pages(
             address.to_machine_address(),
             RESTORER_LENGTH,
             Permissions::WRITE,
+            &mut listener,
         )?;
 
         // Write the function
-        self.machine_state
-            .core
-            .main_memory
-            .write(address.to_machine_address(), RESTORER_FUNCTION)?;
+        main_memory.write(address.to_machine_address(), RESTORER_FUNCTION)?;
 
         // Make the restorer page R+X
-        self.machine_state.core.main_memory.protect_pages(
+        main_memory.protect_pages(
             address.to_machine_address(),
             // TODO: RV-561: use u64 everywhere in the PVM
             PAGE_SIZE
@@ -799,6 +798,7 @@ where
                 exec: true,
                 write: false,
             },
+            listener,
         )?;
 
         let restorer_end = address + RESTORER_LENGTH.get() as u64;
@@ -829,11 +829,9 @@ mod tests {
     use crate::machine_state::block_cache::block::Interpreted;
     use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M1M;
-    use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
-    use crate::pvm::linux::Permissions;
     use crate::pvm::linux::VirtAddr;
 
     backend_test!(test_step_into_handler, F, {
@@ -844,11 +842,7 @@ mod tests {
 
         pvm.machine_state.reset();
 
-        pvm.machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        pvm.machine_state.set_all_readable_writeable();
 
         // Write the initial stack pointer and program counter.
         let stack_top = M1M::TOTAL_BYTES.get() as u64;
@@ -924,11 +918,7 @@ mod tests {
 
         pvm.machine_state.reset();
 
-        pvm.machine_state
-            .core
-            .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
-            .unwrap();
+        pvm.machine_state.set_all_readable_writeable();
 
         // Write the initial stack pointer and program counter.
         let stack_top = M1M::TOTAL_BYTES.get() as u64;

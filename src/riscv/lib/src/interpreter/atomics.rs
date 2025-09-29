@@ -693,6 +693,7 @@ pub(crate) mod test {
     use crate::interpreter::integer::run_addi;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
@@ -716,8 +717,8 @@ pub(crate) mod test {
                     imm in any::<i64>(),
                 )| {
                     let mut state = state_cell.borrow_mut();
-                    state.reset();
-                    state.main_memory.set_all_readable_writeable();
+                    state.reset(NoopMemoryGovernanceListener);
+                    state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
 
                     state.hart.xregisters.write(a0, r1_addr);
                     state.write_to_bus(0, a0, r1_val)?;
@@ -762,8 +763,8 @@ pub(crate) mod test {
                     r2_val in any::<u64>(),
                 )| {
                     let mut state = state_cell.borrow_mut();
-                    state.reset();
-                    state.main_memory.set_all_readable_writeable();
+                    state.reset(NoopMemoryGovernanceListener);
+                    state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
 
                     state.hart.xregisters.write(a0, r1_addr);
                     state.write_to_bus(0, a0, r1_val)?;
@@ -964,7 +965,9 @@ pub(crate) mod test {
 
     backend_test!(test_alignment, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
-        state.main_memory.set_all_readable_writeable();
+        state
+            .main_memory
+            .set_all_readable_writeable(NoopMemoryGovernanceListener);
         state.hart.xregisters.write(a0, 80); // LR.D starting address.
         state.hart.xregisters.write(a1, 84); // SC.W starting address.
         state.hart.xregisters.write(a2, 200); // Value to store.

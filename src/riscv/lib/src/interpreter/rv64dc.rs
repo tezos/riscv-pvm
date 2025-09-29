@@ -79,6 +79,7 @@ mod test {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::registers::fa2;
     use crate::machine_state::registers::fa3;
     use crate::machine_state::registers::parse_xregister;
@@ -102,8 +103,8 @@ mod test {
             rs1 in (1_u8..31).prop_map(u5::new).prop_map(parse_xregister),
         )| {
             let mut state = state_cell.borrow_mut();
-            state.reset();
-            state.main_memory.set_all_readable_writeable();
+            state.reset(NoopMemoryGovernanceListener);
+            state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
 
             let mut perform_test = |offset: i64| -> Result<(), Exception> {
                 state.hart.fregisters.write(fa2, val.into());
@@ -137,8 +138,8 @@ mod test {
             val in any::<f64>().prop_map(f64::to_bits),
         )| {
             let mut state = state_cell.borrow_mut();
-            state.reset();
-            state.main_memory.set_all_readable_writeable();
+            state.reset(NoopMemoryGovernanceListener);
+            state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
 
             let mut perform_test = |offset: i64| -> Result<(), Exception> {
                 state.hart.fregisters.write(fa2, val.into());
