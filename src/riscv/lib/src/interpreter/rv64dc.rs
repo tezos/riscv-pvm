@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2024 Nomadic Labs <contact@nomadic-labs.com>
-// SPDX-FileCopyrightText: 2024 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 Trilitech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -89,7 +89,7 @@ mod test {
 
     type MC = M4K;
 
-    const OUT_OF_BOUNDS_OFFSET: i64 = MC::TOTAL_BYTES as i64;
+    const OUT_OF_BOUNDS_OFFSET: i64 = MC::TOTAL_BYTES.get() as i64;
 
     backend_test!(test_cfsd_cfld, F, {
         let state = MachineCoreState::<MC, F>::new();

@@ -82,6 +82,11 @@ impl<M: ManagerBase> SupervisorState<M> {
         MC: MemoryConfig,
         M: ManagerReadWrite,
     {
+        let Some(length) = NonZeroU64::new(length) else {
+            // // Length 0 means no protections need to be changed.
+            return Ok(0);
+        };
+
         core.main_memory
             .protect_pages(addr.to_machine_address(), length, perms)?;
 
@@ -123,10 +128,9 @@ impl<M: ManagerBase> SupervisorState<M> {
         }
 
         let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => {
-                core.main_memory
-                    .allocate_and_protect_pages(None, length.get(), perms, false)?
-            }
+            AddressHint::Hint => core
+                .main_memory
+                .allocate_and_protect_pages(None, length, perms, false)?,
 
             AddressHint::Fixed { allow_replace } => {
                 if !addr.is_aligned(PAGE_SIZE) {
@@ -135,7 +139,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
                 core.main_memory.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
-                    length.get(),
+                    length,
                     perms,
                     allow_replace,
                 )?
@@ -153,7 +157,11 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         addr: u64,
-        length: u64,
+        // while not explicitly required to be non-zero, this does partially match the
+        // linux implementation which requires both page-aligned addresses and length > 0
+        //
+        // see <https://github.com/torvalds/linux/blob/50c19e20ed2ef359cf155a39c8462b0a6351b9fa/mm/vma.c#L1573>
+        length: NonZeroU64,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,

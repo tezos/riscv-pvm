@@ -2188,7 +2188,7 @@ mod tests {
         type ConstructStoreFn =
             fn(rs1: XRegister, rs2: XRegister, imm: i64, width: InstrWidth) -> I;
 
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
         const XREG_VALUE: u64 = 0xFFEEDDCCBBAA9988;
 
         let valid_store = |constructor: ConstructStoreFn, imm: u64, expected: u64| {
@@ -2270,7 +2270,7 @@ mod tests {
 
         type ConstructLoadFn = fn(rd: XRegister, rs1: XRegister, imm: i64, width: InstrWidth) -> I;
 
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
 
         let valid_load = |new_load: ConstructLoadFn, imm: u64, expected: u64| {
             const LOAD_ADDRESS_BASE: u64 = MEMORY_SIZE / 2;
@@ -2415,7 +2415,7 @@ mod tests {
             width: InstrWidth,
         ) -> I;
 
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
 
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
@@ -2684,7 +2684,7 @@ mod tests {
 
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::*;
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
         let scenarios: &[Scenario] = &[
@@ -2834,7 +2834,7 @@ mod tests {
 
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::*;
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
         let scenarios: &[Scenario] = &[
@@ -3104,7 +3104,7 @@ mod tests {
         use crate::machine_state::registers::XRegister::x2;
         use crate::machine_state::registers::XRegister::x3;
 
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
         let test_atomic_swap =
@@ -3182,7 +3182,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::*;
 
-        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES as u64;
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get();
 
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 

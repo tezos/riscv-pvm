@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroU64;
+
 use super::Address;
 use super::BadMemoryAccess;
 use super::Memory;
@@ -38,10 +40,13 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Manage
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 {
+    const TOTAL_BYTES: NonZeroU64 = NonZeroU64::new(TOTAL_BYTES as u64)
+        .expect("memory size `TOTAL_BYTES` must be greater than zero");
+
     /// Ensure the access is within bounds.
     #[inline]
-    fn check_bounds<E>(address: Address, length: u64, error: E) -> Result<(), E> {
-        if length > (TOTAL_BYTES as u64).saturating_sub(address) {
+    fn check_bounds<E>(address: Address, length: NonZeroU64, error: E) -> Result<(), E> {
+        if length.get() > Self::TOTAL_BYTES.get().saturating_sub(address) {
             return Err(error);
         }
 
@@ -55,7 +60,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         B: Buddy<M>,
         M: ManagerReadWrite,
     {
-        self.protect_pages(0, TOTAL_BYTES as u64, Permissions::READ_WRITE)
+        self.protect_pages(0, Self::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
     }
 
@@ -70,7 +75,10 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         E: Elem,
         M: ManagerWrite,
     {
-        let length = E::STORED_SIZE.get() as u64;
+        let length = E::STORED_SIZE
+            .try_into()
+            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         self.data.write(address as usize, value);
@@ -92,7 +100,10 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = E::STORED_SIZE.get() as u64;
+        let length = E::STORED_SIZE
+            .try_into()
+            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -111,7 +122,10 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = E::STORED_SIZE.get() as u64;
+        let length = E::STORED_SIZE
+            .try_into()
+            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -135,7 +149,13 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = (E::STORED_SIZE.get() * values.len()) as u64;
+        let Some(length) =
+            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len()) as u64)
+        else {
+            // nothing to read
+            return Ok(());
+        };
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -155,7 +175,10 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        let length = E::STORED_SIZE.get() as u64;
+        let length = E::STORED_SIZE
+            .try_into()
+            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -174,7 +197,13 @@ where
         E: Elem + Copy,
         M: ManagerReadWrite,
     {
-        let length = (E::STORED_SIZE.get() * values.len()) as u64;
+        let Some(length) =
+            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len()) as u64)
+        else {
+            // nothing to write
+            return Ok(());
+        };
+
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -230,7 +259,7 @@ where
     fn protect_pages(
         &mut self,
         address: Address,
-        length: u64,
+        length: NonZeroU64,
         perms: Permissions,
     ) -> Result<(), super::MemoryGovernanceError>
     where
@@ -251,14 +280,15 @@ where
     fn deallocate_pages(
         &mut self,
         address: Address,
-        length: u64,
+        length: NonZeroU64,
     ) -> Result<(), super::MemoryGovernanceError>
     where
         M: ManagerReadWrite,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
-        let pages = length.div_ceil(super::PAGE_SIZE.get());
+        // TODO: RV-799: use `NonZeroU64::div_ceil` once stabilised.
+        let pages = length.get().div_ceil(super::PAGE_SIZE.get());
 
         // Buddy memory manager works on page indices, not addresses
         let idx = address >> super::OFFSET_BITS.get();
@@ -270,13 +300,14 @@ where
     fn allocate_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: u64,
+        length: NonZeroU64,
         allow_replace: bool,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
         M: ManagerReadWrite,
     {
-        let pages = length.div_ceil(super::PAGE_SIZE.get());
+        // TODO: RV-799: use `NonZeroU64::div_ceil` once stabilised.
+        let pages = length.get().div_ceil(super::PAGE_SIZE.get());
 
         match address_hint {
             // Caller wants to allocate at a specific address
@@ -302,7 +333,7 @@ where
     fn allocate_and_protect_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: u64,
+        length: NonZeroU64,
         perms: Permissions,
         allow_replace: bool,
     ) -> Result<Address, super::MemoryGovernanceError>
@@ -320,7 +351,10 @@ where
         // Zero initialise in 8-byte chunks. Using larger writes first, means we do fewer writes
         // altogether. This speeds things up.
         // As we allocate in multiples of pages, we must also clear in multiples of pages.
+        //
+        // TODO: RV-799: use `NonZeroU64::div_ceil` once stabilised.
         let mut remaining = length
+            .get()
             .div_ceil(PAGE_SIZE.get())
             .saturating_mul(PAGE_SIZE.get());
 
@@ -352,22 +386,34 @@ pub mod tests {
 
     #[test]
     fn bounds_check() {
-        type OwnedM0 = MemoryImpl<0, 0, (), Owned>;
         type OwnedM4K = <M4K as MemoryConfig>::State<Owned>;
 
-        // Zero-sized reads or writes are always valid
-        assert!(OwnedM0::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM0::check_bounds(1, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(0, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(4096, 0, ()).is_ok());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 0, ()).is_ok());
-
         // Bounds checks
-        assert!(OwnedM0::check_bounds(0, 1, ()).is_err());
-        assert!(OwnedM0::check_bounds(1, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(4096, 1, ()).is_err());
-        assert!(OwnedM4K::check_bounds(2 * 4096, 1, ()).is_err());
+        assert!(OwnedM4K::check_bounds(4095, NonZeroU64::new(1).unwrap(), ()).is_ok());
+        assert!(OwnedM4K::check_bounds(4096, NonZeroU64::new(1).unwrap(), ()).is_err());
+        assert!(OwnedM4K::check_bounds(2 * 4096, NonZeroU64::new(1).unwrap(), ()).is_err());
     }
+
+    // ensure read/write of empty arrays is ok, even if permissions
+    // are not set
+    backend_test!(test_read_write_all_empty_ok, F, {
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
+
+        let res = memory.write_all::<u8>(0, &[]);
+        assert_eq!(Ok(()), res);
+
+        let res = memory.read_all::<u8>(0, &mut []);
+        assert_eq!(Ok(()), res);
+
+        // double check permissions are in fact, not set
+        let res = memory.write_all::<u8>(0, &[1]);
+        assert!(res.is_err());
+
+        let buff = &mut [1];
+        let res = memory.read_all::<u8>(0, buff);
+        assert!(res.is_err());
+        assert_eq!(&[1], buff);
+    });
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the
     // requested length, when allocating memory.
@@ -383,7 +429,7 @@ pub mod tests {
         }
 
         // Request size that's not a multiple of page size
-        let requested_size = PAGE_SIZE.get() - 100;
+        let requested_size = NonZeroU64::new(PAGE_SIZE.get() - 100).unwrap();
         let address = memory
             .allocate_and_protect_pages(None, requested_size, Permissions::READ_WRITE, false)
             .expect("Memory allocation should succeed");

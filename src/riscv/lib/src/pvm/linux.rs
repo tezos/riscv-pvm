@@ -13,6 +13,7 @@ pub(crate) mod signals;
 
 use std::convert::Infallible;
 use std::ffi::CStr;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
@@ -271,33 +272,38 @@ where
             .map(|(addr, data)| addr.saturating_add(data.len() as u64))
             .max()
             .unwrap_or(0);
-        let program_length = program_end.saturating_sub(program_start);
 
-        // Allow the program to be written to main memory
-        self.machine_state.core.main_memory.protect_pages(
-            program_start,
-            program_length,
-            Permissions::WRITE,
-        )?;
+        if let Some(program_length) = NonZeroU64::new(program_end.saturating_sub(program_start)) {
+            // Allow the program to be written to main memory
+            self.machine_state.core.main_memory.protect_pages(
+                program_start,
+                program_length,
+                Permissions::WRITE,
+            )?;
 
-        // Write program to main memory
-        for (&addr, data) in program.segments.iter() {
-            self.machine_state.core.main_memory.write_all(addr, data)?;
-        }
+            // Write program to main memory
+            for (&addr, data) in program.segments.iter() {
+                self.machine_state.core.main_memory.write_all(addr, data)?;
+            }
 
-        // Remove access to the program that has just been placed into memory
-        self.machine_state.core.main_memory.protect_pages(
-            program_start,
-            program_length,
-            Permissions::NONE,
-        )?;
+            // Remove access to the program that has just been placed into memory
+            self.machine_state.core.main_memory.protect_pages(
+                program_start,
+                program_length,
+                Permissions::NONE,
+            )?;
+        };
 
         // Configure memory permissions using the ELF program headers, if present
         if let Some(program_headers) = &program.program_headers {
             for mem_perms in program_headers.permissions.iter() {
+                let Some(length) = NonZeroU64::new(mem_perms.length) else {
+                    continue;
+                };
+
                 self.machine_state.core.main_memory.protect_pages(
                     mem_perms.start_address,
-                    mem_perms.length,
+                    length,
                     mem_perms.permissions,
                 )?;
             }
@@ -319,7 +325,7 @@ where
     where
         M: ManagerReadWrite,
     {
-        let stack_top = VirtAddr::new(MC::TOTAL_BYTES as u64);
+        let stack_top = VirtAddr::new(MC::TOTAL_BYTES.get());
 
         // We must fit at least one guard page between the program break and the stack
         let guarded_stack_space = stack_top - self.system_state.program.end;
@@ -338,24 +344,25 @@ where
             return Err(MachineError::MemoryTooSmall);
         }
 
-        // At this point we know that `stack_top` >= `stack_bottom`
-        let stack_space = (stack_top - stack_bottom) as u64;
-
         // Guard the stack with a guard page. This prevents stack overflows spilling into the heap
         // or even worse, the program's .bss or .data area.
         let stack_guard = stack_bottom - PAGE_SIZE.get();
-        self.machine_state.core.main_memory.protect_pages(
-            stack_guard.to_machine_address(),
-            PAGE_SIZE.get(),
-            Permissions::NONE,
-        )?;
 
-        // Make sure the stack region is readable and writable
-        self.machine_state.core.main_memory.protect_pages(
-            stack_bottom.to_machine_address(),
-            stack_space,
-            Permissions::READ_WRITE,
-        )?;
+        // At this point we know that `stack_top` >= `stack_bottom`
+        if let Some(stack_space) = NonZeroU64::new((stack_top - stack_bottom) as u64) {
+            self.machine_state.core.main_memory.protect_pages(
+                stack_guard.to_machine_address(),
+                PAGE_SIZE,
+                Permissions::NONE,
+            )?;
+
+            // Make sure the stack region is readable and writable
+            self.machine_state.core.main_memory.protect_pages(
+                stack_bottom.to_machine_address(),
+                stack_space,
+                Permissions::READ_WRITE,
+            )?;
+        }
 
         self.machine_state
             .core
@@ -420,17 +427,20 @@ where
 
         // Mark all memory as allocated. This also has the benefit of initialising the buddy memory
         // manager properly.
-        self.machine_state.core.main_memory.allocate_pages(
-            Some(0),
-            MC::TOTAL_BYTES as u64,
-            true,
-        )?;
+        self.machine_state
+            .core
+            .main_memory
+            .allocate_pages(Some(0), MC::TOTAL_BYTES, true)?;
 
         // Make sure only the heap can be used for allocation by the user kernel.
-        self.machine_state.core.main_memory.deallocate_pages(
-            self.system_state.heap.start.to_machine_address(),
-            (self.system_state.heap.end - self.system_state.heap.start) as u64,
-        )?;
+        if let Some(heap_size) =
+            NonZeroU64::new((self.system_state.heap.end - self.system_state.heap.start) as u64)
+        {
+            self.machine_state
+                .core
+                .main_memory
+                .deallocate_pages(self.system_state.heap.start.to_machine_address(), heap_size)?;
+        }
 
         Ok(())
     }
@@ -1015,9 +1025,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         struct MemorySize<MC>(MC);
         impl<MC: MemoryConfig> MemorySize<MC> {
-            const SIZE: u64 = MC::TOTAL_BYTES as u64;
-
-            const UPPER_BOUND: () = assert!(MC::TOTAL_BYTES <= u64::MAX as usize);
+            const SIZE: u64 = MC::TOTAL_BYTES.get();
 
             // Hard limit on the size of the data segment
             const RLIMIT_DATA: u64 = Self::SIZE;
@@ -1031,8 +1039,6 @@ impl<M: ManagerBase> SupervisorState<M> {
             // Hard limit on the size of a process's virtual memory (B)
             const RLIMIT_AS: u64 = Self::SIZE;
         }
-
-        let () = MemorySize::<MC>::UPPER_BOUND;
 
         // If new_limit is not NULL, the system call is being used to write new limits, so ignore
         // it and return a permissions error
@@ -1124,7 +1130,7 @@ mod tests {
     // Check that the `set_tid_address` system call is working correctly.
     backend_test!(set_tid_address, F, {
         type MemLayout = M4K;
-        const MEM_BYTES: usize = MemLayout::TOTAL_BYTES;
+        const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get() as usize;
 
         let mut machine_state =
             MachineState::<MemLayout, TestCacheConfig, Interpreted<MemLayout, F>, F>::new(
@@ -1169,7 +1175,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         for fd in [0i32, 1, 2] {
@@ -1239,7 +1245,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1369,14 +1375,14 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
 
         let mut do_ignore = |signal: Signal| {
             // Write the initial stack pointer and program counter.
-            let stack_top = M4K::TOTAL_BYTES as u64;
+            let stack_top = M4K::TOTAL_BYTES.get();
             machine_state.core.hart.xregisters.write(sp, stack_top);
             let init_pc = 0;
             machine_state.core.hart.pc.write(init_pc);
@@ -1514,7 +1520,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         // Mask pointer (must be non-zero)
@@ -1825,7 +1831,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new();
@@ -1895,7 +1901,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new();
@@ -1984,7 +1990,7 @@ mod tests {
             .main_memory
             .allocate_and_protect_pages(
                 Some(0),
-                MemLayout::TOTAL_BYTES as u64,
+                MemLayout::TOTAL_BYTES,
                 Permissions::READ_WRITE,
                 true,
             )

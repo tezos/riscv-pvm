@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::ops::Sub;
@@ -766,7 +767,8 @@ where
         const ECALL: u32 = 0b1110011;
 
         const RESTORER_FUNCTION: [u32; 2] = [LOAD_SIGRETURN, ECALL];
-        const RESTORER_LENGTH: u64 = size_of_val(&RESTORER_FUNCTION) as u64;
+        const RESTORER_LENGTH: NonZeroU64 = NonZeroU64::new(size_of_val(&RESTORER_FUNCTION) as u64)
+            .expect("constant `RESTORER_FUNCTION` is non-zero sized");
 
         // Ensure the restorer is in its own page
         let address = address
@@ -789,7 +791,7 @@ where
         // Make the restorer page R+X
         self.machine_state.core.main_memory.protect_pages(
             address.to_machine_address(),
-            PAGE_SIZE.get(),
+            PAGE_SIZE,
             Permissions {
                 read: true,
                 exec: true,
@@ -797,7 +799,7 @@ where
             },
         )?;
 
-        let restorer_end = address + RESTORER_LENGTH;
+        let restorer_end = address + RESTORER_LENGTH.get();
 
         // Store where the restorer is kept so that the signal handlers can find it
         self.machine_state
@@ -843,11 +845,11 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         // Write the initial stack pointer and program counter.
-        let stack_top = M1M::TOTAL_BYTES as u64;
+        let stack_top = M1M::TOTAL_BYTES.get();
         pvm.machine_state.core.hart.xregisters.write(sp, stack_top);
         let init_pc = 10;
         pvm.machine_state.core.hart.pc.write(init_pc);
@@ -923,11 +925,11 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES as u64, Permissions::READ_WRITE)
+            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
             .unwrap();
 
         // Write the initial stack pointer and program counter.
-        let stack_top = M1M::TOTAL_BYTES as u64;
+        let stack_top = M1M::TOTAL_BYTES.get();
         pvm.machine_state.core.hart.xregisters.write(sp, stack_top);
         let init_pc = 10;
         pvm.machine_state.core.hart.pc.write(init_pc);
