@@ -2,6 +2,9 @@
 CC_wasm32_unknown_unknown = "clang"
 CC_riscv64gc_unknown_hermit = "clang"
 CC_riscv64gc_unknown_linux_musl = "riscv64-unknown-linux-musl-cc"
+OCTEZ_RISCV_ASSETS_DIR = { value = "assets", relative = true }
+OCTEZ_RISCV_KERNELS_DIR = { value = "kernels", relative = true }
+OCTEZ_RISCV_LIB_TESTS_DIR = { value = "src/riscv/lib/tests", relative = true }
 
 [build]
 rustdocflags = ["--deny", "warnings"]

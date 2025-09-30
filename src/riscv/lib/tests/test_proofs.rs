@@ -32,31 +32,35 @@ use rand::Rng;
 
 #[test]
 fn test_jstz_proofs_one_step() {
-    test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof)
+    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof, JSTZ)
 }
 
 #[test]
 fn test_jstz_proofs_one_step_stream() {
-    test_jstz_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes)
+    test_proofs::<M64M, TestCacheConfig>(false, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full() {
-    test_jstz_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof)
+    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof, JSTZ)
 }
 
 #[test]
 #[ignore]
 fn test_jstz_proofs_full_stream() {
-    test_jstz_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes)
+    test_proofs::<M64M, TestCacheConfig>(true, PvmStepper::verify_proof_using_raw_bytes, JSTZ)
 }
 
 #[test]
 fn test_jstz_initial_proof_regression() {
+    test_initial_proof_regression(JSTZ)
+}
+
+fn test_initial_proof_regression(inputs: TestConfig) {
     // Configuring the stepper with `TestCacheConfig` to match the node PVM
     // and make the test run faster.
-    let make_stepper = make_stepper_factory::<M64M, TestCacheConfig>();
+    let make_stepper = make_stepper_factory::<M64M, TestCacheConfig>(&inputs);
     let mut stepper = make_stepper();
 
     eprintln!("> Producing proof ...");
@@ -64,19 +68,19 @@ fn test_jstz_initial_proof_regression() {
     let proof_serialisation: Vec<u8> = serialise_proof(&proof).collect();
 
     // This file is also used in the tests for the OCaml `lib_riscv` library
-    let mut mint = goldenfile::Mint::new("tests/expected/jstz");
+    let mut mint = goldenfile::Mint::new(inputs.golden_dir);
     let mut proof_capture = mint.new_goldenfile("proof_initial").unwrap();
 
     let proof_bytes = hex::encode(proof_serialisation);
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_jstz_proofs<MC, BCC>(full: bool, verify_fn: StepperVerifyFn<MC, BCC, Owned>)
+fn test_proofs<MC, BCC>(full: bool, verify_fn: StepperVerifyFn<MC, BCC, Owned>, inputs: TestConfig)
 where
     MC: MemoryConfig,
     BCC: BlockCacheConfig + 'static,
 {
-    let make_stepper = make_stepper_factory::<MC, BCC>();
+    let make_stepper = make_stepper_factory::<MC, BCC>(&inputs);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);

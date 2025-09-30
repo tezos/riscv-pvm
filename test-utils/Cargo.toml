@@ -9,6 +9,7 @@ publish = false
 workspace = true
 
 [dependencies]
+const_format.workspace = true
 octez-riscv.workspace = true
 rand.workspace = true
 tezos-smart-rollup-utils.workspace = true

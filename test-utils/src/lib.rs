@@ -7,6 +7,7 @@
 
 use std::fs;
 
+use const_format::concatcp;
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::MemoryConfig;
@@ -16,13 +17,53 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
-pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
--> impl Fn() -> PvmStepper<NoHooks, MC, BCC> {
-    let program = fs::read("../../../assets/jstz").expect("Kernel path should be valid");
+const ASSETS_DIR: &str = std::env!("OCTEZ_RISCV_ASSETS_DIR");
+const KERNELS_DIR: &str = std::env!("OCTEZ_RISCV_KERNELS_DIR");
+const LIB_TESTS_DIR: &str = std::env!("OCTEZ_RISCV_LIB_TESTS_DIR");
+
+/// Kernel-specific configuration for tests which run over kernels
+pub struct TestConfig {
+    /// Path to regressions directory
+    pub golden_dir: &'static str,
+    /// Path to kernel binary
+    pub kernel_path: &'static str,
+    /// Path to inbox
+    pub inbox_path: &'static str,
+}
+
+/// Test configuration for the dummy kernel
+pub const DUMMY: TestConfig = TestConfig {
+    golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/dummy"),
+    kernel_path: concatcp!(ASSETS_DIR, "/riscv-dummy.elf"),
+    inbox_path: concatcp!(ASSETS_DIR, "/dummy-kernel-inbox.json"),
+};
+
+/// Test configuration which uses the compiled version of the dummy kernel
+/// instead of the checked-in kernel
+pub const DUMMY_UNCHECKED: TestConfig = TestConfig {
+    kernel_path: concatcp!(
+        KERNELS_DIR,
+        "/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy"
+    ),
+    ..DUMMY
+};
+
+/// Test configuration for the Jstz kernel
+pub const JSTZ: TestConfig = TestConfig {
+    golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/jstz"),
+    kernel_path: concatcp!(ASSETS_DIR, "/jstz"),
+    inbox_path: concatcp!(ASSETS_DIR, "/jstz-regression-inbox.json"),
+};
+
+/// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
+pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>(
+    inputs: &TestConfig,
+) -> impl Fn() -> PvmStepper<NoHooks, MC, BCC> {
+    let program = fs::read(inputs.kernel_path).expect("Kernel path should be valid");
 
     let mut inbox = InboxBuilder::new();
     inbox
-        .load_from_file("../../../assets/jstz-regression-inbox.json")
+        .load_from_file(inputs.inbox_path)
         .expect("Inbox path should be valid");
     let inbox = inbox.build();
 
@@ -44,17 +85,19 @@ pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
     }
 }
 
-pub fn dissect_steps(mut max_steps: usize, min_step_size: usize) -> Vec<usize> {
+/// Given a minimum stepping interval `min_interval`, produce a random sequence
+/// of step increments which add up to `total_steps`.
+pub fn dissect_steps(mut total_steps: usize, min_interval: usize) -> Vec<usize> {
     let mut rng = rand::rng();
     let mut steps: Vec<usize> = std::iter::from_fn(|| {
-        if max_steps == 0 {
+        if total_steps == 0 {
             return None;
         }
 
-        let steps = max_steps.div_euclid(2).max(min_step_size + 1);
-        let steps = rng.random_range(min_step_size..=steps);
+        let steps = total_steps.div_euclid(2).max(min_interval + 1);
+        let steps = rng.random_range(min_interval..=steps);
 
-        max_steps = max_steps.saturating_sub(steps);
+        total_steps = total_steps.saturating_sub(steps);
 
         Some(steps)
     })
