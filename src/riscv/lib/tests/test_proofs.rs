@@ -6,13 +6,10 @@
 // This ensures that Clippy does't apply rules which are allowed in tests.
 #![cfg(test)]
 
-mod common;
-
 use std::io::Write;
 use std::ops::Bound;
 use std::time::Instant;
 
-use common::*;
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::block_cache::block::Interpreted;
@@ -30,6 +27,7 @@ use octez_riscv::state_backend::verify_backend::Verifier;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_test_utils::*;
 use rand::Rng;
 
 #[test]

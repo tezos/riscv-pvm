@@ -1491,6 +1491,7 @@ dependencies = [
  "libsecp256k1",
  "memmap2",
  "num_enum",
+ "octez-riscv-test-utils",
  "paste",
  "perfect-derive",
  "proptest",
@@ -1517,6 +1518,15 @@ dependencies = [
 [[package]]
 name = "octez-riscv-durable-storage"
 version = "0.0.0"
+
+[[package]]
+name = "octez-riscv-test-utils"
+version = "0.0.0"
+dependencies = [
+ "octez-riscv",
+ "rand 0.9.2",
+ "tezos-smart-rollup-utils",
+]
 
 [[package]]
 name = "once_cell"
