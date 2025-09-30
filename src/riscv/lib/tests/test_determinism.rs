@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -21,7 +22,11 @@ use octez_riscv_test_utils::*;
 
 #[test]
 fn test_jstz_determinism() {
-    let make_stepper = make_stepper_factory();
+    test_determinism(JSTZ)
+}
+
+fn test_determinism(inputs: TestConfig) {
+    let make_stepper = make_stepper_factory(&inputs);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);
