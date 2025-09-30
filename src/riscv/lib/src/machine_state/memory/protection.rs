@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroU64;
+
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -65,19 +67,14 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     /// The address and length must be valid for an address space consisting of a number of `PAGES`.
     /// This function is not defined for address and length combinations which are out of bounds.
     #[inline]
-    pub unsafe fn can_access(&self, address: Address, length: u64) -> bool
+    pub unsafe fn can_access(&self, address: Address, length: NonZeroU64) -> bool
     where
         M: ManagerRead,
     {
-        // Zero-sized accesses are always valid
-        if length < 1 {
-            return true;
-        }
-
         // Extract the page index range from using the start and end addresses
         let start_page = address_to_page_index(address);
 
-        let end_address = address.wrapping_add(length as Address).wrapping_sub(1);
+        let end_address = address.wrapping_add(length.get()).wrapping_sub(1);
         let end_page = address_to_page_index(end_address);
 
         for page in start_page..=end_page {
@@ -117,17 +114,13 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     }
 
     /// Change the access permissions for the given range.
-    pub fn modify_access(&mut self, address: Address, length: u64, accessible: bool)
+    pub fn modify_access(&mut self, address: Address, length: NonZeroU64, accessible: bool)
     where
         M: ManagerWrite,
     {
-        if length < 1 {
-            return;
-        }
-
         let start_page = address_to_page_index(address);
 
-        let end_address = address.wrapping_add(length as Address).wrapping_sub(1);
+        let end_address = address.wrapping_add(length.get()).wrapping_sub(1);
         let end_page = address_to_page_index(end_address);
 
         (start_page..=end_page)

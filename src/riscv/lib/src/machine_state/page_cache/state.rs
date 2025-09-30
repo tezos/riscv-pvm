@@ -205,9 +205,9 @@ mod tests {
 
     #[test]
     fn test_page_invalidation_resets_pages() {
-        const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
+        const PAGES: u64 = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get();
 
-        let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, Owned>::new();
+        let mut cache = PageCacheImpl::<{ PAGES as usize }, Instruction, M1M, Owned>::new();
 
         let make_page = || PageEntry {
             entries: boxed_array![Instruction::DEFAULT; INSTRUCTION_ENTRIES],
@@ -276,7 +276,7 @@ mod tests {
         // populating a read-only page should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get(), Permissions {
+            .protect_pages(0, PAGE_SIZE, Permissions {
                 read: true,
                 exec: false,
                 write: false,
@@ -288,7 +288,7 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get(), Permissions::READ_WRITE)
+            .protect_pages(0, PAGE_SIZE, Permissions::READ_WRITE)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -296,7 +296,7 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get(), Permissions::READ_WRITE_EXEC)
+            .protect_pages(0, PAGE_SIZE, Permissions::READ_WRITE_EXEC)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -304,7 +304,7 @@ mod tests {
         // populating a R+X page should succeed
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get(), Permissions {
+            .protect_pages(0, PAGE_SIZE, Permissions {
                 read: true,
                 exec: true,
                 write: false,
@@ -315,15 +315,15 @@ mod tests {
     });
 
     backend_test!(populate_from_memory, F, {
-        const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
+        const PAGES: u64 = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get();
 
         let state = MachineCoreState::<M1M, F>::new();
         let state = &std::cell::RefCell::new(state);
 
-        proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES as u64,
+        proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get(),
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
-            let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, F>::new();
+            let mut cache = PageCacheImpl::<{ PAGES as usize}, Instruction, M1M, F>::new();
             let mut state = state.borrow_mut();
             state.reset();
 
