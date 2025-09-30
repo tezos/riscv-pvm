@@ -271,7 +271,7 @@ where
             .map(|(addr, data)| addr.saturating_add(data.len() as u64))
             .max()
             .unwrap_or(0);
-        let program_length = program_end.saturating_sub(program_start) as usize;
+        let program_length = program_end.saturating_sub(program_start);
 
         // Allow the program to be written to main memory
         self.machine_state.core.main_memory.protect_pages(
@@ -297,7 +297,7 @@ where
             for mem_perms in program_headers.permissions.iter() {
                 self.machine_state.core.main_memory.protect_pages(
                     mem_perms.start_address,
-                    mem_perms.length as usize,
+                    mem_perms.length,
                     mem_perms.permissions,
                 )?;
             }
@@ -339,14 +339,14 @@ where
         }
 
         // At this point we know that `stack_top` >= `stack_bottom`
-        let stack_space = (stack_top - stack_bottom) as usize;
+        let stack_space = (stack_top - stack_bottom) as u64;
 
         // Guard the stack with a guard page. This prevents stack overflows spilling into the heap
         // or even worse, the program's .bss or .data area.
         let stack_guard = stack_bottom - PAGE_SIZE.get();
         self.machine_state.core.main_memory.protect_pages(
             stack_guard.to_machine_address(),
-            PAGE_SIZE.get() as usize,
+            PAGE_SIZE.get(),
             Permissions::NONE,
         )?;
 
@@ -420,15 +420,16 @@ where
 
         // Mark all memory as allocated. This also has the benefit of initialising the buddy memory
         // manager properly.
-        self.machine_state
-            .core
-            .main_memory
-            .allocate_pages(Some(0), MC::TOTAL_BYTES, true)?;
+        self.machine_state.core.main_memory.allocate_pages(
+            Some(0),
+            MC::TOTAL_BYTES as u64,
+            true,
+        )?;
 
         // Make sure only the heap can be used for allocation by the user kernel.
         self.machine_state.core.main_memory.deallocate_pages(
             self.system_state.heap.start.to_machine_address(),
-            (self.system_state.heap.end - self.system_state.heap.start) as usize,
+            (self.system_state.heap.end - self.system_state.heap.start) as u64,
         )?;
 
         Ok(())
@@ -1168,7 +1169,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         for fd in [0i32, 1, 2] {
@@ -1238,7 +1239,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1368,7 +1369,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::<F>::new();
@@ -1513,7 +1514,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         // Mask pointer (must be non-zero)
@@ -1824,7 +1825,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new();
@@ -1894,7 +1895,7 @@ mod tests {
         machine_state
             .core
             .main_memory
-            .protect_pages(0, MemLayout::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MemLayout::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         let mut supervisor_state = SupervisorState::new();
@@ -1983,7 +1984,7 @@ mod tests {
             .main_memory
             .allocate_and_protect_pages(
                 Some(0),
-                MemLayout::TOTAL_BYTES,
+                MemLayout::TOTAL_BYTES as u64,
                 Permissions::READ_WRITE,
                 true,
             )

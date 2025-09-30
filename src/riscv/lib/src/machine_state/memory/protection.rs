@@ -65,7 +65,7 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     /// The address and length must be valid for an address space consisting of a number of `PAGES`.
     /// This function is not defined for address and length combinations which are out of bounds.
     #[inline]
-    pub unsafe fn can_access(&self, address: Address, length: usize) -> bool
+    pub unsafe fn can_access(&self, address: Address, length: u64) -> bool
     where
         M: ManagerRead,
     {
@@ -117,7 +117,7 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
     }
 
     /// Change the access permissions for the given range.
-    pub fn modify_access(&mut self, address: Address, length: usize, accessible: bool)
+    pub fn modify_access(&mut self, address: Address, length: u64, accessible: bool)
     where
         M: ManagerWrite,
     {

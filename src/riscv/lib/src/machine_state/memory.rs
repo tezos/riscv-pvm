@@ -254,7 +254,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn protect_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: u64,
         perms: Permissions,
     ) -> Result<(), MemoryGovernanceError>
     where
@@ -264,7 +264,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn allocate_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: usize,
+        length: u64,
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
     where
@@ -274,7 +274,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn deallocate_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: u64,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite;
@@ -283,7 +283,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn allocate_and_protect_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: usize,
+        length: u64,
         perms: Permissions,
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
@@ -294,7 +294,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn deallocate_and_protect_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: u64,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite,
