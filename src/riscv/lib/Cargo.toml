@@ -53,6 +53,7 @@ proptest.workspace = true
 lazy_static.workspace = true
 tempfile.workspace = true
 goldenfile.workspace = true
+octez-riscv-test-utils.workspace = true
 
 [features]
 default = []

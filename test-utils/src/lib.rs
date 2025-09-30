@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
-// This ensures that Clippy does't apply rules which are allowed in tests.
-#![cfg(test)]
+//! Common utilities for octez-riscv integration tests
 
 use std::fs;
 
@@ -18,12 +18,12 @@ use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
 pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
 -> impl Fn() -> PvmStepper<NoHooks, MC, BCC> {
-    let program = fs::read("../../../assets/jstz").unwrap();
+    let program = fs::read("../../../assets/jstz").expect("Kernel path should be valid");
 
     let mut inbox = InboxBuilder::new();
     inbox
         .load_from_file("../../../assets/jstz-regression-inbox.json")
-        .unwrap();
+        .expect("Inbox path should be valid");
     let inbox = inbox.build();
 
     let address = [0; 20];
@@ -40,7 +40,7 @@ pub fn make_stepper_factory<MC: MemoryConfig, BCC: BlockCacheConfig>()
             None,
             block_builder,
         )
-        .unwrap()
+        .expect("PvmStepper initialisation arguments should be valid")
     }
 }
 

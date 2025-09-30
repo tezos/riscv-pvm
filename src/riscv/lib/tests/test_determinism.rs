@@ -2,11 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-mod common;
-
 use std::ops::Bound;
 
-use common::*;
 use octez_riscv::machine_state::block_cache::BlockCacheConfig;
 use octez_riscv::machine_state::block_cache::TestCacheConfig;
 use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
@@ -20,6 +17,7 @@ use octez_riscv::state_backend::hash;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_test_utils::*;
 
 #[test]
 fn test_jstz_determinism() {

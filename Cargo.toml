@@ -5,6 +5,7 @@ members = [
     "durable_storage",
     "tools/sandbox",
     "tools/analyse-jit-functions",
+    "test-utils"
 ]
 exclude = ["kernels"]
 
@@ -103,6 +104,12 @@ features = ["serde"]
 [workspace.dependencies.ocaml]
 version = "1.1.0"
 default-features = false
+
+[workspace.dependencies.octez-riscv]
+path = "src/riscv/lib"
+
+[workspace.dependencies.octez-riscv-test-utils]
+path = "test-utils"
 
 # The dependency alias is used to make it obvious that it should not be used directly. Using it
 # directly may have a surprising impact on performance when logging and tracing are disabled.
