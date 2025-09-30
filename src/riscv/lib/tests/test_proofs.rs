@@ -23,7 +23,6 @@ use octez_riscv::state_backend::AllocatedOf;
 use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
-use octez_riscv::state_backend::proof_backend::proof::deserialiser;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::NotFound;
 use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
@@ -203,9 +202,7 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig, BCC: BlockCacheConfig>(
     let empty_proof = proof_helpers::empty(state_hash);
     assert!(matches!(
         verify_fn(stepper, empty_proof),
-        Err(ProofVerificationFailure::BadDeserialisation(
-            deserialiser::Error::Deserialise(_)
-        ))
+        Err(ProofVerificationFailure::BadDeserialisation(_))
     ));
 
     let invalid_final_hash_proof = proof_helpers::with_final_hash(proof, state_hash);

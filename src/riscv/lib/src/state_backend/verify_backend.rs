@@ -24,11 +24,11 @@ use super::ManagerWrite;
 use super::PartialHashError;
 use super::Ref;
 use crate::state_backend::Elem;
+use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
-use crate::state_backend::proof_backend::proof::deserialiser;
 
 /// Panic payload that is raised when a value isn't present in a part of the Verifier backend.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]
@@ -59,7 +59,7 @@ pub(crate) fn handle_stepper_panics<R, F: FnOnce() -> R + std::panic::UnwindSafe
 #[derive(Debug, thiserror::Error)]
 pub enum ProofVerificationFailure {
     #[error("Deserialisation error: {0}")]
-    BadDeserialisation(#[from] deserialiser::Error),
+    BadDeserialisation(#[from] ProofError),
 
     #[error("Stepper error")]
     StepperError,
