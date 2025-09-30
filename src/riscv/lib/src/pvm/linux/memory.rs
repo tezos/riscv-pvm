@@ -83,7 +83,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         M: ManagerReadWrite,
     {
         core.main_memory
-            .protect_pages(addr.to_machine_address(), length as usize, perms)?;
+            .protect_pages(addr.to_machine_address(), length, perms)?;
 
         // Return 0 to indicate success.
         Ok(0)
@@ -123,12 +123,10 @@ impl<M: ManagerBase> SupervisorState<M> {
         }
 
         let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => core.main_memory.allocate_and_protect_pages(
-                None,
-                length.get() as usize,
-                perms,
-                false,
-            )?,
+            AddressHint::Hint => {
+                core.main_memory
+                    .allocate_and_protect_pages(None, length.get(), perms, false)?
+            }
 
             AddressHint::Fixed { allow_replace } => {
                 if !addr.is_aligned(PAGE_SIZE) {
@@ -137,7 +135,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
                 core.main_memory.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
-                    length.get() as usize,
+                    length.get(),
                     perms,
                     allow_replace,
                 )?
@@ -162,7 +160,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         M: ManagerReadWrite,
     {
         core.main_memory
-            .deallocate_and_protect_pages(addr, length as usize)
+            .deallocate_and_protect_pages(addr, length)
             .map_err(|_| Error::InvalidArgument)?;
 
         Ok(0)

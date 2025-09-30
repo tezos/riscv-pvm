@@ -276,7 +276,7 @@ mod tests {
         // populating a read-only page should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
+            .protect_pages(0, PAGE_SIZE.get(), Permissions {
                 read: true,
                 exec: false,
                 write: false,
@@ -288,7 +288,7 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE)
+            .protect_pages(0, PAGE_SIZE.get(), Permissions::READ_WRITE)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -296,7 +296,7 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE_EXEC)
+            .protect_pages(0, PAGE_SIZE.get(), Permissions::READ_WRITE_EXEC)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -304,7 +304,7 @@ mod tests {
         // populating a R+X page should succeed
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
+            .protect_pages(0, PAGE_SIZE.get(), Permissions {
                 read: true,
                 exec: true,
                 write: false,

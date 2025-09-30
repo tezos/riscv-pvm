@@ -766,7 +766,7 @@ where
         const ECALL: u32 = 0b1110011;
 
         const RESTORER_FUNCTION: [u32; 2] = [LOAD_SIGRETURN, ECALL];
-        const RESTORER_LENGTH: usize = size_of_val(&RESTORER_FUNCTION);
+        const RESTORER_LENGTH: u64 = size_of_val(&RESTORER_FUNCTION) as u64;
 
         // Ensure the restorer is in its own page
         let address = address
@@ -789,7 +789,7 @@ where
         // Make the restorer page R+X
         self.machine_state.core.main_memory.protect_pages(
             address.to_machine_address(),
-            PAGE_SIZE.get() as usize,
+            PAGE_SIZE.get(),
             Permissions {
                 read: true,
                 exec: true,
@@ -797,7 +797,7 @@ where
             },
         )?;
 
-        let restorer_end = address + RESTORER_LENGTH as u64;
+        let restorer_end = address + RESTORER_LENGTH;
 
         // Store where the restorer is kept so that the signal handlers can find it
         self.machine_state
@@ -843,7 +843,7 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MC::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         // Write the initial stack pointer and program counter.
@@ -923,7 +923,7 @@ mod tests {
         pvm.machine_state
             .core
             .main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE)
+            .protect_pages(0, MC::TOTAL_BYTES as u64, Permissions::READ_WRITE)
             .unwrap();
 
         // Write the initial stack pointer and program counter.
