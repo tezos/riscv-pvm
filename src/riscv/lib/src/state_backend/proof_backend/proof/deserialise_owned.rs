@@ -10,17 +10,16 @@ use bincode::Decode;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
 use super::deserialiser::Partial;
-use super::deserialiser::ProofLayoutResult;
+use super::deserialiser::Result;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
+use crate::state_backend::ProofError;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofLayoutError;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::proof::deserialiser;
-use crate::state_backend::proof_backend::proof::deserialiser::ProofParseResult;
 use crate::state_backend::proof_backend::tree::Tree;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::binary;
@@ -33,15 +32,13 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
 
     type DeserialiserNode<R> = OwnedBranchComb<R, Self>;
 
-    fn into_leaf_raw<const LEN: usize>(
-        self,
-    ) -> ProofLayoutResult<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
+    fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         self.deserialise_as_leaf()?
             .map_present_fallible(|data| {
                 let data_len = data.len();
                 let bytes: Box<[u8; LEN]> =
                     data.try_into()
-                        .map_err(|_| ProofLayoutError::UnexpectedLeafSize {
+                        .map_err(|_| ProofError::UnexpectedLeafSize {
                             expected: LEN,
                             got: data_len,
                         })?;
@@ -50,7 +47,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(|data| OwnedParserComb::new(Ok(data)))
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> ProofLayoutResult<Self::Suspended<Partial<(T, Vec<u8>)>>> {
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         let leaf_data = self
             .deserialise_as_leaf()?
             .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)));
@@ -58,7 +55,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
         Ok(OwnedParserComb::new(leaf_data))
     }
 
-    fn into_node(self) -> ProofLayoutResult<Self::DeserialiserNode<Partial<()>>> {
+    fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
         let branches = self.deserialise_as_node()?;
         Ok(OwnedBranchComb::new(branches))
     }
@@ -72,10 +69,10 @@ impl<'t> From<ProofTree<'t>> for ProofTreeDeserialiser<'t> {
 
 impl ProofTreeDeserialiser<'_> {
     /// Deserialise the proof as a leaf.
-    pub fn deserialise_as_leaf(self) -> ProofLayoutResult<Partial<Vec<u8>>> {
+    pub fn deserialise_as_leaf(self) -> Result<Partial<Vec<u8>>> {
         match self.0 {
             ProofPart::Absent => Ok(Partial::Absent),
-            ProofPart::Present(Tree::Node(_)) => Err(ProofLayoutError::UnexpectedNode),
+            ProofPart::Present(Tree::Node(_)) => Err(ProofError::UnexpectedNode),
             ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Blind(hash))) => {
                 Ok(Partial::Blinded(*hash))
             }
@@ -86,14 +83,14 @@ impl ProofTreeDeserialiser<'_> {
     }
 
     /// Deserialise the proof as a node.
-    pub fn deserialise_as_node(self) -> ProofLayoutResult<Partial<Vec<Self>>> {
+    pub fn deserialise_as_node(self) -> Result<Partial<Vec<Self>>> {
         match self.0 {
             ProofPart::Absent => Ok(Partial::Absent),
             ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Blind(hash))) => {
                 Ok(Partial::Blinded(*hash))
             }
             ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Read(_))) => {
-                Err(ProofLayoutError::UnexpectedLeaf)
+                Err(ProofError::UnexpectedLeaf)
             }
             ProofPart::Present(Tree::Node(trees)) => Ok(Partial::Present(
                 trees
@@ -108,12 +105,12 @@ impl ProofTreeDeserialiser<'_> {
 
 /// Suspended computation combinator for [`ProofTreeDeserialiser`] deserialiser.
 pub struct OwnedParserComb<'t, R> {
-    result: ProofParseResult<R>,
+    result: Result<R>,
     _pd: PhantomData<fn(ProofTreeDeserialiser<'t>)>,
 }
 
 impl<R> OwnedParserComb<'_, R> {
-    fn new(result: ProofParseResult<R>) -> Self {
+    fn new(result: Result<R>) -> Self {
         Self {
             result,
             _pd: PhantomData,
@@ -123,7 +120,7 @@ impl<R> OwnedParserComb<'_, R> {
 
 /// Branch deserialiser combinator for [`ProofTreeDeserialiser`] deserialiser.
 pub struct OwnedBranchComb<R, B> {
-    f: ProofParseResult<R>,
+    f: Result<R>,
     node_data: Partial<VecDeque<B>>,
 }
 
@@ -154,10 +151,9 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         mut self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
-        ) -> ProofLayoutResult<
-            <Self::Parent as Deserialiser>::Suspended<T>,
-        >,
-    ) -> ProofLayoutResult<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
+        )
+            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
     where
         T: 'static,
         R: 'static,
@@ -168,7 +164,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
             Partial::Present(ref mut branches) => {
                 branches
                     .pop_front()
-                    .ok_or(ProofLayoutError::BadNumberOfBranches {
+                    .ok_or(ProofError::BadNumberOfBranches {
                         expected: 1,
                         got: 0,
                     })?
@@ -196,11 +192,11 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         }
     }
 
-    fn done(self) -> ProofLayoutResult<<Self::Parent as Deserialiser>::Suspended<R>> {
+    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
         if let Partial::Present(branches) = self.node_data {
             if !branches.is_empty() {
                 let length = branches.len();
-                return Err(ProofLayoutError::BadNumberOfBranches {
+                return Err(ProofError::BadNumberOfBranches {
                     expected: 0,
                     got: length,
                 });
@@ -231,7 +227,7 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 }
 
 impl<R> OwnedParserComb<'_, R> {
-    pub fn into_result(self) -> ProofParseResult<R> {
+    pub fn into_result(self) -> Result<R> {
         self.result
     }
 }
@@ -240,6 +236,5 @@ impl<R> OwnedParserComb<'_, R> {
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
 ) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
-    let comp_fn = L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?;
-    Ok(comp_fn.into_result()?)
+    L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?.into_result()
 }
