@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "src/riscv/lib",
-    "durable_storage",
+    "durable-storage",
     "tools/sandbox",
     "tools/analyse-jit-functions",
 ]
