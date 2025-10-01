@@ -163,10 +163,6 @@ pub trait Suspended {
 
 #[cfg(test)]
 mod tests {
-
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     use bincode::Decode;
 
     use super::Deserialiser;
@@ -283,9 +279,9 @@ mod tests {
         deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>>,
         bytes: &'t [u8],
     ) -> Result<Result<i32>> {
-        let tags = Rc::new(RefCell::new(TagIter::new(bytes)));
-        let comp_fn = deser(StreamDeserialiser::new_present(tags.clone()))?;
-        Ok(comp_fn.into_result(&mut tags.borrow_mut().remaining_to_stream_input()))
+        let tags = TagIter::new(bytes);
+        let comp_fn = deser(StreamDeserialiser::new_present(tags))?;
+        Ok(comp_fn.into_result())
     }
 
     #[test]
@@ -308,14 +304,9 @@ mod tests {
     #[test]
     fn test_absent_computation_stream() {
         // Root is absent already
-        let proof: StreamDeserialiser = StreamDeserialiser::Absent;
+        let proof: StreamDeserialiser = StreamDeserialiser::new_absent();
         let comp_fn = computation_i16(proof).unwrap();
-        assert_eq!(
-            comp_fn
-                .into_result(&mut TagIter::new(&[]).remaining_to_stream_input())
-                .unwrap(),
-            0
-        );
+        assert_eq!(comp_fn.into_result().unwrap(), 0);
 
         // Expect absent case in the computed result
         let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_BLIND << 2];
@@ -474,15 +465,9 @@ mod tests {
         let b2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let raw_bytes_content = [raw_bytes_tags.as_ref(), b1.as_ref(), b2.as_ref()].concat();
 
-        let rc = Rc::new(RefCell::new(TagIter::new(&raw_bytes_content)));
-
-        let comp_fn =
-            computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(rc.clone()));
-
-        let res = comp_fn
-            .unwrap()
-            .into_result(&mut rc.borrow_mut().remaining_to_stream_input())
-            .unwrap();
+        let tags = TagIter::new(&raw_bytes_content);
+        let comp_fn = computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(tags));
+        let res = comp_fn.unwrap().into_result().unwrap();
 
         assert_eq!(res, -1);
 
