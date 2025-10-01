@@ -14,8 +14,8 @@
 // once later.
 #![cfg(test)]
 
-use crate::jit::builder::graph_walker::GraphWalker;
-use crate::jit::builder::instr_map::InstrId;
+use std::collections::VecDeque;
+
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
 use crate::jit::builder::outcome_map::Graph;
@@ -85,6 +85,11 @@ pub struct StepCounterUpdate<'info, T> {
     /// Unsuccessful outcomes increase by just `base_diff`.
     base_diff: usize,
 
+    /// If the program exits after this outcome, the step counter must be further increased by this
+    /// amount (in addition to `base_diff`-related increments),
+    /// as subsequent step-counter updates will not fire.
+    exit_delta: usize,
+
     /// Edge where the step counter needs updating
     edge: &'info DirectedEdgeInfo<T>,
 }
@@ -92,7 +97,8 @@ pub struct StepCounterUpdate<'info, T> {
 impl<'info, T> StepCounterUpdate<'info, T> {
     /// Number of steps to increment the step counter on a successful outcome.
     pub fn success_delta(&self) -> usize {
-        self.base_diff + 1
+        // wrapping_add is required as base_diff can be negative.
+        self.base_diff.wrapping_add(1)
     }
 
     /// Number of steps to increment the step counter on an exception outcome.
@@ -107,6 +113,7 @@ impl<'info, T> StepCounterUpdate<'info, T> {
 }
 
 /// Control flow graph of instructions
+#[derive(Debug)]
 pub struct ControlFlowGraph<'info, T> {
     /// Nodes in the control flow graph, indexed by instruction ID
     nodes: InstrMap<&'info NodeInfo<T>>,
@@ -179,122 +186,68 @@ where
         }
     }
 
-    /// Classify the incoming edges of a node. The goal is to find the previous node if it is
-    /// unambiguous.
-    fn classify_incoming(&self, idx: InstrId) -> EdgeClass {
-        let [one] = self.graph.incoming_outcomes(TargetInstrLoc::Internal(idx)) else {
-            return EdgeClass::AmbiguousOrNone;
-        };
-
-        match self.outcomes[*one].from() {
-            SourceInstrLoc::Internal(source) => EdgeClass::Unambiguous(source),
-            SourceInstrLoc::Entry => EdgeClass::AmbiguousOrNone,
-        }
-    }
-
-    /// Find the step deltas for each node in the graph.
-    ///
-    /// A step delta is the number of steps that have been performed since the last step counter
-    /// update. 0 means the step counter was updated through an incoming edge of a node.
-    fn find_step_deltas(&self) -> InstrMap<usize> {
-        let mut step_deltas = self.nodes.map(|_, _| None);
-
-        for (idx, _) in self.nodes.iter() {
-            let mut walker = GraphWalker::new(idx);
-            while let Some(cursor) = walker.next() {
-                let pos = cursor.position();
-
-                if step_deltas[pos].is_some() {
-                    // If the step delta is already set there is nothing for us to do.
-                    continue;
-                }
-
-                let EdgeClass::Unambiguous(source) = self.classify_incoming(pos) else {
-                    // Join points require their incoming edges to flush the step counter, thereby
-                    // setting delta back to 0. Unreachable nodes get set to 0 as well, as their
-                    // step delta is irrelevant.
-                    step_deltas[pos] = Some(0usize);
-                    continue;
-                };
-
-                if let Some(delta) = step_deltas[source] {
-                    // If the previous node already has a step delta, we can just use that to
-                    // determine the current node's step delta.
-                    step_deltas[pos] = Some(delta + 1);
-                    continue;
-                }
-
-                if cursor.already_seen(source) {
-                    // We have encountered a cycle. That means it is impossible to resolve an
-                    // accurate delta. We simply require the incoming edge to flush the step
-                    // counter. This makes the step delta 0.
-                    step_deltas[pos] = Some(0usize);
-                    continue;
-                }
-
-                cursor.not_done_yet([source]);
-            }
-        }
-
-        step_deltas.map(|_idx, delta| delta.expect("All nodes should have a step delta by now"))
-    }
-
     /// Find all the edges where the step counter needs updating.
     pub fn find_step_counter_updates(&self) -> OutcomeMap<Option<StepCounterUpdate<'_, T>>> {
-        let step_deltas = self.find_step_deltas();
+        // The delta is the number of steps performed since the last StepCounterUpdate.
+        // 0 means the step counter was updated through an incoming edge.
+        // None means the value has not been computed yet.
+        let mut instr_deltas: InstrMap<Option<usize>> = self.nodes.map(|_, _| None);
 
-        self.outcomes.map(|_idx, outcome| {
-            let Some(edge) = outcome.data() else {
-                // There is nothing to do for edges that don't have corresponding data on caller
-                // side.
-                return None;
+        let mut step_updates = self.outcomes.map(|_, _| None);
+
+        let mut outcome_queue =
+            VecDeque::from(self.graph.outgoing_outcomes(SourceInstrLoc::Entry).to_vec());
+
+        while let Some(outcome_id) = outcome_queue.pop_front() {
+            let source_delta = match self.outcomes[outcome_id].from() {
+                SourceInstrLoc::Entry => None,
+                SourceInstrLoc::Internal(source) => instr_deltas[source],
             };
 
-            let SourceInstrLoc::Internal(source) = outcome.from() else {
-                // There is nothing to do for edges from outside of the graph context. These would
-                // target entrypoints anyway.
-                return None;
-            };
-            let source_delta = step_deltas[source];
+            let edge = self.outcomes[outcome_id].data();
 
-            match outcome.to() {
-                TargetInstrLoc::Internal(target) => {
-                    let target_delta = step_deltas[target];
-
-                    // When the target delta is less or equal, that means the step counter is expected
-                    // to be updated through edges to the target.
-                    // The equal case is important for loops of instructions onto themselves. Those are
-                    // step delta 0 -> 0 transitions.
-                    if target_delta <= source_delta {
-                        return Some(StepCounterUpdate {
-                            base_diff: source_delta - target_delta,
-                            edge,
-                        });
-                    }
-
-                    None
-                }
-
+            match self.outcomes[outcome_id].to() {
                 TargetInstrLoc::Exit => {
-                    // Exit transitions need to ensure the step counter is updated to reflect the
-                    // number of executed instructions in the current context.
-                    Some(StepCounterUpdate {
-                        base_diff: step_deltas[source],
-                        edge,
-                    })
+                    let sc_update = StepCounterUpdate {
+                        base_diff: source_delta.expect("Exit must have a source delta."),
+                        exit_delta: 0,
+                        edge: edge.expect("Exit edge must have edge info."),
+                    };
+                    *step_updates[outcome_id].data_mut() = Some(sc_update);
                 }
+                TargetInstrLoc::Internal(dest_id) => match instr_deltas[dest_id] {
+                    Some(existing_delta) => {
+                        // an unset source delta means the source is an entry point, implying
+                        // a delta of 0.
+                        let source_delta = source_delta.unwrap_or_default();
+
+                        // The existing delta may be larger than the source delta. In this case,
+                        // reconciling the step counter requires a negative diff.
+                        let base_diff = source_delta.wrapping_sub(existing_delta);
+
+                        let sc_update = StepCounterUpdate {
+                            base_diff,
+                            exit_delta: existing_delta,
+                            edge: edge.expect("Internal edge must have edge info."),
+                        };
+
+                        *step_updates[outcome_id].data_mut() = Some(sc_update);
+                    }
+                    None => {
+                        instr_deltas[dest_id] =
+                            Some(source_delta.map_or(0, |delta| delta.wrapping_add(1)));
+
+                        outcome_queue.extend(
+                            self.graph
+                                .outgoing_outcomes(SourceInstrLoc::Internal(dest_id)),
+                        );
+                    }
+                },
             }
-        })
+        }
+
+        step_updates
     }
-}
-
-/// Classification of edges from a node
-enum EdgeClass {
-    /// Has exactly one explicit edge and no implicit edges
-    Unambiguous(InstrId),
-
-    /// Has implicit edges or not exactly 1 explicit edge
-    AmbiguousOrNone,
 }
 
 // By convention, test modules are at the end of the file.

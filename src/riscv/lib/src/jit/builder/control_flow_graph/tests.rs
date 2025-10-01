@@ -55,6 +55,10 @@ struct TestInstrOutcome {
 
     /// Amount to increment the step counter by if this outcome is taken
     step_delta: Cell<usize>,
+
+    /// Extra amount to increment the step counter if the program
+    /// exits after executing this outcome.
+    exit_delta: Cell<usize>,
 }
 
 impl TestInstrOutcome {
@@ -89,6 +93,7 @@ impl TestInstr {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(1),
                 step_delta: Cell::new(1),
+                exit_delta: Cell::new(0),
             }],
         }
     }
@@ -100,10 +105,12 @@ impl TestInstr {
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(1),
                     step_delta: Cell::new(1),
+                    exit_delta: Cell::new(0),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::Exit,
                     step_delta: Cell::new(0),
+                    exit_delta: Cell::new(0),
                 },
             ],
         }
@@ -117,10 +124,12 @@ impl TestInstr {
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(1),
                     step_delta: Cell::new(1),
+                    exit_delta: Cell::new(0),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(offset),
                     step_delta: Cell::new(1),
+                    exit_delta: Cell::new(0),
                 },
             ],
         }
@@ -132,6 +141,7 @@ impl TestInstr {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(offset),
                 step_delta: Cell::new(1),
+                exit_delta: Cell::new(0),
             }],
         }
     }
@@ -197,6 +207,7 @@ fn evaluate_program(
     max_steps: usize,
 ) -> (usize, u64) {
     let mut steps = 0;
+    let mut exit_steps = 0;
     let mut rng = StdRng::seed_from_u64(seed);
 
     // We use a conditional loop break to not mess with how step counters are updated. For example,
@@ -218,11 +229,15 @@ fn evaluate_program(
             .checked_add(outcome.step_delta.get())
             .expect("step counting should not overflow");
 
+        exit_steps = outcome.exit_delta.get();
+
         match outcome.action {
             TestInstrPostAction::RelativeJump(offset) => pc = pc.wrapping_add_signed(offset),
             TestInstrPostAction::Exit => break,
         }
     }
+
+    steps += exit_steps;
 
     (steps, pc)
 }
@@ -281,6 +296,7 @@ fn run_sparse_program(
         };
 
         outcome.step_delta.set(step_delta);
+        outcome.exit_delta.set(update.exit_delta);
     }
 
     evaluate_program(seed, start, start, program, max_steps)
@@ -342,12 +358,17 @@ fn finishes_on_entry_recursion() {
 
 #[test]
 fn finishes_on_mid_sequence_recursion() {
-    let (steps, pc) = run_sparse_program(
-        0,
-        0x1000u64,
-        &[TestInstr::next(), TestInstr::next(), TestInstr::jump(-1)],
-        100,
-    );
+    let program = [TestInstr::next(), TestInstr::next(), TestInstr::jump(-1)];
+
+    // perform analysis and run the program.
+    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100);
+
+    // Ensure the step counting analysis inserted the expected step counter updates.
+    // In this case, we only expect a step counter update on the jump back to the previous
+    // instruction.
+    assert_eq!(program[0].outcomes[0].step_delta.get(), 0);
+    assert_eq!(program[1].outcomes[0].step_delta.get(), 0);
+    assert_eq!(program[2].outcomes[0].step_delta.get(), 2);
 
     assert_eq!(steps, 101);
     assert_eq!(pc, 0x1001);
