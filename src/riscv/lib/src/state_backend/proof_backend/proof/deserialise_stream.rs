@@ -336,3 +336,6 @@ pub fn deserialise<L: ProofLayout>(
     // can not execute the suspended computation, it can only compose them due to encapsulation
     comp_fn.into_result(&mut tags_rc.borrow_mut().remaining_to_stream_input())
 }
+
+#[cfg(test)]
+mod tests;
