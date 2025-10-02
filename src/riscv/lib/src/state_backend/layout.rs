@@ -163,10 +163,6 @@ macro_rules! struct_layout {
                     [<$field_name:camel>]
                 ),+
             >
-            where
-            $(
-                $crate::state_backend::AllocatedOf<[<$field_name:camel>], $crate::state_backend::verify_backend::Verifier>: 'static
-            ),+
             {
                 #[inline]
                 fn to_merkle_tree(

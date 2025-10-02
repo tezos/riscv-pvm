@@ -308,10 +308,7 @@ pub trait ProofLayout: Layout {
     ) -> Result<Hash, PartialHashError>;
 }
 
-impl<T: ProofLayout> ProofLayout for Box<T>
-where
-    AllocatedOf<T, Verifier>: 'static,
-{
+impl<T: ProofLayout> ProofLayout for Box<T> {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         T::to_merkle_tree(*state)
     }
@@ -646,8 +643,6 @@ impl<A, B> ProofLayout for (A, B)
 where
     A: ProofLayout,
     B: ProofLayout,
-    AllocatedOf<A, Verifier>: 'static,
-    AllocatedOf<B, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![A::to_merkle_tree(state.0)?, B::to_merkle_tree(state.1)?];
@@ -678,9 +673,6 @@ where
     A: ProofLayout,
     B: ProofLayout,
     C: ProofLayout,
-    AllocatedOf<A, Verifier>: 'static,
-    AllocatedOf<B, Verifier>: 'static,
-    AllocatedOf<C, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![
@@ -717,10 +709,6 @@ where
     B: ProofLayout,
     C: ProofLayout,
     D: ProofLayout,
-    AllocatedOf<A, Verifier>: 'static,
-    AllocatedOf<B, Verifier>: 'static,
-    AllocatedOf<C, Verifier>: 'static,
-    AllocatedOf<D, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![
@@ -760,11 +748,6 @@ where
     C: ProofLayout,
     D: ProofLayout,
     E: ProofLayout,
-    AllocatedOf<A, Verifier>: 'static,
-    AllocatedOf<B, Verifier>: 'static,
-    AllocatedOf<C, Verifier>: 'static,
-    AllocatedOf<D, Verifier>: 'static,
-    AllocatedOf<E, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![
@@ -806,12 +789,6 @@ where
     D: ProofLayout,
     E: ProofLayout,
     F: ProofLayout,
-    AllocatedOf<A, Verifier>: 'static,
-    AllocatedOf<B, Verifier>: 'static,
-    AllocatedOf<C, Verifier>: 'static,
-    AllocatedOf<D, Verifier>: 'static,
-    AllocatedOf<E, Verifier>: 'static,
-    AllocatedOf<F, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = vec![
@@ -850,8 +827,7 @@ where
 
 impl<T, const LEN: usize> ProofLayout for [T; LEN]
 where
-    T: ProofLayout + 'static,
-    AllocatedOf<T, Verifier>: 'static,
+    T: ProofLayout,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let children = state
@@ -915,7 +891,6 @@ where
 impl<T, const LEN: usize> ProofLayout for Many<T, LEN>
 where
     T: ProofLayout,
-    AllocatedOf<T, Verifier>: 'static,
 {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
         let leaves = state
@@ -938,10 +913,7 @@ where
         fn parametrised_deserialiser<T: ProofLayout, D: Deserialiser>(
             length: usize,
             proof: D,
-        ) -> Result<D::Suspended<NestedSuspendedResult<T>>>
-        where
-            AllocatedOf<T, Verifier>: 'static,
-        {
+        ) -> Result<D::Suspended<NestedSuspendedResult<T>>> {
             let child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
 
             if length == 1 {

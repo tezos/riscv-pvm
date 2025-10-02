@@ -107,7 +107,7 @@ pub trait Deserialiser {
         clippy::type_complexity,
         reason = "Adding an alias for Partial<(T, Vec<u8>)> would only decrease readability"
     )]
-    fn into_leaf<T: Decode<()> + 'static>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
@@ -126,19 +126,10 @@ pub trait DeserialiserNode<R> {
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
-    where
-        T: 'static,
-        R: 'static;
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>;
 
     /// Helper for mapping the current result into a new type.
-    fn map<T>(
-        self,
-        f: impl FnOnce(R) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
-    where
-        T: 'static,
-        R: 'static;
+    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
@@ -155,10 +146,8 @@ pub trait Suspended {
     /// Helper to map the current result into a new type.
     fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
-    where
-        Self::Output: 'static;
+        f: impl FnOnce(Self::Output) -> T,
+    ) -> <Self::Parent as Deserialiser>::Suspended<T>;
 }
 
 #[cfg(test)]
@@ -185,7 +174,7 @@ mod tests {
     use crate::storage::DIGEST_SIZE;
     use crate::storage::Hash;
 
-    fn generic_computation<T: Into<i32> + Decode<()> + 'static, D: Deserialiser>(
+    fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
         proof: D,
     ) -> Result<<D as Deserialiser>::Suspended<i32>> {
         // The tree structure:
@@ -260,23 +249,24 @@ mod tests {
         }))
     }
 
+    /// Execute a deserialising computation over an owned Merkle proof.
     fn run_owned_deserialiser<'t>(
         deser: impl FnOnce(ProofTreeDeserialiser<'t>) -> Result<OwnedParserComb<'t, i32>>,
         merkle_proof: &'t MerkleProof,
-    ) -> Result<Result<i32>> {
+    ) -> Result<i32> {
         let proof: ProofTreeDeserialiser = ProofTree::Present(merkle_proof).into();
-        let suspended = deser(proof);
-        suspended.map(|res| res.into_result())
+        let parsed_result = deser(proof)?;
+        parsed_result.into_result()
     }
 
-    /// Nested results are used to distinguish between deserialisation and parsing leaves stages
+    /// Execute a deserialising computation over raw bytes.
     fn run_stream_deserialiser<'t>(
         deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>>,
         bytes: &'t [u8],
-    ) -> Result<Result<i32>> {
+    ) -> Result<i32> {
         let input = StreamInput::new(bytes);
         let comp_fn = deser(StreamDeserialiser::new_present(input))?;
-        Ok(comp_fn.into_result())
+        comp_fn.into_result()
     }
 
     #[test]
@@ -304,58 +294,78 @@ mod tests {
         assert_eq!(comp_fn.into_result().unwrap(), 0);
 
         // Expect absent case in the computed result
-        let tag_bytes = [TAG_NODE, TAG_READ, TAG_BLIND];
         let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
         let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).into();
-        let proof_bytes = [tag_bytes.as_ref(), leaf_read.as_ref(), leaf_blind.as_ref()].concat();
+        let proof_bytes = [
+            [TAG_NODE, TAG_READ].as_ref(),
+            leaf_read.as_ref(),
+            [TAG_BLIND].as_ref(),
+            leaf_blind.as_ref(),
+        ]
+        .concat();
         let res = run_stream_deserialiser(computation_i16, &proof_bytes);
-        assert_eq!(res.unwrap().unwrap(), 0);
+        assert_eq!(res.unwrap(), 0);
     }
 
     #[test]
     fn test_not_enough_bytes_error() {
         // For the streaming case if the data is incomplete we will actually get a bincode::Error
         // due to eof being reached. So to test for NotEnoughBytes we are just going to provide less tags
-        let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
         let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
         // Note the truncated hash
         let raw_bytes_content = [
-            tag_bytes.as_ref(),
+            [TAG_NODE, TAG_READ].as_ref(),
             hash_read[0..5].as_ref(),
+            [TAG_NODE, TAG_READ].as_ref(),
             bool_read.as_ref(),
         ]
         .concat();
-        let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
+        let res = run_stream_deserialiser(computation_bool, &raw_bytes_content).unwrap_err();
 
         // Corresponds to a bincode::Error & std::io::Error because the hash deserialisation is done by
         // serde/bincode.
-        if let Ok(Err(ProofError::Deserialise(bincode::error::DecodeError::Io {
+        if let ProofError::Deserialise(bincode::error::DecodeError::Io {
             inner: io_err,
             additional: 32,
-        }))) = res
+        }) = res
         {
             assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
         } else {
             panic!("Expected a bincode::Error due to EOF");
         }
 
-        // We leave off the final tag, so we obtain a not enough bytes error we miss
-        // that final tag that we expect.
-        let raw_bytes_content = [TAG_NODE, TAG_READ, TAG_NODE];
-        let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
+        // We don't include the `TAG_READ` that should follow the `TAG_NODE`.
+        let raw_bytes_content = [TAG_NODE];
+        let res = run_stream_deserialiser(computation_bool, &raw_bytes_content).unwrap_err();
 
         // In this case, the error happens earlier, at the tag deserialisation, so it is an error
         // thrown by our own `Deserialiser` traits.
         if let ProofError::Deserialise(bincode::error::DecodeError::Io {
             inner: io_err,
             additional: 1,
-        }) = res.unwrap_err()
+        }) = res
         {
             assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
         } else {
-            panic!("Expected a bincode::Error due to EOF");
+            panic!("Expected a bincode::Error due to EOF: {res:?}");
+        }
+
+        // We omit the contents associated with the `TAG_READ`. This should trigger an error.
+        let raw_bytes_content = [TAG_NODE, TAG_READ];
+        let res = run_stream_deserialiser(computation_bool, &raw_bytes_content).unwrap_err();
+
+        // In this case, the error happens earlier, at the tag deserialisation, so it is an error
+        // thrown by our own `Deserialiser` traits.
+        if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+            inner: io_err,
+            additional: 32,
+        }) = res
+        {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
+        } else {
+            panic!("Expected a bincode::Error due to EOF: {res:?}");
         }
 
         // the same test for the OwnedDeserialiser
@@ -371,9 +381,9 @@ mod tests {
         assert!(
             matches!(
                 res,
-                Ok(Err(ProofError::Deserialise(
+                Err(ProofError::Deserialise(
                     bincode::error::DecodeError::UnexpectedEnd { additional: 27 }
-                )))
+                ))
             ),
             "{res:?}"
         )
@@ -381,20 +391,20 @@ mod tests {
 
     #[test]
     fn test_bad_bincode() {
-        let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
         let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let bad_bool_bincode = [42_u8; 1];
 
         let raw_bytes_content = [
-            tag_bytes.as_ref(),
+            [TAG_NODE, TAG_READ].as_ref(),
             hash_read.as_ref(),
+            [TAG_NODE, TAG_READ].as_ref(),
             bad_bool_bincode.as_ref(),
         ]
         .concat();
 
         let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
 
-        assert!(matches!(res, Ok(Err(ProofError::Deserialise(_)))));
+        assert!(matches!(res, Err(ProofError::Deserialise(_))));
 
         let merkle_proof = MerkleProof::Node(vec![
             MerkleProof::leaf_read(hash_read.to_vec()),
@@ -402,7 +412,7 @@ mod tests {
         ]);
         let res = run_owned_deserialiser(computation_bool, &merkle_proof);
         eprintln!("Result: {res:?}");
-        assert!(matches!(res, Ok(Err(ProofError::Deserialise(_)))));
+        assert!(matches!(res, Err(ProofError::Deserialise(_))));
     }
 
     #[test]
@@ -423,7 +433,7 @@ mod tests {
         // This test only makes sense for the stream deserialiser.
         let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
 
-        matches!(res, Ok(Err(ProofError::RemainingBytes)));
+        matches!(res, Err(ProofError::RemainingBytes));
     }
 
     #[test]
@@ -451,10 +461,15 @@ mod tests {
     #[test]
     fn test_blind_computation_stream() {
         // The nested leaf is blinded
-        let raw_bytes_tags = [TAG_NODE, TAG_BLIND, TAG_NODE, TAG_BLIND];
         let b1: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let b2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
-        let raw_bytes_content = [raw_bytes_tags.as_ref(), b1.as_ref(), b2.as_ref()].concat();
+        let raw_bytes_content = [
+            [TAG_NODE, TAG_BLIND].as_ref(),
+            b1.as_ref(),
+            [TAG_NODE, TAG_BLIND].as_ref(),
+            b2.as_ref(),
+        ]
+        .concat();
 
         let input = StreamInput::new(&raw_bytes_content);
         let comp_fn = computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(input));
@@ -522,21 +537,8 @@ mod tests {
     fn test_bad_structure_stream() {
         let hash: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         // Place an invalid second tag
-        let tag_shape_1 = [TAG_NODE, 0b01];
-        let tag_shape_2 = [TAG_NODE, TAG_BLIND, TAG_BLIND, TAG_NODE, TAG_NODE, TAG_NODE];
-        let tag_shape_3 = [TAG_NODE, TAG_NODE, TAG_BLIND];
-        let tag_shape_4 = [TAG_NODE, TAG_READ, TAG_READ];
-
-        let data_shape_1 = [];
-        let data_shape_2 = [hash.as_ref(), hash.as_ref()].concat();
-        let data_shape_3 = &hash;
-        let data_shape_4 = [hash.as_ref(), hash.as_ref()].concat();
-
         // Bad tag introduced after the first node
-        let res = run_stream_deserialiser(
-            computation_i16,
-            &[tag_shape_1.as_ref(), data_shape_1.as_ref()].concat(),
-        );
+        let res = run_stream_deserialiser(computation_i16, [TAG_NODE, 0b01].as_ref());
 
         if let ProofError::Deserialise(bincode::error::DecodeError::OtherString(message)) =
             res.unwrap_err()
@@ -548,21 +550,34 @@ mod tests {
 
         // First 2 children of root are ok in shape (blinded) but because the extra byte in tags
         // will be counted towards the blinded hashes a RemainingBytes error will occur.
-        let bytes = &[tag_shape_2.as_slice(), data_shape_2.as_ref()].concat();
+        let bytes = &[
+            [TAG_NODE, TAG_BLIND].as_ref(),
+            hash.as_ref(),
+            [TAG_BLIND].as_ref(),
+            hash.as_ref(),
+            [TAG_NODE, TAG_NODE, TAG_NODE].as_ref(),
+        ]
+        .concat();
         let res = run_stream_deserialiser(computation_i16, bytes);
-        assert!(matches!(res, Ok(Err(ProofError::RemainingBytes))));
+        assert!(matches!(res, Err(ProofError::RemainingBytes)));
 
         // The first child is a node, but is expected to be a leaf
         let res = run_stream_deserialiser(
             computation_i16,
-            &[tag_shape_3.as_ref(), data_shape_3.as_ref()].concat(),
+            &[[TAG_NODE, TAG_NODE, TAG_BLIND].as_ref(), hash.as_ref()].concat(),
         );
         assert!(matches!(res, Err(ProofError::UnexpectedNode)));
 
         // The second child is a read leaf, but is expected to be a node
         let res = run_stream_deserialiser(
             computation_i16,
-            &[tag_shape_4.as_slice(), data_shape_4.as_ref()].concat(),
+            &[
+                [TAG_NODE, TAG_READ].as_ref(),
+                hash.as_ref(),
+                [TAG_READ].as_ref(),
+                hash.as_ref(),
+            ]
+            .concat(),
         );
         assert!(matches!(res, Err(ProofError::UnexpectedLeaf)));
     }
@@ -588,19 +603,20 @@ mod tests {
         let h3 = 0xC0005_i32.to_le_bytes();
         let h4: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[9, 10, 11]).into();
 
-        let tags = [TAG_NODE, TAG_READ, TAG_BLIND, TAG_READ, TAG_BLIND];
-
         let res = run_stream_deserialiser(
             computation_leaves,
             &[
-                tags.as_ref(),
+                [TAG_NODE, TAG_READ].as_ref(),
                 h1.as_ref(),
+                [TAG_BLIND].as_ref(),
                 h2.as_ref(),
+                [TAG_READ].as_ref(),
                 h3.as_ref(),
+                [TAG_BLIND].as_ref(),
                 h4.as_ref(),
             ]
             .concat(),
         );
-        assert_eq!(res.unwrap().unwrap(), 0x140A_0000 + 0xC0005);
+        assert_eq!(res.unwrap(), 0x140A_0000 + 0xC0005);
     }
 }
