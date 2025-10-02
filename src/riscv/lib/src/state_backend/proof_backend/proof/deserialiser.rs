@@ -172,21 +172,16 @@ mod tests {
     use super::Suspended;
     use crate::state_backend::ProofError;
     use crate::state_backend::ProofTree;
-    use crate::state_backend::TagError;
     use crate::state_backend::proof_backend::proof::InvalidTagError;
     use crate::state_backend::proof_backend::proof::MerkleProof;
-    use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
     use crate::state_backend::proof_backend::proof::TAG_BLIND;
     use crate::state_backend::proof_backend::proof::TAG_NODE;
     use crate::state_backend::proof_backend::proof::TAG_READ;
-    use crate::state_backend::proof_backend::proof::Tag;
     use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
+    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamInput;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamParserComb;
-    use crate::state_backend::proof_backend::proof::deserialise_stream::TagIter;
-    use crate::state_backend::proof_backend::proof::serialise_raw_tags;
-    use crate::state_backend::proof_backend::proof::tag_offset;
     use crate::storage::DIGEST_SIZE;
     use crate::storage::Hash;
 
@@ -279,8 +274,8 @@ mod tests {
         deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>>,
         bytes: &'t [u8],
     ) -> Result<Result<i32>> {
-        let tags = TagIter::new(bytes);
-        let comp_fn = deser(StreamDeserialiser::new_present(tags))?;
+        let input = StreamInput::new(bytes);
+        let comp_fn = deser(StreamDeserialiser::new_present(input))?;
         Ok(comp_fn.into_result())
     }
 
@@ -309,7 +304,7 @@ mod tests {
         assert_eq!(comp_fn.into_result().unwrap(), 0);
 
         // Expect absent case in the computed result
-        let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_BLIND << 2];
+        let tag_bytes = [TAG_NODE, TAG_READ, TAG_BLIND];
         let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
         let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).into();
         let proof_bytes = [tag_bytes.as_ref(), leaf_read.as_ref(), leaf_blind.as_ref()].concat();
@@ -321,7 +316,7 @@ mod tests {
     fn test_not_enough_bytes_error() {
         // For the streaming case if the data is incomplete we will actually get a bincode::Error
         // due to eof being reached. So to test for NotEnoughBytes we are just going to provide less tags
-        let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_NODE << 2 | TAG_READ];
+        let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
         let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
@@ -346,22 +341,22 @@ mod tests {
             panic!("Expected a bincode::Error due to EOF");
         }
 
-        // The tags for this test fit in one byte, so we have to provide nothing to obtain
-        // a not enough bytes error because of tags.
-        let raw_bytes_content = [];
+        // We leave off the final tag, so we obtain a not enough bytes error we miss
+        // that final tag that we expect.
+        let raw_bytes_content = [TAG_NODE, TAG_READ, TAG_NODE];
         let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
 
         // In this case, the error happens earlier, at the tag deserialisation, so it is an error
         // thrown by our own `Deserialiser` traits.
-        assert!(
-            matches!(
-                res,
-                Err(ProofError::TagDeserialise(TagError::NotEnoughBytes(
-                    NotEnoughBytesError
-                )))
-            ),
-            "{res:?}"
-        );
+        if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+            inner: io_err,
+            additional: 1,
+        }) = res.unwrap_err()
+        {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
+        } else {
+            panic!("Expected a bincode::Error due to EOF");
+        }
 
         // the same test for the OwnedDeserialiser
         let merkle_proof = MerkleProof::Node(vec![
@@ -386,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_bad_bincode() {
-        let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_NODE << 2 | TAG_READ];
+        let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
         let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let bad_bool_bincode = [42_u8; 1];
 
@@ -412,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_too_many_bytes_error() {
-        let tag_bytes = [TAG_NODE << 6 | TAG_READ << 4 | TAG_NODE << 2 | TAG_READ];
+        let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
         let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
@@ -453,20 +448,16 @@ mod tests {
         assert_eq!(comp_fn.into_result().unwrap(), -1);
     }
 
-    fn raw_tags_to_bytes<const LEN: usize>(tags: [u8; LEN]) -> Vec<u8> {
-        serialise_raw_tags(tags.into_iter().map(|tag| Tag::try_from(tag).unwrap()))
-    }
-
     #[test]
     fn test_blind_computation_stream() {
         // The nested leaf is blinded
-        let raw_bytes_tags = raw_tags_to_bytes([TAG_NODE, TAG_BLIND, TAG_NODE, TAG_BLIND]);
+        let raw_bytes_tags = [TAG_NODE, TAG_BLIND, TAG_NODE, TAG_BLIND];
         let b1: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let b2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         let raw_bytes_content = [raw_bytes_tags.as_ref(), b1.as_ref(), b2.as_ref()].concat();
 
-        let tags = TagIter::new(&raw_bytes_content);
-        let comp_fn = computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(tags));
+        let input = StreamInput::new(&raw_bytes_content);
+        let comp_fn = computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(input));
         let res = comp_fn.unwrap().into_result().unwrap();
 
         assert_eq!(res, -1);
@@ -531,11 +522,10 @@ mod tests {
     fn test_bad_structure_stream() {
         let hash: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
         // Place an invalid second tag
-        let tag_shape_1 = [TAG_NODE << tag_offset(0) | 0b01 << tag_offset(1)];
-        let tag_shape_2 =
-            raw_tags_to_bytes([TAG_NODE, TAG_BLIND, TAG_BLIND, TAG_NODE, TAG_NODE, TAG_NODE]);
-        let tag_shape_3 = raw_tags_to_bytes([TAG_NODE, TAG_NODE, TAG_BLIND]);
-        let tag_shape_4 = raw_tags_to_bytes([TAG_NODE, TAG_READ, TAG_READ]);
+        let tag_shape_1 = [TAG_NODE, 0b01];
+        let tag_shape_2 = [TAG_NODE, TAG_BLIND, TAG_BLIND, TAG_NODE, TAG_NODE, TAG_NODE];
+        let tag_shape_3 = [TAG_NODE, TAG_NODE, TAG_BLIND];
+        let tag_shape_4 = [TAG_NODE, TAG_READ, TAG_READ];
 
         let data_shape_1 = [];
         let data_shape_2 = [hash.as_ref(), hash.as_ref()].concat();
@@ -547,12 +537,14 @@ mod tests {
             computation_i16,
             &[tag_shape_1.as_ref(), data_shape_1.as_ref()].concat(),
         );
-        assert!(matches!(
-            res,
-            Err(ProofError::TagDeserialise(TagError::InvalidTag(
-                InvalidTagError
-            )))
-        ));
+
+        if let ProofError::Deserialise(bincode::error::DecodeError::OtherString(message)) =
+            res.unwrap_err()
+        {
+            assert_eq!(message, InvalidTagError.to_string());
+        } else {
+            panic!("Expected an InvalidTagError");
+        }
 
         // First 2 children of root are ok in shape (blinded) but because the extra byte in tags
         // will be counted towards the blinded hashes a RemainingBytes error will occur.
@@ -596,7 +588,7 @@ mod tests {
         let h3 = 0xC0005_i32.to_le_bytes();
         let h4: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[9, 10, 11]).into();
 
-        let tags = raw_tags_to_bytes([TAG_NODE, TAG_READ, TAG_BLIND, TAG_READ, TAG_BLIND]);
+        let tags = [TAG_NODE, TAG_READ, TAG_BLIND, TAG_READ, TAG_BLIND];
 
         let res = run_stream_deserialiser(
             computation_leaves,

@@ -14,7 +14,8 @@
 //!
 //! - Convert [`super::merkle::MerkleTree`] to [`MerkleProof`]
 
-use itertools::Itertools;
+use bincode::Encode;
+use bincode::enc::write::Writer;
 
 use super::tree::ModifyResult;
 use super::tree::Tree;
@@ -28,6 +29,7 @@ use crate::state_backend::hash::Hash;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
 use crate::storage::HashError;
+use crate::storage::binary;
 
 pub mod deserialise_owned;
 pub mod deserialise_stream;
@@ -38,7 +40,7 @@ pub mod deserialiser;
 /// The proof needs to be able to:
 /// - Contain enough information to be able to run a single step on A
 /// - Obtain the hash of the state after the step
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Encode)]
 pub struct Proof {
     /// State of the final state B
     final_state_hash: Hash,
@@ -93,6 +95,50 @@ impl Proof {
 ///
 /// [`MerkleTree`]: super::merkle::MerkleTree
 pub type MerkleProof = Tree<MerkleProofLeaf>;
+
+impl bincode::Encode for MerkleProof {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        let mut datas = vec![];
+        let mut nodes = vec![self];
+
+        while let Some(node) = nodes.pop() {
+            match node {
+                Self::Node(trees) => {
+                    Tag::Node.encode(encoder)?;
+
+                    // We add the children in reverse order so that when we pop them from the
+                    // `nodes` stack, they are in the original order.
+                    nodes.extend(trees.iter().rev());
+                }
+
+                Self::Leaf(MerkleProofLeaf::Read(data)) => {
+                    Tag::Leaf(LeafTag::Read).encode(encoder)?;
+
+                    // We want to write the raw data, and avoid the bincode length prefix. The decoder
+                    // will know how many bytes to read.
+                    datas.push(data.as_slice());
+                }
+
+                Self::Leaf(MerkleProofLeaf::Blind(hash)) => {
+                    Tag::Leaf(LeafTag::Blind).encode(encoder)?;
+                    datas.push(hash.as_ref());
+                }
+            }
+        }
+
+        let writer = encoder.writer();
+
+        // The deserialiser expects the tags to be written first, then the data to fill the leafs.
+        for data in datas {
+            writer.write(data)?;
+        }
+
+        Ok(())
+    }
+}
 
 /// Type used to describe the leaves of a [`MerkleProof`].
 /// For more details see the documentation of [`MerkleProof`].
@@ -157,10 +203,55 @@ pub enum Tag {
     Leaf(LeafTag),
 }
 
+impl bincode::Encode for Tag {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        match self {
+            Tag::Node => TAG_NODE.encode(encoder),
+            Tag::Leaf(leaf_tag) => leaf_tag.encode(encoder),
+        }
+    }
+}
+
+impl<'de, C> bincode::BorrowDecode<'de, C> for Tag {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let byte = u8::borrow_decode(decoder)?;
+        Tag::try_from(byte)
+            .map_err(|error| bincode::error::DecodeError::OtherString(error.to_string()))
+    }
+}
+
+impl<C> bincode::Decode<C> for Tag {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let byte = u8::decode(decoder)?;
+        Tag::try_from(byte)
+            .map_err(|error| bincode::error::DecodeError::OtherString(error.to_string()))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LeafTag {
     Blind,
     Read,
+}
+
+impl Encode for LeafTag {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        match self {
+            LeafTag::Blind => TAG_BLIND,
+            LeafTag::Read => TAG_READ,
+        }
+        .encode(encoder)
+    }
 }
 
 /// Tag of a node
@@ -233,59 +324,19 @@ impl Tag {
     }
 }
 
-fn serialise_raw_tags(raw_tags: impl Iterator<Item = Tag>) -> Vec<u8> {
-    // Tag serialisation to bytes depends on the number of bits required to hold a raw tag
-    // Here, a raw tag is 2 bits wide, hence we use 8 / 2 = 4 chunks
-    raw_tags
-        .chunks(TAGS_PER_BYTE)
-        .into_iter()
-        .map(|chunk| {
-            chunk
-                .zip((0..TAGS_PER_BYTE).map(tag_offset))
-                .fold(0, |acc: u8, (tag, offset)| {
-                    let bits = u8::from(tag) << offset;
-                    acc | bits
-                })
-        })
-        .collect()
-}
-
-fn iter_raw_tags(proof: &MerkleProof) -> impl Iterator<Item = Tag> + '_ {
-    proof.subtree_iterator().map(|subtree| subtree.to_raw_tag())
-}
-
-fn serialise_proof_values(proof: &MerkleProof) -> impl Iterator<Item = u8> + '_ {
-    proof
-        .subtree_iterator()
-        .flat_map(move |subtree| match subtree {
-            MerkleProof::Leaf(MerkleProofLeaf::Read(vec)) => vec,
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)) => hash.as_ref(),
-            MerkleProof::Node(_) => &[],
-        })
-        .copied()
-}
-
 /// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
-pub fn serialise_proof(proof: &Proof) -> impl Iterator<Item = u8> + '_ {
-    // Collect the `iter_raw_tags` iterator to be able to chunkify it and transform it
-    // by compressing the tags to a byte-array, fully utilising the bytes capacity.
-    let final_hash_encoding = proof.final_state_hash.as_ref().iter().copied();
-    let proof_tree_encoding = serialise_merkle_tree(proof.tree());
-
-    final_hash_encoding.chain(proof_tree_encoding)
+pub fn serialise_proof(proof: &Proof) -> Vec<u8> {
+    binary::serialise(proof).expect("Serialisation of Merkle proof should not fail")
 }
 
 /// Serialise just the proof tree part of a general [`Proof`] object.
 ///
 /// Useful for testing
-pub fn serialise_merkle_tree(tree: &MerkleProof) -> impl Iterator<Item = u8> + '_ {
-    let tags_encoding = serialise_raw_tags(iter_raw_tags(tree)).into_iter();
-    let nodes_encoding = serialise_proof_values(tree);
-
-    tags_encoding.chain(nodes_encoding)
+pub fn serialise_merkle_tree(tree: &MerkleProof) -> Vec<u8> {
+    binary::serialise(tree).expect("Serialisation of Merkle tree should not fail")
 }
 
 /// The tag is invalid.
@@ -373,8 +424,10 @@ mod tests {
 
         fn expected_serialisation_length(&self) -> usize {
             let hashes_size = 2 * DIGEST_SIZE as u64;
-            // div_ceil
-            let tags_size = self.nodes_count / 4 + (self.nodes_count % 4 != 0) as u64;
+
+            // Each node tag occupies 1 byte.
+            let tags_size = self.nodes_count;
+
             (hashes_size + tags_size + self.content_size) as usize
         }
 
@@ -412,7 +465,7 @@ mod tests {
         let final_state_hash = Hash::blake3_hash_bytes(&rand::random::<[u8; 10]>());
         let proof = Proof::new(tree, final_state_hash);
 
-        let ser_bytes: Vec<u8> = serialise_proof(&proof).collect();
+        let ser_bytes: Vec<u8> = serialise_proof(&proof);
         assert_eq!(
             ser_bytes.as_slice(),
             &[final_state_hash.as_ref(), tree_correct_bytes].concat()
@@ -426,12 +479,12 @@ mod tests {
         let raw_array: [u8; 10] = rand::random();
 
         let rleaf = MerkleProof::Leaf(MerkleProofLeaf::Read(raw_array.to_vec()));
-        check_serialisation(rleaf, &[&[TAG_READ << 6], raw_array.as_slice()].concat());
+        check_serialisation(rleaf, &[&[TAG_READ], raw_array.as_slice()].concat());
 
         let hash = Hash::blake3_hash_bytes(&raw_array);
         check_serialisation(
             MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)),
-            &[&[TAG_BLIND << 6], hash.as_ref()].concat(),
+            &[&[TAG_BLIND], hash.as_ref()].concat(),
         );
     }
 
@@ -448,13 +501,15 @@ mod tests {
         let n4 = MerkleProof::Leaf(MerkleProofLeaf::Read(vec![123, 234, 42, 1, 2, 3]));
 
         let root = MerkleProof::Node(vec![n1.clone()]);
-        check_serialisation(root, &[(TAG_NODE << 6) | (TAG_READ << 4), 12, 15, 30, 40]);
+        check_serialisation(root, &[TAG_NODE, TAG_READ, 12, 15, 30, 40]);
 
         let root = MerkleProof::Node(vec![n1.clone(), n2.clone()]);
         check_serialisation(
             root,
             &[
-                [(TAG_NODE << 6) | (TAG_READ << 4) | (TAG_BLIND << 2)].as_ref(),
+                [TAG_NODE].as_ref(),
+                [TAG_READ].as_ref(),
+                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
                 h1.as_ref(),
             ]
@@ -465,7 +520,10 @@ mod tests {
         check_serialisation(
             root,
             &[
-                [(TAG_NODE << 6) | (TAG_READ << 4) | (TAG_BLIND << 2) | TAG_BLIND].as_ref(),
+                [TAG_NODE].as_ref(),
+                [TAG_READ].as_ref(),
+                [TAG_BLIND].as_ref(),
+                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
                 h1.as_ref(),
                 h2.as_ref(),
@@ -477,11 +535,11 @@ mod tests {
         check_serialisation(
             root,
             &[
-                [
-                    (TAG_NODE << 6) | (TAG_READ << 4) | (TAG_BLIND << 2) | TAG_READ,
-                    TAG_BLIND << 6,
-                ]
-                .as_ref(),
+                [TAG_NODE].as_ref(),
+                [TAG_READ].as_ref(),
+                [TAG_BLIND].as_ref(),
+                [TAG_READ].as_ref(),
+                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
                 h1.as_ref(),
                 &[123, 234, 42, 1, 2, 3],
@@ -495,7 +553,7 @@ mod tests {
         let final_state_hash = Hash::blake3_hash_bytes(&rand::random::<[u8; 10]>());
         let proof = Proof::new(tree, final_state_hash);
 
-        let serialisation: Vec<_> = super::serialise_proof(&proof).collect();
+        let serialisation: Vec<_> = super::serialise_proof(&proof);
         assert!(serialisation.len() <= bound.expected_serialisation_length());
     }
 

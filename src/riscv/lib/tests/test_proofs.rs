@@ -96,7 +96,7 @@ fn test_initial_proof_regression(inputs: TestConfig) {
 
     eprintln!("> Producing proof ...");
     let proof = stepper.produce_proof().unwrap();
-    let proof_serialisation: Vec<u8> = serialise_proof(&proof).collect();
+    let proof_serialisation: Vec<u8> = serialise_proof(&proof);
 
     // This file is also used in the tests for the OCaml `lib_riscv` library
     let mut mint = goldenfile::Mint::new(inputs.golden_dir);
@@ -162,7 +162,7 @@ fn run_steps_ladder<MC, BCC, F>(
             let proof = stepper.produce_proof().unwrap();
             let time = start.elapsed();
 
-            let serialisation: Vec<u8> = serialise_proof(&proof).collect();
+            let serialisation: Vec<u8> = serialise_proof(&proof);
             let proof_size_kib = serialisation.len() / 1024;
 
             eprintln!("> Proof of size {proof_size_kib} KiB produced in {time:?}");
