@@ -268,7 +268,7 @@ impl<H, MC: MemoryConfig, BCC: BlockCacheConfig, M: ManagerReadWrite> PvmStepper
     where
         AllocatedOf<<BCC as BlockCacheConfig>::Layout, Verifier>: 'static,
     {
-        let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).collect();
+        let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
         let (space, merkle_tree) =
             deserialise_stream::deserialise::<PvmLayout<MC, BCC>>(&tree_serialisation)
                 .map_err(ProofVerificationFailure::BadDeserialisation)?;
