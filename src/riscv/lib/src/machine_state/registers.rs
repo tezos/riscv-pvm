@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023-2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2023-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -15,6 +15,7 @@
 
 use std::fmt;
 use std::mem::Discriminant;
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
 use arbitrary_int::u5;
@@ -568,7 +569,8 @@ impl FValue {
 }
 
 impl backend::Elem for FValue {
-    const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+    const STORED_SIZE: NonZeroU64 = NonZeroU64::new(8).unwrap();
+    const STORED_SIZE_USIZE: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     #[inline(always)]
     unsafe fn read_unaligned(source: *const u8) -> Self {

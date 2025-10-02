@@ -659,6 +659,7 @@ impl<const LEN: usize, M: ManagerClone> Clone for DynCells<LEN, M> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::num::NonZeroU64;
     use std::num::NonZeroUsize;
 
     use bincode::Encode;
@@ -694,7 +695,8 @@ pub(crate) mod tests {
     }
 
     impl Elem for Flipper {
-        const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+        const STORED_SIZE: NonZeroU64 = NonZeroU64::new(2).unwrap();
+        const STORED_SIZE_USIZE: NonZeroUsize = NonZeroUsize::new(2).unwrap();
 
         unsafe fn read_unaligned(source: *const u8) -> Self {
             unsafe {
@@ -793,7 +795,10 @@ pub(crate) mod tests {
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
-            state.write(LEN * Flipper::STORED_SIZE.get(), Flipper { a: 1, b: 2 });
+            state.write(LEN * Flipper::STORED_SIZE_USIZE.get(), Flipper {
+                a: 1,
+                b: 2,
+            });
         }
     );
 

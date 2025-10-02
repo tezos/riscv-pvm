@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -150,7 +150,7 @@ impl ManagerRead for Verifier {
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
-        let mut raw_data = vec![0u8; E::STORED_SIZE.get()];
+        let mut raw_data = vec![0u8; E::STORED_SIZE.get() as usize];
         region.read_bytes(address, &mut raw_data);
 
         // SAFETY: The byte vector has been allocated with sufficient space.
@@ -165,7 +165,9 @@ impl ManagerRead for Verifier {
         for (i, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read(
                 region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                (E::STORED_SIZE.get() as usize)
+                    .wrapping_mul(i)
+                    .wrapping_add(address),
             );
         }
     }
@@ -243,7 +245,9 @@ impl ManagerWrite for Verifier {
         for (i, value) in values.iter().enumerate() {
             Self::dyn_region_write(
                 region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                (E::STORED_SIZE.get() as usize)
+                    .wrapping_mul(i)
+                    .wrapping_add(address),
                 *value,
             );
         }

@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024-2025 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2025 Trilitech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -109,8 +110,7 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         for (offset, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read(
                 region,
-                E::STORED_SIZE
-                    .get()
+                (E::STORED_SIZE.get() as usize)
                     .wrapping_mul(offset)
                     .wrapping_add(address),
             );
@@ -167,7 +167,7 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         address: usize,
         value: E,
     ) {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE.get() as usize <= LEN);
 
         for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
             region.writes.insert(address + offset, byte);
@@ -182,8 +182,7 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         for (offset, &value) in values.iter().enumerate() {
             Self::dyn_region_write(
                 region,
-                E::STORED_SIZE
-                    .get()
+                (E::STORED_SIZE.get() as usize)
                     .wrapping_mul(offset)
                     .wrapping_add(address),
                 value,
@@ -414,14 +413,17 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
     /// Version of [`ManagerRead::dyn_region_read`] which does not record
     /// the access as a read.
     fn unrecorded_read<E: Elem>(&self, address: usize) -> E {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE.get() as usize <= LEN);
 
         // Read the underlying bytes of the value.
-        let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
+        let mut value_bytes = vec![0u8; E::STORED_SIZE.get() as usize];
         M::dyn_region_read_all(&self.source, address, &mut value_bytes);
 
         // Overwrite any byte that has been written during the proof step.
-        for (&i, &byte) in self.writes.range(address..address + E::STORED_SIZE.get()) {
+        for (&i, &byte) in self
+            .writes
+            .range(address..address + E::STORED_SIZE.get() as usize)
+        {
             value_bytes[i - address] = byte;
         }
 
@@ -472,7 +474,8 @@ pub struct DynAccess(BTreeSet<usize>);
 impl DynAccess {
     /// Insert all addresses touched while accessing an element of a given size.
     pub fn insert<E: Elem>(&mut self, address: usize) {
-        self.0.extend(address..address + E::STORED_SIZE.get())
+        self.0
+            .extend(address..address + E::STORED_SIZE.get() as usize)
     }
 
     /// Check whether any address within a given range of addresses
@@ -612,7 +615,7 @@ mod tests {
 
     const LEAVES: usize = 8;
     const DYN_REGION_SIZE: usize = MERKLE_LEAF_SIZE.get() * LEAVES;
-    const ELEM_SIZE: usize = u64::STORED_SIZE.get();
+    const ELEM_SIZE: usize = u64::STORED_SIZE.get() as usize;
 
     #[test]
     fn test_proof_gen_dyn_region() {

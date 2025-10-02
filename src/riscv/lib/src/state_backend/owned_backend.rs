@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -102,7 +102,7 @@ impl ManagerRead for Owned {
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE_USIZE.get() <= LEN);
 
         // SAFETY: The assertion above ensures that the address can be read for at least
         // `E::STORED_SIZE` bytes.
@@ -117,7 +117,10 @@ impl ManagerRead for Owned {
         for (i, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read::<E, LEN>(
                 region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                E::STORED_SIZE_USIZE
+                    .get()
+                    .wrapping_mul(i)
+                    .wrapping_add(address),
             );
         }
     }
@@ -167,7 +170,7 @@ impl ManagerWrite for Owned {
         address: usize,
         value: E,
     ) {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE_USIZE.get() <= LEN);
 
         // SAFETY: The assertion above ensures that the address can be written for at least
         // `E::STORED_SIZE` bytes.
@@ -182,7 +185,10 @@ impl ManagerWrite for Owned {
         for (i, value) in values.iter().enumerate() {
             Self::dyn_region_write::<E, LEN>(
                 region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                E::STORED_SIZE_USIZE
+                    .get()
+                    .wrapping_mul(i)
+                    .wrapping_add(address),
                 *value,
             );
         }
