@@ -21,6 +21,7 @@
 #![cfg(test)]
 
 pub(crate) mod code_page_entry;
+pub(crate) mod interpreted;
 pub(crate) mod jitted;
 pub(crate) mod state;
 
@@ -171,6 +172,7 @@ where
 mod tests {
     use super::CodePage;
     use super::INSTRUCTION_ENTRIES;
+    use super::interpreted::Interpreted;
     use crate::array_utils::boxed_from_fn;
     use crate::backend_test;
     use crate::exceptions::Exception;
@@ -187,7 +189,7 @@ mod tests {
 
     struct DispatchTest<'a, F: TestBackendFactory> {
         state: &'a std::cell::RefCell<MachineCoreState<M4K, F>>,
-        dispatch: &'a std::cell::RefCell<CodePage<'a, Instruction>>,
+        dispatch: &'a std::cell::RefCell<CodePage<'a, Interpreted<M4K, F>>>,
         pc_addr: u64,
         max_steps: usize,
         expected_steps: usize,
@@ -218,8 +220,14 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let mut page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> =
-            boxed_from_fn(|| Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Compressed));
+        let mut page_entry: Box<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn(|| {
+            Interpreted::from(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                5,
+                InstrWidth::Compressed,
+            ))
+        });
 
         let dispatch = &std::cell::RefCell::new(CodePage {
             page: &mut page_entry,
@@ -268,7 +276,7 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let mut page_entry: Box<[Instruction; INSTRUCTION_ENTRIES]> = boxed_from_fn({
+        let mut page_entry: Box<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn({
             let mut idx = 0;
             move || {
                 // we put uncompressed instructions on 4-byte aligned addresses
@@ -280,7 +288,7 @@ mod tests {
 
                 idx += 1;
 
-                instr
+                Interpreted::from(instr)
             }
         });
 
@@ -342,41 +350,49 @@ mod tests {
         let pc_j_absolute_start = 0;
         let pc_j_absolute = 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Instruction::new_addi(
+            page_entry.push(Interpreted::from(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 5,
                 InstrWidth::Compressed,
-            ));
+            )));
         }
-        page_entry.push(Instruction::new_j_absolute(0, InstrWidth::Uncompressed));
+        page_entry.push(Interpreted::from(Instruction::new_j_absolute(
+            0,
+            InstrWidth::Uncompressed,
+        )));
 
         let pc_jump_pc_start = pc_j_absolute + InstrWidth::Compressed as u64;
         let pc_jump_pc = pc_jump_pc_start + 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Instruction::new_addi(
+            page_entry.push(Interpreted::from(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 4,
                 InstrWidth::Compressed,
-            ));
+            )));
         }
-        page_entry.push(Instruction::new_jump_pc(0, InstrWidth::Uncompressed));
+        page_entry.push(Interpreted::from(Instruction::new_jump_pc(
+            0,
+            InstrWidth::Uncompressed,
+        )));
 
         let pc_ecall_start = pc_jump_pc + InstrWidth::Compressed as u64;
         let pc_ecall = pc_ecall_start + 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Instruction::new_addi(
+            page_entry.push(Interpreted::from(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 3,
                 InstrWidth::Compressed,
-            ));
+            )));
         }
-        page_entry.push(Instruction::new_ecall());
+        page_entry.push(Interpreted::from(Instruction::new_ecall()));
 
         while page_entry.len() < page_entry.capacity() {
-            page_entry.push(Instruction::new_nop(InstrWidth::Compressed));
+            page_entry.push(Interpreted::from(Instruction::new_nop(
+                InstrWidth::Compressed,
+            )));
         }
 
         let mut page_entry = page_entry
