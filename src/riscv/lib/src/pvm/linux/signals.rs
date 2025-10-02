@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT
 
 use std::num::NonZeroU64;
-use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::ops::Sub;
 use std::slice::from_raw_parts;
@@ -114,17 +113,20 @@ pub const SIG_IGN: VirtAddr = VirtAddr::new(1u64);
 pub const SA_SIGINFO: u32 = 0x4000000;
 
 /// `size_of(struct sigaction)` on the Kernel side
-const SIZE_SIGACTION: usize = 32;
+const SIZE_SIGACTION: u64 = 32;
 
 impl Elem for LinuxSigAction {
-    const STORED_SIZE: NonZeroUsize = { NonZeroUsize::new(SIZE_SIGACTION).unwrap() };
+    const STORED_SIZE: NonZeroU64 = { NonZeroU64::new(SIZE_SIGACTION).unwrap() };
 
     unsafe fn read_unaligned(source: *const u8) -> Self {
         // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each
         // field.
         unsafe {
-            LinuxSigAction::read_from_bytes(from_raw_parts(source, Self::STORED_SIZE.get()))
-                .expect("Bad sigaction")
+            LinuxSigAction::read_from_bytes(from_raw_parts(
+                source,
+                Self::STORED_SIZE.get() as usize,
+            ))
+            .expect("Bad sigaction")
         }
     }
 
@@ -132,7 +134,7 @@ impl Elem for LinuxSigAction {
         // SAFETY: The bitwise representation is the same as `read_unaligned` and matches each
         // field.
         unsafe {
-            let _ = self.write_to(from_raw_parts_mut(dest, Self::STORED_SIZE.get()));
+            let _ = self.write_to(from_raw_parts_mut(dest, Self::STORED_SIZE.get() as usize));
         }
     }
 }

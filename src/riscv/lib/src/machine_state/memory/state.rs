@@ -75,9 +75,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         E: Elem,
         M: ManagerWrite,
     {
-        let length = E::STORED_SIZE
-            .try_into()
-            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+        let length = E::STORED_SIZE;
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
@@ -100,9 +98,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = E::STORED_SIZE
-            .try_into()
-            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+        let length = E::STORED_SIZE;
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
@@ -122,9 +118,7 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        let length = E::STORED_SIZE
-            .try_into()
-            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+        let length = E::STORED_SIZE;
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
@@ -150,7 +144,7 @@ where
         M: ManagerRead,
     {
         let Some(length) =
-            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len()) as u64)
+            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len() as u64))
         else {
             // nothing to read
             return Ok(());
@@ -175,9 +169,7 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        let length = E::STORED_SIZE
-            .try_into()
-            .expect("Elem size `E::STORED_SIZE` must fit into u64");
+        let length = E::STORED_SIZE;
 
         Self::check_bounds(address, length, BadMemoryAccess)?;
 
@@ -198,7 +190,7 @@ where
         M: ManagerReadWrite,
     {
         let Some(length) =
-            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len()) as u64)
+            NonZeroU64::new(E::STORED_SIZE.get().saturating_mul(values.len() as u64))
         else {
             // nothing to write
             return Ok(());
@@ -234,7 +226,7 @@ where
     where
         M: ManagerWrite,
     {
-        const SIZE_OF_U64: usize = u64::STORED_SIZE.get();
+        const SIZE_OF_U64: usize = u64::STORED_SIZE.get() as usize;
 
         let mut address = 0;
         let mut outstanding = TOTAL_BYTES;

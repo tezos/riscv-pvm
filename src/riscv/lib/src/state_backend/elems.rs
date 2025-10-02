@@ -1,16 +1,16 @@
-// SPDX-FileCopyrightText: 2023-2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2023-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
-use std::num::NonZeroUsize;
+use std::num::NonZeroU64;
 
 use crate::machine_state::memory::PAGE_SIZE;
 
 /// Types that are less than one page wide
 pub trait NarrowlySized: Elem {
     /// Size of the type
-    const NARROW_SIZE: NonZeroUsize = {
-        if Self::STORED_SIZE.get() >= PAGE_SIZE.get() as usize {
+    const NARROW_SIZE: NonZeroU64 = {
+        if Self::STORED_SIZE.get() >= PAGE_SIZE.get() {
             panic!("Type is too wide");
         }
 
@@ -28,7 +28,7 @@ impl<T: Copy + 'static> StaticCopy for T {}
 /// Values that can be stored in dynamic regions
 pub trait Elem {
     /// Size of the stored representation in bytes
-    const STORED_SIZE: NonZeroUsize;
+    const STORED_SIZE: NonZeroU64;
 
     /// Read a value from its stored representation.
     ///
@@ -47,7 +47,7 @@ pub trait Elem {
 
 /// Capture the stored representation of an element from a dynamic region.
 pub fn elem_bytes<E: Elem>(value: E) -> Box<[u8]> {
-    let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
+    let mut value_bytes = vec![0u8; E::STORED_SIZE.get() as usize];
 
     // SAFETY: The vector has been allocated with sufficient space.
     unsafe {
@@ -60,8 +60,8 @@ pub fn elem_bytes<E: Elem>(value: E) -> Box<[u8]> {
 macro_rules! impl_dyn_value_prim {
     ( $x:ty ) => {
         impl Elem for $x {
-            const STORED_SIZE: NonZeroUsize =
-                NonZeroUsize::new(std::mem::size_of::<$x>()).expect("Type has zero size");
+            const STORED_SIZE: NonZeroU64 =
+                NonZeroU64::new(std::mem::size_of::<$x>() as u64).expect("Type has zero size");
 
             #[inline]
             unsafe fn read_unaligned(source: *const u8) -> Self {
@@ -88,8 +88,8 @@ impl_dyn_value_prim!(u128);
 impl_dyn_value_prim!(i128);
 
 impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
-    const STORED_SIZE: NonZeroUsize = {
-        let len = NonZeroUsize::new(LEN).expect("Array length must be non-zero");
+    const STORED_SIZE: NonZeroU64 = {
+        let len = NonZeroU64::new(LEN as u64).expect("Array length must be non-zero");
         E::STORED_SIZE
             .checked_mul(len)
             .expect("Array size must not overflow")
@@ -97,14 +97,14 @@ impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
 
     unsafe fn read_unaligned(source: *const u8) -> Self {
         std::array::from_fn(|i| {
-            let offset = E::STORED_SIZE.get().wrapping_mul(i);
+            let offset = (E::STORED_SIZE.get() as usize).wrapping_mul(i);
             unsafe { E::read_unaligned(source.add(offset)) }
         })
     }
 
     unsafe fn write_unaligned(self, dest: *mut u8) {
         for (i, elem) in self.into_iter().enumerate() {
-            let offset = E::STORED_SIZE.get().wrapping_mul(i);
+            let offset = (E::STORED_SIZE.get() as usize).wrapping_mul(i);
             unsafe { elem.write_unaligned(dest.add(offset)) };
         }
     }
