@@ -6,11 +6,12 @@ use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
 use crate::machine_state::memory::PAGE_SIZE;
+use crate::num::NonZeroLength;
 
 /// Types that are less than one page wide
 pub trait NarrowlySized: Elem {
     /// Size of the type
-    const NARROW_SIZE: NonZeroU64 = {
+    const NARROW_SIZE: NonZeroLength = {
         if Self::STORED_SIZE.get() >= PAGE_SIZE.get() {
             panic!("Type is too wide");
         }
@@ -29,12 +30,7 @@ impl<T: Copy + 'static> StaticCopy for T {}
 /// Values that can be stored in dynamic regions
 pub trait Elem {
     /// Size of the stored representation in bytes
-    const STORED_SIZE: NonZeroU64;
-
-    /// Size of the stored representation in bytes.
-    ///
-    /// `STORED_SIZE_USIZE.get()` must be equivalent to `STORED_SIZE.get() as usize`.
-    const STORED_SIZE_USIZE: NonZeroUsize;
+    const STORED_SIZE: NonZeroLength;
 
     /// Read a value from its stored representation.
     ///
@@ -66,11 +62,8 @@ pub fn elem_bytes<E: Elem>(value: E) -> Box<[u8]> {
 macro_rules! impl_dyn_value_prim {
     ( $x:ty ) => {
         impl Elem for $x {
-            const STORED_SIZE: NonZeroU64 =
-                NonZeroU64::new(std::mem::size_of::<$x>() as u64).expect("Type has zero size");
-
-            const STORED_SIZE_USIZE: NonZeroUsize =
-                NonZeroUsize::new(std::mem::size_of::<$x>()).expect("Type has zero size");
+            const STORED_SIZE: NonZeroLength =
+                NonZeroLength::new(std::mem::size_of::<$x>() as u64).expect("Type has zero size");
 
             #[inline]
             unsafe fn read_unaligned(source: *const u8) -> Self {
@@ -97,30 +90,23 @@ impl_dyn_value_prim!(u128);
 impl_dyn_value_prim!(i128);
 
 impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
-    const STORED_SIZE: NonZeroU64 = {
-        let len = NonZeroU64::new(LEN as u64).expect("Array length must be non-zero");
+    const STORED_SIZE: NonZeroLength = {
+        let len = NonZeroLength::new(LEN as u64).expect("Array length must be non-zero");
         E::STORED_SIZE
-            .checked_mul(len)
-            .expect("Array size must not overflow")
-    };
-
-    const STORED_SIZE_USIZE: NonZeroUsize = {
-        let len = NonZeroUsize::new(LEN).expect("Array length must be non-zero");
-        E::STORED_SIZE_USIZE
             .checked_mul(len)
             .expect("Array size must not overflow")
     };
 
     unsafe fn read_unaligned(source: *const u8) -> Self {
         std::array::from_fn(|i| {
-            let offset = E::STORED_SIZE_USIZE.get().wrapping_mul(i);
+            let offset = E::STORED_SIZE.as_usize().wrapping_mul(i);
             unsafe { E::read_unaligned(source.add(offset)) }
         })
     }
 
     unsafe fn write_unaligned(self, dest: *mut u8) {
         for (i, elem) in self.into_iter().enumerate() {
-            let offset = E::STORED_SIZE_USIZE.get().wrapping_mul(i);
+            let offset = E::STORED_SIZE.as_usize().wrapping_mul(i);
             unsafe { elem.write_unaligned(dest.add(offset)) };
         }
     }

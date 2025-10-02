@@ -102,7 +102,7 @@ impl ManagerRead for Owned {
         region: &Self::DynRegion<LEN>,
         address: usize,
     ) -> E {
-        assert!(address + E::STORED_SIZE_USIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE.as_usize() <= LEN);
 
         // SAFETY: The assertion above ensures that the address can be read for at least
         // `E::STORED_SIZE` bytes.
@@ -117,8 +117,8 @@ impl ManagerRead for Owned {
         for (i, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read::<E, LEN>(
                 region,
-                E::STORED_SIZE_USIZE
-                    .get()
+                E::STORED_SIZE
+                    .as_usize()
                     .wrapping_mul(i)
                     .wrapping_add(address),
             );
@@ -170,7 +170,7 @@ impl ManagerWrite for Owned {
         address: usize,
         value: E,
     ) {
-        assert!(address + E::STORED_SIZE_USIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE.as_usize() <= LEN);
 
         // SAFETY: The assertion above ensures that the address can be written for at least
         // `E::STORED_SIZE` bytes.
@@ -185,8 +185,8 @@ impl ManagerWrite for Owned {
         for (i, value) in values.iter().enumerate() {
             Self::dyn_region_write::<E, LEN>(
                 region,
-                E::STORED_SIZE_USIZE
-                    .get()
+                E::STORED_SIZE
+                    .as_usize()
                     .wrapping_mul(i)
                     .wrapping_add(address),
                 *value,

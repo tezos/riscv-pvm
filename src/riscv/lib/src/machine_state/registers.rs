@@ -27,6 +27,7 @@ use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::jit::builder::typed;
 use crate::machine_state::backend;
+use crate::num::NonZeroLength;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
 use crate::state_backend::owned_backend::Owned;
@@ -569,8 +570,7 @@ impl FValue {
 }
 
 impl backend::Elem for FValue {
-    const STORED_SIZE: NonZeroU64 = NonZeroU64::new(8).unwrap();
-    const STORED_SIZE_USIZE: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+    const STORED_SIZE: NonZeroLength = NonZeroLength::new(8).unwrap();
 
     #[inline(always)]
     unsafe fn read_unaligned(source: *const u8) -> Self {

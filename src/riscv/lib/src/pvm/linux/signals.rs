@@ -37,6 +37,7 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::nz;
 use crate::machine_state::registers::sp;
+use crate::num::NonZeroLength;
 use crate::pvm::Pvm;
 use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
@@ -117,8 +118,7 @@ pub const SA_SIGINFO: u32 = 0x4000000;
 const SIZE_SIGACTION: u64 = 32;
 
 impl Elem for LinuxSigAction {
-    const STORED_SIZE: NonZeroU64 = { NonZeroU64::new(SIZE_SIGACTION).unwrap() };
-    const STORED_SIZE_USIZE: NonZeroUsize = { NonZeroUsize::new(SIZE_SIGACTION as usize).unwrap() };
+    const STORED_SIZE: NonZeroLength = NonZeroLength::new(SIZE_SIGACTION).unwrap();
 
     unsafe fn read_unaligned(source: *const u8) -> Self {
         // SAFETY: The bitwise representation is the same as `write_unaligned` and matches each

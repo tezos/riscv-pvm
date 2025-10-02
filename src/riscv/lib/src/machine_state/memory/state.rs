@@ -11,6 +11,7 @@ use super::PAGE_SIZE;
 use super::Permissions;
 use super::buddy::Buddy;
 use super::protection::PagePermissions;
+use crate::num::NonZeroLength;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
@@ -45,7 +46,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
 
     /// Ensure the access is within bounds.
     #[inline]
-    fn check_bounds<E>(address: Address, length: NonZeroU64, error: E) -> Result<(), E> {
+    fn check_bounds<E>(address: Address, length: NonZeroLength, error: E) -> Result<(), E> {
         if length.get() > Self::TOTAL_BYTES.get().saturating_sub(address) {
             return Err(error);
         }
@@ -150,7 +151,7 @@ where
             return Ok(());
         };
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        Self::check_bounds(address, NonZeroLength::wrap(length), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -196,7 +197,7 @@ where
             return Ok(());
         };
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
+        Self::check_bounds(address, NonZeroLength::wrap(length), BadMemoryAccess)?;
 
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
@@ -257,7 +258,11 @@ where
     where
         M: ManagerWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        Self::check_bounds(
+            address,
+            NonZeroLength::wrap(length),
+            super::MemoryGovernanceError,
+        )?;
 
         self.readable_pages
             .modify_access(address, length, perms.can_read());
@@ -277,7 +282,11 @@ where
     where
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+        Self::check_bounds(
+            address,
+            NonZeroLength::wrap(length),
+            super::MemoryGovernanceError,
+        )?;
 
         // TODO: RV-799: use `NonZeroU64::div_ceil` once stabilised.
         let pages = length.get().div_ceil(super::PAGE_SIZE.get());
@@ -304,7 +313,11 @@ where
         match address_hint {
             // Caller wants to allocate at a specific address
             Some(address) => {
-                Self::check_bounds(address, length, super::MemoryGovernanceError)?;
+                Self::check_bounds(
+                    address,
+                    NonZeroLength::wrap(length),
+                    super::MemoryGovernanceError,
+                )?;
 
                 // Buddy memory manager works on page indices, not addresses
                 let idx = address >> super::OFFSET_BITS.get();
