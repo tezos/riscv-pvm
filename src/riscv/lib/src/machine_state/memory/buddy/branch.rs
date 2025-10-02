@@ -15,7 +15,6 @@ use perfect_derive::perfect_derive;
 use super::Buddy;
 use super::BuddyLayout;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
@@ -27,7 +26,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::Ref;
-use crate::state_backend::verify_backend::Verifier;
 use crate::struct_layout;
 
 /// Information about what is free in each buddy
@@ -60,10 +58,7 @@ struct_layout! {
     }
 }
 
-impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B>
-where
-    AllocatedOf<B, Verifier>: 'static,
-{
+impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
     type Buddy<M: ManagerBase> = BuddyBranch2<B::Buddy<M>, M>;
 
     fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {

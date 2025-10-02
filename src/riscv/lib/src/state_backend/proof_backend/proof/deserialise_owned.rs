@@ -153,11 +153,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
-    where
-        T: 'static,
-        R: 'static,
-    {
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
             Partial::Absent | Partial::Blinded(_) => ProofTreeDeserialiser(ProofTree::Absent),
@@ -178,14 +174,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         })
     }
 
-    fn map<T>(
-        self,
-        f: impl FnOnce(R) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
-    where
-        T: 'static,
-        R: 'static,
-    {
+    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T> {
         OwnedBranchComb {
             f: self.f.map(f),
             node_data: self.node_data,
@@ -217,11 +206,8 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 
     fn map<T>(
         self,
-        f: impl FnOnce(Self::Output) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
-    where
-        Self::Output: 'static,
-    {
+        f: impl FnOnce(Self::Output) -> T,
+    ) -> <Self::Parent as Deserialiser>::Suspended<T> {
         OwnedParserComb::new(self.result.map(f))
     }
 }

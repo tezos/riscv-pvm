@@ -39,7 +39,6 @@ use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
-use crate::state_backend::verify_backend::Verifier;
 use crate::storage::Hash;
 use crate::storage::HashError;
 
@@ -96,7 +95,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: ProofLayout> ProofLayout for [<$name Layout>]<B>
             where
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, Verifier>: 'static,
                 [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
             {
                 fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {

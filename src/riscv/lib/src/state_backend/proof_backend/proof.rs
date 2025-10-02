@@ -101,7 +101,6 @@ impl bincode::Encode for MerkleProof {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        let mut datas = vec![];
         let mut nodes = vec![self];
 
         while let Some(node) = nodes.pop() {
@@ -119,21 +118,14 @@ impl bincode::Encode for MerkleProof {
 
                     // We want to write the raw data, and avoid the bincode length prefix. The decoder
                     // will know how many bytes to read.
-                    datas.push(data.as_slice());
+                    encoder.writer().write(data.as_slice())?;
                 }
 
                 Self::Leaf(MerkleProofLeaf::Blind(hash)) => {
                     Tag::Leaf(LeafTag::Blind).encode(encoder)?;
-                    datas.push(hash.as_ref());
+                    hash.encode(encoder)?;
                 }
             }
-        }
-
-        let writer = encoder.writer();
-
-        // The deserialiser expects the tags to be written first, then the data to fill the leafs.
-        for data in datas {
-            writer.write(data)?;
         }
 
         Ok(())
@@ -509,8 +501,8 @@ mod tests {
             &[
                 [TAG_NODE].as_ref(),
                 [TAG_READ].as_ref(),
-                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
+                [TAG_BLIND].as_ref(),
                 h1.as_ref(),
             ]
             .concat(),
@@ -522,10 +514,10 @@ mod tests {
             &[
                 [TAG_NODE].as_ref(),
                 [TAG_READ].as_ref(),
-                [TAG_BLIND].as_ref(),
-                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
+                [TAG_BLIND].as_ref(),
                 h1.as_ref(),
+                [TAG_BLIND].as_ref(),
                 h2.as_ref(),
             ]
             .concat(),
@@ -537,12 +529,12 @@ mod tests {
             &[
                 [TAG_NODE].as_ref(),
                 [TAG_READ].as_ref(),
-                [TAG_BLIND].as_ref(),
-                [TAG_READ].as_ref(),
-                [TAG_BLIND].as_ref(),
                 &[12, 15, 30, 40],
+                [TAG_BLIND].as_ref(),
                 h1.as_ref(),
+                [TAG_READ].as_ref(),
                 &[123, 234, 42, 1, 2, 3],
+                [TAG_BLIND].as_ref(),
                 h2.as_ref(),
             ]
             .concat(),

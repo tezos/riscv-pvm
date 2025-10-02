@@ -5,7 +5,6 @@
 use std::io::Read;
 
 use bincode::Decode;
-use try_blocks::try_block;
 
 use super::LeafTag;
 use super::Tag;
@@ -148,49 +147,55 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         mut self,
     ) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         if self.is_absent() {
-            return Ok(StreamParserComb::new(self, |_| Ok(Partial::Absent)));
+            return Ok(StreamParserComb::new(self, Partial::Absent));
         }
 
         let tag = self.next_tag()?;
 
-        Ok(StreamParserComb::new(self, match tag {
+        let result = match tag {
             Tag::Node => return Err(ProofError::UnexpectedNode),
-            Tag::Leaf(leaf_type) => move |input: &mut StreamInput| match leaf_type {
-                LeafTag::Blind => Ok(Partial::Blinded(input.deserialise::<Hash>()?)),
+            Tag::Leaf(leaf_type) => match leaf_type {
+                LeafTag::Blind => Partial::Blinded(self.input.deserialise::<Hash>()?),
                 LeafTag::Read => {
                     let mut data = Box::new([0_u8; LEN]);
-                    match input.data.read_exact(data.as_mut()) {
-                        Ok(()) => Ok(Partial::Present(data)),
-                        Err(_eof) => Err(NotEnoughBytesError.into()),
-                    }
+
+                    if self.input.data.read_exact(data.as_mut()).is_err() {
+                        return Err(ProofError::NotEnoughBytes(NotEnoughBytesError));
+                    };
+
+                    Partial::Present(data)
                 }
             },
-        }))
+        };
+
+        Ok(StreamParserComb::new(self, result))
     }
 
     fn into_leaf<T: Decode<()>>(mut self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
         if self.is_absent() {
-            return Ok(StreamParserComb::new(self, |_| Ok(Partial::Absent)));
+            return Ok(StreamParserComb::new(self, Partial::Absent));
         }
 
         let tag = self.next_tag()?;
 
-        Ok(StreamParserComb::new(self, match tag {
+        let result = match tag {
             Tag::Node => return Err(ProofError::UnexpectedNode),
-            Tag::Leaf(leaf_type) => move |input: &mut StreamInput| match leaf_type {
-                LeafTag::Blind => Ok(Partial::Blinded(input.deserialise::<Hash>()?)),
-                LeafTag::Read => try_block! {
-                    let (data, raw_bytes) = input.capture_deserialise::<T>()?;
+            Tag::Leaf(leaf_type) => match leaf_type {
+                LeafTag::Blind => Partial::Blinded(self.input.deserialise::<Hash>()?),
+                LeafTag::Read => {
+                    let (data, raw_bytes) = self.input.capture_deserialise::<T>()?;
                     Partial::Present((data, raw_bytes.to_vec()))
-                },
+                }
             },
-        }))
+        };
+
+        Ok(StreamParserComb::new(self, result))
     }
 
     fn into_node(mut self) -> Result<Self::DeserialiserNode<Partial<()>>> {
         if self.is_absent() {
             return Ok(StreamBranchComb {
-                f: Box::new(|_| Ok(Partial::Absent)),
+                result: Partial::Absent,
                 deser: self.enter_absent(),
             });
         }
@@ -200,13 +205,11 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         match tag {
             Tag::Leaf(LeafTag::Read) => Err(ProofError::UnexpectedLeaf),
             Tag::Leaf(LeafTag::Blind) => Ok(StreamBranchComb {
-                f: Box::new(move |input: &mut StreamInput| {
-                    Ok(Partial::Blinded(input.deserialise::<Hash>()?))
-                }),
+                result: Partial::Blinded(self.input.deserialise::<Hash>()?),
                 deser: self.enter_absent(),
             }),
             Tag::Node => Ok(StreamBranchComb {
-                f: Box::new(|_| Ok(Partial::Present(()))),
+                result: Partial::Present(()),
                 deser: self.enter_present(),
             }),
         }
@@ -215,11 +218,8 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
 
 /// Parser combinator for [`StreamDeserialiser`] deserialiser.
 pub struct StreamParserComb<'t, R> {
-    #[expect(
-        clippy::type_complexity,
-        reason = "FnOnce is a trait and trait aliases are not stable yet"
-    )]
-    f: Box<dyn FnOnce(&mut StreamInput) -> Result<R> + 'static>,
+    /// Parser result
+    result: R,
 
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
@@ -232,38 +232,26 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
 
     fn map<T>(
         self,
-        map_f: impl FnOnce(Self::Output) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::Suspended<T>
-    where
-        Self::Output: 'static,
-    {
-        StreamParserComb::new(self.deser, move |input| {
-            let r = (self.f)(input)?;
-            Ok(map_f(r))
-        })
+        map_f: impl FnOnce(Self::Output) -> T,
+    ) -> <Self::Parent as Deserialiser>::Suspended<T> {
+        StreamParserComb {
+            result: map_f(self.result),
+            deser: self.deser,
+        }
     }
 }
 
 impl<'t, R> StreamParserComb<'t, R> {
     /// Create a new [`StreamParserComb`] with the given function.
-    fn new(
-        deser: StreamDeserialiser<'t>,
-        f: impl FnOnce(&mut StreamInput) -> Result<R> + 'static,
-    ) -> Self {
-        StreamParserComb {
-            f: Box::new(f),
-            deser,
-        }
+    fn new(deser: StreamDeserialiser<'t>, result: R) -> Self {
+        StreamParserComb { result, deser }
     }
 }
 
 /// Branch combinator for [`StreamDeserialiser`] deserialiser.
 pub struct StreamBranchComb<'t, R> {
-    #[expect(
-        clippy::type_complexity,
-        reason = "FnOnce is a trait and trait aliases are not stable yet"
-    )]
-    f: Box<dyn FnOnce(&mut StreamInput) -> Result<R> + 'static>,
+    /// Branch result
+    result: R,
 
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
@@ -278,47 +266,27 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>
-    where
-        T: 'static,
-        R: 'static,
-    {
+    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
         let next_branch = branch_deserialiser(self.deser)?;
 
         Ok(StreamBranchComb {
-            f: Box::new(move |input| {
-                // We still have to apply the parser combinator, it may compute the Hash for the blinded case for example
-                // or any other intermediate function the user made on the computation using `map`
-                let r = (self.f)(input)?;
-
-                // The same logic applies for the child branch, maybe the user maps the Absent result to something else.
-                let br_res = (next_branch.f)(input)?;
-
-                Ok((r, br_res))
-            }),
+            result: (self.result, next_branch.result),
 
             // We need to recover the deserialiser from the child branch.
             deser: next_branch.deser,
         })
     }
 
-    fn map<T>(
-        self,
-        f: impl FnOnce(R) -> T + 'static,
-    ) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>
-    where
-        T: 'static,
-        R: 'static,
-    {
+    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T> {
         StreamBranchComb {
-            f: Box::new(move |input| Ok(f((self.f)(input)?))),
+            result: f(self.result),
             deser: self.deser,
         }
     }
 
     fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
         Ok(StreamParserComb {
-            f: self.f,
+            result: self.result,
             deser: self.deser.exit_context(),
         })
     }
@@ -327,17 +295,13 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
 impl<R> StreamParserComb<'_, R> {
     /// Deserialise the input and return the result if all bytes have been consumed.
     pub fn into_result(self) -> Result<R> {
-        let mut input = self.deser.input;
-        let result = (self.f)(&mut input)?;
-
-        // A correct deserialisation makes sure all bytes are consumed.
-        // Otherwise, if tags indicate a bigger part of the proof has been blinded that actually
-        // was, the extra data at the end - which wasn't actually blinded - remains unparsed / ignored.
-        if !input.is_empty() {
+        if !self.deser.input.is_empty() {
+            // Ending with left over bytes indicates that we have not parsed the proof correctly.
+            // It could be that we have interpreted data as tags, or vice versa.
             return Err(ProofError::RemainingBytes);
         }
 
-        Ok(result)
+        Ok(self.result)
     }
 }
 
