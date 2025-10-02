@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 
 use crate::machine_state::memory::PAGE_SIZE;
 
@@ -29,6 +30,17 @@ impl<T: Copy + 'static> StaticCopy for T {}
 pub trait Elem {
     /// Size of the stored representation in bytes
     const STORED_SIZE: NonZeroU64;
+
+    const STORED_SIZE_USIZE: NonZeroUsize = {
+        let value: u64 = Self::STORED_SIZE.get();
+
+        if value == value as usize as u64 {
+            // Safety: conversion to usize is lossless and of a non-zero value
+            unsafe { NonZeroUsize::new_unchecked(value as usize) }
+        } else {
+            panic!("stored size too wide")
+        }
+    };
 
     /// Read a value from its stored representation.
     ///
@@ -63,6 +75,9 @@ macro_rules! impl_dyn_value_prim {
             const STORED_SIZE: NonZeroU64 =
                 NonZeroU64::new(std::mem::size_of::<$x>() as u64).expect("Type has zero size");
 
+            const STORED_SIZE_USIZE: NonZeroUsize =
+                NonZeroUsize::new(std::mem::size_of::<$x>()).expect("Type has zero size");
+
             #[inline]
             unsafe fn read_unaligned(source: *const u8) -> Self {
                 Self::from_le(unsafe { source.cast::<Self>().read_unaligned() })
@@ -95,16 +110,23 @@ impl<E: Elem, const LEN: usize> Elem for [E; LEN] {
             .expect("Array size must not overflow")
     };
 
+    const STORED_SIZE_USIZE: NonZeroUsize = {
+        let len = NonZeroUsize::new(LEN).expect("Array length must be non-zero");
+        E::STORED_SIZE_USIZE
+            .checked_mul(len)
+            .expect("Array size must not overflow")
+    };
+
     unsafe fn read_unaligned(source: *const u8) -> Self {
         std::array::from_fn(|i| {
-            let offset = (E::STORED_SIZE.get() as usize).wrapping_mul(i);
+            let offset = E::STORED_SIZE_USIZE.get().wrapping_mul(i);
             unsafe { E::read_unaligned(source.add(offset)) }
         })
     }
 
     unsafe fn write_unaligned(self, dest: *mut u8) {
         for (i, elem) in self.into_iter().enumerate() {
-            let offset = (E::STORED_SIZE.get() as usize).wrapping_mul(i);
+            let offset = E::STORED_SIZE_USIZE.get().wrapping_mul(i);
             unsafe { elem.write_unaligned(dest.add(offset)) };
         }
     }
