@@ -7,13 +7,10 @@
 //!
 //! [`CodePage`]: super::CodePage
 
-// TODO: RV-765: add support for inline JIT
-
 use super::INSTRUCTION_ENTRIES;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
-use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -53,32 +50,4 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ) -> StepManyResult<Exception>
     where
         M: ManagerReadWrite;
-}
-
-impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Instruction {
-    type Compiler = InterpretedBlockBuilder;
-
-    /// Run an entrypoint in a purely interpreted manner.
-    ///
-    /// # SAFETY
-    ///
-    /// This function is always safe to call.
-    unsafe fn run_entrypoint(
-        page: &mut [Self; INSTRUCTION_ENTRIES],
-        core: &mut MachineCoreState<MC, M>,
-        _compiler: &mut Self::Compiler,
-        instr_pc: Address,
-        max_steps: usize,
-    ) -> StepManyResult<Exception>
-    where
-        M: ManagerReadWrite,
-    {
-        super::run_code_page_interpreted(page, core, instr_pc, max_steps)
-    }
-}
-
-impl AsRef<Instruction> for Instruction {
-    fn as_ref(&self) -> &Instruction {
-        self
-    }
 }

@@ -210,6 +210,7 @@ mod tests {
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
+    use crate::machine_state::page_cache::interpreted::Interpreted;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
@@ -228,10 +229,10 @@ mod tests {
     fn test_page_invalidation_resets_pages() {
         const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
 
-        let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, Owned>::new();
+        let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Owned>::new();
 
         let make_page = || PageEntry {
-            entries: boxed_array![Instruction::DEFAULT; INSTRUCTION_ENTRIES],
+            entries: boxed_array![Interpreted::<_, _>::from(Instruction::DEFAULT); INSTRUCTION_ENTRIES],
         };
 
         for page in cache.pages.iter_mut().take(16) {
@@ -239,43 +240,33 @@ mod tests {
         }
         assert_eq!(count_active_pages(&cache), 16);
 
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 1..=4);
+        // invalidate some pages
+        cache.invalidate_pages(1..=4);
         assert_eq!(count_active_pages(&cache), 12);
-        assert!(PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, 0).is_some());
+        assert!(cache.get_code_page(0).is_some());
 
-        for i in 1..5 {
-            assert!(
-                PageCache::<Instruction, M1M, Owned>::get_code_page(
-                    &mut cache,
-                    i * PAGE_SIZE.get()
-                )
-                .is_none()
-            );
+        for i in 1..=4 {
+            assert!(cache.get_code_page(i * PAGE_SIZE.get()).is_none());
         }
 
-        assert!(
-            PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, 5 * PAGE_SIZE.get())
-                .is_some()
-        );
+        assert!(cache.get_code_page(5 * PAGE_SIZE.get()).is_some());
 
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 10..=11);
+        // invalidate another range
+        cache.invalidate_pages(10..=11);
         assert_eq!(count_active_pages(&cache), 10);
 
-        // invalidate an already invalidated range does nothing
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
-            &mut cache,
-            PAGE_SIZE.get()..=(2 * PAGE_SIZE.get()),
-        );
+        // invalidating pages we already have does nothing
+        cache.invalidate_pages(1..=3);
         assert_eq!(count_active_pages(&cache), 10);
 
         // invalidate all addresses clears all pages
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 0..=u64::MAX);
+        cache.invalidate_pages(0..=u64::MAX);
         assert_eq!(count_active_pages(&cache), 0);
     }
 
     backend_test!(test_populate_block_cache, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
-        let mut cache = PageCacheImpl::<1, Instruction, M4K, F>::new();
+        let mut cache = PageCacheImpl::<1, Interpreted<_, _>, M4K, F>::new();
 
         // populating a non R+X page should fail
         cache.populate_page(15, &state);
@@ -339,7 +330,8 @@ mod tests {
         let state = MachineCoreState::<M1M, F>::new();
         let state = &std::cell::RefCell::new(state);
 
-        let cache = &std::cell::RefCell::new(PageCacheImpl::<PAGES, Instruction, M1M, F>::new());
+        let cache =
+            &std::cell::RefCell::new(PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, F>::new());
 
         proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get() as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
@@ -385,7 +377,7 @@ mod tests {
 
             let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
             let instr_from_code_page = code_page.page[pc_offset as usize / 2];
-            assert_eq!(expected_instr, instr_from_code_page);
+            assert_eq!(&expected_instr, instr_from_code_page.as_ref());
 
             // double check last halfword
             let pc_last_halfword = page_start + (PAGE_SIZE.get() - InstrWidth::Compressed as u64);
