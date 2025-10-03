@@ -89,7 +89,7 @@ mod test {
 
     type MC = M4K;
 
-    const OUT_OF_BOUNDS_OFFSET: i64 = MC::TOTAL_BYTES as i64;
+    const OUT_OF_BOUNDS_OFFSET: i64 = MC::TOTAL_BYTES.get() as i64;
 
     backend_test!(test_cfsd_cfld, F, {
         let state = MachineCoreState::<MC, F>::new();

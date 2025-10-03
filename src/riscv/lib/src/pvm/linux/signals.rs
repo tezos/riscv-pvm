@@ -766,7 +766,8 @@ where
         const ECALL: u32 = 0b1110011;
 
         const RESTORER_FUNCTION: [u32; 2] = [LOAD_SIGRETURN, ECALL];
-        const RESTORER_LENGTH: usize = size_of_val(&RESTORER_FUNCTION);
+        const RESTORER_LENGTH: NonZeroUsize = NonZeroUsize::new(size_of_val(&RESTORER_FUNCTION))
+            .expect("size of `RESTORER_FUNCTION` is greater than zero");
 
         // Ensure the restorer is in its own page
         let address = address
@@ -789,7 +790,10 @@ where
         // Make the restorer page R+X
         self.machine_state.core.main_memory.protect_pages(
             address.to_machine_address(),
-            PAGE_SIZE.get() as usize,
+            // TODO: RV-561: use u64 everywhere in the PVM
+            PAGE_SIZE
+                .try_into()
+                .expect("`PAGE_SIZE` fits into usize width"),
             Permissions {
                 read: true,
                 exec: true,
@@ -797,7 +801,7 @@ where
             },
         )?;
 
-        let restorer_end = address + RESTORER_LENGTH as u64;
+        let restorer_end = address + RESTORER_LENGTH.get() as u64;
 
         // Store where the restorer is kept so that the signal handlers can find it
         self.machine_state
@@ -847,7 +851,7 @@ mod tests {
             .unwrap();
 
         // Write the initial stack pointer and program counter.
-        let stack_top = M1M::TOTAL_BYTES as u64;
+        let stack_top = M1M::TOTAL_BYTES.get() as u64;
         pvm.machine_state.core.hart.xregisters.write(sp, stack_top);
         let init_pc = 10;
         pvm.machine_state.core.hart.pc.write(init_pc);
@@ -927,7 +931,7 @@ mod tests {
             .unwrap();
 
         // Write the initial stack pointer and program counter.
-        let stack_top = M1M::TOTAL_BYTES as u64;
+        let stack_top = M1M::TOTAL_BYTES.get() as u64;
         pvm.machine_state.core.hart.xregisters.write(sp, stack_top);
         let init_pc = 10;
         pvm.machine_state.core.hart.pc.write(init_pc);

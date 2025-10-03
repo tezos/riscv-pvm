@@ -172,6 +172,8 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use proptest::prelude::*;
 
     use super::PageCacheImpl;
@@ -205,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_page_invalidation_resets_pages() {
-        const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
+        const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
 
         let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, Owned>::new();
 
@@ -274,9 +276,10 @@ mod tests {
         assert_eq!(count_active_pages(&cache), 0);
 
         // populating a read-only page should fail
+        let page_size: NonZeroUsize = PAGE_SIZE.try_into().unwrap();
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
+            .protect_pages(0, page_size, Permissions {
                 read: true,
                 exec: false,
                 write: false,
@@ -288,7 +291,7 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE)
+            .protect_pages(0, page_size, Permissions::READ_WRITE)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -296,7 +299,7 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions::READ_WRITE_EXEC)
+            .protect_pages(0, page_size, Permissions::READ_WRITE_EXEC)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -304,7 +307,7 @@ mod tests {
         // populating a R+X page should succeed
         state
             .main_memory
-            .protect_pages(0, PAGE_SIZE.get() as usize, Permissions {
+            .protect_pages(0, page_size, Permissions {
                 read: true,
                 exec: true,
                 write: false,
@@ -315,12 +318,12 @@ mod tests {
     });
 
     backend_test!(populate_from_memory, F, {
-        const PAGES: usize = M1M::TOTAL_BYTES / PAGE_SIZE.get() as usize;
+        const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
 
         let state = MachineCoreState::<M1M, F>::new();
         let state = &std::cell::RefCell::new(state);
 
-        proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES as u64,
+        proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get() as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
             let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, F>::new();

@@ -1262,7 +1262,7 @@ mod tests {
         state.reset();
         state.core.main_memory.set_all_readable_writeable();
 
-        let stack_top = M4K::TOTAL_BYTES as u64;
+        let stack_top = M4K::TOTAL_BYTES.get() as u64;
         state.core.hart.xregisters.write(sp, stack_top);
 
         let init_pc = 0xFE;
@@ -1283,7 +1283,7 @@ mod tests {
         state.reset();
         state.core.main_memory.set_all_readable_writeable();
 
-        let stack_top = M4K::TOTAL_BYTES as u64;
+        let stack_top = M4K::TOTAL_BYTES.get() as u64;
         state.core.hart.xregisters.write(sp, stack_top);
 
         let init_pc = 0x100;
