@@ -30,7 +30,7 @@ pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
 impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
     type Suspended<R> = OwnedParserComb<'t, R>;
 
-    type DeserialiserNode<R> = OwnedBranchComb<R, Self>;
+    type DeserialiserNode = OwnedBranchComb<Self>;
 
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
         self.deserialise_as_leaf()?
@@ -53,7 +53,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
+    fn into_node(self) -> Result<(Self::DeserialiserNode, Partial<()>)> {
         let branches = self.deserialise_as_node()?;
         Ok(OwnedBranchComb::new(branches))
     }
@@ -122,15 +122,14 @@ impl<R> OwnedParserComb<'_, R> {
 }
 
 /// Branch deserialiser combinator for [`ProofTreeDeserialiser`] deserialiser.
-pub struct OwnedBranchComb<R, B> {
-    result: R,
+pub struct OwnedBranchComb<B> {
     node_data: Partial<VecDeque<B>>,
 }
 
-impl<B> OwnedBranchComb<Partial<()>, B> {
+impl<B> OwnedBranchComb<B> {
     /// Create a new [`OwnedBranchComb`] with the given branches,
     /// preserving the absent/blind/present information from the given [`Partial`].
-    fn new(branches: Partial<Vec<B>>) -> Self {
+    fn new(branches: Partial<Vec<B>>) -> (Self, Partial<()>) {
         // Similar to `map_present` but for `&Partial<R>`.
         // This is done to preserve absent/blind/present information from node until calling `done()`.
         // See test_blind_node_parsing for an example.
@@ -140,14 +139,15 @@ impl<B> OwnedBranchComb<Partial<()>, B> {
             Partial::Present(_) => Partial::Present(()),
         };
 
-        Self {
-            result,
+        let this = Self {
             node_data: branches.map_present(VecDeque::from),
-        }
+        };
+
+        (this, result)
     }
 }
 
-impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>> {
+impl<'t> DeserialiserNode for OwnedBranchComb<ProofTreeDeserialiser<'t>> {
     type Parent = ProofTreeDeserialiser<'t>;
 
     fn next_branch<T>(
@@ -156,7 +156,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
+    ) -> Result<(Self, T)> {
         let next_branch = match self.node_data {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
             Partial::Absent | Partial::Blinded(_) => ProofTreeDeserialiser(ProofTree::Absent),
@@ -169,22 +169,12 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
                     })?
             }
         };
-        let br_comb = branch_deserialiser(next_branch)?;
 
-        Ok(OwnedBranchComb {
-            result: (self.result, br_comb.result),
-            node_data: self.node_data,
-        })
+        let result = branch_deserialiser(next_branch)?.result;
+        Ok((self, result))
     }
 
-    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T> {
-        OwnedBranchComb {
-            result: f(self.result),
-            node_data: self.node_data,
-        }
-    }
-
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
+    fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>> {
         if let Partial::Present(branches) = self.node_data {
             if !branches.is_empty() {
                 let length = branches.len();
@@ -196,7 +186,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         }
 
         Ok(OwnedParserComb {
-            result: self.result,
+            result: value,
             _pd: PhantomData,
         })
     }

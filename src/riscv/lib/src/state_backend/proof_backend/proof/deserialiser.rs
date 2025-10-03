@@ -97,7 +97,7 @@ pub trait Deserialiser {
     type Suspended<R>: Suspended<Output = R, Parent = Self>;
 
     /// In case the proof is a node, [`Deserialiser::DeserialiserNode`] is the deserialiser for the branch case.
-    type DeserialiserNode<R>: DeserialiserNode<R, Parent = Self>;
+    type DeserialiserNode: DeserialiserNode<Parent = Self>;
 
     /// It is expected for the proof to be a leaf. Obtain the raw bytes from that leaf.
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
@@ -110,13 +110,13 @@ pub trait Deserialiser {
     fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
-    fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>>;
+    fn into_node(self) -> Result<(Self::DeserialiserNode, Partial<()>)>;
 }
 
 /// The trait used for deserialising a proof's node.
 /// Having an object of this trait is equivalent to knowing the current proof is a node.
 /// Deserialisers for each of its branches are expected to be provided to continue the deserialisation.
-pub trait DeserialiserNode<R> {
+pub trait DeserialiserNode: Sized {
     type Parent: Deserialiser;
 
     /// The next branch of the current node is deserialised using the provided deserialiser `br_deser`.
@@ -126,14 +126,11 @@ pub trait DeserialiserNode<R> {
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>>;
-
-    /// Helper for mapping the current result into a new type.
-    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T>;
+    ) -> Result<(Self, T)>;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>>;
+    fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>>;
 }
 
 /// The trait represents a computation function obtained after deserialising a proof.
@@ -158,7 +155,6 @@ mod tests {
     use super::DeserialiserNode;
     use super::Partial;
     use super::Result;
-    use super::Suspended;
     use crate::state_backend::ProofError;
     use crate::state_backend::ProofTree;
     use crate::state_backend::proof_backend::proof::InvalidTagError;
@@ -185,24 +181,19 @@ mod tests {
 
         // Computation: return the value of the nested leaf
 
-        let ctx = proof.into_node()?;
-        let r = ctx
-            .next_branch(|br_proof| br_proof.into_leaf::<Hash>())?
-            .map(|(_node_parse, br)| br)
-            .next_branch(|br_proof| {
-                br_proof
-                    .into_node()?
-                    .next_branch(|pr| pr.into_leaf::<T>())?
-                    .map(|(_node_parse, br)| br)
-                    .done()
-            })?
-            .done()?;
+        let (ctx, _partial) = proof.into_node()?;
+        let (ctx, _left) = ctx.next_branch(|br_proof| br_proof.into_leaf::<Hash>())?;
+        let (ctx, right) = ctx.next_branch(|br_ctx| {
+            let (ctx, _) = br_ctx.into_node()?;
+            let (ctx, result) = ctx.next_branch(|pr| pr.into_leaf::<T>())?;
+            ctx.done(result)
+        })?;
 
-        Ok(r.map(move |(_left, right)| match right {
+        ctx.done(match right {
             Partial::Present((nr, _)) => nr.into(),
             Partial::Absent => 0,
             Partial::Blinded(_hash) => -1,
-        }))
+        })
     }
 
     fn computation_i16<D: Deserialiser>(proof: D) -> Result<<D as Deserialiser>::Suspended<i32>> {
@@ -225,28 +216,27 @@ mod tests {
 
         // Computation: sum the non-blinded leaves
 
-        let mut ctx = proof
-            .into_node()?
-            .map(|data| data.map_present(|_| Vec::<i32>::new()));
+        let (ctx, partial) = proof.into_node()?;
 
-        for _ in 0..4 {
-            ctx = ctx
-                .next_branch(|br_proof| br_proof.into_leaf::<i32>())?
-                .map(|(acc, val)| {
-                    acc.map_present(|mut acc| {
-                        if let Partial::Present((val, _)) = val {
-                            acc.push(val);
-                        }
-                        acc
-                    })
-                })
+        match partial {
+            Partial::Absent => return ctx.done(0),
+            Partial::Blinded(_) => return ctx.done(-1),
+            Partial::Present(_) => {}
         }
 
-        Ok(ctx.done()?.map(|data| match data {
-            Partial::Absent => 0,
-            Partial::Blinded(_hash) => -1,
-            Partial::Present(data) => data.into_iter().sum(),
-        }))
+        let mut data = Vec::new();
+
+        let ctx = (0..4).try_fold(ctx, |ctx, _| -> Result<_> {
+            let (ctx, val) = ctx.next_branch(|br_proof| br_proof.into_leaf::<i32>())?;
+
+            if let Partial::Present((val, _)) = val {
+                data.push(val);
+            }
+
+            Ok(ctx)
+        })?;
+
+        ctx.done(data.into_iter().sum())
     }
 
     /// Execute a deserialising computation over an owned Merkle proof.

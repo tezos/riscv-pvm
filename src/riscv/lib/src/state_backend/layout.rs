@@ -181,23 +181,25 @@ macro_rules! struct_layout {
                 fn into_verifier_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
                     proof: D,
                 ) -> $crate::state_backend::VerifierAllocResult<D, Self> {
-
                     use $crate::state_backend::proof_layout::tuple_branches_proof_layout;
                     use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
+                    use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 
-                    let ctx = tuple_branches_proof_layout!(@no_done; proof $(, [<$field_name:camel>])+);
+                    let result = tuple_branches_proof_layout!(proof $(, [<$field_name:camel>])+)?;
 
-                    let ctx = ctx.map(|(res, merkle)| {
-                        let ( $($field_name,)+ ) = res;
+                    let result = result.map(|(values, proof)| {
+                        let ( $($field_name),+ ) = values;
+
                         let allocated = Self::Allocated {
                             $(
                                 $field_name
                             ),+
                         };
-                        (allocated, merkle)
+
+                        (allocated, proof)
                     });
 
-                    ctx.done()
+                    Ok(result)
                 }
 
                 #[inline]

@@ -275,17 +275,30 @@ impl OwnedProofPart {
         }
     }
 
-    /// Map the inner [`MerkleProof`] if the proof is present.
-    ///
-    /// Panic: In debug mode, panic if the proof is absent.
-    pub(crate) fn map_present_unchecked(self, f: impl FnOnce(MerkleProof)) {
-        match self {
-            OwnedProofPart::Absent => debug_assert!(
-                false,
-                "If the node is present, then the branch is also present"
-            ),
-            OwnedProofPart::Present(proof) => f(proof),
+    /// Construct a node from its child proofs. The `parent` parameter allows us to restruct the
+    /// blinded state of the parent.
+    pub fn node_from_children(
+        parent: Partial<()>,
+        children: impl IntoIterator<Item = Self>,
+    ) -> Self {
+        match parent {
+            Partial::Absent => return OwnedProofPart::Absent,
+            Partial::Blinded(hash) => {
+                return OwnedProofPart::Present(MerkleProof::leaf_blind(hash));
+            }
+            Partial::Present(_) => {}
         }
+
+        let mut partial_children = Vec::with_capacity(MERKLE_ARITY);
+
+        for item in children {
+            match item {
+                OwnedProofPart::Absent => return OwnedProofPart::Absent,
+                OwnedProofPart::Present(tree) => partial_children.push(tree),
+            }
+        }
+
+        OwnedProofPart::Present(MerkleProof::Node(partial_children))
     }
 }
 
@@ -453,31 +466,27 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
                 });
                 Ok(ctx)
             } else {
-                let ctx = proof
-                    .into_node()?
-                    .map(|node_partial| (vec![], node_partial.map_present(|()| vec![])));
-                let ctx = Ok::<_, ProofError>(ctx);
-                let r = work_merkle_params::<MERKLE_ARITY>(start, left_length).fold(
-                    ctx,
-                    |ctx, (start, length)| {
-                        Ok(ctx?
-                            .next_branch(|proof| parse_pages_fn_getter(start, length, proof))?
-                            .map(|((mut acc, merkle_acc), (br_data, br_merkle))| {
-                                let merkle_acc = merkle_acc.map_present(|mut acc| {
-                                    br_merkle.map_present_unchecked(|br_proof| acc.push(br_proof));
-                                    acc
-                                });
-                                acc.extend(br_data);
-                                (acc, merkle_acc)
-                            }))
-                    },
-                );
+                let (ctx, parent) = proof.into_node()?;
 
-                Ok(r?
-                    .map(|(acc, merkle_children)| {
-                        (acc, OwnedProofPart::node_from_partial(merkle_children))
-                    })
-                    .done()?)
+                let mut pages_acc = Vec::new();
+                let mut proof_children_acc = Vec::new();
+
+                let mut work_brackets = work_merkle_params::<MERKLE_ARITY>(start, left_length);
+                let ctx = work_brackets.try_fold(
+                    ctx,
+                    |ctx, (start, length)| -> Result<_, ProofError> {
+                        let (ctx, (pages, proof)) =
+                            ctx.next_branch(|proof| parse_pages_fn_getter(start, length, proof))?;
+
+                        pages_acc.extend(pages);
+                        proof_children_acc.push(proof);
+
+                        Ok(ctx)
+                    },
+                )?;
+
+                let proof = OwnedProofPart::node_from_children(parent, proof_children_acc);
+                ctx.done((pages_acc, proof))
             }
         }
 
@@ -591,50 +600,32 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
 /// }
 /// ```
 macro_rules! tuple_branches_proof_layout {
-    (@no_done; $proof:expr, $($branches:path),+) => {
-        {
-            let ctx = $proof.into_node()?.map(|node_partial| ((), node_partial.map_present(|()| vec![])));
+    ($proof:expr, $($branches:ident),+) => {{
+        let (ctx, parent) = $proof.into_node()?;
 
-            tuple_branches_proof_layout!(@internal; ctx, [], $($branches),+)
+        paste::paste! {
+            $(
+                let (ctx, ([<$branches:lower>], [<$branches:lower _proof>])) = ctx.next_branch(|child_proof| [<$branches>]::into_verifier_alloc(child_proof))?;
+            )+
+
+            let value = (
+                $(
+                    [<$branches:lower>]
+                ),+
+            );
+
+            let proof = $crate::state_backend::proof_layout::OwnedProofPart::node_from_children(
+                parent,
+                [
+                    $(
+                        [<$branches:lower _proof>]
+                    ),+
+                ]
+            );
         }
-    };
-    ($proof:expr, $($branches:path),+) => {
-        {
-            let ctx = tuple_branches_proof_layout!(@no_done; $proof, $($branches),+);
 
-            ctx.done()
-        }
-    };
-    (@internal; $de:expr, [$($acc_br:path),*], $curr_br:path $(, $rest_br:path)*) => {
-        {
-            use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
-            use tuples::CombinRight;
-
-            let de = $de.next_branch(|child_proof| <$curr_br>::into_verifier_alloc(child_proof))?
-                .map(|((acc, merkle_acc), (br, br_merkle))| {
-                    (
-                        acc.push_right(br),
-                        merkle_acc.map_present(|mut acc| {
-                            br_merkle.map_present_unchecked(|br_proof| {
-                                acc.push(br_proof);
-                            });
-                            acc
-                        }),
-                    )
-                });
-
-            tuple_branches_proof_layout!(@internal; de, [ $($acc_br,)* $curr_br ] $(, $rest_br)*)
-        }
-    };
-    (@internal; $de:expr, [$($acc_br:path),*]) => {
-        {
-            use $crate::state_backend::proof_layout::OwnedProofPart;
-
-            $de.map(|(acc, merkle_children)| {
-                (acc, OwnedProofPart::node_from_partial(merkle_children))
-            })
-        }
-    };
+        ctx.done((value, proof))
+    }};
 }
 
 pub(crate) use tuple_branches_proof_layout;
@@ -839,39 +830,28 @@ where
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        let mut ctx = proof
-            .into_node()?
-            .map(|node_partial| (vec![], node_partial.map_present(|()| vec![])));
+        let (ctx, parent) = proof.into_node()?;
 
-        for _ in 0..LEN {
-            ctx = ctx
-                .next_branch(|child_proof| T::into_verifier_alloc(child_proof))?
-                .map(|((mut acc, merkle_acc), (br_res, br_merkle))| {
-                    acc.push(br_res);
-                    (
-                        acc,
-                        merkle_acc.map_present(|mut acc| {
-                            br_merkle.map_present_unchecked(|br_proof| {
-                                acc.push(br_proof);
-                            });
-                            acc
-                        }),
-                    )
-                });
-        }
+        let mut children_acc = Vec::with_capacity(LEN);
+        let mut child_proofs_acc = Vec::with_capacity(LEN);
 
-        let ctx = ctx.map(|(data, merkle_acc)| {
-            let data = data
-                .try_into()
-                .map_err(|_| {
-                    // We can't use expected because the error can't be displayed
-                    unreachable!("Conversion to array of fixed length doesn't fail")
-                })
-                .expect("Conversion to array of fixed length failed unexpectedly");
-            (data, OwnedProofPart::node_from_partial(merkle_acc))
-        });
+        let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, ProofError> {
+            let (ctx, (child, proof)) =
+                ctx.next_branch(|child_proof| T::into_verifier_alloc(child_proof))?;
 
-        ctx.done()
+            children_acc.push(child);
+            child_proofs_acc.push(proof);
+
+            Ok(ctx)
+        })?;
+
+        let Ok(children) = children_acc.try_into() else {
+            // We can't use expected because the error can't be displayed
+            unreachable!("Conversion to array of fixed length doesn't fail")
+        };
+        let proof = OwnedProofPart::node_from_children(parent, child_proofs_acc);
+
+        ctx.done((children, proof))
     }
 
     fn partial_state_hash(
@@ -914,46 +894,31 @@ where
             length: usize,
             proof: D,
         ) -> Result<D::Suspended<NestedSuspendedResult<T>>> {
-            let child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
-
             if length == 1 {
                 Ok(T::into_verifier_alloc(proof)?.map(|(data, merkle)| (vec![data], merkle)))
             } else {
-                let mut ctx = proof
-                    .into_node()?
-                    .map(|node_partial| (vec![], node_partial.map_present(|()| (vec![]))));
-                for (_, child_length) in child_length_iter {
-                    ctx = ctx
-                        .next_branch(|child_proof| {
+                let (ctx, parent) = proof.into_node()?;
+
+                let mut children_acc = Vec::with_capacity(MERKLE_ARITY);
+                let mut child_proofs_acc = Vec::with_capacity(MERKLE_ARITY);
+
+                let mut child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
+                let ctx = child_length_iter.try_fold(
+                    ctx,
+                    |ctx, (_, child_length)| -> Result<_, ProofError> {
+                        let (ctx, (children, proof)) = ctx.next_branch(|child_proof| {
                             parametrised_deserialiser::<T, D>(child_length, child_proof)
-                        })?
-                        .map(|((mut acc, merkle_acc), (br, merkle_br))| {
-                            acc.extend(br);
-                            let merkle_acc = merkle_acc.map_present(|mut acc| {
-                                match merkle_br {
-                                    OwnedProofPart::Absent => debug_assert!(
-                                        false,
-                                        "If the node is present, then the branch is also present"
-                                    ),
-                                    OwnedProofPart::Present(proof) => acc.push(proof),
-                                };
-                                acc
-                            });
-                            (acc, merkle_acc)
-                        });
-                }
-                let ctx = ctx.map(|(acc, merkle_children)| {
-                    (acc, match merkle_children {
-                        Partial::Absent => OwnedProofPart::Absent,
-                        Partial::Blinded(hash) => {
-                            OwnedProofPart::Present(MerkleProof::leaf_blind(hash))
-                        }
-                        Partial::Present(children) => {
-                            OwnedProofPart::Present(MerkleProof::Node(children))
-                        }
-                    })
-                });
-                ctx.done()
+                        })?;
+
+                        children_acc.extend(children);
+                        child_proofs_acc.push(proof);
+
+                        Ok(ctx)
+                    },
+                )?;
+
+                let proof = OwnedProofPart::node_from_children(parent, child_proofs_acc);
+                ctx.done((children_acc, proof))
             }
         }
 
