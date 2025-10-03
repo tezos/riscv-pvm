@@ -16,6 +16,7 @@
 //! - `stack_guard_start+PAGE_SIZE..MC::TOTAL_BYTES` is the stack area
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 
 use super::SupervisorState;
 use super::addr::PageAligned;
@@ -71,6 +72,8 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `mprotect` system call.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/mprotect.2.html>
+    ///
+    /// A length of 0 means no protections need to be changed.
     pub(super) fn handle_mprotect<MC>(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
@@ -82,8 +85,10 @@ impl<M: ManagerBase> SupervisorState<M> {
         MC: MemoryConfig,
         M: ManagerReadWrite,
     {
-        core.main_memory
-            .protect_pages(addr.to_machine_address(), length as usize, perms)?;
+        if let Some(length) = NonZeroUsize::new(length as usize) {
+            core.main_memory
+                .protect_pages(addr.to_machine_address(), length, perms)?;
+        }
 
         // Return 0 to indicate success.
         Ok(0)
@@ -122,13 +127,13 @@ impl<M: ManagerBase> SupervisorState<M> {
             Backend::File => return Err(Error::NoSystemCall),
         }
 
+        // TODO: RV-561: use u64 everywhere in the PVM
+        let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");
+
         let res_addr: VirtAddr = match flags.addr_hint {
-            AddressHint::Hint => core.main_memory.allocate_and_protect_pages(
-                None,
-                length.get() as usize,
-                perms,
-                false,
-            )?,
+            AddressHint::Hint => core
+                .main_memory
+                .allocate_and_protect_pages(None, length, perms, false)?,
 
             AddressHint::Fixed { allow_replace } => {
                 if !addr.is_aligned(PAGE_SIZE) {
@@ -137,7 +142,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
                 core.main_memory.allocate_and_protect_pages(
                     Some(addr.to_machine_address()),
-                    length.get() as usize,
+                    length,
                     perms,
                     allow_replace,
                 )?
@@ -155,14 +160,21 @@ impl<M: ManagerBase> SupervisorState<M> {
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         addr: u64,
-        length: u64,
+        // while not explicitly required to be non-zero, this does partially match the
+        // linux implementation which requires both page-aligned addresses and length > 0
+        //
+        // see <https://github.com/torvalds/linux/blob/50c19e20ed2ef359cf155a39c8462b0a6351b9fa/mm/vma.c#L1573>
+        length: NonZeroU64,
     ) -> Result<u64, Error>
     where
         MC: MemoryConfig,
         M: ManagerReadWrite,
     {
+        // TODO: RV-561: use u64 everywhere in the PVM
+        let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");
+
         core.main_memory
-            .deallocate_and_protect_pages(addr, length as usize)
+            .deallocate_and_protect_pages(addr, length)
             .map_err(|_| Error::InvalidArgument)?;
 
         Ok(0)

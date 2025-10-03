@@ -8,6 +8,7 @@ mod protection;
 mod state;
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -254,7 +255,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn protect_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: NonZeroUsize,
         perms: Permissions,
     ) -> Result<(), MemoryGovernanceError>
     where
@@ -264,7 +265,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn allocate_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: usize,
+        length: NonZeroUsize,
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
     where
@@ -274,7 +275,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn deallocate_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: NonZeroUsize,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite;
@@ -283,7 +284,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn allocate_and_protect_pages(
         &mut self,
         address_hint: Option<Address>,
-        length: usize,
+        length: NonZeroUsize,
         perms: Permissions,
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
@@ -294,7 +295,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn deallocate_and_protect_pages(
         &mut self,
         address: Address,
-        length: usize,
+        length: NonZeroUsize,
     ) -> Result<(), MemoryGovernanceError>
     where
         M: ManagerReadWrite,
@@ -307,7 +308,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 /// Memory configuration
 pub trait MemoryConfig: Send + 'static {
     /// Number of bytes in the memory
-    const TOTAL_BYTES: usize;
+    const TOTAL_BYTES: NonZeroUsize;
 
     /// Layout for memory instance's state
     type Layout: CommitmentLayout + ProofLayout;

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::num::NonZeroUsize;
+
 use super::buddy::BuddyLayout;
 use super::buddy::BuddyLayoutProxy;
 use super::protection::PagePermissions;
@@ -44,7 +46,8 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
 where
     BuddyLayoutProxy<PAGES>: BuddyLayout + 'static,
 {
-    const TOTAL_BYTES: usize = TOTAL_BYTES;
+    const TOTAL_BYTES: NonZeroUsize = NonZeroUsize::new(TOTAL_BYTES)
+        .expect("size of memory `TOTAL_BYTES` must be greater than zero");
 
     type Layout = (
         DynArray<TOTAL_BYTES>,
