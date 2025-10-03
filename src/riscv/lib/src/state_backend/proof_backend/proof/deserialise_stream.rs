@@ -141,7 +141,7 @@ impl<'t> StreamDeserialiser<'t> {
 impl<'t> Deserialiser for StreamDeserialiser<'t> {
     type Suspended<R> = StreamParserComb<'t, R>;
 
-    type DeserialiserNode<R> = StreamBranchComb<'t, R>;
+    type DeserialiserNode = StreamBranchComb<'t>;
 
     fn into_leaf_raw<const LEN: usize>(
         mut self,
@@ -192,26 +192,32 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         Ok(StreamParserComb::new(self, result))
     }
 
-    fn into_node(mut self) -> Result<Self::DeserialiserNode<Partial<()>>> {
+    fn into_node(mut self) -> Result<(Self::DeserialiserNode, Partial<()>)> {
         if self.is_absent() {
-            return Ok(StreamBranchComb {
-                result: Partial::Absent,
+            let this = StreamBranchComb {
                 deser: self.enter_absent(),
-            });
+            };
+            return Ok((this, Partial::Absent));
         }
 
         let tag = self.next_tag()?;
 
         match tag {
             Tag::Leaf(LeafTag::Read) => Err(ProofError::UnexpectedLeaf),
-            Tag::Leaf(LeafTag::Blind) => Ok(StreamBranchComb {
-                result: Partial::Blinded(self.input.deserialise::<Hash>()?),
-                deser: self.enter_absent(),
-            }),
-            Tag::Node => Ok(StreamBranchComb {
-                result: Partial::Present(()),
-                deser: self.enter_present(),
-            }),
+            Tag::Leaf(LeafTag::Blind) => {
+                let result = Partial::Blinded(self.input.deserialise::<Hash>()?);
+                let this = StreamBranchComb {
+                    deser: self.enter_absent(),
+                };
+                Ok((this, result))
+            }
+            Tag::Node => {
+                let result = Partial::Present(());
+                let this = StreamBranchComb {
+                    deser: self.enter_present(),
+                };
+                Ok((this, result))
+            }
         }
     }
 }
@@ -249,15 +255,12 @@ impl<'t, R> StreamParserComb<'t, R> {
 }
 
 /// Branch combinator for [`StreamDeserialiser`] deserialiser.
-pub struct StreamBranchComb<'t, R> {
-    /// Branch result
-    result: R,
-
+pub struct StreamBranchComb<'t> {
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
 }
 
-impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
+impl<'t> DeserialiserNode for StreamBranchComb<'t> {
     type Parent = StreamDeserialiser<'t>;
 
     fn next_branch<T>(
@@ -266,27 +269,15 @@ impl<'t, R> DeserialiserNode<R> for StreamBranchComb<'t, R> {
             Self::Parent,
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<<Self::Parent as Deserialiser>::DeserialiserNode<(R, T)>> {
-        let next_branch = branch_deserialiser(self.deser)?;
-
-        Ok(StreamBranchComb {
-            result: (self.result, next_branch.result),
-
-            // We need to recover the deserialiser from the child branch.
-            deser: next_branch.deser,
-        })
+    ) -> Result<(Self, T)> {
+        let StreamParserComb { result, deser } = branch_deserialiser(self.deser)?;
+        let this = StreamBranchComb { deser };
+        Ok((this, result))
     }
 
-    fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T> {
-        StreamBranchComb {
-            result: f(self.result),
-            deser: self.deser,
-        }
-    }
-
-    fn done(self) -> Result<<Self::Parent as Deserialiser>::Suspended<R>> {
+    fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>> {
         Ok(StreamParserComb {
-            result: self.result,
+            result: value,
             deser: self.deser.exit_context(),
         })
     }
