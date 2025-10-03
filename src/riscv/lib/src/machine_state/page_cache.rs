@@ -34,6 +34,7 @@ use super::memory;
 use super::memory::Address;
 use super::memory::MemoryConfig;
 use super::memory::address_to_page_offset;
+use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
@@ -51,7 +52,9 @@ const INSTRUCTION_ENTRIES: usize = 1
         .expect("OFFSET_BITS is non-zero") as usize;
 
 /// Instance of the page cache.
-pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> {
+pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>:
+    MemoryGovernanceListener
+{
     /// Instantiate a new page cache instance.
     fn new() -> Self;
 
@@ -68,10 +71,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
     /// Invalidate a range of pages, usually due to the corresponding memory becoming write-able,
     /// or no longer executable.
-    ///
-    /// While `pages` are expected to be `PAGE_SIZE` aligned, this is not a hard requirement.
-    /// Rather, all pages partially or fully overlapping with the range will be invalidated.
-    fn invalidate_pages(&mut self, addresses: std::ops::Range<u64>);
+    fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>);
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
