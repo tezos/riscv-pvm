@@ -406,7 +406,7 @@ pub mod tests {
         }
     });
 
-    backend_test!(test_endianess, F, {
+    backend_test!(test_endianness, F, {
         let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
 
         memory

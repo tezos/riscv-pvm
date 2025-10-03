@@ -504,8 +504,8 @@ mod tests {
         assert!(comp_fn.is_err_and(|e| matches!(e, ProofError::BadNumberOfBranches { .. })));
 
         // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
-        // Ideally, we would like to have expected: 2, got: 5, but the implemenetation for `ProofTreeDeserialiser`
-        // does not track this information (the original number of chilren)
+        // Ideally, we would like to have expected: 2, got: 5, but the implementation for `ProofTreeDeserialiser`
+        // does not track this information (the original number of children)
         let comp_fn =
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
         assert!(comp_fn.is_err_and(|e| {

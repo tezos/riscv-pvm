@@ -1250,7 +1250,7 @@ mod tests {
         );
     });
 
-    backend_test!(test_bitwise_intruction, F, {
+    backend_test!(test_bitwise_instruction, F, {
         proptest!(|(val1 in any::<u64>(), val2 in any::<u64>())| {
             let mut state = MachineCoreState::<M4K, F>::new();
 

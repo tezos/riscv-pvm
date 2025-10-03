@@ -28,7 +28,7 @@ use crate::state_backend::owned_backend::Owned;
 /// Internally, this may be interpreted, just-in-time compiled, or do
 /// additional work over just execution.
 ///
-/// The first and last parameters must be thin-references, for ABI-compatability reasons.
+/// The first and last parameters must be thin-references, for ABI-compatibility reasons.
 pub type DispatchFn<C, D, MC> = unsafe extern "C" fn(
     &mut C,
     &mut MachineCoreState<MC, Owned>,
@@ -266,7 +266,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
                 // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
                 //
                 // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                // information on ABI compatability.
+                // information on ABI compatibility.
                 unsafe { std::mem::transmute::<JitFn<MC>, DispatchFn<C, Self, MC>>(jitfn) }
             }
             None => C::run_block_not_compiled,
@@ -348,7 +348,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                         // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
                         //
                         // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                        // information on ABI compatability.
+                        // information on ABI compatibility.
                         msg.fun.store(jitfn as usize, Ordering::Release);
                     };
                 }

@@ -161,7 +161,7 @@ pub fn impl_modify_map_collect<
             },
             ProcessEvents::Collect(node_data, count) => {
                 // We need to reconstruct a subtree which is made of `count` children
-                // No panic: We are guaranted count < done.len() since every Collect(size)
+                // No panic: We are guaranteed count < done.len() since every Collect(size)
                 // corresponds to size nodes pushed to Done-queue
                 let children = done.split_off(done.len() - count);
                 done.push(collect(node_data, children)?);

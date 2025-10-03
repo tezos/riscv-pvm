@@ -595,7 +595,7 @@ pub fn run_x64_atomic_store<I: ICB>(
     run_atomic_store::<I, i64>(icb, rs1, rs2, rd)
 }
 
-// Reservation Set Helper Functionss
+// Reservation Set Helper Functions
 
 /// Raise an [`Exception::StoreAMOAccessFault`] error if `address` is not aligned to the width
 /// encoded by `V`.

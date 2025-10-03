@@ -43,7 +43,7 @@ pub enum StorageError {
     #[error("Data for hash {0} not found")]
     NotFound(String),
 
-    #[error("Commited chunk {0} not found")]
+    #[error("Committed chunk {0} not found")]
     ChunkNotFound(String),
 }
 

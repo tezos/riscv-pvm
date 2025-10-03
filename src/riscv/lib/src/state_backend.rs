@@ -148,7 +148,7 @@ pub trait ManagerBase: Sized {
     /// [enriched]: EnrichedValue
     type EnrichedCell<V: EnrichedValue>;
 
-    /// The root manager may either be itself, or occassionally the manager that this manager
+    /// The root manager may either be itself, or occasionally the manager that this manager
     /// wraps.
     ///
     /// For example, the [`Ref`] backend is often use to wrap the [`Owned`] backend to gain access
@@ -282,7 +282,7 @@ pub trait ManagerDeserialise: ManagerBase {
         decoder: D,
     ) -> Result<Self::Region<T, LEN>, DecodeError>;
 
-    /// Deserialise the dyanmic region.
+    /// Deserialise the dynamic region.
     fn deserialise_dyn_region<const LEN: usize, D: Decoder>(
         decoder: D,
     ) -> Result<Self::DynRegion<LEN>, DecodeError>;

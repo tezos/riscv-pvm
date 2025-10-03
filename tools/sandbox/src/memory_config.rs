@@ -24,7 +24,7 @@ impl FromStr for MemoryConfigValue {
             "4g" => Ok(MemoryConfigValue::M4G),
             "16g" => Ok(MemoryConfigValue::M16G),
             "64g" => Ok(MemoryConfigValue::M64G),
-            cfg => Err(format!("Unsupported memory configuation: {cfg}")),
+            cfg => Err(format!("Unsupported memory configuration: {cfg}")),
         }
     }
 }

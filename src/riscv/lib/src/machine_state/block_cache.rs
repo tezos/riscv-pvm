@@ -44,11 +44,11 @@
 //! instruction cache, could be completely different to those stored in
 //! the block cache, for the same physical address.
 //!
-//! This can occur due to the differring nature of cache entries between
+//! This can occur due to the differing nature of cache entries between
 //! the instruction & block cache: entries in the instruction cache are
 //! 1 instruction per slot, whereas in the block cache it's instead a
 //! block (a sequence of instructions) per slot. Therefore, an entry
-//! getting overriden in the instruction/block cache at address *A*, does
+//! getting overridden in the instruction/block cache at address *A*, does
 //! not invalidate all instructions in the block cache that correspond
 //! to *A*, as they could also exist in blocks at nearby preceding
 //! addresses.

@@ -125,7 +125,7 @@ pub(crate) const RLIMIT_NPROC: u64 = 1;
 
 /// Hard limit on the number of file descriptors that a system call can work with
 ///
-/// We also use this constant to implictly limit how much memory can be associated with a system
+/// We also use this constant to implicitly limit how much memory can be associated with a system
 /// call. For example, `ppoll` takes a pointer to an array of `struct pollfd`. If we don't limit
 /// the length of that array, then we might read an arbitrary amount of memory. This impacts the
 /// proof size dramatically as everything read would also be in the proof.

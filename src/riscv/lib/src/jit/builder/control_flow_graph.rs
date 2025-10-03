@@ -299,7 +299,7 @@ enum EdgeClass {
 
 // By convention, test modules are at the end of the file.
 //
-// We don't put the conditional compilaton attribute here to avoid issues with Clippy. Instead, we
+// We don't put the conditional compilation attribute here to avoid issues with Clippy. Instead, we
 // put it into the module file itself. Clippy doesn't look at the module declaration in the parent
 // file to determine whether the module is test-only or not. That means some non-test lints would
 // trigger in the tests module.

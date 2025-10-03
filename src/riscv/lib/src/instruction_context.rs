@@ -49,7 +49,7 @@ pub type IcbFnResult<I> = <I as ICB>::IResult<ProgramCounterUpdate<<I as ICB>::X
 #[expect(clippy::upper_case_acronyms, reason = "ICB looks cooler than Icb")]
 pub(crate) trait ICB
 where
-    // These contraints let us tie a type-equality knot.
+    // These constraints let us tie a type-equality knot.
     //
     // We want to allow handling of arbitrary value types via [`StateContext`]'s associated type
     // `Value`, whilst adding functionality on a subset of those values (e.g. 64-bit and 32-bit

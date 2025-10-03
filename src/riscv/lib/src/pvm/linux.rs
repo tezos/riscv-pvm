@@ -1008,7 +1008,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         // In jstz this is only used to set the maximum size of the process stack to infinity. In
         // other programs, it can be used to set limits for system resources. Allowing programs to
         // set these values to extreme values would inflate proof size, so is undesirable.
-        // Futhermore, a privileged process (such as the supervisor implemented in this PVM) has
+        // Furthermore, a privileged process (such as the supervisor implemented in this PVM) has
         // the ability to set these limits to arbitrary values.
         // So it does! By using its own predefined limits and returning EPERM.
 

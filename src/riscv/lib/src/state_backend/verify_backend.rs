@@ -381,7 +381,7 @@ impl<const LEAF_SIZE: usize> PageId<LEAF_SIZE> {
 
     const LEAF_MASK: usize = !(Self::LEAF_SIZE - 1);
 
-    /// Construct a page idetifier from an address.
+    /// Construct a page identifier from an address.
     pub fn from_address(address: usize) -> Self {
         PageId(address & Self::LEAF_MASK)
     }
