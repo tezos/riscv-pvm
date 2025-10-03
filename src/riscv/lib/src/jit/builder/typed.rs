@@ -30,7 +30,7 @@ use perfect_derive::perfect_derive;
 /// Cranelift IR type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
-    /// Basic Cranelift type (e.g. intergers)
+    /// Basic Cranelift type (e.g. integers)
     Basic(CraneliftType),
 
     /// Target-dependent pointer type

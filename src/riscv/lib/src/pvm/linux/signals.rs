@@ -856,7 +856,7 @@ mod tests {
         let init_pc = 10;
         pvm.machine_state.core.hart.pc.write(init_pc);
 
-        // The address of a psuedo handler.
+        // The address of a pseudo handler.
         let handler_address = VirtAddr::new(42);
 
         // Instruction to return from a function.

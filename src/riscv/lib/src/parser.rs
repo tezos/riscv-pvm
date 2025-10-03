@@ -516,7 +516,7 @@ pub const fn parse_uncompressed_instruction(instr: u32) -> Instr {
     use Instr::*;
     // RV64I (Chapter 5.4) and RV64C (Chapter 16.7) describe the code points associated
     // with HINT instructions. We do not implement any HINT logic, but decode all these
-    // as `Hint` or `HintCompresssed` opcodes, which we translate to NOPs in `machine_state`.
+    // as `Hint` or `HintCompressed` opcodes, which we translate to NOPs in `machine_state`.
     use XRegisterParsed::*;
     match opcode(instr) {
         // R-type instructions

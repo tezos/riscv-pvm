@@ -4,7 +4,7 @@
 
 //! Loading and storing of temporary values to/from the stack.
 //!
-//! Certain information is occassionally required to be on the stack, when executing
+//! Certain information is occasionally required to be on the stack, when executing
 //! a JIT-compiled block.
 //!
 //! See [`crate::jit::state_access`] for examples.

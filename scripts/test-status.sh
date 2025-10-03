@@ -57,8 +57,8 @@ done
 
 echo "[INFO]: found ${#working[@]} tested instructions"
 
-# Examing ignored test requirements
-echo "[INFO]: examing ignored tests"
+# Examining ignored test requirements
+echo "[INFO]: examining ignored tests"
 
 for t in "${ignored[@]}"; do
   echo -en "$(basename "$t")\t\t"

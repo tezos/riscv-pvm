@@ -440,12 +440,12 @@ pub enum Instr {
     Auipc(NonZeroRdUJTypeArgs),
 
     // RV64I jump instructions
-    /// `JAL` (note: uncompressed variant) - Instruction mis-aligned will
+    /// `JAL` (note: uncompressed variant) - Instruction misaligned will
     /// never be thrown because we allow C extension
     ///
     /// Always returns the target address (current program counter + imm)
     Jal(UJTypeArgs),
-    /// `JALR` (note: uncompressed variant) - Instruction mis-aligned will
+    /// `JALR` (note: uncompressed variant) - Instruction misaligned will
     /// never be thrown because we allow C extension
     ///
     /// Always returns the target address (val(rs1) + imm)

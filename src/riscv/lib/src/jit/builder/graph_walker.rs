@@ -134,7 +134,7 @@ mod tests {
             Ok(())
         }
 
-        // We have moved out the body into a separate function to avoid formating problems with the
+        // We have moved out the body into a separate function to avoid formatting problems with the
         // macro.
         proptest!(|(graph in graph())| {
             inner(graph)?;

@@ -347,7 +347,7 @@ mod tests {
     use crate::storage::Hash;
 
     /// Utility struct that computes the bounds of a [`MerkleProof`] serialisation
-    /// based on total number of nodes in the tree and total size of raw data in the leafs.
+    /// based on total number of nodes in the tree and total size of raw data in the leaves.
     struct SerialisationBound {
         nodes_count: u64,
         content_size: u64,
