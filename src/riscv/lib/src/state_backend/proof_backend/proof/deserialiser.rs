@@ -256,7 +256,7 @@ mod tests {
     ) -> Result<i32> {
         let proof: ProofTreeDeserialiser = ProofTree::Present(merkle_proof).into();
         let parsed_result = deser(proof)?;
-        parsed_result.into_result()
+        Ok(parsed_result.into_result())
     }
 
     /// Execute a deserialising computation over raw bytes.
@@ -274,7 +274,7 @@ mod tests {
         // Root is absent already
         let proof: ProofTreeDeserialiser = ProofTree::Absent.into();
         let comp_fn = computation_i16(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0);
+        assert_eq!(comp_fn.into_result(), 0);
 
         // We expect to get the Absent case since the father of the nested node is blinded
         let merkle_proof = MerkleProof::Node(vec![
@@ -283,7 +283,7 @@ mod tests {
         ]);
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_i16(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0);
+        assert_eq!(comp_fn.into_result(), 0);
     }
 
     #[test]
@@ -448,14 +448,14 @@ mod tests {
         let comp_fn =
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&absent_shape).into());
 
-        assert_eq!(comp_fn.unwrap().into_result().unwrap(), -1);
+        assert_eq!(comp_fn.unwrap().into_result(), -1);
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
         let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), -1);
+        assert_eq!(comp_fn.into_result(), -1);
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
         let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), -1);
+        assert_eq!(comp_fn.into_result(), -1);
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
 
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
         let comp_fn = computation_leaves(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0x140A_0000 + 0xC0005);
+        assert_eq!(comp_fn.into_result(), 0x140A_0000 + 0xC0005);
     }
 
     #[test]

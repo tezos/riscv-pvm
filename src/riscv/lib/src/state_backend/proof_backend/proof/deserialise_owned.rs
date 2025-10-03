@@ -44,15 +44,13 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
                         })?;
                 Ok(bytes)
             })
-            .map(|data| OwnedParserComb::new(Ok(data)))
+            .map(OwnedParserComb::new)
     }
 
     fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
-        let leaf_data = self
-            .deserialise_as_leaf()?
-            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)));
-
-        Ok(OwnedParserComb::new(leaf_data))
+        self.deserialise_as_leaf()?
+            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
+            .map(OwnedParserComb::new)
     }
 
     fn into_node(self) -> Result<Self::DeserialiserNode<Partial<()>>> {
@@ -105,22 +103,27 @@ impl ProofTreeDeserialiser<'_> {
 
 /// Suspended computation combinator for [`ProofTreeDeserialiser`] deserialiser.
 pub struct OwnedParserComb<'t, R> {
-    result: Result<R>,
+    result: R,
     _pd: PhantomData<fn(ProofTreeDeserialiser<'t>)>,
 }
 
 impl<R> OwnedParserComb<'_, R> {
-    fn new(result: Result<R>) -> Self {
+    fn new(result: R) -> Self {
         Self {
             result,
             _pd: PhantomData,
         }
     }
+
+    /// Consume the combinator and return its result.
+    pub fn into_result(self) -> R {
+        self.result
+    }
 }
 
 /// Branch deserialiser combinator for [`ProofTreeDeserialiser`] deserialiser.
 pub struct OwnedBranchComb<R, B> {
-    f: Result<R>,
+    result: R,
     node_data: Partial<VecDeque<B>>,
 }
 
@@ -131,14 +134,14 @@ impl<B> OwnedBranchComb<Partial<()>, B> {
         // Similar to `map_present` but for `&Partial<R>`.
         // This is done to preserve absent/blind/present information from node until calling `done()`.
         // See test_blind_node_parsing for an example.
-        let f_comb = match &branches {
+        let result = match &branches {
             Partial::Absent => Partial::Absent,
             Partial::Blinded(hash) => Partial::Blinded(*hash),
             Partial::Present(_) => Partial::Present(()),
         };
 
         Self {
-            f: Ok(f_comb),
+            result,
             node_data: branches.map_present(VecDeque::from),
         }
     }
@@ -169,14 +172,14 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         let br_comb = branch_deserialiser(next_branch)?;
 
         Ok(OwnedBranchComb {
-            f: self.f.and_then(|res| Ok((res, br_comb.result?))),
+            result: (self.result, br_comb.result),
             node_data: self.node_data,
         })
     }
 
     fn map<T>(self, f: impl FnOnce(R) -> T) -> <Self::Parent as Deserialiser>::DeserialiserNode<T> {
         OwnedBranchComb {
-            f: self.f.map(f),
+            result: f(self.result),
             node_data: self.node_data,
         }
     }
@@ -193,7 +196,7 @@ impl<'t, R> DeserialiserNode<R> for OwnedBranchComb<R, ProofTreeDeserialiser<'t>
         }
 
         Ok(OwnedParserComb {
-            result: self.f,
+            result: self.result,
             _pd: PhantomData,
         })
     }
@@ -208,13 +211,10 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
         self,
         f: impl FnOnce(Self::Output) -> T,
     ) -> <Self::Parent as Deserialiser>::Suspended<T> {
-        OwnedParserComb::new(self.result.map(f))
-    }
-}
-
-impl<R> OwnedParserComb<'_, R> {
-    pub fn into_result(self) -> Result<R> {
-        self.result
+        OwnedParserComb {
+            result: f(self.result),
+            _pd: PhantomData,
+        }
     }
 }
 
@@ -222,5 +222,5 @@ impl<R> OwnedParserComb<'_, R> {
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
 ) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
-    L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?.into_result()
+    Ok(L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?.into_result())
 }
