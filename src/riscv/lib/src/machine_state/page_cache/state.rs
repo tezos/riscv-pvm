@@ -14,11 +14,13 @@
 use std::marker::PhantomData;
 
 use super::INSTRUCTION_ENTRIES;
+use super::PageCache;
 use super::code_page_entry::CodePageEntry;
 use crate::array_utils::boxed_from_fn;
 use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::InstructionData;
 use crate::machine_state::memory::MemoryConfig;
@@ -26,6 +28,7 @@ use crate::machine_state::memory::OFFSET_BITS;
 use crate::machine_state::memory::PAGE_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::address_to_page_index;
+use crate::machine_state::memory::listener::MemoryGovernanceListener;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::state_backend::ManagerBase;
@@ -63,7 +66,7 @@ pub struct PageCacheImpl<const PAGES: usize, CPE, MC, M> {
 }
 
 impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
-    super::PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE, MC, M>
+    PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE, MC, M>
 {
     /// Construct a new page cache, which will be entirely unpopulated.
     fn new() -> Self {
@@ -155,17 +158,33 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     }
 
     /// Invalidate a range of pages corresponding to the provided range of memory.
-    fn invalidate_pages(&mut self, addresses: std::ops::Range<u64>) {
-        let start_page = address_to_page_index(addresses.start);
-        let end_page = address_to_page_index(addresses.end.wrapping_sub(1));
+    fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>) {
+        for page_idx in pages.take_while(|idx| *idx < PAGES as u64) {
+            self.pages[page_idx as usize] = None;
+        }
+    }
+}
 
-        // shortcut in-case of ranges out of bounds of memory
-        let end_page = end_page.min(self.pages.len().saturating_sub(1));
+impl<const PAGES: usize, CPE, MC, M> MemoryGovernanceListener for PageCacheImpl<PAGES, CPE, MC, M>
+where
+    CPE: CodePageEntry<MC, M>,
+    MC: MemoryConfig,
+    M: ManagerBase,
+{
+    /// The PageCache must ensure that it is always synchronised with main memory.
+    ///
+    /// Specifically, we must only have entries for pages that are executable, possibly readable,
+    /// and *not* writeable. Caching writeable pages would mean that entries could easily become
+    /// desynchronised from main memory, when said pages are written to - which we must avoid.
+    fn handle_permissions_update(
+        &mut self,
+        pages: std::ops::RangeInclusive<u64>,
+        permissions: memory::Permissions,
+    ) {
+        let needs_invalidation = permissions.can_write() || !permissions.can_exec();
 
-        for page_idx in start_page..=end_page {
-            if let Some(entry) = self.pages.get_mut(page_idx) {
-                *entry = None;
-            }
+        if needs_invalidation {
+            self.invalidate_pages(pages);
         }
     }
 }
@@ -189,7 +208,6 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
-    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -221,14 +239,7 @@ mod tests {
         }
         assert_eq!(count_active_pages(&cache), 16);
 
-        // invalidate a range - page aligned
-        //
-        // we expect the final page to not be invalidated - as upper bound of the half-open range
-        // ends on the first byte of the page.
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
-            &mut cache,
-            PAGE_SIZE.get()..(5 * PAGE_SIZE.get()),
-        );
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 1..=4);
         assert_eq!(count_active_pages(&cache), 12);
         assert!(PageCache::<Instruction, M1M, Owned>::get_code_page(&mut cache, 0).is_some());
 
@@ -247,24 +258,18 @@ mod tests {
                 .is_some()
         );
 
-        // invalidate a range - non-page aligned
-        //
-        // in this instance, we expect both the starting and ending pages to be invalidated.
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(
-            &mut cache,
-            (10 * PAGE_SIZE.get() + 1)..(11 * PAGE_SIZE.get() + 1),
-        );
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 10..=11);
         assert_eq!(count_active_pages(&cache), 10);
 
         // invalidate an already invalidated range does nothing
         PageCache::<Instruction, M1M, Owned>::invalidate_pages(
             &mut cache,
-            PAGE_SIZE.get()..(4 * PAGE_SIZE.get()),
+            PAGE_SIZE.get()..=(2 * PAGE_SIZE.get()),
         );
         assert_eq!(count_active_pages(&cache), 10);
 
         // invalidate all addresses clears all pages
-        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 0..u64::MAX);
+        PageCache::<Instruction, M1M, Owned>::invalidate_pages(&mut cache, 0..=u64::MAX);
         assert_eq!(count_active_pages(&cache), 0);
     }
 
@@ -288,8 +293,7 @@ mod tests {
                     exec: false,
                     write: false,
                 },
-                // TODO: replace with PageCache once implementing the listener
-                NoopMemoryGovernanceListener,
+                &mut cache,
             )
             .unwrap();
         cache.populate_page(15, &state);
@@ -298,13 +302,7 @@ mod tests {
         // populating a R+W should fail
         state
             .main_memory
-            .protect_pages(
-                0,
-                page_size,
-                Permissions::READ_WRITE,
-                // TODO: replace with PageCache once implementing the listener
-                NoopMemoryGovernanceListener,
-            )
+            .protect_pages(0, page_size, Permissions::READ_WRITE, &mut cache)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -312,13 +310,7 @@ mod tests {
         // populating a R+W+X should fail
         state
             .main_memory
-            .protect_pages(
-                0,
-                page_size,
-                Permissions::READ_WRITE_EXEC,
-                // TODO: replace with PageCache once implementing the listener
-                NoopMemoryGovernanceListener,
-            )
+            .protect_pages(0, page_size, Permissions::READ_WRITE_EXEC, &mut cache)
             .unwrap();
         cache.populate_page(15, &state);
         assert_eq!(count_active_pages(&cache), 0);
@@ -334,8 +326,7 @@ mod tests {
                     exec: true,
                     write: false,
                 },
-                // TODO: replace with PageCache once implementing the listener
-                NoopMemoryGovernanceListener,
+                &mut cache,
             )
             .unwrap();
         cache.populate_page(90, &state);
@@ -348,12 +339,15 @@ mod tests {
         let state = MachineCoreState::<M1M, F>::new();
         let state = &std::cell::RefCell::new(state);
 
+        let cache = &std::cell::RefCell::new(PageCacheImpl::<PAGES, Instruction, M1M, F>::new());
+
         proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get() as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
-            let mut cache = PageCacheImpl::<PAGES, Instruction, M1M, F>::new();
             let mut state = state.borrow_mut();
-            state.reset(NoopMemoryGovernanceListener);
+            let mut cache = cache.borrow_mut();
+
+            state.reset(&mut *cache);
 
             // clear lowest bit - address is always halfword aligned
             let pc_addr = pc_addr & !1;
