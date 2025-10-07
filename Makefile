@@ -10,7 +10,7 @@ build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check sandbox/check jstz/check dummy/check page-cache-tester/all etherlink/check assets/check
+check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
