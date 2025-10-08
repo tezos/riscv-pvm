@@ -23,10 +23,15 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
-#![cfg_attr(
+#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+mod merkle_layer;
+#[cfg_attr(
     not(test),
-    expect(dead_code, reason = "Stubbed API - will be implemented in RV-793")
+    expect(
+        dead_code,
+        reason = "Database will use the persistence layer in RV-808"
+    )
 )]
-
-mod persistence_layer;
+pub(crate) mod persistence_layer;
+#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 mod repo;
