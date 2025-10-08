@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::cmp::Ordering;
+
 use super::Key;
+use super::NONE_HASH;
 
 /// A node which supports rebalancing operations
 pub trait AvlNode: BinaryTreeNode {
@@ -22,6 +25,11 @@ pub trait BinaryTreeNode {
 
 /// A node with basic mutable binary tree traversal and mutation.
 pub trait BinaryTreeNodeInvalidating: NodeData + NodeDataInvalidating {
+    /// Delete the node with a given key.
+    ///
+    /// If it does not exist, do nothing.
+    fn delete(root: &mut Option<Box<Self>>, key: &Key);
+
     /// A mutable reference to the left branch.
     fn left_mut(&mut self) -> &mut Option<Box<Self>>;
 
@@ -32,6 +40,11 @@ pub trait BinaryTreeNodeInvalidating: NodeData + NodeDataInvalidating {
     ///
     /// If it does not exist, do nothing.
     fn set(root: &mut Option<Box<Self>>, key: &Key, data: Vec<u8>);
+
+    /// Swap this node with its successor.
+    ///
+    /// This method assumes this node has a successor.
+    fn trade_successor(root: &mut Option<Box<Self>>);
 }
 
 /// A node that supports rebalancing and Merklisation
@@ -41,7 +54,7 @@ pub struct MavlNode {
     data: Vec<u8>,
     left: Option<Box<Self>>,
     right: Option<Box<Self>>,
-    _hash: Option<blake3::Hash>,
+    hash: Option<blake3::Hash>,
     _height: u32,
 }
 
@@ -62,11 +75,54 @@ impl BinaryTreeNode for MavlNode {
 }
 
 impl BinaryTreeNodeInvalidating for MavlNode {
+    fn delete(root: &mut Option<Box<Self>>, key: &Key) {
+        let mut stack = Vec::new();
+        let mut current = root as *mut Option<Box<Self>>;
+
+        unsafe {
+            while let Some(node) = &mut *current {
+                stack.push(node as *mut Box<Self>);
+                match key.cmp(node.key()) {
+                    Ordering::Equal => {
+                        match (node.left_ref().as_ref(), node.right_ref().as_ref()) {
+                            (None, None) => *current = None,
+                            (Some(_), None) => *current = node.left_mut().take(),
+                            (None, Some(_)) => *current = node.right_mut().take(),
+                            (Some(_), Some(_)) => Self::trade_successor(&mut *current),
+                        }
+                        return;
+                    }
+
+                    Ordering::Greater => {
+                        current = (&mut *current)
+                            .as_mut()
+                            .expect("current is Some(_) in this loop")
+                            .right_mut()
+                    }
+
+                    Ordering::Less => {
+                        current = (&mut *current)
+                            .as_mut()
+                            .expect("current is Some(_) in this loop")
+                            .left_mut()
+                    }
+                }
+            }
+
+            for &node_ptr in stack.iter().rev().skip(1) {
+                let node = &mut *node_ptr;
+                Self::rebalance(node);
+            }
+        }
+    }
+
     fn left_mut(&mut self) -> &mut Option<Box<Self>> {
+        self.invalidate_hash();
         &mut self.left
     }
 
     fn right_mut(&mut self) -> &mut Option<Box<Self>> {
+        self.invalidate_hash();
         &mut self.right
     }
 
@@ -93,6 +149,36 @@ impl BinaryTreeNodeInvalidating for MavlNode {
                 stack.push(node as *mut Box<Self>);
             }
         }
+    }
+
+    fn trade_successor(_root: &mut Option<Box<Self>>) {
+        todo!()
+    }
+}
+
+impl MerkleNode for MavlNode {
+    fn hash(&mut self) -> blake3::Hash {
+        if let Some(hash) = self.hash {
+            hash
+        } else {
+            let mut hasher = blake3::Hasher::new();
+            let (l, r) = match (&mut self.left, &mut self.right) {
+                (Some(l), Some(r)) => (l.hash(), r.hash()),
+                (Some(l), None) => (l.hash(), NONE_HASH),
+                (None, Some(r)) => (NONE_HASH, r.hash()),
+                (None, None) => (NONE_HASH, NONE_HASH),
+            };
+
+            hasher.update(l.as_bytes());
+            hasher.update(r.as_bytes());
+            let hash = hasher.finalize();
+            self.hash = Some(hash);
+            hash
+        }
+    }
+
+    fn invalidate_hash(&mut self) {
+        self.hash = None;
     }
 }
 
@@ -125,6 +211,17 @@ impl NodeDataInvalidating for MavlNode {
         self.invalidate_hash();
         &mut self.key
     }
+}
+
+/// A node that can be Merklised
+pub trait MerkleNode {
+    /// Return the hash of the node.
+    ///
+    /// This may trigger re-hashing if the hash of this node is dirty.
+    fn hash(&mut self) -> blake3::Hash;
+
+    /// Mark the hash of this node as dirty
+    fn invalidate_hash(&mut self);
 }
 
 /// A key-value store node with immutable access.

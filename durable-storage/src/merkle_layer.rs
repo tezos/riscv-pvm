@@ -8,7 +8,7 @@ pub mod tree;
 use std::cmp::Ordering;
 
 use tree::BinaryTree;
-use tree::BinaryTreeUnbalancing;
+use tree::MerkleBinaryTree;
 
 /// An identifier generated for a given commit.
 pub struct CommitId;
@@ -109,7 +109,7 @@ impl<T: BinaryTree + Clone> MerkleLayerStable for T {
     }
 }
 
-impl<T: BinaryTreeUnbalancing> MerkleLayerInvalidating for T {
+impl<T: MerkleBinaryTree> MerkleLayerInvalidating for T {
     fn clear(&mut self) {
         self.root_mut().take();
     }
@@ -119,17 +119,19 @@ impl<T: BinaryTreeUnbalancing> MerkleLayerInvalidating for T {
     }
 
     fn hash(&mut self) -> blake3::Hash {
-        todo!()
+        T::hash(self)
     }
 
     fn set(&mut self, key: &Key, data: Vec<u8>) {
         T::set(self, key, data)
     }
 
-    fn delete(&mut self, _key: &Key) {
-        todo!()
+    fn delete(&mut self, key: &Key) {
+        T::delete(self, key)
     }
 }
+
+const NONE_HASH: blake3::Hash = blake3::Hash::from_bytes([0; 32]);
 
 /// A stand-in for the in-development layer for persisting data to durable storage.
 pub struct PersistenceLayer;
@@ -146,6 +148,39 @@ mod tests {
     use super::node::MavlNode;
     use super::node::NodeData;
     use super::tree::Avl;
+
+    #[cfg(test)]
+    trait ValidateTree<Node> {
+        fn is_inorder(&self) -> bool;
+
+        fn is_inorder_inner(node: &Option<Box<Node>>, min: &Key, max: &Key) -> bool;
+    }
+
+    #[cfg(test)]
+    impl<T, Node> ValidateTree<Node> for T
+    where
+        T: super::tree::BinaryTree<Node = Node>,
+        Node: super::node::BinaryTreeNode + NodeData,
+    {
+        fn is_inorder(&self) -> bool {
+            Self::is_inorder_inner(
+                self.root(),
+                &Key([u8::MIN; KEY_LENGTH]),
+                &Key([u8::MAX; KEY_LENGTH]),
+            )
+        }
+
+        fn is_inorder_inner(node: &Option<Box<Node>>, min: &Key, max: &Key) -> bool {
+            if let Some(node) = node.as_ref() {
+                if node.key() < min || node.key() > max {
+                    return false;
+                }
+                return Self::is_inorder_inner(node.left_ref(), min, node.key())
+                    && Self::is_inorder_inner(node.right_ref(), node.key(), max);
+            }
+            true
+        }
+    }
 
     #[test]
     fn test_key_comparison() {
@@ -173,5 +208,98 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(get_node, NodeData::data(&node));
+    }
+
+    #[test]
+    fn test_mavl_create_existing() {
+        let key: Key = Key([1; KEY_LENGTH]);
+        let data = vec![0; 8];
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+        avl.set(&key, data.clone());
+
+        let node: MavlNode = NodeData::new(key.clone(), data.clone());
+        let get_node = avl
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(get_node, NodeData::data(&node));
+
+        let hash1 = avl.hash();
+
+        avl.set(&key, data.clone());
+        assert!(avl.is_inorder(), "AVL isn't in order: {avl:?}");
+        let node: MavlNode = NodeData::new(key.clone(), data.clone());
+        let get_node = avl
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(get_node, NodeData::data(&node));
+        let hash2 = avl.hash();
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_mavl_delete() {
+        let key: Key = Key([1; KEY_LENGTH]);
+        let data = vec![0; 8];
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+
+        avl.set(&key, data.clone());
+
+        let node: MavlNode = NodeData::new(key.clone(), data.clone());
+        let get_node = avl
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(get_node, NodeData::data(&node));
+        avl.delete(&key);
+        assert_eq!(avl.get(&key), None);
+    }
+
+    #[test]
+    fn test_mavl_delete_invalid_key() {
+        let key = Key([1; KEY_LENGTH]);
+
+        let invalid_key = Key([255; KEY_LENGTH]);
+
+        let data = vec![];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+
+        avl.set(&key, data.clone());
+        assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+
+        let hash1 = avl.hash();
+
+        avl.delete(&invalid_key.clone());
+        assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+
+        let hash2 = avl.hash();
+        assert!(hash1 == hash2);
+    }
+
+    #[test]
+    fn test_mavl_invalidate_hash() {
+        let keys = [
+            Key([3; KEY_LENGTH]),
+            Key([1; KEY_LENGTH]),
+            Key([2; KEY_LENGTH]),
+            Key([4; KEY_LENGTH]),
+        ];
+
+        let data = vec![];
+
+        let mut avl = Avl::<MavlNode>::default();
+
+        for key in keys.iter() {
+            avl.set(key, data.clone());
+            assert!(avl.is_inorder(), "avl isn't in order: {avl:?}");
+        }
+
+        let hash1 = avl.hash();
+        avl.delete(&keys[3].clone());
+        assert!(avl.is_inorder(), "avl isn't in order: {avl:?}");
+        let hash2 = avl.hash();
+        assert!(hash1 != hash2);
     }
 }

@@ -6,9 +6,11 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 use super::Key;
+use super::NONE_HASH;
 use super::node::AvlNode;
 use super::node::BinaryTreeNode;
 use super::node::BinaryTreeNodeInvalidating;
+use super::node::MerkleNode;
 use super::node::NodeData;
 use super::node::NodeDataInvalidating;
 
@@ -44,6 +46,17 @@ impl<Node: AvlNode + BinaryTreeNode + BinaryTreeNodeInvalidating + Debug> Binary
         let root = self.root_mut();
         Node::set(root, key, data);
     }
+
+    fn delete(&mut self, key: &Key) {
+        let root = self.root_mut();
+        Node::delete(root, key);
+    }
+}
+
+impl<Node: AvlNode + BinaryTreeNode + BinaryTreeNodeInvalidating + Debug + Default + MerkleNode>
+    MerkleBinaryTree for Avl<Node>
+{
+    type Node = Node;
 }
 
 /// A tree of nodes with basic immutable binary tree traversal.
@@ -85,4 +98,24 @@ pub(super) trait BinaryTreeUnbalancing:
     ///
     /// If it does not exist, do nothing.
     fn set(&mut self, key: &Key, data: Vec<u8>);
+
+    /// Delete the node in the tree with a given key.
+    ///
+    /// If it does not exist, do nothing.
+    fn delete(&mut self, key: &Key);
+}
+
+/// A mutable key-value store binary tree with nodes that can be Merklised.
+pub(super) trait MerkleBinaryTree:
+    BinaryTreeUnbalancing<Node = <Self as MerkleBinaryTree>::Node>
+{
+    type Node: MerkleNode + NodeData + NodeDataInvalidating;
+
+    fn hash(&mut self) -> blake3::Hash {
+        if let Some(root) = self.root_mut() {
+            root.hash()
+        } else {
+            NONE_HASH
+        }
+    }
 }
