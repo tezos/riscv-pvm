@@ -3,13 +3,18 @@
 // SPDX-License-Identifier: MIT
 
 pub mod node;
+pub mod tree;
 
 use std::cmp::Ordering;
+
+use tree::BinaryTree;
+use tree::BinaryTreeUnbalancing;
 
 /// An identifier generated for a given commit.
 pub struct CommitId;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
+#[derive(Clone, Debug, Default)]
 pub struct Key([u8; KEY_LENGTH]);
 
 impl Eq for Key {}
@@ -81,6 +86,49 @@ pub trait MerkleLayerStable: Clone + Sized {
 
     /// Returns an immutable reference to the data stored for a given [Key].
     fn get(&self, key: &Key) -> Option<&Vec<u8>>;
+}
+
+impl<T: BinaryTree + Clone> MerkleLayerStable for T {
+    fn empty(_persistence: PersistenceLayer) -> Self {
+        Self::default()
+    }
+
+    fn checkout(
+        _persistence: PersistenceLayer,
+        _root: blake3::Hash,
+    ) -> Result<Self, MerkleLayerError> {
+        todo!()
+    }
+
+    fn commit(&self) -> Result<CommitId, MerkleLayerError> {
+        todo!()
+    }
+
+    fn get(&self, key: &Key) -> Option<&Vec<u8>> {
+        T::get(self, key)
+    }
+}
+
+impl<T: BinaryTreeUnbalancing> MerkleLayerInvalidating for T {
+    fn clear(&mut self) {
+        self.root_mut().take();
+    }
+
+    fn get_mut(&mut self, _key: &Key) -> Option<&mut Vec<u8>> {
+        todo!()
+    }
+
+    fn hash(&mut self) -> blake3::Hash {
+        todo!()
+    }
+
+    fn set(&mut self, key: &Key, data: Vec<u8>) {
+        T::set(self, key, data)
+    }
+
+    fn delete(&mut self, _key: &Key) {
+        todo!()
+    }
 }
 
 /// A stand-in for the in-development layer for persisting data to durable storage.
