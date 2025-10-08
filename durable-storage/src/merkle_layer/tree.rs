@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: MIT
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 
 use super::Key;
+use super::node::AvlNode;
 use super::node::BinaryTreeNode;
 use super::node::BinaryTreeNodeInvalidating;
 use super::node::NodeData;
@@ -12,6 +14,39 @@ use super::node::NodeDataInvalidating;
 
 /// An immutable key-value store tree with left and right nodes that supports traversal and value
 /// retrieval.
+#[derive(Clone, Default, Debug)]
+pub struct Avl<Node: BinaryTreeNode> {
+    root: Option<Box<Node>>,
+}
+
+impl<Node: BinaryTreeNode + Default + NodeData> BinaryTree for Avl<Node> {
+    type Node = Node;
+
+    fn root(&self) -> &Option<Box<Self::Node>> {
+        &self.root
+    }
+}
+
+impl<Node: BinaryTreeNode + BinaryTreeNodeInvalidating> BinaryTreeMutating for Avl<Node> {
+    type Node = Node;
+
+    fn root_mut(&mut self) -> &mut Option<Box<Self::Node>> {
+        &mut self.root
+    }
+}
+
+impl<Node: AvlNode + BinaryTreeNode + BinaryTreeNodeInvalidating + Debug> BinaryTreeUnbalancing
+    for Avl<Node>
+{
+    type Node = Node;
+
+    fn set(&mut self, key: &Key, data: Vec<u8>) {
+        let root = self.root_mut();
+        Node::set(root, key, data);
+    }
+}
+
+/// A tree of nodes with basic immutable binary tree traversal.
 pub(super) trait BinaryTree: Default {
     type Node: BinaryTreeNode + NodeData;
 

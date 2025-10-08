@@ -140,6 +140,12 @@ mod tests {
 
     use super::KEY_LENGTH;
     use super::Key;
+    use super::MerkleLayerInvalidating;
+    use super::MerkleLayerStable;
+    use super::PersistenceLayer;
+    use super::node::MavlNode;
+    use super::node::NodeData;
+    use super::tree::Avl;
 
     #[test]
     fn test_key_comparison() {
@@ -152,5 +158,20 @@ mod tests {
         assert_eq!(key1.cmp(&key2), Ordering::Greater);
         key2.0[0] = 1;
         assert_eq!(key1.cmp(&key2), Ordering::Less);
+    }
+
+    #[test]
+    fn test_mavl_create() {
+        let key: Key = Key([1; KEY_LENGTH]);
+        let data = vec![0; 8];
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+        avl.set(&key, data.clone());
+
+        let node: MavlNode = NodeData::new(key.clone(), data.clone());
+        let get_node = avl
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(get_node, NodeData::data(&node));
     }
 }
