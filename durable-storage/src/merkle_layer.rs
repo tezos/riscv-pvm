@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+pub mod node;
+
 use std::cmp::Ordering;
 
 /// An identifier generated for a given commit.
