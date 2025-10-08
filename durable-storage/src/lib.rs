@@ -22,3 +22,4 @@
 //!
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
+pub mod merkle_layer;
