@@ -8,3 +8,4 @@ rust-version = "1.88.0"
 workspace = true
 
 [dependencies]
+blake3.workspace = true
