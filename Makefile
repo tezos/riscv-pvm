@@ -14,9 +14,7 @@ check: riscv/check sandbox/check jstz/check dummy/check page-cache-tester/all et
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
-test: riscv/test jstz/test etherlink/test 
-
-test-miri: riscv/test-miri
+test: riscv/test jstz/test etherlink/test
 
 clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
@@ -49,4 +47,4 @@ assets/%:
 	@make -C assets ${@:assets/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check audit build test test-miri clean 
+.PHONY: all build-deps build-deps-slim check audit build test clean 
