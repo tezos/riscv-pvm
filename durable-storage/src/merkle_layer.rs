@@ -182,6 +182,72 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
+    impl<
+        Node: Default + NodeData + std::fmt::Debug + super::node::AvlNode + super::node::BinaryTreeNode,
+    > Avl<Node>
+    {
+        fn is_balanced(&self) -> bool {
+            Self::is_balanced_inner(super::tree::BinaryTree::root(self))
+        }
+
+        fn is_balanced_inner(node: &Option<Box<Node>>) -> bool {
+            if let Some(node) = node {
+                let left_node = node.left_ref();
+                let right_node = node.right_ref();
+
+                if left_node.is_none() && right_node.is_none() {
+                    return true;
+                }
+
+                let left_height = node.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
+                let right_height = node.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
+                let balance_factor = left_height as i64 - right_height as i64;
+                if !(-1..=1).contains(&balance_factor) {
+                    eprintln!("Balance factor not in -1..=1: {balance_factor:?}");
+                    eprintln!("Left: {left_height:?}");
+                    eprintln!("Right: {right_height:?}");
+                    return false;
+                }
+                return Self::is_balanced_inner(node.left_ref())
+                    && Self::is_balanced_inner(node.right_ref());
+            }
+            true
+        }
+
+        fn has_correct_heights(&self) -> bool {
+            Self::has_correct_heights_inner(super::tree::BinaryTree::root(self))
+        }
+
+        fn has_correct_heights_inner(node: &Option<Box<Node>>) -> bool {
+            if let Some(node) = node.as_ref() {
+                let left_height = node.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
+                let right_height = node.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
+                let height = 1 + std::cmp::max(left_height, right_height);
+                if node.height() != height {
+                    eprintln!("Node has height {:?}, should be {height:?}", node.height());
+                    return false;
+                }
+                return Self::has_correct_heights_inner(node.left_ref())
+                    && Self::has_correct_heights_inner(node.right_ref());
+            }
+            true
+        }
+
+        fn check(&self, line: u32) {
+            let inorder = self.is_inorder();
+            let is_balanced = self.is_balanced();
+            let has_correct_heights = self.has_correct_heights();
+            if !inorder || !is_balanced || !has_correct_heights {
+                eprintln!("{self:?}");
+                eprintln!("Line {line:?}");
+            }
+            assert!(inorder, "AVL tree isn't in order");
+            assert!(is_balanced, "AVL tree isn't balanced");
+            assert!(has_correct_heights, "AVL tree heights are incorrect");
+        }
+    }
+
     #[test]
     fn test_key_comparison() {
         let mut key1: Key = Key([0; KEY_LENGTH]);
@@ -214,7 +280,7 @@ mod tests {
     fn test_mavl_create_existing() {
         let key: Key = Key([1; KEY_LENGTH]);
         let data = vec![0; 8];
-        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
         avl.set(&key, data.clone());
 
         let node: MavlNode = NodeData::new(key.clone(), data.clone());
@@ -236,13 +302,14 @@ mod tests {
         assert_eq!(get_node, NodeData::data(&node));
         let hash2 = avl.hash();
         assert_eq!(hash1, hash2);
+        avl.check(line!());
     }
 
     #[test]
     fn test_mavl_delete() {
         let key: Key = Key([1; KEY_LENGTH]);
         let data = vec![0; 8];
-        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
 
         avl.set(&key, data.clone());
 
@@ -264,7 +331,7 @@ mod tests {
 
         let data = vec![];
 
-        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
 
         avl.set(&key, data.clone());
         assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
@@ -279,6 +346,116 @@ mod tests {
     }
 
     #[test]
+    fn test_mavl_delete_many() {
+        let keys = [
+            Key([1; KEY_LENGTH]),
+            Key([2; KEY_LENGTH]),
+            Key([3; KEY_LENGTH]),
+            Key([6; KEY_LENGTH]),
+            Key([4; KEY_LENGTH]),
+            Key([7; KEY_LENGTH]),
+            Key([8; KEY_LENGTH]),
+            Key([5; KEY_LENGTH]),
+            Key([10; KEY_LENGTH]),
+            Key([9; KEY_LENGTH]),
+        ];
+
+        let data = vec![];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+
+        for key in keys.iter() {
+            avl.set(key, data.clone());
+            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+        }
+
+        let psuedo_random_order = [4, 3, 2, 0, 5, 9, 1, 8, 7, 6];
+
+        for (i, index) in psuedo_random_order.iter().enumerate() {
+            avl.delete(&keys[*index].clone());
+            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+
+            for j in 0..i {
+                assert!(avl.get(&keys[psuedo_random_order[j]]).is_none())
+            }
+
+            for j in i + 1..psuedo_random_order.len() {
+                assert!(
+                    avl.get(&keys[psuedo_random_order[j]]).is_some(),
+                    "Wrong tree: {avl:?}, missing {:?}",
+                    keys[psuedo_random_order[j]]
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn test_mavl_imbalanced() {
+        let mut keys = [
+            Key([6; KEY_LENGTH]),
+            Key([5; KEY_LENGTH]),
+            Key([4; KEY_LENGTH]),
+            Key([3; KEY_LENGTH]),
+            Key([2; KEY_LENGTH]),
+            Key([1; KEY_LENGTH]),
+            Key([0; KEY_LENGTH]),
+        ];
+
+        let data = vec![];
+
+        // Left imbalance
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+
+        for key in keys.iter() {
+            avl.set(key, data.clone());
+            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+        }
+
+        // Right imbalance
+        avl.clear();
+        keys.sort();
+
+        for key in keys.iter() {
+            avl.set(key, data.clone());
+            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
+            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+        }
+    }
+
+    #[test]
+    fn test_mavl_delete_prng() {
+        let mut key = Key([0; KEY_LENGTH]);
+        let data = vec![];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+        let hash1 = avl.hash();
+
+        const NODES: u64 = 1000;
+        assert_eq!(NODES % 2, 0);
+        for i in 0..NODES {
+            key.0 = *blake3::hash(&i.to_le_bytes()).as_bytes();
+
+            avl.set(&key, data.clone());
+            avl.check(line!());
+        }
+        let hash2 = avl.hash();
+        assert!(hash1 != hash2);
+
+        for i in NODES / 2..NODES + NODES / 2 {
+            let i = i % NODES;
+            key.0 = *blake3::hash(&i.to_le_bytes()).as_bytes();
+            avl.delete(&key);
+            avl.check(line!());
+        }
+        let hash3 = avl.hash();
+        avl.check(line!());
+        assert!(hash1 == hash3);
+    }
+
+    #[test]
     fn test_mavl_invalidate_hash() {
         let keys = [
             Key([3; KEY_LENGTH]),
@@ -289,7 +466,7 @@ mod tests {
 
         let data = vec![];
 
-        let mut avl = Avl::<MavlNode>::default();
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
 
         for key in keys.iter() {
             avl.set(key, data.clone());
