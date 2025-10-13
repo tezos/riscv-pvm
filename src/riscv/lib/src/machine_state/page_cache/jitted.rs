@@ -7,7 +7,6 @@
 
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
-use super::dispatch::CodeDispatcher;
 use super::dispatch::DispatchCompiler;
 use crate::exceptions::Exception;
 use crate::jit::state_access::ExceptionCode;
@@ -37,7 +36,7 @@ pub type JittedPage<D, MC> = [Jitted<D, MC>; INSTRUCTION_ENTRIES];
 #[derive(derive_more::Debug)]
 pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     instruction: Instruction,
-    pub(super) dispatch: DispatchTarget<[Self; INSTRUCTION_ENTRIES], D, MC>,
+    pub(super) dispatch: DispatchTarget<D, MC>,
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<Instruction> for Jitted<D, MC> {
@@ -46,7 +45,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<Instruction> for Jitted<D,
     }
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for JittedPage<D, MC> {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// The default initial dispatcher for jit.
     ///
     /// This will run the entrypoint in interpreted mode by default, but may attempt to JIT-compile
@@ -58,8 +57,8 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
-    unsafe extern "C" fn run_entrypoint_interpreted(
-        &mut self,
+    pub(super) unsafe extern "C" fn run_entrypoint_interpreted(
+        page: &mut [Self; INSTRUCTION_ENTRIES],
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
@@ -71,29 +70,29 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         // instr_pc is always halfword aligned
         let mut offset = page_offset >> 1;
 
-        if !compiler.should_compile(&mut self[offset].dispatch) {
+        if !compiler.should_compile(&mut page[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
             // lifetime of the entrypoint
             return unsafe {
-                self.run_entrypoint_not_compiled(core, instr_pc, max_steps, result, compiler)
+                Self::run_entrypoint_not_compiled(page, core, instr_pc, max_steps, result, compiler)
             };
         }
 
         // trigger JIT compilation
         let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
         while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
-            let entry = &self[offset];
+            let entry = &page[offset];
 
             offset += (entry.instruction.width() as usize) >> 1;
 
             instructions.push(entry.instruction);
         }
 
-        let fun = compiler.compile(&mut self[page_offset >> 1].dispatch, instructions, instr_pc);
+        let fun = compiler.compile(&mut page[page_offset >> 1].dispatch, instructions, instr_pc);
 
         // Safety: the compiler passed to this function is always the same for the
         // lifetime of the entrypoint
-        unsafe { (fun)(self, core, instr_pc, max_steps, result, compiler) }
+        unsafe { (fun)(page, core, instr_pc, max_steps, result, compiler) }
     }
 
     /// Dispatch an entrypoint where JIT-compilation has been attempted, but failed for any reason.
@@ -104,15 +103,15 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
-    unsafe extern "C" fn run_entrypoint_not_compiled(
-        &mut self,
+    pub(super) unsafe extern "C" fn run_entrypoint_not_compiled(
+        page: &mut [Self; INSTRUCTION_ENTRIES],
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
         result: &mut ExceptionCode,
         _compiler: &mut D,
     ) -> usize {
-        let block_result = super::run_code_page_interpreted(self, core, instr_pc, max_steps);
+        let block_result = super::run_code_page_interpreted(page, core, instr_pc, max_steps);
 
         *result = block_result
             .error
