@@ -23,23 +23,18 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::InstructionData;
+use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::OFFSET_BITS;
 use crate::machine_state::memory::PAGE_MASK;
-use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::address_to_page_index;
 use crate::machine_state::memory::listener::MemoryGovernanceListener;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
+use crate::parser::parse_uncompressed_instruction;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
-
-/// Offset from the start of the page, to the last halfword contained within.
-const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
-    .get()
-    .checked_sub(std::mem::size_of::<u16>() as u64)
-    .expect("page-size must contain at least one halfword");
 
 pub(crate) struct PageEntry<CPE> {
     // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
@@ -189,37 +184,41 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
 
         let page_start = address & PAGE_MASK;
 
-        let page_last_halfword = page_start + LAST_HALFWORD_PAGE_OFFSET;
+        let Ok(InstructionData {
+            data,
+            writable: false,
+        }) = core.main_memory.read_page_exec(page_start)
+        else {
+            return;
+        };
 
-        let page_range = page_start..page_last_halfword;
+        for offset in 0..2047 {
+            let lower = data[offset];
 
-        // fetch and parse all instructions in the page, except the final halfword as
-        // it could be the lower halfword of an uncompressed instruction, which would
-        // require looking up the next page (which may not be R+X).
-        //
-        // TODO: RV-772: remove redundant permission checks/halfword fetches from memory.
-        for address in page_range.step_by(std::mem::size_of::<u16>()) {
-            let Ok(InstructionData {
-                data: instr,
-                writable: false,
-            }) = core.fetch_instr(address)
-            else {
-                return;
-            };
+            if is_compressed(lower) {
+                let instr = parse_compressed_instruction(lower);
+                let instr = Instruction::from(&instr);
+                entries.push(CPE::from(instr));
+            } else {
+                let InstructionData {
+                    data: uncompressed, ..
+                } = InstructionData {
+                    data: lower,
+                    writable: false,
+                }
+                .combine_with_upper(InstructionData {
+                    data: data[offset + 1],
+                    writable: false,
+                });
 
-            entries.push(CPE::from(instr));
+                let instr = parse_uncompressed_instruction(uncompressed);
+                let instr = Instruction::from(&instr);
+                entries.push(CPE::from(instr));
+            }
         }
 
         // final halfword may need to use ForceFetchRun mechanism if it overlaps page boundary
-        let Ok(InstructionData {
-            data: halfword,
-            writable: false,
-        }) = core.fetch_instr_halfword(page_last_halfword)
-        else {
-            unreachable!(
-                "If the page was not R+X only, we would have failed to fetch all previous halfwords"
-            );
-        };
+        let halfword = data[2047];
 
         let final_entry = if is_compressed(halfword) {
             let instr = parse_compressed_instruction(halfword);

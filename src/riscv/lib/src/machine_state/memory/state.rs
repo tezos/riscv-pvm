@@ -8,12 +8,14 @@ use std::ops::RangeInclusive;
 use super::Address;
 use super::BadMemoryAccess;
 use super::Memory;
+use super::PAGE_MASK;
 use super::PAGE_SIZE;
 use super::Permissions;
 use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
+use crate::array_utils::boxed_array;
 use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
@@ -137,6 +139,45 @@ where
 
         // SAFETY: The bounds check above ensures the access check below is safe
         let writable = unsafe { self.writable_pages.can_access_narrow::<E>(address) };
+
+        Ok(super::InstructionData { data, writable })
+    }
+
+    fn read_page_exec(
+        &self,
+        address: Address,
+    ) -> Result<super::InstructionData<Box<[u16; 2048]>>, BadMemoryAccess>
+    where
+        M: ManagerRead,
+    {
+        let page_start = address & PAGE_MASK;
+
+        Self::check_bounds(
+            page_start,
+            PAGE_SIZE
+                .try_into()
+                .expect("expect `PAGE_SIZE` to fit into `usize`"),
+            BadMemoryAccess,
+        )?;
+
+        unsafe {
+            if !self
+                .executable_pages
+                .can_access_narrow::<[u16; 2048]>(page_start)
+            {
+                return Err(BadMemoryAccess);
+            }
+        }
+
+        let mut data: Box<[u16; 2048]> = boxed_array![0; 2048];
+
+        self.data.read_all(page_start as usize, data.as_mut_slice());
+
+        // SAFETY: The bounds check above ensures the access check below is safe
+        let writable = unsafe {
+            self.writable_pages
+                .can_access_narrow::<[u16; 2048]>(address)
+        };
 
         Ok(super::InstructionData { data, writable })
     }

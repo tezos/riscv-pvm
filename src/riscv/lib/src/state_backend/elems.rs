@@ -10,7 +10,7 @@ use crate::machine_state::memory::PAGE_SIZE;
 pub trait NarrowlySized: Elem {
     /// Size of the type
     const NARROW_SIZE: NonZeroUsize = {
-        if Self::STORED_SIZE.get() >= PAGE_SIZE.get() as usize {
+        if Self::STORED_SIZE.get() > PAGE_SIZE.get() as usize {
             panic!("Type is too wide");
         }
 

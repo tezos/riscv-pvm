@@ -227,6 +227,14 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         E: Elem,
         M: ManagerRead;
 
+    /// Read in full the page containing the address, as instruction data.
+    fn read_page_exec(
+        &self,
+        address: Address,
+    ) -> Result<InstructionData<Box<[u16; 2048]>>, BadMemoryAccess>
+    where
+        M: ManagerRead;
+
     /// Read elements from the region. `address` is in bytes.
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
     where
