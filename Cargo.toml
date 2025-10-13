@@ -89,7 +89,7 @@ version = "0.26.3"
 features = ["derive"]
 
 [workspace.dependencies.clap]
-version = "4.5.47"
+version = "4.5.49"
 features = ["derive"]
 
 [workspace.dependencies.derive_more]
