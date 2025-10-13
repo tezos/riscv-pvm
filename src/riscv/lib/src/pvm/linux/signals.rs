@@ -823,10 +823,10 @@ mod tests {
     use super::Signal;
     use crate::backend_test;
     use crate::exceptions::Exception;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
     use crate::pvm::linux::VirtAddr;
@@ -835,7 +835,7 @@ mod tests {
         type MC = M1M;
         type Cpe = Interpreted<MC, Owned>;
 
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
 
         pvm.machine_state.reset();
 
@@ -911,7 +911,7 @@ mod tests {
         type MC = M1M;
         type Cpe = Interpreted<MC, Owned>;
 
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
 
         pvm.machine_state.reset();
 

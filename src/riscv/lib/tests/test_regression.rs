@@ -11,12 +11,12 @@ use std::io::Write;
 use std::ops::Bound;
 use std::path::PathBuf;
 
-use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
-use octez_riscv::machine_state::block_cache::block::OutlineCompiler;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::page_cache::CodePageEntry;
 use octez_riscv::machine_state::page_cache::Interpreted;
+use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::machine_state::page_cache::Jitted;
+use octez_riscv::machine_state::page_cache::OutlineCompiler;
 use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::stepper::Stepper;
@@ -68,7 +68,7 @@ fn regression_frozen_etherlink() {
 
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
     test_regression_for_block::<Interpreted<M64M, Owned>>(
-        InterpretedBlockBuilder,
+        InterpretedCompiler,
         &inputs,
         capture_volatile_properties,
     );

@@ -34,7 +34,7 @@ use crate::state_backend::owned_backend::Owned;
 /// Alias for the function signature produced by the JIT compilation.
 ///
 /// This must have the same Abi as [`DispatchFn`], which is used by
-/// the block dispatch mechanism in the block cache.
+/// the entrypoint dispatch mechanism in the page cache.
 ///
 /// The JitFn does not inspect the first and last parameters here, however.
 /// These parameters are needed by the initial dispatch mechanism to enable
@@ -45,7 +45,7 @@ use crate::state_backend::owned_backend::Owned;
 ///
 /// It also does not inspect the third parameter as it is hard-coded in the sequence building.
 ///
-/// [`DispatchFn`]: crate::machine_state::block_cache::block::DispatchFn
+/// [`DispatchFn`]: crate::machine_state::page_cache::dispatch::DispatchFn
 pub type JitFn<MC> = unsafe extern "C" fn(
     // ignored
     *const c_void,
@@ -300,14 +300,14 @@ mod tests {
     use crate::interpreter::float::RoundingMode;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
-    use crate::machine_state::block_cache::block::InlineCompiler;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
+    use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
@@ -369,7 +369,7 @@ mod tests {
 
             // Create the states for the interpreted and jitted runs.
             let mut interpreted_state: TestMachineState<Interpreted<_, _>> =
-                MachineState::new(InterpretedBlockBuilder);
+                MachineState::new(InterpretedCompiler);
             interpreted_state
                 .core
                 .main_memory
@@ -427,14 +427,14 @@ mod tests {
 
             let jitted_res = jitted_state.step_max_inner(max_steps);
 
-            // Assert the JIT-compiled block was called once.
+            // Assert the JIT-compiled entrypoint was called once.
             let jit_called_counter = jitted_state
                 .page_cache
                 .get_entrypoint_called_times(initial_pc)
-                .expect("Block at initial_pc should be valid");
+                .expect("Entrypoint at initial_pc should be valid");
             assert_eq!(
                 jit_called_counter, 1,
-                "Expected JIT-compiled block to be called exactly once"
+                "Expected JIT-compiled entrypoint to be called exactly once"
             );
 
             // Assert state equality.
@@ -1117,7 +1117,7 @@ mod tests {
                 .build(),
             ScenarioBuilder::default()
                 // Jump past u64::MAX - in both worlds we should wrap around but not
-                // execute functions past the end of the block (the jump).
+                // execute functions past the end of the instruction sequence (the jump).
                 .set_instructions(&[
                     I::new_nop(Uncompressed),
                     I::new_nop(Uncompressed),
@@ -1153,10 +1153,10 @@ mod tests {
                 .unset_expected_exception()
                 .build(),
             ScenarioBuilder::default()
-                // jumping to start of the block should exit the block in both interpreted and jitted world
+                // jumping to start of the instruction sequence should exit the instruction sequence in both interpreted and jitted world
                 //
-                // since we jump to the start of the block, however, we will fallback to partial
-                // block evaluation on the 4th step. Therefore, we do not expect an
+                // since we jump to the start of the instruction sequence, however, we will fallback to partial
+                // instruction sequence evaluation on the 4th step. Therefore, we do not expect an
                 // IllegalInstruction for executing an `Unknown` instruction.
                 .set_instructions(&[
                     I::new_nop(Compressed),
@@ -1184,7 +1184,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let scenarios: &[Scenario] = &[
-            // JR not to start of block should exit
+            // JR not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x2, 10, Compressed),
@@ -1195,7 +1195,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
-            // JR to start of block should continue with evaluating the same block
+            // JR to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x6, 0, Uncompressed),
@@ -1220,7 +1220,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let scenarios: &[Scenario] = &[
-            // JR_IMM not to start of block should exit
+            // JR_IMM not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x2, 10, Compressed),
@@ -1231,7 +1231,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
-            // JR_IMM to start of block should continue with evaluating the same block
+            // JR_IMM to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x6, 10, Uncompressed),
@@ -1256,7 +1256,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let scenarios: &[Scenario] = &[
-            // JALR not to start of block should exit
+            // JALR not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x2, 100_000, Compressed),
@@ -1270,7 +1270,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::InstructionAccessFault)
                 .build(),
-            // JALR to start of block should continue with evaluating the same block
+            // JALR to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x6, 0, Uncompressed),
@@ -1298,7 +1298,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let scenarios: &[Scenario] = &[
-            // JALR_IMM not to start of block should exit
+            // JALR_IMM not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x2, 10, Compressed),
@@ -1312,7 +1312,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
-            // JALR_IMM to start of block should continue with evaluating the same block
+            // JALR_IMM to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_li(x1, 1000, Uncompressed),
@@ -1340,7 +1340,7 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
         let scenarios: &[Scenario] = &[
-            // JALR_ABSOLUTE not to start of block should exit
+            // JALR_ABSOLUTE not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_nop(Uncompressed),
@@ -1354,7 +1354,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
-            // JALR_ABSOLUTE to start of block should continue with evaluating the same block
+            // JALR_ABSOLUTE to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_nop(Compressed),
@@ -1380,7 +1380,7 @@ mod tests {
     #[test]
     fn test_j_absolute() {
         let scenarios: &[Scenario] = &[
-            // J_ABSOLUTE not to start of block should exit
+            // J_ABSOLUTE not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_nop(Uncompressed),
@@ -1393,7 +1393,7 @@ mod tests {
                 .set_expected_steps(2)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
-            // J_ABSOLUTE to start of block should continue with evaluating the same block
+            // J_ABSOLUTE to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_nop(Compressed),
@@ -1675,7 +1675,7 @@ mod tests {
                     ])
                     .set_expected_steps(4)
                     // we branch, and all memory is set as non-executable.
-                    // since we exit the block, we fall back to fetch/run - which will fail
+                    // since we exit the instruction sequence, we fall back to fetch/run - which will fail
                     .set_expected_exception(Exception::InstructionAccessFault)
                     .set_assert_hook(assert_hook!(|core| {
                         assert_eq!(
@@ -1898,7 +1898,7 @@ mod tests {
             let max_steps = usize::MAX;
             let jitted_steps = unsafe {
                 // # Safety - the jit is not dropped until after we
-                //            exit the block.
+                //            exit the instruction sequence.
                 (fun)(
                     null(),
                     &mut jitted,

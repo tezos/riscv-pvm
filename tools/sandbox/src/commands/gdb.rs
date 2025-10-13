@@ -37,10 +37,10 @@ use gdbstub::target::ext::breakpoints::SwBreakpoint;
 use gdbstub::target::ext::breakpoints::SwBreakpointOps;
 use gdbstub::target::ext::exec_file::ExecFile;
 use gdbstub_arch::riscv::reg::RiscvCoreRegs;
-use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::BadMemoryAccess;
 use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::machine_state::memory::Memory;
+use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::hooks::StdoutDebugHooks;
 use octez_riscv::state_backend::FnManagerIdent;
 use octez_riscv::stepper::StepResult;
@@ -76,7 +76,7 @@ pub fn gdb_server(opts: GdbServerOptions) -> Result<(), Box<dyn Error>> {
         rollup_address.into_hash().as_ref().try_into()?,
         opts.inbox.origination_level,
         opts.preimage.preimages_dir,
-        InterpretedBlockBuilder,
+        InterpretedCompiler,
     )?;
 
     // loop

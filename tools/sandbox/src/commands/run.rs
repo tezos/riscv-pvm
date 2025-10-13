@@ -13,7 +13,6 @@ use std::fs;
 use std::ops::Bound;
 use std::time::Duration;
 
-use octez_riscv::machine_state::block_cache::block;
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::machine_state::page_cache::CodePageEntry;
@@ -35,11 +34,11 @@ cfg_if::cfg_if! {
         /// Execution strategy for entrypoints.
         pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::owned_backend::Owned>;
     } else if #[cfg(feature = "inline-jit")] {
-        /// Execution strategy for blocks.
-        pub type CodePageEntryImpl<MC> = page_cache::Jitted<block::InlineCompiler<MC>, MC>;
+        /// Execution strategy for entrypoints.
+        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler<MC>, MC>;
     } else {
-        /// Execution strategy for blocks.
-        pub type CodePageEntryImpl<MC> = page_cache::Jitted<block::OutlineCompiler<MC>, MC>;
+        /// Execution strategy for entrypoints.
+        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::OutlineCompiler<MC>, MC>;
     }
 }
 

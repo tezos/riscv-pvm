@@ -17,9 +17,9 @@ use super::reveals::RevealRequest;
 use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::machine_state;
-use crate::machine_state::block_cache::block;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache;
 use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::machine_state::registers::a0;
@@ -100,7 +100,7 @@ const INITIAL_VERSION: u64 = 0;
 
 /// Proof generator for the PVM.
 ///
-/// Uses the interpreted block backend by default.
+/// Uses the interpreted compiler.
 pub(crate) type PvmProofGen<'a, MC, M> = Pvm<
     MC,
     Interpreted<MC, ProofGen<state_backend::Ref<'a, M>>>,
@@ -140,9 +140,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         }
     }
 
-    /// Bind the block cache to the given allocated state and the given [block builder].
+    /// Bind the machine core state to the given allocated state and initialise the page cache with
+    /// the given [compiler].
     ///
-    /// [block builder]: block::Block::BlockBuilder
+    /// [compiler]: CodePageEntry::Compiler
     pub(crate) fn bind(
         space: state_backend::AllocatedOf<PvmLayout<MC>, M>,
         compiler: CPE::Compiler,
@@ -187,7 +188,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         M: state_backend::ManagerRead,
     {
         let space = self.struct_ref::<ProofWrapper>();
-        Pvm::bind(space, block::InterpretedBlockBuilder)
+        Pvm::bind(space, page_cache::InterpretedCompiler)
     }
 
     /// Reset the PVM.
@@ -470,11 +471,11 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::page_cache;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
@@ -511,7 +512,7 @@ mod tests {
         type Cpe = page_cache::Interpreted<MC, Owned>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -617,7 +618,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedBlockBuilder);
+            let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -662,7 +663,7 @@ mod tests {
         type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedCompiler);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -732,7 +733,7 @@ mod tests {
         type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedBlockBuilder);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedCompiler);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

@@ -3,7 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-pub mod block_cache;
 pub(crate) mod csregisters;
 pub(crate) mod hart_state;
 pub mod instruction;
@@ -338,7 +337,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
 
     /// Fetch & run the instruction located at address `instr_pc`.
     ///
-    /// Additionally, this will push the instruction to the block cache, iff the memory address is
+    /// Additionally, this will populate the relevant page in the page cache, iff the memory address is
     /// *not* writable.
     fn run_instr_at(&mut self, addr: Address) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
@@ -390,7 +389,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
                     let steps_remaining = max_steps - result.steps;
 
                     // Safety: the compiler is the same each time.
-                    let block_result = unsafe {
+                    let entrypoint_result = unsafe {
                         code_page.run(
                             &mut self.core,
                             &mut self.compiler,
@@ -399,8 +398,8 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
                         )
                     };
 
-                    // Short-circuit if the block failed
-                    if result.merge_and_return(block_result) {
+                    // Short-circuit if the entrypoint call failed
+                    if result.merge_and_return(entrypoint_result) {
                         return result;
                     }
                 }
@@ -648,9 +647,9 @@ pub(crate) mod test_helpers {
     use std::ops::DerefMut;
 
     use super::MachineState;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::state_backend::ManagerBase;
     use crate::state_backend::owned_backend::Owned;
     use crate::state_backend::proof_backend::ProofGen;
@@ -728,7 +727,7 @@ pub(crate) mod test_helpers {
 
     impl ReinitMachine<ProofGen<Owned>> for TestMachineOf<ProofGen<Owned>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
-            let new_state = MachineState::new(InterpretedBlockBuilder);
+            let new_state = MachineState::new(InterpretedCompiler);
             RefMutOrOwned::Owned(new_state)
         }
     }
@@ -751,10 +750,10 @@ mod tests {
     use proptest::proptest;
 
     use super::MachineState;
-    use super::block_cache::block::InterpretedBlockBuilder;
     use super::instruction::Instruction;
     use super::memory::Address;
     use super::page_cache::Interpreted;
+    use super::page_cache::InterpretedCompiler;
     use super::page_cache::state::PageEntry;
     use crate::backend_test;
     use crate::default::ConstDefault;
@@ -789,7 +788,7 @@ mod tests {
     use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
-        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
+        let state = TestMachineOf::<F>::new(InterpretedCompiler);
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -838,7 +837,7 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
+        let state = TestMachineOf::<F>::new(InterpretedCompiler);
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -864,7 +863,7 @@ mod tests {
     });
 
     backend_test!(test_step_access_exception, F, {
-        let state = TestMachineOf::<F>::new(InterpretedBlockBuilder);
+        let state = TestMachineOf::<F>::new(InterpretedCompiler);
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -888,7 +887,7 @@ mod tests {
     // `page-cache-tester` kernel's source that is used to test this.
     backend_test!(test_page_cache_state, F, {
         let base_state = {
-            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new(InterpretedBlockBuilder);
+            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new(InterpretedCompiler);
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
@@ -931,8 +930,7 @@ mod tests {
             // Clone the base state to get rid of any ephemeral state that was created.
             let refs = base_state.struct_ref::<FnManagerIdent>();
             let refs = PvmLayout::<M64M>::clone_allocated(refs);
-            let mut state =
-                Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedBlockBuilder);
+            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedCompiler);
 
             // We want to run the kernel until it exits as that is a good point to compare.
             loop {
@@ -976,7 +974,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, Interpreted<M1M, F>, F>::new(InterpretedBlockBuilder);
+        let state = MachineState::<M1M, Interpreted<M1M, F>, F>::new(InterpretedCompiler);
 
         let second = state.clone();
 
@@ -988,104 +986,99 @@ mod tests {
 
     // Ensure that the force-fetch-run mechanism correctly fetches instructions directly from
     // memory, and executes them.
-    backend_test!(
-        test_force_fetch_run,
-        F,
-        {
-            // li a1, 1
-            let li_bytes: u32 = 0x00100593;
-            const IMMEDIATE: i64 = 1;
+    backend_test!(test_force_fetch_run, F, {
+        // li a1, 1
+        let li_bytes: u32 = 0x00100593;
+        const IMMEDIATE: i64 = 1;
 
-            let li_instr = Instruction::from(&parse_uncompressed_instruction(li_bytes));
-            assert_eq!(
-                li_instr,
-                Instruction::new_li(nz::a1, IMMEDIATE, InstrWidth::Uncompressed),
-                "Incorrect bytes {li_bytes:x} for instruction"
-            );
+        let li_instr = Instruction::from(&parse_uncompressed_instruction(li_bytes));
+        assert_eq!(
+            li_instr,
+            Instruction::new_li(nz::a1, IMMEDIATE, InstrWidth::Uncompressed),
+            "Incorrect bytes {li_bytes:x} for instruction"
+        );
 
-            let li_lower = li_bytes as u16;
-            let li_upper = (li_bytes >> 16) as u16;
+        let li_lower = li_bytes as u16;
+        let li_upper = (li_bytes >> 16) as u16;
 
-            let run_test = |initial_pc: Address,
-                            write_lower: bool,
-                            write_upper: bool,
-                            expected_pc: Address,
-                            succeeds: bool| {
-                let mut state =
-                    MachineState::<M8K, Interpreted<M8K, F>, F>::new(InterpretedBlockBuilder);
+        let run_test = |initial_pc: Address,
+                        write_lower: bool,
+                        write_upper: bool,
+                        expected_pc: Address,
+                        succeeds: bool| {
+            let mut state = MachineState::<M8K, Interpreted<M8K, F>, F>::new(InterpretedCompiler);
 
-                state.core.hart.pc.write(initial_pc);
+            state.core.hart.pc.write(initial_pc);
 
-                if write_lower {
-                    state
-                        .core
-                        .main_memory
-                        .write_instruction_unchecked(initial_pc, li_lower)
-                        .unwrap();
-                }
+            if write_lower {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc, li_lower)
+                    .unwrap();
+            }
 
-                if write_upper {
-                    state
-                        .core
-                        .main_memory
-                        .write_instruction_unchecked(initial_pc + 2, li_upper)
-                        .unwrap();
-                }
+            if write_upper {
+                state
+                    .core
+                    .main_memory
+                    .write_instruction_unchecked(initial_pc + 2, li_upper)
+                    .unwrap();
+            }
 
-                let mut page = PageEntry::zeroed();
-                page.push_instructions(initial_pc, [Instruction::DEFAULT].into_iter());
+            let mut page = PageEntry::zeroed();
+            page.push_instructions(initial_pc, [Instruction::DEFAULT].into_iter());
 
-                state.page_cache.overwrite_page(initial_pc, page);
+            state.page_cache.overwrite_page(initial_pc, page);
 
-                let res: StepManyResult<()> =
-                    state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
+            let res: StepManyResult<()> =
+                state.step_max_handle(Bound::Included(1), |_| panic!("unexpected ECall"));
 
-                assert_eq!(state.core.hart.pc.read(), expected_pc);
-                assert_eq!(res.steps, 1);
-                assert_eq!(res.error, None);
-                let expected_a1 = if succeeds { IMMEDIATE as u64 } else { 0 };
-                assert_eq!(state.core.hart.xregisters.read_nz(nz::a1), expected_a1);
-            };
+            assert_eq!(state.core.hart.pc.read(), expected_pc);
+            assert_eq!(res.steps, 1);
+            assert_eq!(res.error, None);
+            let expected_a1 = if succeeds { IMMEDIATE as u64 } else { 0 };
+            assert_eq!(state.core.hart.xregisters.read_nz(nz::a1), expected_a1);
+        };
 
-            // TESTS
-            // we use as failure indication pc == 0 and a1 not updated
-            // -----
+        // TESTS
+        // we use as failure indication pc == 0 and a1 not updated
+        // -----
 
-            let pc_within_page = 100;
+        let pc_within_page = 100;
 
-            let pc_across_pages = memory::PAGE_SIZE.get().checked_sub(2).unwrap();
+        let pc_across_pages = memory::PAGE_SIZE.get().checked_sub(2).unwrap();
 
-            // force fetch run within an executable page succeeds
-            run_test(
-                pc_within_page,
-                true,
-                true,
-                pc_within_page + InstrWidth::Uncompressed as u64,
-                true,
-            );
+        // force fetch run within an executable page succeeds
+        run_test(
+            pc_within_page,
+            true,
+            true,
+            pc_within_page + InstrWidth::Uncompressed as u64,
+            true,
+        );
 
-            // force fetch run within a non executable page fails
-            run_test(pc_within_page, false, false, 0, false);
+        // force fetch run within a non executable page fails
+        run_test(pc_within_page, false, false, 0, false);
 
-            // force fetch run across two executable pages succeeds
-            run_test(
-                pc_across_pages,
-                true,
-                true,
-                pc_across_pages + InstrWidth::Uncompressed as u64,
-                true,
-            );
+        // force fetch run across two executable pages succeeds
+        run_test(
+            pc_across_pages,
+            true,
+            true,
+            pc_across_pages + InstrWidth::Uncompressed as u64,
+            true,
+        );
 
-            // force fetch run across one executable page followed by a non executable page
-            run_test(pc_across_pages, true, false, 0, false);
+        // force fetch run across one executable page followed by a non executable page
+        run_test(pc_across_pages, true, false, 0, false);
 
-            // force fetch run across one non-executable page followed by an executable page
-            run_test(pc_across_pages, false, true, 0, false);
-        }
-    );
+        // force fetch run across one non-executable page followed by an executable page
+        run_test(pc_across_pages, false, true, 0, false);
+    });
 
     backend_test!(test_signal_context, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedBlockBuilder);
+        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedCompiler);
 
         state.reset();
         state.set_all_readable_writeable();
@@ -1104,7 +1097,7 @@ mod tests {
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
     backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedBlockBuilder);
+        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedCompiler);
 
         state.reset();
         state.set_all_readable_writeable();

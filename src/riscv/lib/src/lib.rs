@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: 2024 Nomadic Labs <contact@nomadic-labs.com>
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
 mod array_utils;
 mod bits;
-mod cache_utils;
 mod default;
 mod exceptions;
 mod instruction_context;

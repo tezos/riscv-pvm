@@ -105,7 +105,7 @@ impl<const PAGES: usize, D, MC>
     PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, crate::state_backend::owned_backend::Owned>
 where
     MC: MemoryConfig,
-    D: crate::machine_state::block_cache::block::dispatch::DispatchCompiler<MC>,
+    D: super::dispatch::DispatchCompiler<MC>,
 {
     /// TEST ONLY
     ///
@@ -287,7 +287,6 @@ mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
@@ -296,6 +295,7 @@ mod tests {
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::interpreted::Interpreted;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -471,7 +471,7 @@ mod tests {
             let last_halfword = state.fetch_instr_halfword(pc_last_halfword).unwrap();
             if !crate::parser::is_compressed(last_halfword.data) {
                 // SAFETY: interpreted is always safe to call
-                let step_res = unsafe { code_page.run(&mut state, &mut InterpretedBlockBuilder, pc_last_halfword, 1) };
+                let step_res = unsafe { code_page.run(&mut state, &mut InterpretedCompiler, pc_last_halfword, 1) };
                 assert_eq!(step_res.error, Some(crate::exceptions::Exception::ForceFetchRun));
                 assert_eq!(step_res.steps, 0, "raising an exception does not complete a step");
             }
