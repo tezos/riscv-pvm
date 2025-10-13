@@ -18,6 +18,7 @@ use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
+use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::jitted::Jitted;
@@ -31,7 +32,7 @@ use crate::state_backend::owned_backend::Owned;
 ///
 /// The first and last parameters must be thin-references, for ABI-compatibility reasons.
 pub type DispatchFn<D, MC> = unsafe extern "C" fn(
-    &mut JittedPage<D, MC>,
+    &JittedPage<D, MC>,
     &mut MachineCoreState<MC, Owned>,
     Address,
     usize,
@@ -48,8 +49,8 @@ pub struct DispatchTarget<D, MC> {
     /// This will allow the `fun` to be updated from a background thread.
     /// See <https://doc.rust-lang.org/std/primitive.fn.html#casting-to-and-from-integers> for
     /// considerations taken whilst converting pointer <--> usize.
-    fun: Arc<AtomicUsize>,
-    remaining_calls: usize,
+    fun: AtomicUsize,
+    remaining_calls: AtomicUsize,
     /// A test only counter for the number of times this entrypoint has been called.
     ///
     /// This is used in the `jit.rs` tests to ensure that when running a scenario over InlineJit,
@@ -57,7 +58,7 @@ pub struct DispatchTarget<D, MC> {
     /// in the tests using the interpreted fallback mechanism instead for certain classes of test, rather
     /// than actually running the JIT-compiled function as intended.
     #[cfg(test)]
-    call_counter: usize,
+    call_counter: AtomicUsize,
     _pd: PhantomData<(D, MC)>,
 }
 
@@ -86,26 +87,24 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
 
     /// Increase the call counter to keep track of how often it was dispatched for verification in tests.
     #[cfg(test)]
-    pub(crate) fn record_called(&mut self) {
-        self.call_counter += 1;
+    pub(crate) fn record_called(&self) {
+        self.call_counter.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Get the number of times this dispatch target has been called for verification in tests.
     #[cfg(test)]
     pub(crate) fn called_times(&self) -> usize {
-        self.call_counter
+        self.call_counter.load(Ordering::SeqCst)
     }
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
     fn default() -> Self {
         Self {
-            fun: Arc::new(AtomicUsize::new(
-                Jitted::<D, MC>::run_entrypoint_interpreted as usize,
-            )),
-            remaining_calls: 1000,
+            fun: AtomicUsize::new(Jitted::<D, MC>::run_entrypoint_interpreted as usize),
+            remaining_calls: AtomicUsize::new(1000),
             #[cfg(test)]
-            call_counter: 0,
+            call_counter: AtomicUsize::new(0),
             _pd: PhantomData,
         }
     }
@@ -142,7 +141,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug for DispatchTarg
 /// said entrypoint in the given dispatch target.
 pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// Whether compilation should be attempted for the instruction sequence.
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool;
+    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool;
 
     /// Compile an instruction sequence, hot-swapping the `run_entrypoint` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
@@ -153,7 +152,7 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// outline jit, especially).
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
+        target: &JittedPage<Self, MC>,
         instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC>;
@@ -174,7 +173,7 @@ impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
 
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
     #[inline]
-    fn should_compile(&self, _target: &mut DispatchTarget<Self, MC>) -> bool {
+    fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
         // every entrypoint must be compiled immediately for inline jit, as it's used for testing
         // jit compatibility with interpreted mode.
         true
@@ -182,7 +181,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
+        target: &JittedPage<Self, MC>,
         instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
@@ -202,7 +201,8 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
             None => Jitted::run_entrypoint_not_compiled,
         };
 
-        target.set(fun);
+        let offset = memory::address_to_page_offset(program_counter) >> 1;
+        target[offset].dispatch.set(fun);
 
         fun
     }
@@ -241,7 +241,7 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
     _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
-    sender: Sender<CompilationRequest>,
+    sender: Sender<CompilationRequest<Self, MC>>,
 }
 
 impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
@@ -263,8 +263,11 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
 
                 while let Ok(msg) = receiver.recv() {
                     if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
+                        let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
+                        let dispatch = &msg.page[offset].dispatch;
+
                         debug_assert_eq!(
-                            msg.fun.load(Ordering::Acquire),
+                            dispatch.fun.load(Ordering::Acquire),
                             Jitted::<Self, MC>::run_entrypoint_not_compiled as usize,
                             "Unexpected function pointer in dispatch target"
                         );
@@ -279,7 +282,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                         //
                         // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
                         // information on ABI compatibility.
-                        msg.fun.store(jitfn as usize, Ordering::Release);
+                        dispatch.fun.store(jitfn as usize, Ordering::Release);
                     };
                 }
             }
@@ -301,27 +304,20 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
 }
 
 impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
-    fn should_compile(&self, target: &mut DispatchTarget<Self, MC>) -> bool {
-        unsafe {
-            match target.remaining_calls {
-                0 => true,
-                _ => {
-                    //SAFETY: `remaining_calls` (a usize) can only be a positive, non-zero integer
-                    target.remaining_calls = target.remaining_calls.unchecked_sub(1);
-                    false
-                }
-            }
-        }
+    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool {
+        target.remaining_calls.fetch_sub(1, Ordering::SeqCst) == 1
     }
 
     fn compile(
         &mut self,
-        target: &mut DispatchTarget<Self, MC>,
+        target: &JittedPage<Self, MC>,
         instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_entrypoint_not_compiled;
-        target.set(fun);
+
+        let offset = memory::address_to_page_offset(program_counter) >> 1;
+        target[offset].dispatch.set(fun);
 
         // Single instruction entrypoints don't perform as well when compiled
         if instr.len() <= 1 {
@@ -330,7 +326,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 
         let request = CompilationRequest {
             instr,
-            fun: target.fun.clone(),
+            page: target.clone(),
             program_counter,
         };
 
@@ -349,9 +345,10 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     }
 }
 
-struct CompilationRequest {
+// TODO: we can just send the whole page, and retrieve the instructions on the other side :)
+struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     instr: Vec<Instruction>,
-    fun: Arc<AtomicUsize>,
+    page: JittedPage<D, MC>,
     program_counter: Address,
 }
 
@@ -387,7 +384,7 @@ mod tests {
         );
 
         unsafe extern "C" fn compiled_dummy<D: DispatchCompiler<M4K>>(
-            _: &mut JittedPage<D, M4K>,
+            _: &JittedPage<D, M4K>,
             _: &mut MachineCoreState<M4K, Owned>,
             _: Address,
             _: usize,

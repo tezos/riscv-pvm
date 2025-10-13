@@ -23,6 +23,8 @@ pub(crate) mod interpreted;
 pub(crate) mod jitted;
 pub(crate) mod state;
 
+use std::sync::Arc;
+
 pub use code_page_entry::CodePageEntry;
 pub use dispatch::DispatchTarget;
 pub use dispatch::InlineCompiler;
@@ -97,7 +99,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 /// A page containing code that may then be run against the [`MachineCoreState`].
 #[derive(Debug)]
 pub struct CodePage<'a, CPE> {
-    page: &'a mut [CPE; INSTRUCTION_ENTRIES],
+    page: &'a Arc<[CPE; INSTRUCTION_ENTRIES]>,
 }
 
 impl<CPE> CodePage<'_, CPE> {
@@ -190,6 +192,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::CodePage;
     use super::INSTRUCTION_ENTRIES;
     use super::interpreted::Interpreted;
@@ -240,14 +244,15 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let mut page_entry: Box<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn(|| {
+        let mut page_entry: Arc<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn(|| {
             Interpreted::from(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 5,
                 InstrWidth::Compressed,
             ))
-        });
+        })
+        .into();
 
         let dispatch = &std::cell::RefCell::new(CodePage {
             page: &mut page_entry,
@@ -296,7 +301,7 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let mut page_entry: Box<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn({
+        let mut page_entry: Arc<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn({
             let mut idx = 0;
             move || {
                 // we put uncompressed instructions on 4-byte aligned addresses
@@ -310,7 +315,8 @@ mod tests {
 
                 Interpreted::from(instr)
             }
-        });
+        })
+        .into();
 
         let dispatch = &std::cell::RefCell::new(CodePage {
             page: &mut page_entry,
@@ -415,12 +421,12 @@ mod tests {
             )));
         }
 
-        let mut page_entry = page_entry
+        let page_entry: Box<[_; INSTRUCTION_ENTRIES]> = page_entry
             .try_into()
             .expect("page_entry has INSTRUCTION_ENTRIES entries");
-        let dispatch = &std::cell::RefCell::new(CodePage {
-            page: &mut page_entry,
-        });
+        let page_entry = Arc::from(page_entry);
+
+        let dispatch = &std::cell::RefCell::new(CodePage { page: &page_entry });
 
         let state = MachineCoreState::<M4K, F>::new();
         let state = &std::cell::RefCell::new(state);

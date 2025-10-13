@@ -12,6 +12,7 @@
 //! [PageCache]: super::PageCache
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use super::INSTRUCTION_ENTRIES;
 use super::PageCache;
@@ -55,9 +56,9 @@ pub(crate) struct PageEntry<CPE> {
     // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
     // interpreted dispatch here.
     //
-    // TODO: RV-790: consider raising this pointer (Box) out of `PageEntrye` to exploit the
-    // `Option<Box<_>>` optimisation.
-    entries: Box<[CPE; INSTRUCTION_ENTRIES]>,
+    // TODO: RV-790: consider raising this pointer (Arc) out of `PageEntry` to exploit the
+    // `Option<Arc<_>>` optimisation.
+    entries: Arc<[CPE; INSTRUCTION_ENTRIES]>,
 }
 
 #[cfg(test)]
@@ -76,7 +77,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
         let instruction = Instruction::from(&instruction);
 
         Self {
-            entries: boxed_from_fn(|| CPE::from(instruction)),
+            entries: Arc::from(boxed_from_fn(|| CPE::from(instruction))),
         }
     }
 
@@ -84,12 +85,17 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
     ///
     /// Push a sequence of instructions to a page entry, starting from the page offset given by the
     /// address.
+    ///
+    /// The page in question must not have been cloned.
     pub(crate) fn push_instructions(
         &mut self,
         address: Address,
         instructions: impl Iterator<Item = Instruction>,
     ) {
         use crate::machine_state::memory::address_to_page_offset;
+
+        let entries = Arc::get_mut(&mut self.entries)
+            .expect("push_instructions can only be called on an uncloned page");
 
         // we only store entries for halfword-aligned addresses, since pc is always halfword
         // aligned
@@ -102,7 +108,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
                 );
             }
 
-            self.entries[offset] = CPE::from(instr);
+            entries[offset] = CPE::from(instr);
 
             // we update the offset by half the width, as the offset is halfword aligned
             offset += (instr.width() as usize) >> 1;
@@ -195,7 +201,11 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     where
         M: ManagerReadWrite,
     {
-        let mut entries = Vec::with_capacity(INSTRUCTION_ENTRIES);
+        // Unlike with `Box<[T; LEN]>` - we cannot initialise with a Vec and do an in-place
+        // conversion. To avoid copying, we're forced to allocate with `Arc` directly.
+        let mut entries = Arc::new_uninit_slice(INSTRUCTION_ENTRIES);
+        let page_entries =
+            Arc::get_mut(&mut entries).expect("We just created this arc, there's only one");
 
         let page_start = address & PAGE_MASK;
 
@@ -207,7 +217,10 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
         // it could be the lower halfword of an uncompressed instruction, which would
         // require looking up the next page (which may not be R+X).
         //
+        // After this loop, all but the final entrypoint are initialised.
+        //
         // TODO: RV-772: remove redundant permission checks/halfword fetches from memory.
+        let mut offset = 0;
         for address in page_range.step_by(std::mem::size_of::<u16>()) {
             let Ok(InstructionData {
                 data: instr,
@@ -217,7 +230,8 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
                 return;
             };
 
-            entries.push(CPE::from(instr));
+            page_entries[offset].write(CPE::from(instr));
+            offset += 1;
         }
 
         // final halfword may need to use ForceFetchRun mechanism if it overlaps page boundary
@@ -240,12 +254,17 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
             Instruction::DEFAULT
         };
 
-        entries.push(CPE::from(final_entry));
+        // Initialise the final entrypoint (which corresponds to the final halfword).
+        page_entries[offset].write(CPE::from(final_entry));
 
         if let Some(page_entry) = self
             .pages
             .get_mut((page_start >> OFFSET_BITS.get()) as usize)
         {
+            // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. It is therefore
+            // safe to no longer treat these as unitialised.
+            let entries = unsafe { entries.assume_init() };
+
             *page_entry = Some(PageEntry {
                 entries: entries
                     .try_into()
@@ -289,6 +308,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
 
     use proptest::prelude::*;
 
@@ -329,7 +349,9 @@ mod tests {
         let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Owned>::new();
 
         let make_page = || PageEntry {
-            entries: boxed_array![Interpreted::<_, _>::from(Instruction::DEFAULT); INSTRUCTION_ENTRIES],
+            entries: Arc::from(
+                boxed_array![Interpreted::<_, _>::from(Instruction::DEFAULT); INSTRUCTION_ENTRIES],
+            ),
         };
 
         for page in cache.pages.iter_mut().take(16) {

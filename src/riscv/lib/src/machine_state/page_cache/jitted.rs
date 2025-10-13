@@ -5,6 +5,8 @@
 
 //! JIT-compilation support for entrypoints in pages.
 
+use std::sync::Arc;
+
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
 use super::dispatch::DispatchCompiler;
@@ -26,7 +28,7 @@ use crate::state_backend::owned_backend::Owned;
 const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
-pub type JittedPage<D, MC> = [Jitted<D, MC>; INSTRUCTION_ENTRIES];
+pub type JittedPage<D, MC> = Arc<[Jitted<D, MC>; INSTRUCTION_ENTRIES]>;
 
 /// Entrypoints that are compiled to native code for execution, when possible & desirable.
 ///
@@ -58,7 +60,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_interpreted(
-        page: &mut [Self; INSTRUCTION_ENTRIES],
+        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
@@ -70,7 +72,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         // instr_pc is always halfword aligned
         let mut offset = page_offset >> 1;
 
-        if !compiler.should_compile(&mut page[offset].dispatch) {
+        if !compiler.should_compile(&page[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
             // lifetime of the entrypoint
             return unsafe {
@@ -88,7 +90,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             instructions.push(entry.instruction);
         }
 
-        let fun = compiler.compile(&mut page[page_offset >> 1].dispatch, instructions, instr_pc);
+        let fun = compiler.compile(page, instructions, instr_pc);
 
         // Safety: the compiler passed to this function is always the same for the
         // lifetime of the entrypoint
@@ -104,7 +106,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_not_compiled(
-        page: &mut [Self; INSTRUCTION_ENTRIES],
+        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
         max_steps: usize,
@@ -143,7 +145,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jit
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     unsafe fn run_entrypoint(
-        page: &mut [Self; INSTRUCTION_ENTRIES],
+        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
         core: &mut MachineCoreState<MC, Owned>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,
@@ -159,7 +161,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jit
         // as many entries as the page size.
         let instr_offset = page_offset >> 1;
 
-        let entrypoint = &mut page[instr_offset];
+        let entrypoint = &page[instr_offset];
 
         let fun = entrypoint.dispatch.get();
 
@@ -196,16 +198,17 @@ mod tests {
 
     #[test]
     fn test_jitted_entrypoint_called() {
-        let mut page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
+        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
             Jitted::<_, M4K>::from(Instruction::new_nop(InstrWidth::Compressed))
-        });
+        })
+        .into();
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
 
         // Safety: we only ever use the above JIT instance
         let result = unsafe {
-            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 100, MAX_INSTR_COMPILED)
+            CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 100, MAX_INSTR_COMPILED)
         };
 
         assert!(result.error.is_none());
@@ -221,9 +224,10 @@ mod tests {
 
     #[test]
     fn test_interpreted_fallback_on_insufficient_steps() {
-        let mut page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
+        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
             Jitted::<_, M4K>::from(Instruction::new_nop(InstrWidth::Compressed))
-        });
+        })
+        .into();
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -231,9 +235,8 @@ mod tests {
         let max_steps = MAX_INSTR_COMPILED - 1;
 
         // Safety: we only ever use the above JIT instance
-        let result = unsafe {
-            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 100, max_steps)
-        };
+        let result =
+            unsafe { CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 100, max_steps) };
 
         assert!(result.error.is_none());
         assert_eq!(result.steps, max_steps);
@@ -248,9 +251,10 @@ mod tests {
 
     #[test]
     fn test_not_compiled_fallback_on_compilation_failure() {
-        let mut page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
+        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
             Jitted::<_, M4K>::from(Instruction::new_fence_i())
-        });
+        })
+        .into();
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -258,9 +262,8 @@ mod tests {
         let max_steps = MAX_INSTR_COMPILED;
 
         // Safety: we only ever use the above JIT instance
-        let result = unsafe {
-            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 100, max_steps)
-        };
+        let result =
+            unsafe { CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 100, max_steps) };
 
         assert_eq!(result.error, Some(Exception::FenceI));
         assert_eq!(result.steps, 0);
@@ -285,7 +288,7 @@ mod tests {
     /// request.
     #[test]
     fn test_compilation_request_respects_instruction_width() {
-        let mut page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>({
+        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>({
             let mut index = 0;
             move || {
                 let instruction = if index % 2 == 0 {
@@ -296,7 +299,8 @@ mod tests {
                 index += 1;
                 Jitted::<_, M4K>::from(instruction)
             }
-        });
+        })
+        .into();
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -305,7 +309,7 @@ mod tests {
 
         // Safety: we only ever use the above JIT instance
         let result = unsafe {
-            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 0, MAX_INSTR_COMPILED)
+            CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 0, MAX_INSTR_COMPILED)
         };
 
         assert!(result.error.is_none());
@@ -322,7 +326,7 @@ mod tests {
 
         // Safety: we only ever use the above JIT instance
         let result = unsafe {
-            CodePageEntry::run_entrypoint(&mut page, &mut core, &mut jit, 2, MAX_INSTR_COMPILED)
+            CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 2, MAX_INSTR_COMPILED)
         };
 
         assert_eq!(result.error, Some(Exception::IllegalInstruction));
