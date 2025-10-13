@@ -10,9 +10,9 @@ use std::ops::Bound;
 use goldenfile::Mint;
 use paste::paste;
 
-use crate::machine_state::block_cache::block::dispatch::InlineCompiler;
 use crate::machine_state::memory::M1M;
 use crate::machine_state::page_cache::CodePageEntry;
+use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
 use crate::machine_state::registers::XRegister;

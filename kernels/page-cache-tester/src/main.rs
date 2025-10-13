@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Block cache tester kernel for RISC-V PVM
+//! Page cache tester kernel for RISC-V PVM
 //!
 //! This module provides a test kernel that demonstrates dynamic code execution and cache
 //! invalidation behavior in the RISC-V PVM.

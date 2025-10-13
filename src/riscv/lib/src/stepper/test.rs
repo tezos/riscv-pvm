@@ -95,11 +95,11 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
         Ok(Self::new_with_parsed_program(program, compiler)?.0)
     }
 
-    /// Consumes the stepper, returning the [`BlockBuilder`] used internally.
+    /// Consumes the stepper, returning the [`Compiler`] used internally.
     ///
-    /// This allows the block builder to be re-used with a second stepper.
+    /// This allows the compiler to be re-used with a second stepper.
     ///
-    /// [`BlockBuilder`]: Block::BlockBuilder
+    /// [`Compiler`]: CodePageEntry::Compiler
     pub fn recover_builder(self) -> CPE::Compiler {
         self.machine_state.compiler
     }

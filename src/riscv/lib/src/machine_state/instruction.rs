@@ -9,7 +9,7 @@
 //!
 //! This allows us to dispatch the operation over the state directly from the opcode - both a
 //! simpler match statement and, ultimately, paves the way to pre-dispatch these functions
-//! when blocks are built in the block cache. This avoids the runtime overhead caused by
+//! when entrypoints are populated in the page cache. This avoids the runtime overhead caused by
 //! dispatching every time an instruction is run.
 
 mod constructors;

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
 
-//! Dispatching of blocks under JIT is done via hot-swappable
+//! Dispatching of entrypoints under JIT is done via hot-swappable
 //! function pointers.
 //!
 //! This module exposes wrappers for the style of dispatch and compilation that is done.
@@ -13,7 +13,6 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use super::Jitted;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
@@ -21,9 +20,10 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::jitted::JittedPage;
 use crate::state_backend::owned_backend::Owned;
 
-/// The function signature for dispatching a block run.
+/// The function signature for dispatching an entrypoint run.
 ///
 /// Internally, this may be interpreted, just-in-time compiled, or do
 /// additional work over just execution.
@@ -47,16 +47,16 @@ pub type DispatchFn<C, D, MC> = unsafe extern "C" fn(
 pub trait CodeDispatcher<D: DispatchCompiler<MC>, MC: MemoryConfig>: Sized {
     /// The default initial dispatcher for jit.
     ///
-    /// This will run the block in interpreted mode by default, but should attempt to JIT-compile
-    /// the block.
+    /// This will run the entrypoint in interpreted mode by default, but should attempt to JIT-compile
+    /// the entrypoint.
     ///
     /// # SAFETY
     ///
-    /// The `block_builder` must be the same every time this function is called.
+    /// The `dispatch_compiler` must be the same every time this function is called.
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
-    /// as this block may be run.
-    unsafe extern "C" fn run_block_interpreted(
+    /// as this entrypoint may be run.
+    unsafe extern "C" fn run_entrypoint_interpreted(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -65,15 +65,15 @@ pub trait CodeDispatcher<D: DispatchCompiler<MC>, MC: MemoryConfig>: Sized {
         dispatch_compiler: &mut D,
     ) -> usize;
 
-    /// Run a block where JIT-compilation has been attempted, but failed for any reason.
+    /// Run an entrypoint where JIT-compilation has been attempted, but failed for any reason.
     ///
     /// # SAFETY
     ///
-    /// The `block_builder` must be the same every time this function is called.
+    /// The `dispatch_compiler` must be the same every time this function is called.
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
-    /// as this block may be run.
-    unsafe extern "C" fn run_block_not_compiled(
+    /// as this entrypoint may be run.
+    unsafe extern "C" fn run_entrypoint_not_compiled(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -94,11 +94,11 @@ pub struct DispatchTarget<C, D, MC> {
     /// considerations taken whilst converting pointer <--> usize.
     fun: Arc<AtomicUsize>,
     remaining_calls: usize,
-    /// A test only counter for the number of times this block has been called.
+    /// A test only counter for the number of times this entrypoint has been called.
     ///
     /// This is used in the `jit.rs` tests to ensure that when running a scenario over InlineJit,
-    /// we *do* actually run the block. Previously this check did not exist, and a change resulted
-    /// in the tests using the partial block mechanism instead for certain classes of test, rather
+    /// we *do* actually run the entrypoint. Previously this check did not exist, and a change resulted
+    /// in the tests using the interpreted fallback mechanism instead for certain classes of test, rather
     /// than actually running the JIT-compiled function as intended.
     #[cfg(test)]
     call_counter: usize,
@@ -108,12 +108,12 @@ pub struct DispatchTarget<C, D, MC> {
 impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<C, D, MC> {
     /// Reset the dispatch target to the interpreted dispatch mechanism.
     pub fn reset(&mut self) {
-        // in resetting the block, we must allocated a new Arc<AtomicUsize>.
+        // in resetting the entrypoint, we must allocated a new Arc<AtomicUsize>.
         //
         // If we just reset the current arc, outline jit could update it from the background thread
-        // after reset it - meaning a reset/under construction block could now have a jitted function for
-        // a completely different set of instructions.
-        self.fun = Arc::new(AtomicUsize::new(C::run_block_interpreted as usize));
+        // after reset it - meaning a reset/under construction entrypoint could now have a jitted
+        // function for a completely different set of instructions.
+        self.fun = Arc::new(AtomicUsize::new(C::run_entrypoint_interpreted as usize));
 
         self.remaining_calls = 1000;
         #[cfg(test)]
@@ -124,7 +124,7 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> Dispat
 }
 
 impl<C, D, MC: MemoryConfig> DispatchTarget<C, D, MC> {
-    /// Set the dispatch target to use the given `block_run` function.
+    /// Set the dispatch target to use the given `run_entrypoint` function.
     pub fn set(&self, fun: DispatchFn<C, D, MC>) {
         // casting a function pointer as usize is ok to do.
         let fun = fun as usize;
@@ -133,7 +133,7 @@ impl<C, D, MC: MemoryConfig> DispatchTarget<C, D, MC> {
         self.fun.store(fun, Ordering::Release);
     }
 
-    /// Get the dispatch target's current `block_run` function.
+    /// Get the dispatch target's current `run_entrypoint` function.
     pub fn get(&self) -> DispatchFn<C, D, MC> {
         // load using Acquire ordering - so that it will see the previous store which was with
         // Release.
@@ -164,7 +164,7 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> Defaul
 {
     fn default() -> Self {
         Self {
-            fun: Arc::new(AtomicUsize::new(C::run_block_interpreted as usize)),
+            fun: Arc::new(AtomicUsize::new(C::run_entrypoint_interpreted as usize)),
             remaining_calls: 1000,
             #[cfg(test)]
             call_counter: 0,
@@ -186,9 +186,9 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> std::f
             Compiled,
         }
 
-        let status = if fun as usize == C::run_block_interpreted as usize {
+        let status = if fun as usize == C::run_entrypoint_interpreted as usize {
             Status::Interpreted
-        } else if fun as usize == C::run_block_not_compiled as usize {
+        } else if fun as usize == C::run_entrypoint_not_compiled as usize {
             Status::NotCompiled
         } else {
             Status::Compiled
@@ -202,20 +202,20 @@ impl<C: CodeDispatcher<D, MC>, D: DispatchCompiler<MC>, MC: MemoryConfig> std::f
     }
 }
 
-/// A compiler that can JIT-compile blocks of instructions, and hot-swap the execution of
-/// said block in the given dispatch target.
+/// A compiler that can JIT-compile sequences of instructions, and hot-swap the execution of
+/// said entrypoint in the given dispatch target.
 pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
-    /// Whether compilation should be attempted for the block.
+    /// Whether compilation should be attempted for the instruction sequence.
     fn should_compile<C: CodeDispatcher<Self, MC>>(
         &self,
         target: &mut DispatchTarget<C, Self, MC>,
     ) -> bool;
 
-    /// Compile a block, hot-swapping the `run_block` function contained in `target` in
+    /// Compile an instruction sequence, hot-swapping the `run_entrypoint` function contained in `target` in
     /// the process. This could be to an interpreted execution method, and/or jit-compiled
     /// function.
     ///
-    /// NB - the hot-swapping of JIT-compiled blocks may occur at any time, and is not
+    /// NB - the hot-swapping of JIT-compiled entrypoints may occur at any time, and is not
     /// guaranteed to be contained within the call-time of this function. (This is true for
     /// outline jit, especially).
     fn compile<C: CodeDispatcher<Self, MC>>(
@@ -226,7 +226,7 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     ) -> DispatchFn<C, Self, MC>;
 }
 
-/// JIT compiler for blocks that performs compilation inline, in the same thread as execution.
+/// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
 pub struct InlineCompiler<MC: MemoryConfig> {
     jit: JIT<MC>,
 }
@@ -245,7 +245,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         &self,
         _target: &mut DispatchTarget<C, Self, MC>,
     ) -> bool {
-        // every block must be compiled immediately for inline jit, as it's used for testing
+        // every entrypoint must be compiled immediately for inline jit, as it's used for testing
         // jit compatibility with interpreted mode.
         true
     }
@@ -269,7 +269,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
                 // information on ABI compatibility.
                 unsafe { std::mem::transmute::<JitFn<MC>, DispatchFn<C, Self, MC>>(jitfn) }
             }
-            None => C::run_block_not_compiled,
+            None => C::run_entrypoint_not_compiled,
         };
 
         target.set(fun);
@@ -304,7 +304,7 @@ mod internal_corro {
     unsafe impl<T> Send for SendWrapper<T> {}
 }
 
-/// JIT compiler for blocks that performs compilation in a
+/// JIT compiler for entrypoints that performs compilation in a
 /// background thread.
 pub struct OutlineCompiler<MC: MemoryConfig> {
     // We will not touch the jit from the execution thread, however we must maintain
@@ -335,7 +335,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                     if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
                         debug_assert_eq!(
                             msg.fun.load(Ordering::Acquire),
-                            Jitted::<Self, MC>::run_block_not_compiled as usize,
+                            <JittedPage::<Self, MC> as CodeDispatcher<Self, MC>>::run_entrypoint_not_compiled as usize,
                             "Unexpected function pointer in dispatch target"
                         );
 
@@ -393,10 +393,10 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<C, Self, MC> {
-        let fun = C::run_block_not_compiled;
+        let fun = C::run_entrypoint_not_compiled;
         target.set(fun);
 
-        // Single instruction blocks don't perform as well when compiled
+        // Single instruction entrypoints don't perform as well when compiled
         if instr.len() <= 1 {
             return fun;
         }
@@ -413,7 +413,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         // If it has, execution must still continue - but everything will fallback
         // to interpreted mode.
         //
-        // NB - any blocks already JIT compiled are safe to keep calling, as the
+        // NB - any entrypoints already JIT compiled are safe to keep calling, as the
         // data behind the mutex (the JIT) is kept alive for as long as we maintain
         // our reference to it, despite the lock itself being poisoned.
         let _ = self.sender.send(request);
@@ -430,11 +430,11 @@ struct CompilationRequest {
 
 #[cfg(test)]
 mod tests {
+    use super::CodeDispatcher;
     use super::DispatchTarget;
+    use super::InlineCompiler;
     use crate::jit::state_access::ExceptionCode;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::block_cache::block::InlineCompiler;
-    use crate::machine_state::block_cache::block::dispatch::CodeDispatcher;
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::jitted::JittedPage;
@@ -450,7 +450,7 @@ mod tests {
             "unexpected formatting \"{format}\""
         );
 
-        dispatch.set(<JittedPage<_, _> as CodeDispatcher<_, _>>::run_block_not_compiled);
+        dispatch.set(<JittedPage<_, _> as CodeDispatcher<_, _>>::run_entrypoint_not_compiled);
         let format = format!("{dispatch:?}");
 
         assert!(
