@@ -313,7 +313,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 }
 
 /// Memory configuration
-pub trait MemoryConfig: Send + Sized + 'static {
+pub trait MemoryConfig: Send + Sync + Sized + 'static {
     /// Number of bytes in the memory
     const TOTAL_BYTES: NonZeroUsize;
 
