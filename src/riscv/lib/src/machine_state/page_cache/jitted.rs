@@ -7,17 +7,17 @@
 
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
+use super::dispatch::CodeDispatcher;
+use super::dispatch::DispatchCompiler;
 use crate::exceptions::Exception;
 use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
-use crate::machine_state::block_cache::block::dispatch::CodeDispatcher;
-use crate::machine_state::block_cache::block::dispatch::DispatchCompiler;
-use crate::machine_state::block_cache::block::dispatch::DispatchTarget;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
+use crate::machine_state::page_cache::DispatchTarget;
 use crate::state_backend::owned_backend::Owned;
 
 /// Maximum number of instructions we pass to a compilation request
@@ -58,7 +58,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
-    unsafe extern "C" fn run_block_interpreted(
+    unsafe extern "C" fn run_entrypoint_interpreted(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -75,7 +75,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
             // Safety: the compiler passed to this function is always the same for the
             // lifetime of the entrypoint
             return unsafe {
-                self.run_block_not_compiled(core, instr_pc, max_steps, result, compiler)
+                self.run_entrypoint_not_compiled(core, instr_pc, max_steps, result, compiler)
             };
         }
 
@@ -96,7 +96,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
         unsafe { (fun)(self, core, instr_pc, max_steps, result, compiler) }
     }
 
-    /// Run a block where JIT-compilation has been attempted, but failed for any reason.
+    /// Dispatch an entrypoint where JIT-compilation has been attempted, but failed for any reason.
     ///
     /// # SAFETY
     ///
@@ -104,7 +104,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodeDispatcher<D, MC> for Jitted
     ///
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
-    unsafe extern "C" fn run_block_not_compiled(
+    unsafe extern "C" fn run_entrypoint_not_compiled(
         &mut self,
         core: &mut MachineCoreState<MC, Owned>,
         instr_pc: Address,
@@ -187,11 +187,11 @@ mod tests {
     use crate::array_utils::boxed_from_fn;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::block_cache::block::InlineCompiler;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::CodePageEntry;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
+    use crate::machine_state::page_cache::InlineCompiler;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
 

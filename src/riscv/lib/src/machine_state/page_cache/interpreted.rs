@@ -14,12 +14,15 @@ use super::code_page_entry::CodePageEntry;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
-use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
+
+/// Interpreted entrypoints are built automatically, and require no additional context.
+#[derive(Debug, Default)]
+pub struct InterpretedCompiler;
 
 /// Entrypoints that are interpreted only.
 #[derive(derive_more::Debug)]
@@ -30,7 +33,7 @@ pub struct Interpreted<MC, M> {
 }
 
 impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, M> {
-    type Compiler = InterpretedBlockBuilder;
+    type Compiler = InterpretedCompiler;
 
     /// Run an entrypoint in a purely interpreted manner.
     ///

@@ -5,9 +5,9 @@
 
 use std::ops::Bound;
 
-use octez_riscv::machine_state::block_cache::block::InterpretedBlockBuilder;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
+use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::CloneLayout;
@@ -99,8 +99,8 @@ fn run_steps_ladder<MC, F>(
             "Stepper states have diverged after running {steps} steps"
         );
 
-        let block_builder = InterpretedBlockBuilder;
-        stepper_lhs.rebind_via_clone(block_builder);
+        let compiler = InterpretedCompiler;
+        stepper_lhs.rebind_via_clone(compiler);
     }
 
     assert_eq_struct_wrapper::<MC>(stepper_lhs.struct_ref(), expected_refs);

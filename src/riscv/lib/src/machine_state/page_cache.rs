@@ -18,12 +18,17 @@
 //! cycle.
 
 pub(crate) mod code_page_entry;
+pub(crate) mod dispatch;
 pub(crate) mod interpreted;
 pub(crate) mod jitted;
 pub(crate) mod state;
 
 pub use code_page_entry::CodePageEntry;
+pub use dispatch::DispatchTarget;
+pub use dispatch::InlineCompiler;
+pub use dispatch::OutlineCompiler;
 pub use interpreted::Interpreted;
+pub use interpreted::InterpretedCompiler;
 pub use jitted::Jitted;
 
 use super::MachineCoreState;
@@ -173,7 +178,7 @@ where
             }
 
             Err(exception) => {
-                // Exceptions are handled outside of block execution. So we exit the loop.
+                // Exceptions are handled outside of interpreted entrypoint dispatch. So we exit the loop.
                 result.error = Some(exception);
                 break;
             }
@@ -192,11 +197,11 @@ mod tests {
     use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
-    use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
@@ -221,7 +226,7 @@ mod tests {
         let res = unsafe {
             test.dispatch.borrow_mut().run(
                 &mut state,
-                &mut InterpretedBlockBuilder,
+                &mut InterpretedCompiler,
                 test.pc_addr,
                 test.max_steps,
             )

@@ -16,9 +16,9 @@ use super::StepperStatus;
 use crate::kernel_loader;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
-use crate::machine_state::block_cache::block::InterpretedBlockBuilder;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::InterpretedCompiler;
 use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
@@ -304,8 +304,7 @@ impl<H, MC: MemoryConfig, M: ManagerReadWrite> PvmStepper<H, MC, M> {
         &self,
         space: AllocatedOf<PvmLayout<MC>, Verifier>,
     ) -> Result<PvmVerifier<MC>, ProofVerificationFailure> {
-        let pvm =
-            Pvm::<MC, Interpreted<MC, Verifier>, Verifier>::bind(space, InterpretedBlockBuilder);
+        let pvm = Pvm::<MC, Interpreted<MC, Verifier>, Verifier>::bind(space, InterpretedCompiler);
         Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
