@@ -140,6 +140,10 @@ pub struct PersistenceLayer;
 mod tests {
     use std::cmp::Ordering;
 
+    use rand::RngCore;
+    use rand::SeedableRng;
+    use rand_pcg::Pcg64Mcg;
+
     use super::KEY_LENGTH;
     use super::Key;
     use super::MerkleLayerInvalidating;
@@ -248,6 +252,20 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
+    impl Key {
+        /// Using a portable PCG, deterministically randomise the key, using (part of) the current
+        /// key as the seed.
+        fn pseudo_randomise(&mut self) {
+            let mut rng = Pcg64Mcg::from_seed(
+                self.0[..size_of::<<Pcg64Mcg as SeedableRng>::Seed>()]
+                    .try_into()
+                    .expect("Known the same size"),
+            );
+            rng.fill_bytes(&mut self.0);
+        }
+    }
+
     #[test]
     fn test_key_comparison() {
         let mut key1: Key = Key([0; KEY_LENGTH]);
@@ -274,6 +292,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(get_node, NodeData::data(&node));
+        avl.check(line!());
     }
 
     #[test]
@@ -306,6 +325,40 @@ mod tests {
     }
 
     #[test]
+    fn test_mavl_create_prng() {
+        let mut key = Key([0; KEY_LENGTH]);
+        let data = vec![1; 64];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+
+        for _ in 0..1000000 {
+            avl.set(&key, data.clone());
+            key.pseudo_randomise();
+        }
+        avl.check(line!());
+    }
+
+    #[test]
+    fn test_mavl_clone() {
+        let mut key = Key([0; KEY_LENGTH]);
+        let data = vec![1; 64];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+
+        for i in 0..1000u64 {
+            key.0 = *blake3::hash(&i.to_le_bytes()).as_bytes();
+
+            avl.set(&key, data.clone());
+            avl.check(line!());
+        }
+
+        let mut avl2 = avl.clone();
+        assert_eq!(avl.hash(), avl2.hash());
+        avl.check(line!());
+        avl2.check(line!());
+    }
+
+    #[test]
     fn test_mavl_delete() {
         let key: Key = Key([1; KEY_LENGTH]);
         let data = vec![0; 8];
@@ -321,6 +374,7 @@ mod tests {
         assert_eq!(get_node, NodeData::data(&node));
         avl.delete(&key);
         assert_eq!(avl.get(&key), None);
+        avl.check(line!());
     }
 
     #[test]
@@ -343,6 +397,7 @@ mod tests {
 
         let hash2 = avl.hash();
         assert!(hash1 == hash2);
+        avl.check(line!());
     }
 
     #[test]
@@ -366,16 +421,14 @@ mod tests {
 
         for key in keys.iter() {
             avl.set(key, data.clone());
-            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
-            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+            avl.check(line!());
         }
 
         let psuedo_random_order = [4, 3, 2, 0, 5, 9, 1, 8, 7, 6];
 
         for (i, index) in psuedo_random_order.iter().enumerate() {
             avl.delete(&keys[*index].clone());
-            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
-            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+            avl.check(line!());
 
             for j in 0..i {
                 assert!(avl.get(&keys[psuedo_random_order[j]]).is_none())
@@ -389,6 +442,51 @@ mod tests {
                 )
             }
         }
+    }
+
+    #[test]
+    fn test_mavl_delete_prng() {
+        let original_key = Key([1; KEY_LENGTH]);
+        let mut key = original_key.clone();
+        let data = vec![42; 13];
+
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
+        let hash1 = avl.hash();
+
+        const NODES: u64 = 1000000;
+        assert_eq!(NODES % 2, 0);
+        for _ in 0..NODES {
+            avl.set(&key, data.clone());
+            key.pseudo_randomise();
+        }
+        avl.check(line!());
+
+        let hash2 = avl.hash();
+        assert!(hash1 != hash2);
+
+        // Start halfway through the PRNG-chain, so that deletions occur in a different order to
+        // insertions.
+        key = original_key.clone();
+        for _ in 0..NODES / 2 {
+            key.pseudo_randomise();
+        }
+
+        for _ in NODES / 2..NODES {
+            avl.delete(&key);
+            key.pseudo_randomise();
+        }
+
+        key = original_key;
+        for _ in 0..NODES / 2 {
+            avl.delete(&key);
+            key.pseudo_randomise();
+        }
+
+        avl.check(line!());
+
+        let hash3 = avl.hash();
+        avl.check(line!());
+        assert!(hash1 == hash3);
     }
 
     #[test]
@@ -406,12 +504,11 @@ mod tests {
         let data = vec![];
 
         // Left imbalance
-        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer{});
+        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
 
         for key in keys.iter() {
             avl.set(key, data.clone());
-            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
-            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
+            avl.check(line!());
         }
 
         // Right imbalance
@@ -420,39 +517,8 @@ mod tests {
 
         for key in keys.iter() {
             avl.set(key, data.clone());
-            assert!(avl.is_inorder(), "AVL tree isn't in order: {avl:?}");
-            assert!(avl.is_balanced(), "AVL tree isn't balanced: {avl:?}");
-        }
-    }
-
-    #[test]
-    fn test_mavl_delete_prng() {
-        let mut key = Key([0; KEY_LENGTH]);
-        let data = vec![];
-
-        let mut avl = Avl::<MavlNode>::empty(PersistenceLayer {});
-        let hash1 = avl.hash();
-
-        const NODES: u64 = 1000;
-        assert_eq!(NODES % 2, 0);
-        for i in 0..NODES {
-            key.0 = *blake3::hash(&i.to_le_bytes()).as_bytes();
-
-            avl.set(&key, data.clone());
             avl.check(line!());
         }
-        let hash2 = avl.hash();
-        assert!(hash1 != hash2);
-
-        for i in NODES / 2..NODES + NODES / 2 {
-            let i = i % NODES;
-            key.0 = *blake3::hash(&i.to_le_bytes()).as_bytes();
-            avl.delete(&key);
-            avl.check(line!());
-        }
-        let hash3 = avl.hash();
-        avl.check(line!());
-        assert!(hash1 == hash3);
     }
 
     #[test]
@@ -475,8 +541,9 @@ mod tests {
 
         let hash1 = avl.hash();
         avl.delete(&keys[3].clone());
-        assert!(avl.is_inorder(), "avl isn't in order: {avl:?}");
+        avl.check(line!());
         let hash2 = avl.hash();
+        avl.check(line!());
         assert!(hash1 != hash2);
     }
 }
