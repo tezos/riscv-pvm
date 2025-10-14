@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
+use super::code_page_entry::ICall;
 use super::dispatch::DispatchCompiler;
 use crate::exceptions::Exception;
 use crate::jit::state_access::ExceptionCode;
@@ -37,13 +38,13 @@ pub type JittedPage<D, MC> = Arc<[Jitted<D, MC>; INSTRUCTION_ENTRIES]>;
 /// unsupported instruction is attempted for compilation).
 #[derive(derive_more::Debug)]
 pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
-    instruction: Instruction,
+    icall: ICall<MC, Owned>,
     pub(super) dispatch: DispatchTarget<D, MC>,
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<Instruction> for Jitted<D, MC> {
-    fn as_ref(&self) -> &Instruction {
-        &self.instruction
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<ICall<MC, Owned>> for Jitted<D, MC> {
+    fn as_ref(&self) -> &ICall<MC, Owned> {
+        &self.icall
     }
 }
 
@@ -130,26 +131,25 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
             let entry = &page[offset];
 
-            offset += (entry.instruction.width() as usize) >> 1;
+            let instr = entry.icall.as_ref();
+            offset += (instr.width() as usize) >> 1;
 
-            instructions.push(entry.instruction);
+            instructions.push(*instr);
         }
 
         instructions
     }
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> From<Instruction> for Jitted<D, MC> {
-    fn from(instruction: Instruction) -> Self {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jitted<D, MC> {
+    type Compiler = D;
+
+    fn from_instr(instr: Instruction) -> Self {
         Self {
-            instruction,
+            icall: ICall::from_instr(instr),
             dispatch: DispatchTarget::default(),
         }
     }
-}
-
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jitted<D, MC> {
-    type Compiler = D;
 
     /// Run from an entrypoint, using the currently selected dispatch mechanism
     ///

@@ -77,7 +77,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
         let instruction = Instruction::from(&instruction);
 
         Self {
-            entries: Arc::from(boxed_from_fn(|| CPE::from(instruction))),
+            entries: Arc::from(boxed_from_fn(|| CPE::from_instr(instruction))),
         }
     }
 
@@ -108,7 +108,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
                 );
             }
 
-            entries[offset] = CPE::from(instr);
+            entries[offset] = CPE::from_instr(instr);
 
             // we update the offset by half the width, as the offset is halfword aligned
             offset += (instr.width() as usize) >> 1;
@@ -230,7 +230,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
                 return;
             };
 
-            page_entries[offset].write(CPE::from(instr));
+            page_entries[offset].write(CPE::from_instr(instr));
             offset += 1;
         }
 
@@ -255,7 +255,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
         };
 
         // Initialise the final entrypoint (which corresponds to the final halfword).
-        page_entries[offset].write(CPE::from(final_entry));
+        page_entries[offset].write(CPE::from_instr(final_entry));
 
         if let Some(page_entry) = self
             .pages

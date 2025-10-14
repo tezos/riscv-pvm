@@ -26,6 +26,7 @@ pub(crate) mod state;
 use std::sync::Arc;
 
 pub use code_page_entry::CodePageEntry;
+use code_page_entry::ICall;
 pub use dispatch::DispatchTarget;
 pub use dispatch::InlineCompiler;
 pub use dispatch::OutlineCompiler;
@@ -136,7 +137,7 @@ fn run_code_page_interpreted<I, MC, M>(
     max_steps: usize,
 ) -> StepManyResult<Exception>
 where
-    I: AsRef<Instruction>,
+    I: AsRef<ICall<MC, M>>,
     MC: MemoryConfig,
     M: ManagerReadWrite,
 {
@@ -149,9 +150,9 @@ where
     let mut instr_offset = page_offset >> 1;
 
     while max_steps > result.steps && instr_offset < INSTRUCTION_ENTRIES {
-        let instr = code_page[instr_offset].as_ref();
+        let icall = code_page[instr_offset].as_ref();
 
-        match instr.run(core) {
+        match icall.run_instr(core) {
             Ok(ProgramCounterUpdate::Next(width)) => {
                 instr_pc += width as u64;
 

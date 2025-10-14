@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
+use super::code_page_entry::ICall;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::memory::listener::MemoryGovernanceListener;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerReadWrite;
 
@@ -27,14 +29,21 @@ pub struct InterpretedCompiler;
 
 /// Entrypoints that are interpreted only.
 #[derive(derive_more::Debug)]
-pub struct Interpreted<MC, M> {
-    instruction: Instruction,
-    #[debug(skip)]
-    _pd: PhantomData<(MC, M)>,
+pub struct Interpreted<MC: MemoryConfig, M: ManagerBase> {
+    icall: ICall<MC, M>,
 }
 
 impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, M> {
     type Compiler = InterpretedCompiler;
+
+    fn from_instr(instr: Instruction) -> Self
+    where
+        M: ManagerReadWrite,
+    {
+        Self {
+            icall: ICall::from_instr(instr),
+        }
+    }
 
     /// Run an entrypoint in a purely interpreted manner.
     ///
@@ -55,24 +64,15 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
     }
 }
 
-impl<MC, M> From<Instruction> for Interpreted<MC, M> {
-    fn from(instruction: Instruction) -> Self {
-        Self {
-            instruction,
-            _pd: PhantomData,
-        }
+impl<MC: MemoryConfig, M: ManagerBase> AsRef<ICall<MC, M>> for Interpreted<MC, M> {
+    fn as_ref(&self) -> &ICall<MC, M> {
+        &self.icall
     }
 }
 
-impl<MC, M> AsRef<Instruction> for Interpreted<MC, M> {
-    fn as_ref(&self) -> &Instruction {
-        &self.instruction
-    }
-}
+impl<MC: MemoryConfig, M: ManagerBase> Copy for Interpreted<MC, M> {}
 
-impl<MC, M> Copy for Interpreted<MC, M> {}
-
-impl<MC, M> Clone for Interpreted<MC, M> {
+impl<MC: MemoryConfig, M: ManagerBase> Clone for Interpreted<MC, M> {
     fn clone(&self) -> Self {
         *self
     }
