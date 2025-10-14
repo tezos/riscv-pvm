@@ -3,21 +3,160 @@
 // SPDX-License-Identifier: MIT
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 
 use super::Key;
 use super::NONE_HASH;
 
 /// A node which supports rebalancing operations
-pub trait AvlNode: BinaryTreeNode {
+pub trait AvlNode: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug {
+    fn balance_factor(&self) -> i64 {
+        let left_height = self.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
+        let right_height = self.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
+        left_height as i64 - right_height as i64
+    }
+
+    /// Delete the node with a given key.
+    ///
+    /// If it does not exist, do nothing.
+    fn delete(root: &mut Option<Box<Self>>, key: &Key) {
+        let mut stack: Vec<*mut Box<Self>> = Vec::new();
+        let mut current = root as *mut Option<Box<Self>>;
+
+        #[cfg(debug_assertions)]
+        let height = root.as_ref().map(|r| r.height()).unwrap_or(0);
+
+        unsafe {
+            while let Some(node) = &mut *current {
+                #[cfg(debug_assertions)]
+                debug_assert!(node.is_balanced(), "Node not balanced? {node:?}");
+                match key.cmp(node.key()) {
+                    Ordering::Equal => {
+                        match (node.left_ref().as_ref(), node.right_ref().as_ref()) {
+                            (None, None) => *current = None,
+                            (Some(_), None) => *current = node.left_mut().take(),
+                            (None, Some(_)) => *current = node.right_mut().take(),
+                            (Some(_), Some(_)) => Self::trade_successor(&mut *current),
+                        }
+
+                        for &node_ptr in stack.iter().rev() {
+                            if node_ptr.is_null() {
+                                continue;
+                            }
+                            let node = &mut *node_ptr;
+                            Self::rebalance(node);
+                            #[cfg(debug_assertions)]
+                            debug_assert!(node.is_balanced(), "Node not balanced? {node:?}");
+                        }
+
+                        #[cfg(debug_assertions)]
+                        {
+                            let new_height = root.as_ref().map(|r| r.height()).unwrap_or(0);
+                            debug_assert!(
+                                new_height == height - 1 || new_height == height,
+                                "Height should be {:?} or {new_height:?} but is {height:?}",
+                                new_height - 1
+                            );
+                        }
+
+                        return;
+                    }
+
+                    Ordering::Greater => {
+                        current = (&mut *current)
+                            .as_mut()
+                            .expect("current is Some(_) in this loop")
+                            .right_mut()
+                    }
+
+                    Ordering::Less => {
+                        current = (&mut *current)
+                            .as_mut()
+                            .expect("current is Some(_) in this loop")
+                            .left_mut()
+                    }
+                }
+                stack.push(node);
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            let new_height = root.as_ref().map(|r| r.height()).unwrap_or(0);
+            debug_assert!(
+                new_height == height,
+                "Height should be {new_height:?} but is {height:?}"
+            );
+        }
+    }
+
     /// Return the height of the branch including this node.
     fn height(&self) -> u32;
 
     #[cfg(debug_assertions)]
-    fn is_balanced(&self) -> bool;
+    fn is_balanced(&self) -> bool {
+        (-1..=1).contains(&self.balance_factor())
+    }
 
     /// Rebalance the node so that the difference in height between child branches is in the range
     /// of -2..=2.
-    fn rebalance(node: &mut Box<Self>);
+    fn rebalance(node: &mut Box<Self>) {
+        node.update_height();
+        #[cfg(debug_assertions)]
+        {
+            let left_height = node.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
+            let right_height = node.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
+
+            debug_assert!(
+                (-2..=2).contains(&node.balance_factor()),
+                "Node is imbalanced: {node:?}\nleft height: {left_height:?} | right height: {right_height:?}"
+            );
+        }
+
+        match node.balance_factor() {
+            ..=-2 => {
+                let right_balance = node
+                    .right_ref()
+                    .as_ref()
+                    .map(|r| {
+                        let lh = r.left_ref().as_ref().map(|x| x.height()).unwrap_or(0);
+                        let rh = r.right_ref().as_ref().map(|x| x.height()).unwrap_or(0);
+                        lh as i64 - rh as i64
+                    })
+                    .unwrap_or(0);
+
+                if right_balance <= 0 {
+                    Self::rotate_left(node);
+                } else {
+                    if let Some(right) = node.right_mut() {
+                        Self::rotate_right(right);
+                    }
+                    Self::rotate_left(node);
+                }
+            }
+            -1..=1 => (/* Already balanced */),
+            2.. => {
+                let left_balance = node
+                    .left_ref()
+                    .as_ref()
+                    .map(|l| {
+                        let lh = l.left_ref().as_ref().map(|x| x.height()).unwrap_or(0);
+                        let rh = l.right_ref().as_ref().map(|x| x.height()).unwrap_or(0);
+                        lh as i64 - rh as i64
+                    })
+                    .unwrap_or(0);
+
+                if left_balance >= 0 {
+                    Self::rotate_right(node);
+                } else {
+                    if let Some(left) = node.left_mut() {
+                        Self::rotate_left(left);
+                    }
+                    Self::rotate_right(node);
+                }
+            }
+        }
+    }
 
     /// Rotate this node left.
     ///
@@ -31,7 +170,19 @@ pub trait AvlNode: BinaryTreeNode {
     ///         \
     ///           B
     /// ```
-    fn rotate_left(node: &mut Box<Self>);
+    fn rotate_left(node: &mut Box<Self>) {
+        let mut right = node
+            .right_mut()
+            .take()
+            .expect("To rotate left there should be a right child");
+        *node.right_mut() = right.left_mut().take();
+        right.update_height();
+        node.update_height();
+
+        let new_left = std::mem::replace(node, right);
+        *node.left_mut() = Some(new_left);
+        node.update_height();
+    }
 
     /// Rotate this node right.
     ///
@@ -45,7 +196,58 @@ pub trait AvlNode: BinaryTreeNode {
     ///     /
     ///   B
     /// ```
-    fn rotate_right(node: &mut Box<Self>);
+    fn rotate_right(node: &mut Box<Self>) {
+        let mut left = node
+            .left_mut()
+            .take()
+            .expect("To rotate right there should be a left child");
+        *node.left_mut() = left.right_mut().take();
+        left.update_height();
+        node.update_height();
+
+        let new_right = std::mem::replace(node, left);
+        *node.right_mut() = Some(new_right);
+        node.update_height();
+    }
+
+    fn set(root: &mut Option<Box<Self>>, key: &Key, data: Vec<u8>) {
+        let mut stack: Vec<*mut Box<Self>> = Vec::new();
+        let mut current = root as *mut Option<Box<Self>>;
+
+        let do_rebalancing = |stack: Vec<*mut Box<Self>>| {
+            for &node_ptr in stack.iter().rev() {
+                unsafe {
+                    let node = &mut *node_ptr;
+                    Self::rebalance(node);
+                }
+            }
+        };
+
+        unsafe {
+            while let Some(node) = &mut *current {
+                stack.push(node);
+                match node.key().cmp(key) {
+                    std::cmp::Ordering::Equal => {
+                        *node.key_mut() = key.clone();
+                        *node.data_mut() = data;
+                        do_rebalancing(stack);
+                        return;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        stack.push(node);
+                        current = node.left_mut() as *mut _
+                    }
+                    std::cmp::Ordering::Less => {
+                        stack.push(node);
+                        current = node.right_mut() as *mut _
+                    }
+                }
+            }
+
+            *current = Some(Box::new(Self::new(key.clone(), data)));
+            do_rebalancing(stack);
+        }
+    }
 
     /// Update the height stored in this node by adding 1 to the greatest height of any child
     /// branches.
@@ -101,99 +303,6 @@ impl AvlNode for MavlNode {
         self.height
     }
 
-    #[cfg(debug_assertions)]
-    fn is_balanced(&self) -> bool {
-        let left_height = self.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
-        let right_height = self.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
-        let balance_factor = left_height as i64 - right_height as i64;
-        (-1..=1).contains(&balance_factor)
-    }
-
-    fn rebalance(node: &mut Box<Self>) {
-        node.update_height();
-        let left_height = node.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
-        let right_height = node.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
-
-        let balance_factor = left_height as i64 - right_height as i64;
-
-        debug_assert!(
-            (-2..=2).contains(&balance_factor),
-            "Node is imbalanced: {node:?}\nleft height: {left_height:?} | right height: {right_height:?}"
-        );
-
-        match balance_factor {
-            ..=-2 => {
-                let right_balance = node
-                    .right_ref()
-                    .as_ref()
-                    .map(|r| {
-                        let lh = r.left_ref().as_ref().map(|x| x.height()).unwrap_or(0);
-                        let rh = r.right_ref().as_ref().map(|x| x.height()).unwrap_or(0);
-                        lh as i64 - rh as i64
-                    })
-                    .unwrap_or(0);
-
-                if right_balance <= 0 {
-                    Self::rotate_left(node);
-                } else {
-                    if let Some(right) = node.right_mut() {
-                        Self::rotate_right(right);
-                    }
-                    Self::rotate_left(node);
-                }
-            }
-            -1..=1 => (/* Already balanced */),
-            2.. => {
-                let left_balance = node
-                    .left_ref()
-                    .as_ref()
-                    .map(|l| {
-                        let lh = l.left_ref().as_ref().map(|x| x.height()).unwrap_or(0);
-                        let rh = l.right_ref().as_ref().map(|x| x.height()).unwrap_or(0);
-                        lh as i64 - rh as i64
-                    })
-                    .unwrap_or(0);
-
-                if left_balance >= 0 {
-                    Self::rotate_right(node);
-                } else {
-                    if let Some(left) = node.left_mut() {
-                        Self::rotate_left(left);
-                    }
-                    Self::rotate_right(node);
-                }
-            }
-        }
-    }
-
-    fn rotate_left(node: &mut Box<Self>) {
-        let mut right = node
-            .right_mut()
-            .take()
-            .expect("To rotate left there should be a right child");
-        *node.right_mut() = right.left_mut().take();
-        right.update_height();
-        node.update_height();
-
-        let new_left = std::mem::replace(node, right);
-        *node.left_mut() = Some(new_left);
-        node.update_height();
-    }
-
-    fn rotate_right(node: &mut Box<Self>) {
-        let mut left = node
-            .left_mut()
-            .take()
-            .expect("To rotate right there should be a left child");
-        *node.left_mut() = left.right_mut().take();
-        left.update_height();
-        node.update_height();
-
-        let new_right = std::mem::replace(node, left);
-        *node.right_mut() = Some(new_right);
-        node.update_height();
-    }
-
     fn update_height(&mut self) {
         let left_height = self.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
         let right_height = self.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
@@ -213,68 +322,7 @@ impl BinaryTreeNode for MavlNode {
 
 impl BinaryTreeNodeInvalidating for MavlNode {
     fn delete(root: &mut Option<Box<Self>>, key: &Key) {
-        let mut stack: Vec<*mut Box<Self>> = Vec::new();
-        let mut current = root as *mut Option<Box<Self>>;
-
-        #[cfg(debug_assertions)]
-        let height = root.as_ref().map(|r| r.height()).unwrap_or(0);
-
-        unsafe {
-            while let Some(node) = &mut *current {
-                debug_assert!(node.is_balanced(), "Node not balanced? {node:?}");
-                match key.cmp(node.key()) {
-                    Ordering::Equal => {
-                        match (node.left_ref().as_ref(), node.right_ref().as_ref()) {
-                            (None, None) => *current = None,
-                            (Some(_), None) => *current = node.left_mut().take(),
-                            (None, Some(_)) => *current = node.right_mut().take(),
-                            (Some(_), Some(_)) => Self::trade_successor(&mut *current),
-                        }
-
-                        for &node_ptr in stack.iter().rev() {
-                            if node_ptr.is_null() {
-                                continue;
-                            }
-                            let node = &mut *node_ptr;
-                            Self::rebalance(node);
-                            debug_assert!(node.is_balanced(), "Node not balanced? {node:?}");
-                        }
-
-                        #[cfg(debug_assertions)]
-                        let new_height = root.as_ref().map(|r| r.height()).unwrap_or(0);
-                        debug_assert!(
-                            new_height == height - 1 || new_height == height,
-                            "Height should be {:?} or {new_height:?} but is {height:?}",
-                            new_height - 1
-                        );
-
-                        return;
-                    }
-
-                    Ordering::Greater => {
-                        current = (&mut *current)
-                            .as_mut()
-                            .expect("current is Some(_) in this loop")
-                            .right_mut()
-                    }
-
-                    Ordering::Less => {
-                        current = (&mut *current)
-                            .as_mut()
-                            .expect("current is Some(_) in this loop")
-                            .left_mut()
-                    }
-                }
-                stack.push(node);
-            }
-        }
-
-        #[cfg(debug_assertions)]
-        let new_height = root.as_ref().map(|r| r.height()).unwrap_or(0);
-        debug_assert!(
-            new_height == height,
-            "Height should be {new_height:?} but is {height:?}"
-        );
+        AvlNode::delete(root, key)
     }
 
     fn left_mut(&mut self) -> &mut Option<Box<Self>> {
@@ -288,42 +336,7 @@ impl BinaryTreeNodeInvalidating for MavlNode {
     }
 
     fn set(root: &mut Option<Box<Self>>, key: &Key, data: Vec<u8>) {
-        let mut stack: Vec<*mut Box<Self>> = Vec::new();
-        let mut current = root as *mut Option<Box<Self>>;
-
-        let do_rebalancing = |stack: Vec<*mut Box<Self>>| {
-            for &node_ptr in stack.iter().rev() {
-                unsafe {
-                    let node = &mut *node_ptr;
-                    Self::rebalance(node);
-                }
-            }
-        };
-
-        unsafe {
-            while let Some(node) = &mut *current {
-                stack.push(node);
-                match node.key().cmp(key) {
-                    std::cmp::Ordering::Equal => {
-                        *node.key_mut() = key.clone();
-                        *node.data_mut() = data;
-                        do_rebalancing(stack);
-                        return;
-                    }
-                    std::cmp::Ordering::Greater => {
-                        stack.push(node);
-                        current = &mut node.left as *mut _
-                    }
-                    std::cmp::Ordering::Less => {
-                        stack.push(node);
-                        current = &mut node.right as *mut _
-                    }
-                }
-            }
-
-            *current = Some(Box::new(Self::new(key.clone(), data)));
-            do_rebalancing(stack);
-        }
+        AvlNode::set(root, key, data)
     }
 
     fn trade_successor(root: &mut Option<Box<Self>>) {
@@ -338,7 +351,7 @@ impl BinaryTreeNodeInvalidating for MavlNode {
         while successor
             .as_ref()
             .expect("`right` has been asserted to be `Some(_)`")
-            .left
+            .left_ref()
             .is_some()
         {
             stack.push(successor.as_mut().expect("In is_some() loop"));
@@ -365,6 +378,7 @@ impl BinaryTreeNodeInvalidating for MavlNode {
             unsafe {
                 let node = &mut *node_ptr;
                 Self::rebalance(node);
+                #[cfg(debug_assertions)]
                 debug_assert!(node.is_balanced(), "Node not balanced? {node:?}");
             }
         }
@@ -398,6 +412,11 @@ impl MerkleNode for MavlNode {
 
             hasher.update(l.as_bytes());
             hasher.update(r.as_bytes());
+
+            hasher.update(&self.key.0);
+            hasher.update(self.data());
+            hasher.update(&self.balance_factor().to_le_bytes());
+
             let hash = hasher.finalize();
             self.hash = Some(hash);
             hash

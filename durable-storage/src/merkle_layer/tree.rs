@@ -37,19 +37,19 @@ impl<Node: BinaryTreeNode + BinaryTreeNodeInvalidating> BinaryTreeMutating for A
     }
 }
 
-impl<Node: AvlNode + BinaryTreeNode + BinaryTreeNodeInvalidating + Debug> BinaryTreeUnbalancing
+impl<Node: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug> BinaryTreeUnbalancing
     for Avl<Node>
 {
     type Node = Node;
 
     fn set(&mut self, key: &Key, data: Vec<u8>) {
         let root = self.root_mut();
-        Node::set(root, key, data);
+        BinaryTreeNodeInvalidating::set(root, key, data);
     }
 
     fn delete(&mut self, key: &Key) {
         let root = self.root_mut();
-        Node::delete(root, key);
+        BinaryTreeNodeInvalidating::delete(root, key);
     }
 }
 
