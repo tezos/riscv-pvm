@@ -17,7 +17,7 @@ use super::node::NodeDataInvalidating;
 /// An immutable key-value store tree with left and right nodes that supports traversal and value
 /// retrieval.
 #[derive(Clone, Default, Debug)]
-pub struct Avl<Node: BinaryTreeNode> {
+pub(super) struct Avl<Node: BinaryTreeNode> {
     root: Option<Box<Node>>,
 }
 

@@ -9,7 +9,7 @@ use super::Key;
 use super::NONE_HASH;
 
 /// A node which supports rebalancing operations
-pub trait AvlNode: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug {
+pub(super) trait AvlNode: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug {
     fn balance_factor(&self) -> i64 {
         let left_height = self.left_ref().as_ref().map(|l| l.height()).unwrap_or(0);
         let right_height = self.right_ref().as_ref().map(|r| r.height()).unwrap_or(0);
@@ -255,7 +255,7 @@ pub trait AvlNode: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug {
 }
 
 /// A node with basic immutable binary tree traversal.
-pub trait BinaryTreeNode {
+pub(super) trait BinaryTreeNode {
     /// An immutable reference to the left branch.
     fn left_ref(&self) -> &Option<Box<Self>>;
 
@@ -264,7 +264,7 @@ pub trait BinaryTreeNode {
 }
 
 /// A node with basic mutable binary tree traversal and mutation.
-pub trait BinaryTreeNodeInvalidating: NodeData + NodeDataInvalidating {
+pub(super) trait BinaryTreeNodeInvalidating: NodeData + NodeDataInvalidating {
     /// Delete the node with a given key.
     ///
     /// If it does not exist, do nothing.
@@ -460,7 +460,7 @@ impl NodeDataInvalidating for MavlNode {
 }
 
 /// A node that can be Merklised
-pub trait MerkleNode {
+pub(super) trait MerkleNode {
     /// Return the hash of the node.
     ///
     /// This may trigger re-hashing if the hash of this node is dirty.
@@ -471,7 +471,7 @@ pub trait MerkleNode {
 }
 
 /// A key-value store node with immutable access.
-pub trait NodeData: Default + Sized {
+pub(super) trait NodeData: Default + Sized {
     /// An immutable reference to the data stored in the node.
     fn data(&self) -> &Vec<u8>;
 
@@ -483,7 +483,7 @@ pub trait NodeData: Default + Sized {
 }
 
 /// Mutable access to a key-value store node.
-pub trait NodeDataInvalidating {
+pub(super) trait NodeDataInvalidating {
     /// A mutable reference to the data stored in the node.
     fn data_mut(&mut self) -> &mut Vec<u8>;
 
