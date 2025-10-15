@@ -118,10 +118,10 @@ fn check_expected_execution(txs: &[Tx], expected_transfers: usize) -> Result<&[T
         .into());
     }
 
-    if !matches!(
-        txs[1].outcome.result,
-        TxExecutionResult::ContractDeployed(_)
-    ) {
+    if !matches!(txs[1].outcome.result, TxExecutionResult::Success {
+        output: OutputType::Create(_),
+        ..
+    }) {
         return Err("Expected the second transaction to be a contract deployment".into());
     }
 
@@ -146,15 +146,12 @@ fn check_expected_execution(txs: &[Tx], expected_transfers: usize) -> Result<&[T
 }
 
 fn check_transfer(tx: &Tx) -> Result<u64> {
-    match tx.outcome.result {
-        TxExecutionResult::CallSucceeded { .. } => {
-            let tx_data = &tx
-                .outcome
-                .logs
-                .as_ref()
-                .ok_or(format!("Expected this contract call to have a log {tx:?}"))?
-                .data;
-            let amount = u64_from_ethereum_u256_bytes(tx_data.as_slice()).ok_or(format!(
+    match &tx.outcome.result {
+        TxExecutionResult::Success { logs, .. } => {
+            let log = logs
+                .first()
+                .ok_or(format!("Expected this contract call to have a log {tx:?}"))?;
+            let amount = u64_from_ethereum_u256_bytes(log.data.as_slice()).ok_or(format!(
                 "Expected this contract call to have log data {tx:?}"
             ))?;
             Ok(amount)
@@ -164,10 +161,12 @@ fn check_transfer(tx: &Tx) -> Result<u64> {
 }
 
 fn check_call_balance_of(tx: &Tx) -> Result<u64> {
-    match tx.outcome.result {
-        TxExecutionResult::CallSucceeded { value, .. } => {
-            value.ok_or(format!("Expected this contract call to have a return value {tx:?}").into())
-        }
+    match &tx.outcome.result {
+        TxExecutionResult::Success { output, .. } => match output {
+            OutputType::Call(bytes) => u64_from_ethereum_u256_bytes(bytes.as_slice())
+                .ok_or(format!("Expected this contract call to have a return value {tx:?}").into()),
+            _ => Err(format!("Expected a Call output, got {tx:?}").into()),
+        },
         _ => Err(format!("Expected a successful contract call, got {tx:?}").into()),
     }
 }
@@ -215,30 +214,32 @@ struct LogLine {
 struct TxLog {
     #[expect(unused)]
     address: String,
-    #[expect(unused)]
-    topics: Vec<String>,
     data: Vec<u8>,
 }
 
 #[derive(Debug)]
 enum TxExecutionResult {
-    CallSucceeded {
+    Success {
         #[expect(unused)]
         reason: String,
-        value: Option<u64>,
+        logs: Vec<TxLog>,
+        output: OutputType,
     },
-    ContractDeployed(#[expect(unused)] String),
     Other(#[expect(unused)] String),
+}
+
+/// Output of executing a transaction
+#[derive(Debug)]
+enum OutputType {
+    /// Holds returned value
+    Call(Vec<u8>),
+    /// Holds contract address
+    Create(#[expect(unused)] String),
 }
 
 #[derive(Debug)]
 struct TxOutcome {
-    #[expect(unused)]
-    gas_used: u64,
-    logs: Option<TxLog>,
     result: TxExecutionResult,
-    #[expect(unused)]
-    estimated_ticks_used: u64,
 }
 
 #[derive(Debug)]
@@ -294,82 +295,55 @@ fn parse_execution_outcome(line: &str) -> Option<TxOutcome> {
         return None;
     }
 
-    let gas_used = line
-        .split("gas_used: ")
-        .nth(1)?
-        .split(',')
-        .next()?
-        .trim()
-        .parse::<u64>()
-        .ok()?;
-
-    let logs = parse_tx_logs(line);
-
     let result = parse_result(line)?;
 
-    let estimated_ticks_used = line
-        .split("estimated_ticks_used: ")
-        .nth(1)?
-        .split(' ')
-        .next()?
-        .trim_end_matches('}')
-        .parse::<u64>()
-        .ok()?;
-
-    Some(TxOutcome {
-        gas_used,
-        logs,
-        result,
-        estimated_ticks_used,
-    })
+    Some(TxOutcome { result })
 }
 
 fn parse_result(s: &str) -> Option<TxExecutionResult> {
     let result_start = s.find("result: ")?;
     let result_str = &s[result_start + 8..];
 
-    if result_str.starts_with("CallSucceeded(") {
-        let inner_start = result_str.find('(')? + 1;
-        let inner_end = result_str[inner_start..].find(')')? + inner_start;
-
-        let inner = &result_str[inner_start..inner_end];
-        let mut parts = inner.splitn(2, ',');
-
-        let reason = parts.next()?.trim().to_string();
-        let bytes_str = parts
-            .next()
-            .unwrap_or("")
+    if result_str.starts_with("Success {") {
+        let reason = result_str
+            .split("reason: ")
+            .nth(1)?
+            .split(',')
+            .next()?
             .trim()
-            .trim_start_matches('[')
-            .trim_end_matches(']');
+            .to_string();
 
-        let raw_bytes: Vec<u8> = if bytes_str.is_empty() {
-            vec![]
-        } else {
-            bytes_str
-                .split(',')
-                .filter_map(|b| b.trim().parse::<u8>().ok())
-                .collect()
-        };
+        let logs = parse_tx_logs_array(result_str);
 
-        let value = u64_from_ethereum_u256_bytes(raw_bytes.as_slice());
+        let output = parse_output(result_str)?;
 
-        Some(TxExecutionResult::CallSucceeded { reason, value })
-    } else if result_str.starts_with("ContractDeployed(") {
-        let raw = result_str.split(')').next().unwrap_or("").to_string();
-        Some(TxExecutionResult::ContractDeployed(raw))
+        Some(TxExecutionResult::Success {
+            reason,
+            logs,
+            output,
+        })
     } else {
-        let raw = result_str.split(')').next().unwrap_or("").to_string();
+        let raw = result_str.split('}').next().unwrap_or("").to_string();
         Some(TxExecutionResult::Other(raw))
     }
 }
 
-fn parse_tx_logs(line: &str) -> Option<TxLog> {
-    let logs_start = line.find("logs: [Log {")?;
-    let logs_end = line[logs_start..].find("}],")? + logs_start + 1;
-    let logs_str = &line[logs_start + 6..=logs_end];
+fn parse_tx_logs_array(result_str: &str) -> Vec<TxLog> {
+    if result_str.contains("logs: []") {
+        return vec![];
+    }
 
-    let address = logs_str
+    let mut logs = Vec::new();
+    if let Some(logs_start) = result_str.find("logs: [Log {") {
+        if let Some(single_log) = parse_single_tx_log(&result_str[logs_start..]) {
+            logs.push(single_log);
+        }
+    }
+    logs
+}
+
+fn parse_single_tx_log(log_str: &str) -> Option<TxLog> {
+    let address = log_str
         .split("address: ")
         .nth(1)?
         .split(',')
@@ -377,25 +351,41 @@ fn parse_tx_logs(line: &str) -> Option<TxLog> {
         .trim()
         .to_string();
 
-    let topics_str = logs_str.split("topics: [").nth(1)?.split(']').next()?;
+    // Parse data from LogData
+    let data_hex = log_str
+        .split("data: 0x")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .split('}')
+        .next()?
+        .trim();
+    let data = hex::decode(data_hex).ok()?;
 
-    let topics = topics_str
-        .split(',')
-        .map(|t| t.trim().to_string())
-        .collect::<Vec<_>>();
+    Some(TxLog { address, data })
+}
 
-    let data_str = logs_str.split("data: [").nth(1)?.split(']').next()?;
+fn parse_output(result_str: &str) -> Option<OutputType> {
+    let output_start = result_str.find("output: ")?;
+    let output_str = &result_str[output_start + 8..];
 
-    let data = data_str
-        .split(',')
-        .filter_map(|num| num.trim().parse::<u8>().ok())
-        .collect::<Vec<u8>>();
-
-    Some(TxLog {
-        address,
-        topics,
-        data,
-    })
+    if output_str.starts_with("Call(") {
+        let hex_start = output_str.find("0x")?;
+        let hex_str = output_str[hex_start + 2..].split(')').next()?.trim();
+        let bytes = hex::decode(hex_str).ok()?;
+        Some(OutputType::Call(bytes))
+    } else if output_str.starts_with("Create(") {
+        // For Create, extract the address if present
+        let address = output_str
+            .split("Some(")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .unwrap_or("")
+            .to_string();
+        Some(OutputType::Create(address))
+    } else {
+        None
+    }
 }
 
 fn u64_from_ethereum_u256_bytes(bytes: &[u8]) -> Option<u64> {
