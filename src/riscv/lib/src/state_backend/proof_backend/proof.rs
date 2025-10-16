@@ -28,7 +28,6 @@ use crate::state_backend::ProofError;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage::DIGEST_SIZE;
-use crate::storage::HashError;
 use crate::storage::binary;
 
 pub mod deserialise_owned;
@@ -70,9 +69,7 @@ impl Proof {
 
     /// Get the initial state hash of the proof.
     pub fn initial_state_hash(&self) -> Hash {
-        self.partial_tree
-            .root_hash()
-            .expect("Computing the root hash of the Merkle proof should not fail")
+        self.partial_tree.root_hash()
     }
 
     /// Get the final state hash of the proof.
@@ -169,22 +166,18 @@ impl MerkleProof {
     }
 
     /// Compute the root hash of the Merkle proof.
-    pub fn root_hash(&self) -> Result<Hash, HashError> {
+    pub fn root_hash(&self) -> Hash {
         impl_modify_map_collect(
             self,
-            |subtree| {
-                Ok(match subtree {
-                    Tree::Node(vec) => ModifyResult::NodeContinue((), vec.iter().collect()),
-                    Tree::Leaf(data) => ModifyResult::LeafStop(data),
-                })
+            |subtree| match subtree {
+                Tree::Node(vec) => ModifyResult::NodeContinue((), vec.iter().collect()),
+                Tree::Leaf(data) => ModifyResult::LeafStop(data),
             },
-            |leaf| {
-                Ok(match leaf {
-                    MerkleProofLeaf::Blind(hash) => *hash,
-                    MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data.as_slice()),
-                })
+            |leaf| match leaf {
+                MerkleProofLeaf::Blind(hash) => *hash,
+                MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data.as_slice()),
             },
-            |(), leaves| Ok(Hash::combine(leaves)),
+            |(), leaves| Hash::combine(leaves),
         )
     }
 }

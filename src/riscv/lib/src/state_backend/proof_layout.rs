@@ -1167,8 +1167,7 @@ mod tests {
 
             let merkle_proof = <TestLayout as ProofLayout>::to_merkle_tree(proof_state)
                 .unwrap()
-                .to_merkle_proof()
-                .unwrap();
+                .to_merkle_proof();
 
             let verifier_state = deserialise_owned::deserialise::<TestLayout>(
                 ProofTree::Present(&merkle_proof)

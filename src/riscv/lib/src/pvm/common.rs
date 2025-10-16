@@ -402,7 +402,7 @@ impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
         let _ = self.input_request();
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof()?;
+        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof();
 
         let refs = self.struct_ref::<FnManagerIdent>();
         let final_hash = PvmLayout::<MC>::state_hash(refs)?;
