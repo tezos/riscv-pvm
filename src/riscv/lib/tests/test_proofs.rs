@@ -85,8 +85,6 @@ fn test_etherlink_initial_proof_regression() {
 }
 
 fn test_initial_proof_regression(inputs: TestConfig) {
-    // Configuring the stepper with `TestCacheConfig` to match the node PVM
-    // and make the test run faster.
     let make_stepper = make_stepper_factory::<M64M>(&inputs);
     let mut stepper = make_stepper();
 
