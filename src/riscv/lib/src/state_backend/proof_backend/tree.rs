@@ -7,8 +7,6 @@
 //! All the traversals implemented in this module should be the same to maintain consistency,
 //! which is required for serialisation / deserialisation
 
-use std::convert::Infallible;
-
 /// Generic tree structure used to model the [`super::proof::MerkleProof`],
 /// as well as the full & partial shapes of a [`super::merkle::MerkleTree`].
 #[derive(Clone, Debug, PartialEq)]
@@ -46,51 +44,33 @@ impl<A> Tree<A> {
     /// The function returns a [`ModifyResult::LeafStop`] if the subtree will become a leaf
     /// or a [`ModifyResult::NodeContinue`] if the subtree will become a non-leaf node
     /// and will be further traversed by this algorithm.
-    pub fn modify_shape<B, E, F: FnMut(Tree<A>) -> Result<ModifyResult<(), Tree<A>, B>, E>>(
+    pub fn modify_shape<B, E, F: FnMut(Tree<A>) -> ModifyResult<(), Tree<A>, B>>(
         self,
         modify: &mut F,
-    ) -> Result<Tree<B>, E> {
+    ) -> Tree<B> {
         // map & collect are "default"
-        impl_modify_map_collect(
-            self,
-            modify,
-            |data| Ok(data),
-            |(), children| Ok(Tree::Node(children)),
-        )
-    }
-
-    /// Perform a shape-preserving map operation over a [`Tree`].
-    ///
-    /// Note: The traversal order should correspond with the one in [`Tree::modify_shape`] and [`Tree::subtree_iterator`].
-    pub fn map<B, E, F: FnMut(A) -> Result<B, E>>(self, map: &mut F) -> Result<Tree<B>, E> {
-        // modify & collect are "default"
-        impl_modify_map_collect(
-            self,
-            |subtree| match subtree {
-                Tree::Node(vec) => Ok(ModifyResult::NodeContinue((), vec)),
-                Tree::Leaf(data) => Ok(ModifyResult::LeafStop(data)),
-            },
-            map,
-            |(), children| Ok(Tree::Node(children)),
-        )
+        impl_modify_map_collect(self, modify, std::convert::identity, |(), children| {
+            Tree::Node(children)
+        })
     }
 
     /// Borrows each leaf in the tree.
     pub fn each_ref(&self) -> Tree<&A> {
-        impl_modify_map_collect::<_, _, _, Infallible, _, _, _, _, _>(
+        impl_modify_map_collect::<_, _, _, _, _, _, _, _>(
             self,
             |subtree| match subtree {
-                Tree::Node(vec) => Ok(ModifyResult::NodeContinue(
-                    (),
-                    // Obtain references to each sub tree.
-                    vec.iter().collect::<Vec<_>>(),
-                )),
-                Tree::Leaf(data) => Ok(ModifyResult::LeafStop(data)),
+                Tree::Node(vec) => {
+                    ModifyResult::NodeContinue(
+                        (),
+                        // Obtain references to each sub tree.
+                        vec.iter().collect::<Vec<_>>(),
+                    )
+                }
+                Tree::Leaf(data) => ModifyResult::LeafStop(data),
             },
-            Ok,
-            |(), children| Ok(Tree::Node(children)),
+            std::convert::identity,
+            |(), children| Tree::Node(children),
         )
-        .unwrap()
     }
 }
 
@@ -118,18 +98,17 @@ pub fn impl_modify_map_collect<
     InterimLeafData, // InterimLeafData -> FinalLeafData  when applying `map`
     FinalLeafData,   // [FinalLeafData] -> FinalLeafData when applying `collect`
     AuxTreeData,     // Type of auxiliary data held for a subtree
-    Err,             // Error type when applying `modify` / `map` / `collect`
     InputTree,
     OutputTree: From<FinalLeafData>,
-    TreeModifier: FnMut(InputTree) -> Result<ModifyResult<AuxTreeData, InputTree, InterimLeafData>, Err>,
-    LeafMapper: FnMut(InterimLeafData) -> Result<FinalLeafData, Err>,
-    Collector: FnMut(AuxTreeData, Vec<OutputTree>) -> Result<OutputTree, Err>,
+    TreeModifier: FnMut(InputTree) -> ModifyResult<AuxTreeData, InputTree, InterimLeafData>,
+    LeafMapper: FnMut(InterimLeafData) -> FinalLeafData,
+    Collector: FnMut(AuxTreeData, Vec<OutputTree>) -> OutputTree,
 >(
     root: InputTree,
     mut modify: TreeModifier,
     mut map: LeafMapper,
     mut collect: Collector,
-) -> Result<OutputTree, Err> {
+) -> OutputTree {
     enum ProcessEvents<ProcessEvent, CollectAuxTreeData> {
         Node(ProcessEvent),
         Collect(CollectAuxTreeData, usize),
@@ -140,11 +119,11 @@ pub fn impl_modify_map_collect<
 
     while let Some(event) = process.pop() {
         match event {
-            ProcessEvents::Node(subtree) => match modify(subtree)? {
+            ProcessEvents::Node(subtree) => match modify(subtree) {
                 ModifyResult::LeafStop(data) => {
                     // Instead of pushing a single leaf process on the Process-queue,
                     // map the data and append it directly to the Done-queue
-                    done.push(OutputTree::from(map(data)?));
+                    done.push(OutputTree::from(map(data)));
                 }
                 ModifyResult::NodeContinue(node_data, children) => {
                     // the only case where we push further process events in the process queue
@@ -164,17 +143,14 @@ pub fn impl_modify_map_collect<
                 // No panic: We are guaranteed count < done.len() since every Collect(size)
                 // corresponds to size nodes pushed to Done-queue
                 let children = done.split_off(done.len() - count);
-                done.push(collect(node_data, children)?);
+                done.push(collect(node_data, children));
             }
         }
     }
 
     // No Panic: We only add a single node as root at the beginning of the algorithm
     // which corresponds to this last node in the Done-queue
-    let new_root = done
-        .pop()
+    done.pop()
         .filter(|_| done.is_empty())
-        .expect("Unexpected number of results");
-
-    Ok(new_root)
+        .expect("Unexpected number of results")
 }

@@ -416,8 +416,8 @@ mod tests {
             assert_eq!(hash, tree_root_hash);
 
             // Produce a proof
-            let proof = tree.to_merkle_proof().unwrap();
-            let proof_hash = proof.root_hash().unwrap();
+            let proof = tree.to_merkle_proof();
+            let proof_hash = proof.root_hash();
             assert_eq!(hash, proof_hash);
 
             // Apply the same modification on the `Owned` state in order to obtain
