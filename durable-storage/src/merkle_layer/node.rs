@@ -6,7 +6,8 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 use super::Key;
-use super::NONE_HASH;
+use super::NONE_BYTE;
+use super::SOME_BYTE;
 
 /// A node which supports rebalancing operations
 pub(super) trait AvlNode: BinaryTreeNode + BinaryTreeNodeInvalidating + Debug {
@@ -403,15 +404,24 @@ impl MerkleNode for MavlNode {
             hash
         } else {
             let mut hasher = blake3::Hasher::new();
-            let (l, r) = match (&mut self.left, &mut self.right) {
-                (Some(l), Some(r)) => (l.hash(), r.hash()),
-                (Some(l), None) => (l.hash(), NONE_HASH),
-                (None, Some(r)) => (NONE_HASH, r.hash()),
-                (None, None) => (NONE_HASH, NONE_HASH),
+            let l = self.left.as_mut().map(|l| l.hash());
+            let r = self.right.as_mut().map(|r| r.hash());
+
+            match l {
+                Some(digest) => {
+                    hasher.update(&[SOME_BYTE]);
+                    hasher.update(digest.as_bytes())
+                }
+                _ => hasher.update(&[NONE_BYTE]),
             };
 
-            hasher.update(l.as_bytes());
-            hasher.update(r.as_bytes());
+            match r {
+                Some(digest) => {
+                    hasher.update(&[SOME_BYTE]);
+                    hasher.update(digest.as_bytes())
+                }
+                _ => hasher.update(&[NONE_BYTE]),
+            };
 
             hasher.update(&self.key.0);
             hasher.update(self.data());

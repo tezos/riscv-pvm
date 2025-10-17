@@ -131,7 +131,8 @@ impl<T: MerkleBinaryTree> MerkleLayerInvalidating for T {
     }
 }
 
-const NONE_HASH: blake3::Hash = blake3::Hash::from_bytes([0; 32]);
+const NONE_BYTE: u8 = 0;
+const SOME_BYTE: u8 = 1;
 
 /// A stand-in for the in-development layer for persisting data to durable storage.
 pub struct PersistenceLayer;

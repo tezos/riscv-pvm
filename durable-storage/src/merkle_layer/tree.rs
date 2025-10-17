@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 use super::Key;
-use super::NONE_HASH;
+use super::NONE_BYTE;
 use super::node::AvlNode;
 use super::node::BinaryTreeNode;
 use super::node::BinaryTreeNodeInvalidating;
@@ -115,7 +115,7 @@ pub(super) trait MerkleBinaryTree:
         if let Some(root) = self.root_mut() {
             root.hash()
         } else {
-            NONE_HASH
+            blake3::hash(&[NONE_BYTE])
         }
     }
 }
