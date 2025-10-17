@@ -7,6 +7,10 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    groups:
+      tezos-packages:
+        patterns:
+          - "tezos*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
