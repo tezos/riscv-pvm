@@ -824,7 +824,7 @@ checksum = "06cdfe340b16dd990c54cce79743613fa09fbb16774f33a77c9fd196f8f3fa30"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -944,7 +944,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2128,7 +2128,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2141,7 +2141,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2446,13 +2446,13 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "tezos-smart-rollup"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "hex",
  "tezos-smart-rollup-build-utils",
@@ -2471,7 +2471,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-build-utils"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2481,12 +2481,12 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-constants"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 
 [[package]]
 name = "tezos-smart-rollup-core"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "tezos-smart-rollup-build-utils",
  "tezos-smart-rollup-constants",
@@ -2495,7 +2495,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-debug"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "tezos-smart-rollup-core",
  "tezos-smart-rollup-host",
@@ -2504,7 +2504,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-encoding"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "hex",
  "nom",
@@ -2523,7 +2523,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-entrypoint"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "cfg-if",
  "dlmalloc",
@@ -2537,7 +2537,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-host"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "tezos-smart-rollup-build-utils",
  "tezos-smart-rollup-core",
@@ -2549,7 +2549,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-macros"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "proc-macro-error2",
  "quote",
@@ -2561,7 +2561,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-mock"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "hex",
  "tezos-smart-rollup-core",
@@ -2574,7 +2574,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-panic-hook"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "rustversion",
  "tezos-smart-rollup-build-utils",
@@ -2584,7 +2584,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-storage"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "tezos-smart-rollup-core",
  "tezos-smart-rollup-debug",
@@ -2596,7 +2596,7 @@ dependencies = [
 [[package]]
 name = "tezos-smart-rollup-utils"
 version = "0.2.2"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "clap",
  "hex",
@@ -2613,7 +2613,7 @@ dependencies = [
 [[package]]
 name = "tezos_crypto_rs"
 version = "0.6.0"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "anyhow",
  "blst",
@@ -2639,7 +2639,7 @@ dependencies = [
 [[package]]
 name = "tezos_data_encoding"
 version = "0.6.0"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "bit-vec 0.6.3",
  "bitvec",
@@ -2656,7 +2656,7 @@ dependencies = [
 [[package]]
 name = "tezos_data_encoding_derive"
 version = "0.6.0"
-source = "git+https://gitlab.com/tezos/tezos.git#ea7e0eec7d3a3a7870d6df015a3ecb7a7359070a"
+source = "git+https://gitlab.com/tezos/tezos.git#27f98a167805e77d252b70a08210cbdc9589a48b"
 dependencies = [
  "lazy_static",
  "once_cell",
