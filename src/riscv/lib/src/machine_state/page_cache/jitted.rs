@@ -70,7 +70,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         let page_offset = address_to_page_offset(instr_pc);
 
         // instr_pc is always halfword aligned
-        let mut offset = page_offset >> 1;
+        let offset = page_offset >> 1;
 
         if !compiler.should_compile(&page[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
@@ -80,17 +80,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             };
         }
 
-        // trigger JIT compilation
-        let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
-        while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
-            let entry = &page[offset];
-
-            offset += (entry.instruction.width() as usize) >> 1;
-
-            instructions.push(entry.instruction);
-        }
-
-        let fun = compiler.compile(page, instructions, instr_pc);
+        let fun = compiler.compile(page, instr_pc);
 
         // Safety: the compiler passed to this function is always the same for the
         // lifetime of the entrypoint
@@ -121,6 +111,31 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
             .unwrap_or(ExceptionCode::NoException);
 
         block_result.steps
+    }
+
+    /// Returns up to [MAX_INSTR_COMPILED] instructions, that would be contiguous in memory,
+    /// starting from the page offset given by `instr_pc`.
+    ///
+    /// These instructions can be passed to the JIT compiler for entrypoint dispatch optimisation.
+    pub(super) fn compilation_request_instructions(
+        page: &[Self; INSTRUCTION_ENTRIES],
+        instr_pc: Address,
+    ) -> Vec<Instruction> {
+        let page_offset = address_to_page_offset(instr_pc);
+
+        // instr_pc is always halfword aligned
+        let mut offset = page_offset >> 1;
+
+        let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
+        while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
+            let entry = &page[offset];
+
+            offset += (entry.instruction.width() as usize) >> 1;
+
+            instructions.push(entry.instruction);
+        }
+
+        instructions
     }
 }
 
