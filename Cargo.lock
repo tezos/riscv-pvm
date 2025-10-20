@@ -447,9 +447,9 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28bda640bdb33597583178887b25582520457258590a979344f3137a1e64a282"
 dependencies = [
- "cranelift-codegen",
+ "cranelift-codegen 0.120.2",
  "cranelift-frontend",
- "cranelift-module",
+ "cranelift-module 0.120.2",
 ]
 
 [[package]]
@@ -458,7 +458,16 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5023e06632d8f351c2891793ccccfe4aef957954904392434038745fb6f1f68"
 dependencies = [
- "cranelift-assembler-x64-meta",
+ "cranelift-assembler-x64-meta 0.120.2",
+]
+
+[[package]]
+name = "cranelift-assembler-x64"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f502c60b6af2025c312b37788c089943ef03156a2910da1aa046bb39eb8f61c7"
+dependencies = [
+ "cranelift-assembler-x64-meta 0.125.1",
 ]
 
 [[package]]
@@ -467,7 +476,16 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c4012b4c8c1f6eb05c0a0a540e3e1ee992631af51aa2bbb3e712903ce4fd65"
 dependencies = [
- "cranelift-srcgen",
+ "cranelift-srcgen 0.120.2",
+]
+
+[[package]]
+name = "cranelift-assembler-x64-meta"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b7e21a74bcf08443a4ef800a4a257063e5c51ee4d7a3bd58da5262d10340830"
+dependencies = [
+ "cranelift-srcgen 0.125.1",
 ]
 
 [[package]]
@@ -476,7 +494,16 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d6d883b4942ef3a7104096b8bc6f2d1a41393f159ac8de12aed27b25d67f895"
 dependencies = [
- "cranelift-entity",
+ "cranelift-entity 0.120.2",
+]
+
+[[package]]
+name = "cranelift-bforest"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f337d268865c292ad5df0669a9bbf6223ca41460292a20ad5b0a57b8e9f27f93"
+dependencies = [
+ "cranelift-entity 0.125.1",
 ]
 
 [[package]]
@@ -486,28 +513,60 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db7b2ee9eec6ca8a716d900d5264d678fb2c290c58c46c8da7f94ee268175d17"
 
 [[package]]
+name = "cranelift-bitset"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0e60319a8242c8d1c7b5a2444d140c416f903f75e0d84da3256fceb822bab85"
+
+[[package]]
 name = "cranelift-codegen"
 version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aeda0892577afdce1ac2e9a983a55f8c5b87a59334e1f79d8f735a2d7ba4f4b4"
 dependencies = [
  "bumpalo",
- "cranelift-assembler-x64",
- "cranelift-bforest",
- "cranelift-bitset",
- "cranelift-codegen-meta",
- "cranelift-codegen-shared",
- "cranelift-control",
- "cranelift-entity",
- "cranelift-isle",
- "gimli",
+ "cranelift-assembler-x64 0.120.2",
+ "cranelift-bforest 0.120.2",
+ "cranelift-bitset 0.120.2",
+ "cranelift-codegen-meta 0.120.2",
+ "cranelift-codegen-shared 0.120.2",
+ "cranelift-control 0.120.2",
+ "cranelift-entity 0.120.2",
+ "cranelift-isle 0.120.2",
+ "gimli 0.31.1",
  "hashbrown 0.15.5",
  "log",
- "regalloc2",
+ "regalloc2 0.12.2",
  "rustc-hash",
  "serde",
  "smallvec",
  "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-codegen"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78dee669e447a1c68760bf7acee33835e99d564f0137b067f74d4718dfc9970d"
+dependencies = [
+ "bumpalo",
+ "cranelift-assembler-x64 0.125.1",
+ "cranelift-bforest 0.125.1",
+ "cranelift-bitset 0.125.1",
+ "cranelift-codegen-meta 0.125.1",
+ "cranelift-codegen-shared 0.125.1",
+ "cranelift-control 0.125.1",
+ "cranelift-entity 0.125.1",
+ "cranelift-isle 0.125.1",
+ "gimli 0.32.3",
+ "hashbrown 0.15.5",
+ "log",
+ "regalloc2 0.13.2",
+ "rustc-hash",
+ "serde",
+ "smallvec",
+ "target-lexicon",
+ "wasmtime-internal-math",
 ]
 
 [[package]]
@@ -516,9 +575,21 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e461480d87f920c2787422463313326f67664e68108c14788ba1676f5edfcd15"
 dependencies = [
- "cranelift-assembler-x64-meta",
- "cranelift-codegen-shared",
- "cranelift-srcgen",
+ "cranelift-assembler-x64-meta 0.120.2",
+ "cranelift-codegen-shared 0.120.2",
+ "cranelift-srcgen 0.120.2",
+]
+
+[[package]]
+name = "cranelift-codegen-meta"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "601f629d172b7230f41dd0e78ee797efaf7ec1a5e113c8f395f4027dff6a92ca"
+dependencies = [
+ "cranelift-assembler-x64-meta 0.125.1",
+ "cranelift-codegen-shared 0.125.1",
+ "cranelift-srcgen 0.125.1",
+ "heck 0.5.0",
 ]
 
 [[package]]
@@ -526,6 +597,12 @@ name = "cranelift-codegen-shared"
 version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "976584d09f200c6c84c4b9ff7af64fc9ad0cb64dffa5780991edd3fe143a30a1"
+
+[[package]]
+name = "cranelift-codegen-shared"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15755c2660902c7d59d96f6551a66ef629650dc3fd405f9dad841e8c58c1a4a2"
 
 [[package]]
 name = "cranelift-control"
@@ -537,12 +614,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "cranelift-control"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "727bfca18705101a294ab9077ad214a8b762ea2bc9844389d0db233d7c61ec3b"
+dependencies = [
+ "arbitrary",
+]
+
+[[package]]
 name = "cranelift-entity"
 version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d75418674520cb400c8772bfd6e11a62736c78fc1b6e418195696841d1bf91f1"
 dependencies = [
- "cranelift-bitset",
+ "cranelift-bitset 0.120.2",
+]
+
+[[package]]
+name = "cranelift-entity"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15564c6f0c72750ca4374f40b044857cbc8087571e46d4c7ccdbdcc29b1dec8b"
+dependencies = [
+ "cranelift-bitset 0.125.1",
 ]
 
 [[package]]
@@ -551,7 +646,7 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c8b1a91c86687a344f3c52dd6dfb6e50db0dfa7f2e9c7711b060b3623e1fdeb"
 dependencies = [
- "cranelift-codegen",
+ "cranelift-codegen 0.120.2",
  "log",
  "smallvec",
  "target-lexicon",
@@ -564,16 +659,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711baa4e3432d4129295b39ec2b4040cc1b558874ba0a37d08e832e857db7285"
 
 [[package]]
+name = "cranelift-isle"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40cedc02f08307da019a3e06d3f20f772f829ff813aec975accb012f8930b688"
+
+[[package]]
 name = "cranelift-jit"
 version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86eece6be06ba68ed88ea8acb59a528deffe9cee09f08f2a422bfec554e82995"
 dependencies = [
  "anyhow",
- "cranelift-codegen",
- "cranelift-control",
- "cranelift-entity",
- "cranelift-module",
+ "cranelift-codegen 0.120.2",
+ "cranelift-control 0.120.2",
+ "cranelift-entity 0.120.2",
+ "cranelift-module 0.120.2",
  "cranelift-native",
  "libc",
  "log",
@@ -590,8 +691,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0065b75e59fcd32cfb50f754d6daf56235a2914eecb29e61aa2b4250a095c4c"
 dependencies = [
  "anyhow",
- "cranelift-codegen",
- "cranelift-control",
+ "cranelift-codegen 0.120.2",
+ "cranelift-control 0.120.2",
+]
+
+[[package]]
+name = "cranelift-module"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b31d249bbbccc4c1ae54701087d4d49d05951897691eef44f4a60e70252743b"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen 0.125.1",
+ "cranelift-control 0.125.1",
 ]
 
 [[package]]
@@ -600,7 +712,7 @@ version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41c83e8666e3bcc5ffeaf6f01f356f0e1f9dcd69ce5511a1efd7ca5722001a3f"
 dependencies = [
- "cranelift-codegen",
+ "cranelift-codegen 0.120.2",
  "libc",
  "target-lexicon",
 ]
@@ -610,6 +722,12 @@ name = "cranelift-srcgen"
 version = "0.120.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02e3f4d783a55c64266d17dc67d2708852235732a100fc40dd9f1051adc64d7b"
+
+[[package]]
+name = "cranelift-srcgen"
+version = "0.125.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7a06c330b7994a891ad5b622ebc9aefcd17beae832dd25f577cf60c13426bf"
 
 [[package]]
 name = "crc32fast"
@@ -824,7 +942,7 @@ checksum = "06cdfe340b16dd990c54cce79743613fa09fbb16774f33a77c9fd196f8f3fa30"
 dependencies = [
  "cfg-if",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -944,7 +1062,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -1065,6 +1183,17 @@ name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
+dependencies = [
+ "fallible-iterator",
+ "indexmap",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "gimli"
+version = "0.32.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 dependencies = [
  "fallible-iterator",
  "indexmap",
@@ -1261,6 +1390,12 @@ name = "libc"
 version = "0.2.176"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
+
+[[package]]
+name = "libm"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libredox"
@@ -1542,7 +1677,7 @@ dependencies = [
  "blake3",
  "cranelift",
  "cranelift-jit",
- "cranelift-module",
+ "cranelift-module 0.125.1",
  "cranelift-native",
  "derive_more",
  "ed25519-dalek",
@@ -2017,6 +2152,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "regalloc2"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efd8138ce7c3d7c13be4f61893154b5d711bd798d2d7be3ecb8dcc7e7a06ca98"
+dependencies = [
+ "allocator-api2",
+ "bumpalo",
+ "hashbrown 0.15.5",
+ "log",
+ "rustc-hash",
+ "smallvec",
+]
+
+[[package]]
 name = "regex"
 version = "1.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2128,7 +2277,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2141,7 +2290,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2446,7 +2595,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -3065,6 +3214,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bad67dc8b2a1a6e5448428adec4c3e84c43e561d8c9ee8a9e5aabeb193ec41d1"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasmtime-internal-math"
+version = "38.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b900df4252ad86547e7f2b2c00201b006db4e864893bedfb3aca32b23d81868a"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
