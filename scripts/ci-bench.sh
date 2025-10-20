@@ -2,7 +2,7 @@
 
 set -e
 
-NUM_TXS=20
+NUM_TXS=40
 NUM_ITERS=20
 
 # Git ref to checkout
