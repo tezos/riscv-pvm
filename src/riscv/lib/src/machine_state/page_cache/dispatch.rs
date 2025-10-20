@@ -13,11 +13,11 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
+use super::INSTRUCTION_ENTRIES;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -153,7 +153,6 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     fn compile(
         &mut self,
         target: &JittedPage<Self, MC>,
-        instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC>;
 }
@@ -182,9 +181,10 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
     fn compile(
         &mut self,
         target: &JittedPage<Self, MC>,
-        instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
+        let instr = Jitted::compilation_request_instructions(target.as_ref(), program_counter);
+
         let fun = match self.jit.compile(&instr, program_counter) {
             Some(jitfn) => {
                 // Safety: the two function signatures are identical, apart from the first and
@@ -262,7 +262,19 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                 let jit = unsafe { jit_guard.as_mut() };
 
                 while let Ok(msg) = receiver.recv() {
-                    if let Some(jitfn) = jit.compile(&msg.instr, msg.program_counter) {
+                    if Arc::strong_count(&msg.page) == 1 {
+                        // The main thread already dropped the page (we are the only reference)
+                        // - possibly because the memory the page corresponds to is now writable.
+                        // There's no need to handle this request.
+                        continue;
+                    }
+
+                    let instr = Jitted::compilation_request_instructions(
+                        msg.page.as_ref(),
+                        msg.program_counter,
+                    );
+
+                    if let Some(jitfn) = jit.compile(&instr, msg.program_counter) {
                         let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
                         let dispatch = &msg.page[offset].dispatch;
 
@@ -311,7 +323,6 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     fn compile(
         &mut self,
         target: &JittedPage<Self, MC>,
-        instr: Vec<Instruction>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_entrypoint_not_compiled;
@@ -319,13 +330,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let offset = memory::address_to_page_offset(program_counter) >> 1;
         target[offset].dispatch.set(fun);
 
-        // Single instruction entrypoints don't perform as well when compiled
-        if instr.len() <= 1 {
-            return fun;
-        }
-
         let request = CompilationRequest {
-            instr,
             page: target.clone(),
             program_counter,
         };
@@ -345,10 +350,11 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     }
 }
 
-// TODO: we can just send the whole page, and retrieve the instructions on the other side :)
+/// Compilation request sent to the background JIT-thread of the [`OutlineCompiler`].
 struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
-    instr: Vec<Instruction>,
-    page: JittedPage<D, MC>,
+    /// Reference to the page containing the entrypoint to compile.
+    page: Arc<[Jitted<D, MC>; INSTRUCTION_ENTRIES]>,
+    /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,
 }
 
