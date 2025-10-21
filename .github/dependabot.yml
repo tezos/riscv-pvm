@@ -11,6 +11,9 @@ updates:
       tezos-packages:
         patterns:
           - "tezos*"
+      cranelift-packages:
+        patterns:
+          - "cranelift*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
