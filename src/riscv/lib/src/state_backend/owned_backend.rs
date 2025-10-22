@@ -45,7 +45,7 @@ impl Owned {
 impl ManagerBase for Owned {
     type Region<E: 'static, const LEN: usize> = [E; LEN];
 
-    type DynRegion<const LEN: usize> = memmap2::MmapMut;
+    type DynRegion = memmap2::MmapMut;
 
     type ManagerRoot = Self;
 }
@@ -55,8 +55,8 @@ impl ManagerAlloc for Owned {
         value
     }
 
-    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
-        let region = memmap2::MmapMut::map_anon(LEN).expect("Failed to allocate dynamic region");
+    fn allocate_dyn_region(len: usize) -> Self::DynRegion {
+        let region = memmap2::MmapMut::map_anon(len).expect("Failed to allocate dynamic region");
 
         assert_eq!(
             region.as_ptr().align_offset(PAGE_SIZE.get() as usize),
@@ -84,24 +84,21 @@ impl ManagerRead for Owned {
         region.to_vec()
     }
 
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        region.len()
+    }
+
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
+        assert!(address + E::STORED_SIZE.get() <= region.len());
 
         // SAFETY: The assertion above ensures that the address can be read for at least
         // `E::STORED_SIZE` bytes.
         unsafe { E::read_unaligned(region.as_ptr().add(address)) }
     }
 
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    ) {
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
         for (i, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read::<E, LEN>(
+            *value = Self::dyn_region_read::<E>(
                 region,
                 E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
             );
@@ -125,25 +122,21 @@ impl ManagerWrite for Owned {
         region.copy_from_slice(value)
     }
 
-    fn dyn_region_write<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        value: E,
-    ) {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
+        assert!(address + E::STORED_SIZE.get() <= region.len());
 
         // SAFETY: The assertion above ensures that the address can be written for at least
         // `E::STORED_SIZE` bytes.
         unsafe { value.write_unaligned(region.as_mut_ptr().add(address)) }
     }
 
-    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write_all<E: Elem + Copy>(
+        region: &mut Self::DynRegion,
         address: usize,
         values: &[E],
     ) {
         for (i, value) in values.iter().enumerate() {
-            Self::dyn_region_write::<E, LEN>(
+            Self::dyn_region_write::<E>(
                 region,
                 E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
                 *value,
@@ -174,10 +167,13 @@ impl ManagerSerialise for Owned {
         Ok(())
     }
 
-    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<E: Encoder>(
+        region: &Self::DynRegion,
         mut encoder: E,
     ) -> Result<(), EncodeError> {
+        let len = region.len() as u64;
+        len.encode(&mut encoder)?;
+
         encoder.writer().write(region)
     }
 }
@@ -197,11 +193,14 @@ impl ManagerDeserialise for Owned {
         Ok(values)
     }
 
-    fn deserialise_dyn_region<'de, const LEN: usize, D: Decoder>(
+    fn deserialise_dyn_region<'de, D: Decoder>(
         mut decoder: D,
-    ) -> Result<Self::DynRegion<LEN>, DecodeError> {
-        let mut target = Owned::allocate_dyn_region::<LEN>();
+    ) -> Result<Self::DynRegion, DecodeError> {
+        let len = u64::decode(&mut decoder)? as usize;
+
+        let mut target = Owned::allocate_dyn_region(len);
         decoder.reader().read(&mut target)?;
+
         Ok(target)
     }
 }
@@ -213,8 +212,9 @@ impl ManagerClone for Owned {
         region.clone()
     }
 
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
-        let mut new_region = Owned::allocate_dyn_region::<LEN>();
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
+        let len = region.len();
+        let mut new_region = Owned::allocate_dyn_region(len);
         new_region.copy_from_slice(region.deref());
         new_region
     }
@@ -284,12 +284,12 @@ pub(crate) mod test_helpers {
     #[test]
     fn dyn_cells_serialise() {
         proptest::proptest!(|(address in (0usize..120), value: u64)|{
-            let mapping = Owned::allocate_dyn_region::<128>();
-            let mut cells: DynCells<128, Owned> = DynCells::bind(mapping);
+            let mapping = Owned::allocate_dyn_region(128);
+            let mut cells: DynCells<Owned> = DynCells::bind(mapping);
             cells.write(address, value);
             let bytes = binary::serialise(&cells).unwrap();
 
-            let cells_after: DynCells<128, Owned> = binary::deserialise(&bytes).unwrap();
+            let cells_after: DynCells<Owned> = binary::deserialise(&bytes).unwrap();
             for i in 0..128 {
                 assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
             }
@@ -298,7 +298,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: DynCells<128, ProofGen<Ref<'_, Owned>>> =
+            let proof_cells: DynCells<ProofGen<Ref<'_, Owned>>> =
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
             let proof_bytes = binary::serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);

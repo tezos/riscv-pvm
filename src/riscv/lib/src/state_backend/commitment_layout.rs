@@ -52,14 +52,21 @@ where
     }
 }
 
-impl<const LEN: usize> CommitmentLayout for DynArray<LEN> {
+impl CommitmentLayout for DynArray {
     fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
+        let length = state.len();
+
         let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
-        chunks_to_writer::<_, _>(&mut writer, LEN, |address| {
+        chunks_to_writer::<_, _>(&mut writer, length, |address| {
             state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address)
         })?;
         let hashes = writer.finalise();
-        hash::build_custom_merkle_hash(MERKLE_ARITY, hashes)
+        let pages_node = hash::build_custom_merkle_hash(MERKLE_ARITY, hashes)?;
+
+        let length_node = Hash::blake3_hash(length as u64)?;
+        let root_node = Hash::combine([length_node, pages_node]);
+
+        Ok(root_node)
     }
 }
 

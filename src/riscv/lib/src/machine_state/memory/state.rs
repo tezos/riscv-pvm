@@ -25,7 +25,7 @@ use crate::state_backend::ManagerWrite;
 /// Machine's memory
 pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase> {
     /// Memory contents
-    pub(super) data: DynCells<TOTAL_BYTES, M>,
+    pub(super) data: DynCells<M>,
 
     /// Read permissions per page
     pub(super) readable_pages: PagePermissions<PAGES, M>,

@@ -57,6 +57,14 @@ impl<T> Partial<T> {
             Partial::Present(data) => Ok(Partial::Present(f(data)?)),
         }
     }
+
+    /// Convert a [`Partial<T>`] into an [`Option<T>`], discarding blinded and absent cases.
+    pub fn to_present(self) -> Option<T> {
+        match self {
+            Partial::Present(data) => Some(data),
+            Partial::Absent | Partial::Blinded(_) => None,
+        }
+    }
 }
 
 impl Partial<Vec<u8>> {

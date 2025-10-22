@@ -33,7 +33,7 @@ where
         M: ManagerAlloc,
     {
         MemoryImpl {
-            data: DynCells::new(),
+            data: DynCells::new(TOTAL_BYTES),
             readable_pages: PagePermissions::new(),
             writable_pages: PagePermissions::new(),
             executable_pages: PagePermissions::new(),
@@ -51,7 +51,7 @@ where
         .expect("size of memory `TOTAL_BYTES` must be greater than zero");
 
     type Layout = (
-        DynArray<TOTAL_BYTES>,
+        DynArray,
         PagePermissionsLayout<PAGES>,
         PagePermissionsLayout<PAGES>,
         PagePermissionsLayout<PAGES>,

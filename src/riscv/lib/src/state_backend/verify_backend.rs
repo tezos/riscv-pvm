@@ -81,7 +81,7 @@ pub struct Verifier;
 impl ManagerBase for Verifier {
     type Region<E: 'static, const LEN: usize> = Region<E, LEN>;
 
-    type DynRegion<const LEN: usize> = DynRegion<{ MERKLE_LEAF_SIZE.get() }, LEN>;
+    type DynRegion = DynRegion<{ MERKLE_LEAF_SIZE.get() }>;
 
     type ManagerRoot = Self;
 }
@@ -94,15 +94,23 @@ mod test_helpers {
     use crate::state_backend::verify_backend::Region;
     use crate::state_backend::verify_backend::Verifier;
 
-    impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
+    impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         /// Construct a zero-initialized dynamic region.
-        fn zero_initialized() -> Self {
-            let nr_pages = LEN.div_ceil(LEAF_SIZE);
+        pub(crate) fn zero_initialized(length: usize) -> Self {
+            let nr_pages = length.div_ceil(LEAF_SIZE);
 
-            Self::from_pages((0..nr_pages).map(|page_id| {
-                let page_index = PageId::<LEAF_SIZE>::from_address(page_id * LEAF_SIZE);
-                (page_index, Box::new([0; LEAF_SIZE]))
-            }))
+            Self::from_pages(
+                Some(length),
+                (0..nr_pages).map(|page_id| {
+                    let page_index = PageId::<LEAF_SIZE>::from_address(page_id * LEAF_SIZE);
+                    (page_index, Box::new([0; LEAF_SIZE]))
+                }),
+            )
+        }
+
+        /// Like [`Self::zero_initialized`] but all pages are absent.
+        pub(crate) fn absent(length: usize) -> Self {
+            Self::from_pages(Some(length), std::iter::empty())
         }
     }
 
@@ -111,10 +119,10 @@ mod test_helpers {
             Region::Partial(Box::new(init_value.map(Some)))
         }
 
-        fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
+        fn allocate_dyn_region(length: usize) -> Self::DynRegion {
             // Since this implementation is only for testing purposes, we can allocate the regions
             // as zero initialized to mimic what an owned backend would do (to pass tests)
-            DynRegion::zero_initialized()
+            DynRegion::zero_initialized(length)
         }
     }
 }
@@ -132,10 +140,11 @@ impl ManagerRead for Verifier {
         (0..LEN).map(|index| region[index]).collect()
     }
 
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        region.len()
+    }
+
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         let mut raw_data = vec![0u8; E::STORED_SIZE.get()];
         region.read_bytes(address, &mut raw_data);
 
@@ -143,11 +152,7 @@ impl ManagerRead for Verifier {
         unsafe { E::read_unaligned(raw_data.as_ptr()) }
     }
 
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    ) {
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
         for (i, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read(
                 region,
@@ -188,17 +193,13 @@ impl ManagerWrite for Verifier {
         }
     }
 
-    fn dyn_region_write<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        value: E,
-    ) {
+    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         let raw_data = elem_bytes(value);
         region.write_bytes(address, &raw_data);
     }
 
-    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write_all<E: Elem + Copy>(
+        region: &mut Self::DynRegion,
         address: usize,
         values: &[E],
     ) {
@@ -231,7 +232,7 @@ impl ManagerClone for Verifier {
         region.clone()
     }
 
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         region.clone()
     }
 }
@@ -401,33 +402,31 @@ impl<const LEAF_SIZE: usize> Default for Page<LEAF_SIZE> {
 
 /// Verifier dynamic region
 #[derive(Clone, Debug)]
-pub struct DynRegion<const LEAF_SIZE: usize, const LEN: usize> {
+pub struct DynRegion<const LEAF_SIZE: usize> {
+    length: Option<usize>,
     pages: BTreeMap<PageId<LEAF_SIZE>, Page<LEAF_SIZE>>,
 }
 
-impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
-    const SANE: bool = {
-        if LEN.rem_euclid(LEAF_SIZE) != 0 {
-            panic!("LEN must be a multiple of LEAF_SIZE")
+impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
+    /// Get the length of the dynamic region.
+    fn len(&self) -> usize {
+        match self.length {
+            Some(len) => len,
+            None => not_found(),
         }
-
-        true
-    };
+    }
 
     /// Construct a verifier dynamic region using the given known pages.
     pub fn from_pages(
+        length: Option<usize>,
         pages: impl IntoIterator<Item = (PageId<LEAF_SIZE>, Box<[u8; LEAF_SIZE]>)>,
     ) -> Self {
-        if !Self::SANE {
-            unreachable!()
-        }
-
         let pages = pages
             .into_iter()
             .map(|(id, data)| (id, Page::from_full(data)))
             .collect();
 
-        DynRegion { pages }
+        DynRegion { length, pages }
     }
 
     /// Read bytes from the dynamic region.
@@ -436,7 +435,7 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             return;
         }
 
-        if buffer.len() > LEN.saturating_sub(address) {
+        if buffer.len() > self.len().saturating_sub(address) {
             not_found()
         }
 
@@ -470,7 +469,7 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             return;
         }
 
-        if buffer.len() > LEN.saturating_sub(address) {
+        if buffer.len() > self.len().saturating_sub(address) {
             not_found()
         }
 
@@ -502,11 +501,20 @@ impl<const LEAF_SIZE: usize, const LEN: usize> DynRegion<LEAF_SIZE, LEN> {
             None => PartialState::Absent,
         }
     }
+
+    /// Check whether no pages, not even the length is available.
+    ///
+    /// This would be the case when the dynamic region represents an absent or blinded node from
+    /// the compressed partial Merkle proof tree, and no data has been written to it.
+    pub(crate) fn is_completely_absent(&self) -> bool {
+        self.length.is_none() && self.pages.is_empty()
+    }
 }
 
-impl<const LEAF_SIZE: usize, const LEN: usize> Default for DynRegion<LEAF_SIZE, LEN> {
+impl<const LEAF_SIZE: usize> Default for DynRegion<LEAF_SIZE> {
     fn default() -> Self {
         DynRegion {
+            length: Some(LEAF_SIZE),
             pages: BTreeMap::new(),
         }
     }
@@ -642,12 +650,13 @@ mod tests {
     }
 
     macro_rules! assert_not_found {
-        ( $body:expr ) => {
+        ( $body:expr ) => {{
+            let result = handle_stepper_panics(|| $body).expect_err("computation should fail");
             assert!(
-                handle_stepper_panics(|| { $body })
-                    .is_err_and(|e| matches!(e, ProofVerificationFailure::AbsentDataAccess(_)))
-            )
-        };
+                matches!(result, ProofVerificationFailure::AbsentDataAccess(_)),
+                "unexpected error: {result:?}"
+            );
+        }};
     }
 
     /// Check the read functionality of a region that has no gaps between its pages.
@@ -655,7 +664,7 @@ mod tests {
     fn dyn_region_continuous() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::default();
+        let mut dyn_region = DynRegion::absent(3 * LEAF_SIZE);
         dyn_region.write_bytes(
             0,
             [1, 3, 3, 7]
@@ -675,7 +684,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<{ 3 * LEAF_SIZE }, Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
         assert_eq_found!(dyn_cells.read::<[u8; 4]>(0), [1, 3, 3, 7]);
@@ -720,7 +729,7 @@ mod tests {
     fn dyn_region_gaps() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::default();
+        let mut dyn_region = DynRegion::absent(3 * LEAF_SIZE);
         dyn_region.write_bytes(
             0,
             [7, 3, 3]
@@ -740,7 +749,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<{ 3 * LEAF_SIZE }, Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
         assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);
         assert_eq_found!(dyn_cells.read::<[u8; 2]>(1), [3, 3]);

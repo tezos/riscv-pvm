@@ -48,7 +48,7 @@ pub struct ProofGen<M: ManagerBase> {
 impl<M: ManagerBase> ManagerBase for ProofGen<M> {
     type Region<E: 'static, const LEN: usize> = ProofRegion<E, LEN, M>;
 
-    type DynRegion<const LEN: usize> = ProofDynRegion<LEN, M>;
+    type DynRegion = ProofDynRegion<M>;
 
     type ManagerRoot = Self;
 }
@@ -58,8 +58,8 @@ impl<M: ManagerAlloc> ManagerAlloc for ProofGen<M> {
         ProofRegion::bind(M::allocate_region::<E, LEN>(init_value))
     }
 
-    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN> {
-        ProofDynRegion::bind(M::allocate_dyn_region::<LEN>())
+    fn allocate_dyn_region(len: usize) -> Self::DynRegion {
+        ProofDynRegion::bind(M::allocate_dyn_region(len))
     }
 }
 
@@ -79,19 +79,16 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         (0..LEN).map(|i| Self::region_read(region, i)).collect()
     }
 
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        region.len()
+    }
+
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         region.reads.borrow_mut().insert::<E>(address);
         region.unrecorded_read(address)
     }
 
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    ) {
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
         for (offset, value) in values.iter_mut().enumerate() {
             *value = Self::dyn_region_read(
                 region,
@@ -106,7 +103,7 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
 
 /// Implementation of [`ManagerWrite`] which wraps another manager and
 /// records written locations but does not write to the wrapped region directly.
-impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
+impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
     fn region_write<E, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
         index: usize,
@@ -125,20 +122,16 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
         }
     }
 
-    fn dyn_region_write<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        value: E,
-    ) {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
+        assert!(address + E::STORED_SIZE.get() <= region.unrecorded_len());
 
         for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
             region.writes.insert(address + offset, byte);
         }
     }
 
-    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write_all<E: Elem + Copy>(
+        region: &mut Self::DynRegion,
         address: usize,
         values: &[E],
     ) {
@@ -208,8 +201,8 @@ impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
         Ok(())
     }
 
-    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<E: Encoder>(
+        region: &Self::DynRegion,
         mut encoder: E,
     ) -> Result<(), EncodeError> {
         if region.writes.is_empty() {
@@ -236,7 +229,7 @@ impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
         }
 
         // Write the remaining items from the region that were not written yet.
-        let to_be_written = LEN.saturating_sub(write_index);
+        let to_be_written = region.unrecorded_len().saturating_sub(write_index);
         if to_be_written > 0 {
             let mut buffer = vec![0u8; to_be_written];
             M::dyn_region_read_all(&region.source, write_index, &mut buffer);
@@ -254,7 +247,7 @@ impl<M: ManagerClone> ManagerClone for ProofGen<M> {
         region.clone()
     }
 
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         region.clone()
     }
 }
@@ -323,19 +316,23 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for ProofRegion<E, LEN, 
 /// Accesses are thus recorded for each address.
 /// The underlying dynamic region is never mutated, but all written bytes are
 /// recorded in order to preserve the integrity of subsequent reads.
-pub struct ProofDynRegion<const LEN: usize, M: ManagerBase> {
-    source: M::DynRegion<LEN>,
+pub struct ProofDynRegion<M: ManagerBase> {
+    source: M::DynRegion,
     reads: RefCell<DynAccess>,
     writes: BTreeMap<usize, u8>,
+
+    /// Was the length of the dynamic region accessed?
+    did_access_length: Cell<bool>,
 }
 
-impl<M: ManagerBase, const LEN: usize> ProofDynRegion<LEN, M> {
+impl<M: ManagerBase> ProofDynRegion<M> {
     /// Bind a pre-existing dynamic region.
-    pub fn bind(source: M::DynRegion<LEN>) -> Self {
+    pub fn bind(source: M::DynRegion) -> Self {
         Self {
             source,
             reads: RefCell::default(),
             writes: BTreeMap::new(),
+            did_access_length: Cell::new(false),
         }
     }
 
@@ -351,9 +348,18 @@ impl<M: ManagerBase, const LEN: usize> ProofDynRegion<LEN, M> {
         let writes: BTreeSet<_> = self.writes.keys().copied().collect();
         DynAccess(writes)
     }
+
+    /// Figure out whether the part of the Merkle tree that contains the dynamic region length
+    /// needs to be present.
+    ///
+    /// Generally that is when the length was retrieved, or when any other read or write occurred
+    /// within the dynamic region.
+    pub(crate) fn need_length_in_proof(&self) -> bool {
+        self.did_access_length.get() || !self.reads.borrow().is_empty() || !self.writes.is_empty()
+    }
 }
 
-impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
+impl<M: ManagerRead> ProofDynRegion<M> {
     /// Read from the wrapped dynamic region.
     pub fn inner_dyn_region_read<E: Elem>(&self, address: usize) -> E {
         M::dyn_region_read(&self.source, address)
@@ -362,7 +368,7 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
     /// Version of [`ManagerRead::dyn_region_read`] which does not record
     /// the access as a read.
     fn unrecorded_read<E: Elem>(&self, address: usize) -> E {
-        assert!(address + E::STORED_SIZE.get() <= LEN);
+        assert!(address + E::STORED_SIZE.get() <= self.unrecorded_len());
 
         // Read the underlying bytes of the value.
         let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
@@ -376,14 +382,27 @@ impl<M: ManagerRead, const LEN: usize> ProofDynRegion<LEN, M> {
         // SAFETY: The vector has been allocated with sufficient space.
         unsafe { E::read_unaligned(value_bytes.as_ptr()) }
     }
+
+    /// Get the length of the dynamic region.
+    fn len(&self) -> usize {
+        self.did_access_length.set(true);
+        self.unrecorded_len()
+    }
+
+    /// Like [`Self::len`], but does not record the access as a read.
+    fn unrecorded_len(&self) -> usize {
+        // XXX: This implies the size can't change in a proof.
+        M::dyn_region_len(&self.source)
+    }
 }
 
-impl<const LEN: usize, M: ManagerClone> Clone for ProofDynRegion<LEN, M> {
+impl<M: ManagerClone> Clone for ProofDynRegion<M> {
     fn clone(&self) -> Self {
         Self {
             source: M::clone_dyn_region(&self.source),
             reads: self.reads.clone(),
             writes: self.writes.clone(),
+            did_access_length: self.did_access_length.clone(),
         }
     }
 }
@@ -403,6 +422,11 @@ impl DynAccess {
     pub fn includes_range(&self, r: std::ops::Range<usize>) -> bool {
         self.0.range(r).next().is_some()
     }
+
+    /// Check whether no address has been accessed.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// Natural transformation from a manager `M` to a proof-generating manager `ProofGen<M>`
@@ -417,9 +441,9 @@ impl<M: ManagerBase> FnManager<M> for ProofWrapper {
         ProofRegion::bind(input)
     }
 
-    fn map_dyn_region<const LEN: usize>(
-        input: <M as ManagerBase>::DynRegion<LEN>,
-    ) -> <ProofGen<M> as ManagerBase>::DynRegion<LEN> {
+    fn map_dyn_region(
+        input: <M as ManagerBase>::DynRegion,
+    ) -> <ProofGen<M> as ManagerBase>::DynRegion {
         ProofDynRegion::bind(input)
     }
 }
@@ -551,11 +575,10 @@ mod tests {
         proptest!(|(byte_before: u8,
                     bytes_after: [u8; ELEM_SIZE],
                     write_address in &address_range)| {
-            let mut cells = Owned::allocate_dyn_region::<DYN_REGION_SIZE>();
+            let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
-            let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
-                DynCells::bind(dyn_region);
+            let dyn_region: ProofDynRegion<Owned> = ProofDynRegion::bind(cells);
+            let mut dyn_cells: DynCells<ProofGen<Owned>> = DynCells::bind(dyn_region);
 
             // Perform static memory accesses
             let value_before = u64::from_le_bytes([byte_before; ELEM_SIZE]);
@@ -567,11 +590,10 @@ mod tests {
             let value: u64 = dyn_cells.read(write_address);
             assert_eq!(value, value_after);
 
-            let mut cells = Owned::allocate_dyn_region::<DYN_REGION_SIZE>();
+            let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
-            let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
-                DynCells::bind(dyn_region);
+            let dyn_region: ProofDynRegion<Owned> = ProofDynRegion::bind(cells);
+            let mut dyn_cells: DynCells<ProofGen<Owned>> = DynCells::bind(dyn_region);
 
             // Perform dynamic memory accesses as `u16`
             let value_before = [u16::from_le_bytes([byte_before; 2]); ELEM_SIZE / 2];
@@ -589,11 +611,10 @@ mod tests {
             dyn_cells.read_all(write_address, &mut value);
             assert_eq!(value, value_after);
 
-            let mut cells = Owned::allocate_dyn_region::<DYN_REGION_SIZE>();
+            let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
-            let dyn_region: ProofDynRegion<DYN_REGION_SIZE, Owned> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<DYN_REGION_SIZE, ProofGen<Owned>> =
-                DynCells::bind(dyn_region);
+            let dyn_region: ProofDynRegion<Owned> = ProofDynRegion::bind(cells);
+            let mut dyn_cells: DynCells<ProofGen<Owned>> = DynCells::bind(dyn_region);
 
             // Perform dynamic memory accesses as bytes
             let value_before = [byte_before; ELEM_SIZE];
@@ -611,24 +632,22 @@ mod tests {
                     bytes_after: [u8; ELEM_SIZE],
                     reads in array::uniform2(&address_range),
                     writes in array::uniform2(&address_range))| {
-            let mut cells = Owned::allocate_dyn_region::<DYN_REGION_SIZE>();
+            let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
-            let owned_dyn_cells: DynCells<DYN_REGION_SIZE, Ref<'_, Owned>> =
-                DynCells::bind(&cells);
+            let owned_dyn_cells: DynCells<Ref<'_, Owned>> = DynCells::bind(&cells);
             let initial_root_hash =
-                <DynArray<DYN_REGION_SIZE> as CommitmentLayout>::state_hash(owned_dyn_cells)
-                    .unwrap();
+                <DynArray as CommitmentLayout>::state_hash(owned_dyn_cells).unwrap();
 
-            let mut proof_dyn_region: ProofDynRegion<DYN_REGION_SIZE, Ref<'_, Owned>> =
-                ProofDynRegion::bind(&cells);
+            let mut proof_dyn_region: ProofDynRegion<Ref<'_, Owned>> = ProofDynRegion::bind(&cells);
 
             // Perform memory accesses
             let value_before = [byte_before; ELEM_SIZE];
-            reads.iter().for_each(|i| {
+            reads.iter().try_for_each(|i| {
                 let mut value = [0u8; ELEM_SIZE];
                 ProofGen::<Ref<'_, Owned>>::dyn_region_read_all(&proof_dyn_region, *i, &mut value);
-                assert_eq!(value, value_before)
-            });
+                prop_assert_eq!(value, value_before);
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
             writes.iter().for_each(|i| {
                 ProofGen::<Ref<'_, Owned>>::dyn_region_write_all(
                     &mut proof_dyn_region,
@@ -639,10 +658,10 @@ mod tests {
 
             // Build the Merkle tree and check that it has the root hash of the
             // initial wrapped region.
-            let proof_dyn_cells: DynCells<DYN_REGION_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
+            let proof_dyn_cells: DynCells<Ref<'_, ProofGen<Ref<'_, Owned>>>> =
                 DynCells::bind(&proof_dyn_region);
             let merkle_tree =
-                <DynArray<DYN_REGION_SIZE> as ProofLayout>::to_merkle_tree(proof_dyn_cells).unwrap();
+                <DynArray as ProofLayout>::to_merkle_tree(proof_dyn_cells).unwrap();
             merkle_tree.check_root_hash();
             prop_assert_eq!(merkle_tree.root_hash(), initial_root_hash);
 
@@ -661,13 +680,22 @@ mod tests {
 
             // Traverse the generated Merkle tree and check each leaf's access log
             let mut queue = VecDeque::with_capacity(LEAVES + 1);
-            queue.push_back(merkle_tree);
+
+            let pages_tree = match merkle_tree {
+                MerkleTree::Leaf(_, _, _) => panic!("Did not expect leaf"),
+                MerkleTree::Node(_, mut children) => {
+                    // The node for the pages is the second child.
+                    children.remove(1)
+                },
+            };
+            queue.push_back(pages_tree);
+
             let mut leaf: usize = 0;
             while let Some(node) = queue.pop_front() {
                 match node {
                     MerkleTree::Node(_, children) => queue.extend(children),
                     MerkleTree::Leaf(_, access_info, _) => {
-                        assert_eq!(
+                        prop_assert_eq!(
                             access_info,
                             read_leaves.contains(&leaf) ||
                                 written_leaves.contains(&leaf)

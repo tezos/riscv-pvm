@@ -77,7 +77,7 @@ impl<A: CloneLayout, B: CloneLayout, C: CloneLayout, D: CloneLayout, E: CloneLay
     }
 }
 
-impl<const LEN: usize> CloneLayout for DynArray<LEN> {
+impl CloneLayout for DynArray {
     fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
         let region = space.region_ref();
         let region = M::clone_dyn_region(region);

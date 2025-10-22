@@ -74,6 +74,9 @@ pub enum ProofError {
     #[error("Proof tree is absent")]
     AbsentProof,
 
+    #[error("A part of the proof required to parse further is absent")]
+    DependentNodeIsAbsent,
+
     #[error("Encountered a node with a bad number of branches: expected {expected}, got {got}")]
     BadNumberOfBranches { expected: usize, got: usize },
 
@@ -419,20 +422,32 @@ where
     }
 }
 
-impl<const LEN: usize> ProofLayout for DynArray<LEN> {
+impl ProofLayout for DynArray {
     fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
+        let len = state.len();
+
         let region = state.region_ref();
         let mut writer = MerkleWriter::new(
             MERKLE_LEAF_SIZE,
             MERKLE_ARITY,
             region.get_read(),
             region.get_write(),
-            LEN.div_ceil(MERKLE_ARITY),
+            len.div_ceil(MERKLE_ARITY),
         );
         let read =
             |address| -> [u8; MERKLE_LEAF_SIZE.get()] { region.inner_dyn_region_read(address) };
-        chunks_to_writer::<_, _>(&mut writer, LEN, read)?;
-        writer.finalise()
+        chunks_to_writer::<_, _>(&mut writer, len, read)?;
+
+        let pages_node = writer.finalise()?;
+
+        let length_node = MerkleTree::make_merkle_leaf(
+            binary::serialise(len as u64)?,
+            region.need_length_in_proof(),
+        );
+
+        let root_node = MerkleTree::make_merkle_node(vec![length_node, pages_node]);
+
+        Ok(root_node)
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
@@ -480,26 +495,128 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
             }
         }
 
-        let pages_handler = parse_pages_fn_getter::<D>(0, LEN, proof)?;
+        let proof = proof.into_node()?;
+        let (proof, length) = proof.next_branch(|proof| proof.into_leaf::<u64>())?;
 
-        // After the recursive parsing, convert all pages into cells.
-        Ok(pages_handler.map(|pages| {
-            let region = verify_backend::DynRegion::from_pages(pages);
-            super::DynCells::bind(region)
-        }))
+        let (proof, pages) = proof.next_branch(|proof| {
+            let length = length.to_present().map(|len| len as usize);
+
+            let pages_handler = match length {
+                // When the length node is present, we can properly parse all pages.
+                Some(len) => parse_pages_fn_getter::<D>(0, len, proof)?,
+
+                // When the length node is not present, we cannot parse any pages. This needs to be
+                // validated. In other words, the node for the pages must be blinded or absent.
+                None => {
+                    // XXX: We can't pick whether this is a node or leaf given we don't know the
+                    // length. However, absent or blinded leaves are encoded the same way as nodes.
+                    // In the case where the node is present (which is an error in here), we would
+                    // trigger an unexpected leaf error instead of the more appropriate error below.
+                    let proof = proof.into_node()?;
+
+                    match proof.presence() {
+                        Partial::Absent | Partial::Blinded(_) => {
+                            // Fine, hence we extract no pages.
+                        }
+
+                        Partial::Present(_) => {
+                            // Not fine, there may be pages and we don't know how to extract them.
+                            return Err(ProofError::DependentNodeIsAbsent);
+                        }
+                    }
+
+                    proof.done(Vec::new())?
+                }
+            };
+
+            // After the recursive parsing, convert all pages into cells.
+            Ok(pages_handler.map(|pages| {
+                let region = verify_backend::DynRegion::from_pages(length, pages);
+                super::DynCells::bind(region)
+            }))
+        })?;
+
+        proof.done(pages)
     }
 
     fn partial_state_hash(
         state: RefVerifierAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
+        let region = state.region_ref();
+
+        let proof = match proof {
+            ProofPart::Absent => {
+                if !region.is_completely_absent() {
+                    // The verifier contains data, but the proof is not in the right shape for us
+                    // to insert back the data and obtain a root hash. This indicates an invalid
+                    // proof.
+                    return Err(PartialHashError::Fatal);
+                }
+
+                // The dynamic region is untouched, so re-hashing needs to resume higher up in the
+                // proof tree.
+                return Err(PartialHashError::PotentiallyRecoverable);
+            }
+
+            ProofPart::Present(proof) => proof,
+        };
+
+        let children = match proof {
+            Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
+                if !region.is_completely_absent() {
+                    // The verifier contains data, but the proof is not in the right shape for us
+                    // to insert back the data and obtain a root hash. This indicates an invalid
+                    // proof.
+                    //
+                    // From a partial Merkle tree perspective, technically you can blind a node in
+                    // the proof and then write all the data necessary to expand the node fully
+                    // after the verification is done. In the context of a dynamic region that
+                    // would entail setting the length and writing all pages. However, dynamic
+                    // regions cannot be re-created hence you cannot "write" the length. Any
+                    // modification requires at least the length node to be present. Hence,
+                    // blinding the pages node can be paired with modifications, but you cannot
+                    // blind the dynamic region's root node if there are modifications.
+                    return Err(PartialHashError::Fatal);
+                }
+
+                // We already know that the dynamic region has been untouched at this point.
+                return Ok(*hash);
+            }
+
+            Tree::Leaf(MerkleProofLeaf::Read(_)) => {
+                return Err(PartialHashError::FromProof(ProofError::UnexpectedLeaf));
+            }
+
+            Tree::Node(children) => children.as_slice(),
+        };
+
+        let [length_tree, pages_tree] = children else {
+            return Err(PartialHashError::FromProof(
+                ProofError::BadNumberOfBranches {
+                    expected: 2,
+                    got: children.len(),
+                },
+            ));
+        };
+
+        let length = if let Tree::Leaf(MerkleProofLeaf::Read(data)) = length_tree {
+            // The length data must be present if the node is present. Practically, if there is any
+            // pages data to be dealt with we require the length. Or if there is no pages data,
+            // then the only reason the parent node would be present is if the length was to be
+            // read during verification.
+            binary::deserialise::<u64>(data).map_err(ProofError::Deserialise)? as usize
+        } else {
+            return Err(PartialHashError::Fatal);
+        };
+
         enum Event<'a> {
             Span(usize, usize, ProofTree<'a>),
             Node(Option<Hash>),
         }
 
         let mut queue = VecDeque::new();
-        queue.push_back(Event::Span(0usize, LEN, proof));
+        queue.push_back(Event::Span(0usize, length, ProofTree::Present(pages_tree)));
 
         let mut hashes: Vec<Result<Hash, PartialHashError>> = Vec::new();
 
@@ -563,10 +680,15 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
 
         // There must only be a single hash, the root hash. If there are more or less, that is an
         // error.
-        hashes
+        let pages_hash = hashes
             .pop()
             .filter(|_| hashes.is_empty())
-            .map_or(Err(PartialHashError::Fatal), |hash| hash)
+            .map_or(Err(PartialHashError::Fatal), |hash| hash)?;
+
+        let length_hash = Hash::blake3_hash(length as u64)?;
+        let root_hash = Hash::combine([length_hash, pages_hash]);
+
+        Ok(root_hash)
     }
 }
 
