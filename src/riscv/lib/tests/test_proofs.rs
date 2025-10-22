@@ -173,7 +173,7 @@ fn run_steps_ladder<MC, F>(
             basic_invalid_proofs_are_rejected(&stepper, &proof, initial_state_hash, verify_fn);
 
             eprintln!("> Verifying proof ...");
-            assert!(verify_fn(&stepper, proof).is_ok());
+            verify_fn(&stepper, proof).unwrap();
 
             // Run one final step, which is the step proven by `proof`, and check that its
             // state hash matches the final state hash of `proof`.

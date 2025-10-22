@@ -43,10 +43,10 @@ impl<T: 'static, const LEN: usize> Layout for Array<T, LEN> {
 }
 
 /// Layout for a fixed number of bytes, readable as types implementing [`super::elems::Elem`].
-pub struct DynArray<const LEN: usize> {}
+pub struct DynArray {}
 
-impl<const LEN: usize> Layout for DynArray<LEN> {
-    type Allocated<M: super::ManagerBase> = super::DynCells<LEN, M>;
+impl Layout for DynArray {
+    type Allocated<M: super::ManagerBase> = super::DynCells<M>;
 }
 
 /// Usage: Provide a struct with each field holding a layout.

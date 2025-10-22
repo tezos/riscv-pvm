@@ -18,13 +18,13 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::Ref;
 
 /// Reveal request layout
-pub type RevealRequestLayout = (DynArray<REVEAL_REQUEST_MAX_SIZE>, Atom<u64>);
+pub type RevealRequestLayout = (DynArray, Atom<u64>);
 
 /// Request content of reveal
 #[perfect_derive(Clone)]
 pub struct RevealRequest<M: ManagerBase> {
     /// Reveal request payload
-    pub bytes: DynCells<REVEAL_REQUEST_MAX_SIZE, M>,
+    pub bytes: DynCells<M>,
     /// Size of reveal request payload
     pub size: Cell<u64, M>,
 }
@@ -66,7 +66,7 @@ impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
         M: ManagerAlloc,
     {
         Self {
-            bytes: DynCells::new(),
+            bytes: DynCells::new(REVEAL_REQUEST_MAX_SIZE),
             size: Cell::new(),
         }
     }

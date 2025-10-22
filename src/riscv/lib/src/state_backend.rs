@@ -110,7 +110,7 @@ pub trait ManagerBase: Sized {
     type Region<E: 'static, const LEN: usize>;
 
     /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
-    type DynRegion<const LEN: usize>;
+    type DynRegion;
 
     /// The root manager may either be itself, or occasionally the manager that this manager
     /// wraps.
@@ -131,7 +131,7 @@ pub trait ManagerAlloc: 'static + ManagerReadWrite {
     fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN>;
 
     /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region<const LEN: usize>() -> Self::DynRegion<LEN>;
+    fn allocate_dyn_region(len: usize) -> Self::DynRegion;
 }
 
 /// Manager with read capabilities
@@ -145,18 +145,14 @@ pub trait ManagerRead: ManagerBase {
     /// Read all elements in the region.
     fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E>;
 
+    /// Read the length of the dynamic region in bytes.
+    fn dyn_region_len(region: &Self::DynRegion) -> usize;
+
     /// Read an element in the region. `address` is in bytes.
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E;
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
 
     /// Read elements from the region. `address` is in bytes.
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    );
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]);
 }
 
 /// Manager with write capabilities
@@ -172,15 +168,11 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
     fn region_write_all<E: Copy, const LEN: usize>(region: &mut Self::Region<E, LEN>, value: &[E]);
 
     /// Update an element in the region. `address` is in bytes.
-    fn dyn_region_write<E: Elem, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
-        address: usize,
-        value: E,
-    );
+    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
 
     /// Update multiple elements in the region. `address` is in bytes.
-    fn dyn_region_write_all<E: Elem + Copy, const LEN: usize>(
-        region: &mut Self::DynRegion<LEN>,
+    fn dyn_region_write_all<E: Elem + Copy>(
+        region: &mut Self::DynRegion,
         address: usize,
         values: &[E],
     );
@@ -205,8 +197,8 @@ pub trait ManagerSerialise: ManagerRead {
     ) -> Result<(), EncodeError>;
 
     /// Serialise the contents of the dynamic region.
-    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<E: Encoder>(
+        region: &Self::DynRegion,
         encoder: E,
     ) -> Result<(), EncodeError>;
 }
@@ -219,9 +211,7 @@ pub trait ManagerDeserialise: ManagerBase {
     ) -> Result<Self::Region<T, LEN>, DecodeError>;
 
     /// Deserialise the dynamic region.
-    fn deserialise_dyn_region<const LEN: usize, D: Decoder>(
-        decoder: D,
-    ) -> Result<Self::DynRegion<LEN>, DecodeError>;
+    fn deserialise_dyn_region<D: Decoder>(decoder: D) -> Result<Self::DynRegion, DecodeError>;
 }
 
 /// Manager with the ability to clone regions
@@ -232,7 +222,7 @@ pub trait ManagerClone: ManagerBase {
     ) -> Self::Region<E, LEN>;
 
     /// Clone the dynamic region.
-    fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN>;
+    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
 }
 
 /// Manager wrapper around `M` whose regions are immutable references to regions of `M`
@@ -241,7 +231,7 @@ pub struct Ref<'backend, M>(std::marker::PhantomData<fn(&'backend M)>);
 impl<'backend, M: ManagerBase> ManagerBase for Ref<'backend, M> {
     type Region<E: 'static, const LEN: usize> = &'backend M::Region<E, LEN>;
 
-    type DynRegion<const LEN: usize> = &'backend M::DynRegion<LEN>;
+    type DynRegion = &'backend M::DynRegion;
 
     type ManagerRoot = M::ManagerRoot;
 }
@@ -254,8 +244,8 @@ impl<M: ManagerSerialise> ManagerSerialise for Ref<'_, M> {
         M::serialise_region(region, encoder)
     }
 
-    fn serialise_dyn_region<const LEN: usize, E: Encoder>(
-        region: &Self::DynRegion<LEN>,
+    fn serialise_dyn_region<E: Encoder>(
+        region: &Self::DynRegion,
         encoder: E,
     ) -> Result<(), EncodeError> {
         M::serialise_dyn_region(region, encoder)
@@ -275,18 +265,15 @@ impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
         M::region_read_all(region)
     }
 
-    fn dyn_region_read<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-    ) -> E {
+    fn dyn_region_len(region: &Self::DynRegion) -> usize {
+        M::dyn_region_len(region)
+    }
+
+    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         M::dyn_region_read(region, address)
     }
 
-    fn dyn_region_read_all<E: Elem, const LEN: usize>(
-        region: &Self::DynRegion<LEN>,
-        address: usize,
-        values: &mut [E],
-    ) {
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
         M::dyn_region_read_all(region, address, values)
     }
 }
