@@ -78,6 +78,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Check storage init
+        run: |
+          df -h
+          du -sch .
+
       - name: Nix setup
         uses: nixbuild/nix-quick-install-action@v34
         with:
@@ -128,6 +133,12 @@ jobs:
           direnv allow .
           direnv export gha > "$GITHUB_ENV"
 
+      - name: Check storage pre-build
+        run: |
+          df -h
+          du -sch .
+          du -sch /nix
+
       # All downloads should be cached. If there is a cache miss, we should ensure that the cache
       # contains all downloads.
       - name: Prefetch Cargo downloads
@@ -139,6 +150,12 @@ jobs:
 
       - name: Run 'make ${{ matrix.make-target }}'
         run: make ${{ matrix.make-target }}
+
+      - name: Check storage after-build
+        run: |
+          df -h
+          du -sch .
+          du -sch /nix
 
       - name: Analyse code coverage
         if: matrix.code-coverage

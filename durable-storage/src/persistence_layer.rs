@@ -26,6 +26,7 @@
 
 use std::mem::ManuallyDrop;
 
+use rocksdb::MultiThreaded;
 use tempfile::TempDir;
 
 use crate::repo::DirectoryManager;
@@ -82,7 +83,7 @@ pub struct PersistenceLayer {
     /// [`ManuallyDrop`] is used to ensure safety when dropping [`PersistenceLayer`]. Calling
     /// [`rocksdb::DB::destroy`] requires all connections to that path to be closed, which is called
     /// in [`rocksdb::DB`]'s drop method.
-    db_instance: ManuallyDrop<rocksdb::DB>,
+    db_instance: ManuallyDrop<rocksdb::DBWithThreadMode<MultiThreaded>>,
 
     /// What mode was the [`PersistenceLayer`] opened in.
     mode: Mode,
@@ -96,7 +97,7 @@ impl PersistenceLayer {
 
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
         let options = rocksdb_options();
-        let db = rocksdb::DB::open(&options, &new_db_path)?;
+        let db = rocksdb::DBWithThreadMode::open(&options, &new_db_path)?;
 
         Ok(Self {
             mode: Mode::Temporary { tempdir },
