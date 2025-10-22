@@ -57,6 +57,9 @@ impl CommitId {
     }
 }
 
+/// The name of the column family used for storing [`HashedData`].
+const BLOB_CF: &str = "blob";
+
 /// Represents a key-value blob to be stored in the persistence layer.
 ///
 /// Invariant: [`HashedData`] is content-addressable by the stored hash.
@@ -155,7 +158,8 @@ impl<'a> PersistenceLayer<'a> {
 
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
         let options = rocksdb_creation_options();
-        let db = rocksdb::DB::open(&options, &new_db_path)?;
+        let mut db = rocksdb::DB::open(&options, &new_db_path)?;
+        db.create_cf(BLOB_CF, &rocksdb::Options::default())?;
 
         Ok(Self {
             mode: Mode::Temporary { _tempdir: tempdir },
@@ -175,7 +179,7 @@ impl<'a> PersistenceLayer<'a> {
         Checkpoint::new(&self.db_instance)?.create_checkpoint(&checkpoint_path)?;
 
         // We expect the db at this checkpoint to exist.
-        let db = rocksdb::DB::open(&rocksdb::Options::default(), &checkpoint_path)?;
+        let db = rocksdb::DB::open_cf(&rocksdb::Options::default(), &checkpoint_path, [BLOB_CF])?;
 
         Ok(Self {
             mode: Mode::Temporary { _tempdir: tempdir },
@@ -202,7 +206,7 @@ impl<'a> PersistenceLayer<'a> {
             return Err(Error::CommitNotFound);
         };
 
-        let db = rocksdb::DB::open(&rocksdb::Options::default(), &db_path)?;
+        let db = rocksdb::DB::open_cf(&rocksdb::Options::default(), &db_path, [BLOB_CF])?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
@@ -225,24 +229,61 @@ impl<'a> PersistenceLayer<'a> {
 
         self.checkpoint_at(&checkpoint_path)
     }
+}
 
-    /// Retrieves a value associated with the given key.
-    pub fn get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, Error> {
-        self.db_instance.get_pinned(key)?.ok_or(Error::KeyNotFound)
+// Interface used by the Merkle layer which operates over implicitly hashed values.
+impl PersistenceLayer<'_> {
+    fn blob_cf(&self) -> &rocksdb::ColumnFamily {
+        self.db_instance
+            .cf_handle(BLOB_CF)
+            .expect("the rocksdb instance should always contain the data cf")
+    }
+
+    /// Retrieves the hashed data associated with its hash as the key.
+    pub fn blob_get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, Error> {
+        self.db_instance
+            .get_pinned_cf(self.blob_cf(), key.as_ref())?
+            .ok_or(Error::KeyNotFound)
     }
 
     /// Sets a value for the given key.
-    pub fn set(&mut self, blob: &HashedData) -> Result<(), Error> {
+    pub fn blob_set(&mut self, blob: &HashedData) -> Result<(), Error> {
         self.make_temporary()?;
 
-        Ok(self.db_instance.put(blob.hash, blob.value)?)
+        Ok(self
+            .db_instance
+            .put_cf(self.blob_cf(), blob.hash, blob.value)?)
     }
 
     /// Deletes a value associated with the given key.
-    pub fn delete(&mut self, key: &Hash) -> Result<(), Error> {
+    pub fn blob_delete(&mut self, key: &Hash) -> Result<(), Error> {
         self.make_temporary()?;
 
-        Ok(self.db_instance.delete(key)?)
+        Ok(self.db_instance.delete_cf(self.blob_cf(), key.as_ref())?)
+    }
+}
+
+// Interface used by the Data layer which operates over raw key-value pairs.
+impl PersistenceLayer<'_> {
+    /// Retrieves a value associated with the given key.
+    pub fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.db_instance
+            .get_pinned(key.as_ref())?
+            .ok_or(Error::KeyNotFound)
+    }
+
+    /// Sets a value for the given key.
+    pub fn set(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), Error> {
+        self.make_temporary()?;
+
+        Ok(self.db_instance.put(key.as_ref(), value.as_ref())?)
+    }
+
+    /// Deletes a value associated with the given key.
+    pub fn delete(&mut self, key: impl AsRef<[u8]>) -> Result<(), Error> {
+        self.make_temporary()?;
+
+        Ok(self.db_instance.delete(key.as_ref())?)
     }
 }
 
@@ -380,51 +421,66 @@ mod tests {
             let key = blob.hash;
 
             // Initially the key should not be found
-            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+            assert!(matches!(db.blob_get(&key), Err(Error::KeyNotFound)));
 
-            db.set(&blob).expect("Should be able to set a value");
+            db.blob_set(&blob).expect("Should be able to set a value");
 
             {
                 // Now the key should be found
-                let retrieved = db.get(&key).expect("Should be able to get the value");
+                let retrieved = db.blob_get(&key).expect("Should be able to get the value");
                 assert_eq!(retrieved.as_ref(), value_a.as_bytes());
             }
 
             let blob2 = HashedData::from_value(value_b.as_bytes());
             let key2 = blob2.hash;
-            db.set(&blob2).expect("Should be able to set another value");
+            db.blob_set(&blob2)
+                .expect("Should be able to set another value");
 
             {
                 // Now the second key should be found
-                let retrieved = db.get(&key2).expect("Should be able to get the value");
+                let retrieved = db.blob_get(&key2).expect("Should be able to get the value");
                 assert_eq!(retrieved.as_ref(), value_b.as_bytes());
 
-                let retrieved = db.get(&key).expect("Should be able to get the first value");
+                let retrieved = db
+                    .blob_get(&key)
+                    .expect("Should be able to get the first value");
                 assert_eq!(retrieved.as_ref(), value_a.as_bytes());
             }
 
             assert_eq!(
-                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                db.db_instance
+                    .property_value_cf(db.blob_cf(), ESTIMATE_NUM_KEYS),
                 Ok(Some("2".to_string()))
             );
 
-            db.delete(&key).expect("Should be able to delete the value");
-            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+            db.blob_delete(&key)
+                .expect("Should be able to delete the value");
+            assert!(matches!(db.blob_get(&key), Err(Error::KeyNotFound)));
 
             assert_eq!(
-                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                db.db_instance
+                    .property_value_cf(db.blob_cf(), ESTIMATE_NUM_KEYS),
                 Ok(Some("1".to_string()))
             );
 
-            db.delete(&key2)
+            {
+                // These operations shouldn't affect the data column family
+                let data_a = db.get(&blob.hash);
+                let data_b = db.get(&blob2.hash);
+                assert!(matches!(data_a, Err(Error::KeyNotFound)));
+                assert!(matches!(data_b, Err(Error::KeyNotFound)));
+            }
+
+            db.blob_delete(&key2)
                 .expect("Should be able to delete the second value");
-            assert!(matches!(db.get(&key2), Err(Error::KeyNotFound)));
+            assert!(matches!(db.blob_get(&key2), Err(Error::KeyNotFound)));
 
             let nonexistent_blob = HashedData::from_value(b"non_existent");
-            assert!(matches!(db.delete(&nonexistent_blob.hash), Ok(())));
+            assert!(matches!(db.blob_delete(&nonexistent_blob.hash), Ok(())));
 
             assert_eq!(
-                db.db_instance.property_value(ESTIMATE_NUM_KEYS),
+                db.db_instance
+                    .property_value_cf(db.blob_cf(), ESTIMATE_NUM_KEYS),
                 Ok(Some("0".to_string()))
             );
         };
@@ -456,17 +512,17 @@ mod tests {
         let another_blob = &HashedData::from_value(b"another_value");
         let third_blob = &HashedData::from_value(b"third_value");
 
-        db_a.set(initial_blob)
+        db_a.blob_set(initial_blob)
             .expect("Failed to set initial blob in A");
         let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
 
-        db_b.set(another_blob)
+        db_b.blob_set(another_blob)
             .expect("Failed to set another blob in B");
 
         // get methods borrow the db so we have to drop the borrow to mutate the db in the next scope
         {
             let retrieved_a = db_a
-                .get(&initial_blob.hash)
+                .blob_get(&initial_blob.hash)
                 .expect("Failed to get initial blob from A");
             assert_eq!(retrieved_a.as_ref(), b"initial_value");
         }
@@ -474,12 +530,13 @@ mod tests {
         // Wrap in a scope so we can drop the db's later
         {
             let retrieved_b = db_b
-                .get(&initial_blob.hash)
+                .blob_get(&initial_blob.hash)
                 .expect("Failed to get initial blob from B");
             assert_eq!(retrieved_b.as_ref(), b"initial_value");
 
-            db_a.set(third_blob).expect("Failed to set third blob in A");
-            let retrieved_third_from_b = db_b.get(&third_blob.hash);
+            db_a.blob_set(third_blob)
+                .expect("Failed to set third blob in A");
+            let retrieved_third_from_b = db_b.blob_get(&third_blob.hash);
             assert!(
                 retrieved_third_from_b.is_err()
                     && matches!(retrieved_third_from_b.err(), Some(Error::KeyNotFound))
@@ -509,7 +566,7 @@ mod tests {
 
         // A -> (B, C)
         let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.set(blob).expect("Failed to set blob in A");
+        db_a.blob_set(blob).expect("Failed to set blob in A");
 
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
         let db_c = db_a.try_clone(&repo).expect("Failed to clone DB A to C");
@@ -519,10 +576,14 @@ mod tests {
         assert!(!checkpoint_path.exists());
 
         {
-            let retrieved_b = db_b.get(&blob.hash).expect("Failed to get blob from B");
+            let retrieved_b = db_b
+                .blob_get(&blob.hash)
+                .expect("Failed to get blob from B");
             assert_eq!(retrieved_b.as_ref(), b"some_value");
 
-            let retrieved_c = db_c.get(&blob.hash).expect("Failed to get blob from C");
+            let retrieved_c = db_c
+                .blob_get(&blob.hash)
+                .expect("Failed to get blob from C");
             assert_eq!(retrieved_c.as_ref(), b"some_value");
         }
 
@@ -543,7 +604,7 @@ mod tests {
 
         let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let blob = &HashedData::from_value(b"some_value");
-        db_a.set(blob).expect("Failed to set blob in A");
+        db_a.blob_set(blob).expect("Failed to set blob in A");
 
         let commit_id: CommitId = blake3::hash(b"commit_1").into();
         db_a.commit(&repo, &commit_id)
@@ -557,9 +618,13 @@ mod tests {
             .expect("Failed to checkout commit into DB B");
 
         {
-            let retrieved_b = db_b.get(&blob.hash).expect("Failed to get blob from B");
+            let retrieved_b = db_b
+                .blob_get(&blob.hash)
+                .expect("Failed to get blob from B");
             assert_eq!(retrieved_b.as_ref(), blob.value);
-            let retrieved_nonexistent = db_b.get(&[0u8; 32]);
+            let retrieved_nonexistent = db_b.blob_get(&[0u8; 32]);
+            assert!(matches!(retrieved_nonexistent, Err(Error::KeyNotFound)));
+            let retrieved_nonexistent = db_b.get(&[1u8; 32]);
             assert!(matches!(retrieved_nonexistent, Err(Error::KeyNotFound)));
         }
 
@@ -595,16 +660,16 @@ mod tests {
         let blob_c = &HashedData::from_value(b"third_value");
 
         let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.set(blob_a).expect("Failed to set blob in A");
+        db_a.blob_set(blob_a).expect("Failed to set blob in A");
 
         let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
-        db_b.set(blob_b).expect("Failed to set blob in B");
+        db_b.blob_set(blob_b).expect("Failed to set blob in B");
 
         let commit_id: CommitId = blake3::hash(b"commit_1").into();
         db_b.commit(&repo, &commit_id)
             .expect("Failed to commit DB B");
 
-        db_b.set(blob_c).expect("Failed to set blob in B");
+        db_b.blob_set(blob_c).expect("Failed to set blob in B");
 
         drop(db_a);
         drop(db_b);
@@ -613,11 +678,15 @@ mod tests {
         let db_c = PersistenceLayer::checkout(&repo, &commit_id)
             .expect("Failed to checkout commit into DB C");
         {
-            let retrieved_a = db_c.get(&blob_a.hash).expect("Failed to get blob a from C");
+            let retrieved_a = db_c
+                .blob_get(&blob_a.hash)
+                .expect("Failed to get blob a from C");
             assert_eq!(retrieved_a.as_ref(), blob_a.value);
-            let retrieved_b = db_c.get(&blob_b.hash).expect("Failed to get blob b from C");
+            let retrieved_b = db_c
+                .blob_get(&blob_b.hash)
+                .expect("Failed to get blob b from C");
             assert_eq!(retrieved_b.as_ref(), blob_b.value);
-            let retrieved_c = db_c.get(&blob_c.hash);
+            let retrieved_c = db_c.blob_get(&blob_c.hash);
             assert!(matches!(retrieved_c, Err(Error::KeyNotFound)));
         }
 
@@ -641,16 +710,17 @@ mod tests {
         let commit_id_1: CommitId = blake3::hash(b"commit_1").into();
         let commit_id_2: CommitId = blake3::hash(b"commit_2").into();
         let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.set(blob_a).expect("Failed to set blob in A");
+        db_a.blob_set(blob_a).expect("Failed to set blob in A");
         db_a.commit(&repo, &commit_id_1)
             .expect("Failed to commit DB A");
 
         let mut db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
             .expect("Failed to checkout commit into DB C");
-        db_c.set(blob_b).expect("Failed to set blob in C");
+        db_c.blob_set(blob_b).expect("Failed to set blob in C");
         db_c.commit(&repo, &commit_id_2)
             .expect("Failed to commit DB C");
-        db_c.delete(&blob_a.hash)
+        db_c.blob_delete(&blob_a.hash)
+            // db_c.blob_delete(&blob_a.hash)
             .expect("Failed to delete blob a in C");
         drop(db_a);
         drop(db_c);
@@ -660,10 +730,10 @@ mod tests {
             PersistenceLayer::checkout(&repo, &commit_id_1).expect("Failed to checkout commit 1");
         {
             let retrieved_a = db_check_1
-                .get(&blob_a.hash)
+                .blob_get(&blob_a.hash)
                 .expect("Failed to get blob a from check 1");
             assert_eq!(retrieved_a.as_ref(), blob_a.value);
-            let retrieved_b = db_check_1.get(&blob_b.hash);
+            let retrieved_b = db_check_1.blob_get(&blob_b.hash);
             assert!(matches!(retrieved_b, Err(Error::KeyNotFound)));
         }
 
@@ -672,11 +742,11 @@ mod tests {
             PersistenceLayer::checkout(&repo, &commit_id_2).expect("Failed to checkout commit 2");
         {
             let retrieved_a = db_check_2
-                .get(&blob_a.hash)
+                .blob_get(&blob_a.hash)
                 .expect("Failed to get blob a from check 2");
             assert_eq!(retrieved_a.as_ref(), blob_a.value);
             let retrieved_b = db_check_2
-                .get(&blob_b.hash)
+                .blob_get(&blob_b.hash)
                 .expect("Failed to get blob b from check 2");
             assert_eq!(retrieved_b.as_ref(), blob_b.value);
         }
@@ -691,14 +761,14 @@ mod tests {
         let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
 
         let blob = &HashedData::from_value(b"some_value");
-        db_a.set(blob).expect("Failed to set blob in A");
+        db_a.blob_set(blob).expect("Failed to set blob in A");
 
         let commit_id: CommitId = blake3::hash(b"commit_1").into();
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
 
         let blob_2 = &HashedData::from_value(b"another_value");
-        db_a.set(blob_2).expect("Failed to set blob 2 in A");
+        db_a.blob_set(blob_2).expect("Failed to set blob 2 in A");
 
         // Committing again with the same id should work
         let result = db_a.commit(&repo, &commit_id);
@@ -710,10 +780,65 @@ mod tests {
         let db_a = PersistenceLayer::checkout(&repo, &commit_id)
             .expect("Failed to checkout commit into DB A");
 
-        let retrieved = db_a.get(&blob.hash).expect("Failed to get blob from A");
+        let retrieved = db_a
+            .blob_get(&blob.hash)
+            .expect("Failed to get blob from A");
         assert_eq!(retrieved.as_ref(), blob.value);
 
-        let retrieved_2 = db_a.get(&blob_2.hash).expect("Failed to get blob 2 from A");
+        let retrieved_2 = db_a
+            .blob_get(&blob_2.hash)
+            .expect("Failed to get blob 2 from A");
         assert_eq!(retrieved_2.as_ref(), blob_2.value);
+    }
+
+    #[test]
+    fn test_data_basic_ops() {
+        let test = |key: String, value: String, value2: String| {
+            let repo = DirectoryManager::new(std::path::Path::new("/tmp/test_data_basic_ops"))
+                .expect("Failed to create directory manager");
+            let mut db = PersistenceLayer::new(&repo)
+                .expect("Should be able to create new persistence layer");
+
+            // Initially the key should not be found
+            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+
+            db.set(&key, &value).expect("Should be able to set a value");
+
+            {
+                // Now the key should be found
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                assert_eq!(retrieved.as_ref(), value.as_bytes());
+            }
+
+            db.set(&key, &value2)
+                .expect("Should be able to set another value for the same key");
+
+            {
+                // Now the key should return the new value
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                assert_eq!(retrieved.as_ref(), value2.as_bytes());
+            }
+
+            {
+                // Another key should still be unset
+                let other_key = format!("other_{key}");
+                assert!(matches!(db.get(&other_key), Err(Error::KeyNotFound)));
+            }
+
+            {
+                // these operations shouldn't affect the default column family for hashed data
+                let blob1 = HashedData::from_value(value.as_bytes());
+                let blob2 = HashedData::from_value(value2.as_bytes());
+                assert!(matches!(db.blob_get(&blob1.hash), Err(Error::KeyNotFound)));
+                assert!(matches!(db.blob_get(&blob2.hash), Err(Error::KeyNotFound)));
+            }
+
+            db.delete(&key).expect("Should be able to delete the value");
+            assert!(matches!(db.get(&key), Err(Error::KeyNotFound)));
+        };
+
+        proptest!(|(key in string_of_length(8), value in string_of_length(10), value2 in string_of_length(12))| {
+            test(key, value, value2);
+        });
     }
 }
