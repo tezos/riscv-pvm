@@ -363,6 +363,19 @@ impl NonZeroXRegister {
     }
 }
 
+impl TryFrom<XRegister> for NonZeroXRegister {
+    type Error = ();
+
+    fn try_from(r: XRegister) -> Result<Self, Self::Error> {
+        match r {
+            x0 => Err(()),
+            // SAFETY: Excluding x0, XRegister is a
+            // direct map to NonZeroXRegister, so safe to convert.
+            r => unsafe { Ok(std::mem::transmute::<XRegister, Self>(r)) },
+        }
+    }
+}
+
 /// ABI register names for NonZeroXRegister types used in backend tests.
 pub mod nz {
     use super::NonZeroXRegister;

@@ -290,6 +290,7 @@ mod tests {
     use std::ptr::null;
 
     use Instruction as I;
+    use proptest::prelude::proptest;
     use rustc_apfloat::Float;
     use rustc_apfloat::Round;
     use rustc_apfloat::ieee::Double;
@@ -309,6 +310,7 @@ mod tests {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
+    use crate::machine_state::page_cache::jitted::MAX_INSTR_COMPILED;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
@@ -326,11 +328,23 @@ mod tests {
     /// Machine state for test scenarios with a configurable [`Block`] type.
     type TestMachineState<CPE> = MachineState<M4K, CPE, Owned>;
 
+    enum ScenarioSteps {
+        /// Steps equal to the instruction sequence.
+        Sequence,
+
+        /// Steps equal to `MAX_INSTR_COMPILED`.
+        Max,
+
+        /// A specific expected step count.
+        Specific(usize),
+    }
+
     struct Scenario {
         initial_pc: Option<u64>,
-        expected_steps: Option<usize>,
+        expected_steps: ScenarioSteps,
         instructions: Vec<Instruction>,
         setup_hook: Option<Box<SetupHook>>,
+        xregisters: Vec<(NonZeroXRegister, u64)>,
         assert_hook: Option<Box<AssertHook>>,
         expected_exception: Option<Exception>,
     }
@@ -339,9 +353,10 @@ mod tests {
         fn simple(instructions: &[Instruction]) -> Self {
             Scenario {
                 initial_pc: None,
-                expected_steps: None,
+                expected_steps: ScenarioSteps::Sequence,
                 instructions: instructions.to_vec(),
                 setup_hook: None,
+                xregisters: vec![],
                 assert_hook: None,
                 // TODO: RV-803:
                 //     due to the overestimate we are forced to make in terms of budget checks,
@@ -361,9 +376,46 @@ mod tests {
                 .expect("JIT compilation should succeed.");
         }
 
+        /// Run a test scenario in three modes:
+        ///
+        /// A) With the `xregisters` preset (as if in a `setup_hook`)
+        /// B) With the `xregisters` set in `Compressed` instructions
+        /// C) With the `xregisters` set in `Uncompressed` instructions
+        fn run(mut self) {
+            self.run_inner();
+
+            if self.xregisters.is_empty() {
+                return;
+            }
+
+            let instr_count = self.instructions.len() + self.xregisters.len();
+            let mut add_compressed = Vec::with_capacity(instr_count);
+            let mut add_uncompressed = Vec::with_capacity(instr_count);
+
+            if let ScenarioSteps::Specific(exp_steps) = self.expected_steps {
+                let new = exp_steps + self.xregisters.len();
+                assert!(new <= MAX_INSTR_COMPILED);
+                self.expected_steps = ScenarioSteps::Specific(new);
+            }
+
+            for (reg, value) in self.xregisters.drain(..) {
+                add_compressed.push(I::new_li(reg, value as i64, Compressed));
+                add_uncompressed.push(I::new_li(reg, value as i64, Uncompressed));
+            }
+
+            add_compressed.extend(&self.instructions);
+            add_uncompressed.extend(&self.instructions);
+
+            self.instructions = add_compressed;
+            self.run_inner();
+
+            self.instructions = add_uncompressed;
+            self.run_inner();
+        }
+
         /// Run a test scenario over both the Interpreted & JIT modes of compilation,
         /// to ensure they behave identically.
-        fn run(&self) {
+        fn run_inner(&self) {
             // ensure the set of instructions can be compiled in JIT.
             self.check_compilable();
 
@@ -399,10 +451,16 @@ mod tests {
                 .page_cache
                 .overwrite_page(initial_pc, jitted_page);
 
-            // Run the setup hooks.
+            // Run the setup hook.
             if let Some(hook) = &self.setup_hook {
                 (hook)(&mut interpreted_state.core);
                 (hook)(&mut jitted_state.core)
+            }
+
+            // Preset the setup registers.
+            for &(reg, value) in &self.xregisters {
+                interpreted_state.core.hart.xregisters.write_nz(reg, value);
+                jitted_state.core.hart.xregisters.write_nz(reg, value);
             }
 
             // initialise starting parameters: pc and expected_steps
@@ -416,15 +474,18 @@ mod tests {
             //
             //     As a result, by default we expect most scenarios to end with an
             //     `Exception::IllegalInstruction` error as they move past the compiled entrypoint
-            let max_steps = self.instructions.len().max(40);
-            let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
+            let max_steps = self.instructions.len().max(MAX_INSTR_COMPILED);
+            let expected_steps = match self.expected_steps {
+                ScenarioSteps::Sequence => self.instructions.len(),
+                ScenarioSteps::Specific(n) => n,
+                ScenarioSteps::Max => MAX_INSTR_COMPILED,
+            };
 
             interpreted_state.core.hart.pc.write(initial_pc);
             jitted_state.core.hart.pc.write(initial_pc);
 
             // Run the sequence in interpreted mode and Jitted mode.
             let interpreted_res = interpreted_state.step_max_inner(max_steps);
-
             let jitted_res = jitted_state.step_max_inner(max_steps);
 
             // Assert the JIT-compiled entrypoint was called once.
@@ -437,50 +498,50 @@ mod tests {
                 "Expected JIT-compiled entrypoint to be called exactly once"
             );
 
-            // Assert state equality.
+            // Run the assert hook. We do this on both states for easier debugging.
+            if let Some(hook) = &self.assert_hook {
+                (hook)(&interpreted_state.core);
+                (hook)(&jitted_state.core);
+            }
+
+            // Check steps. We do this on both steps for easier debugging
             assert_eq!(
-                jitted_res, interpreted_res,
-                "JittedRes {jitted_res:?} should equal InterpretedRes {interpreted_res:?}"
+                interpreted_res.steps, expected_steps,
+                "Expected {expected_steps} steps; interpreted scenario ran for {}",
+                interpreted_res.steps
             );
             assert_eq!(
                 jitted_res.steps, expected_steps,
-                "Expected {expected_steps} steps; scenarios ran for {}",
+                "Expected {expected_steps} steps; jitted scenario ran for {}",
                 jitted_res.steps
+            );
+
+            // Finally check state equality. We do this last as the earlier checks provide better
+            // clues for debugging when they fail.
+            assert!(
+                interpreted_state.struct_ref::<FnManagerIdent>()
+                    == jitted_state.struct_ref::<FnManagerIdent>(),
+                "Interpreted and Jitted states should be equal."
+            );
+            assert_eq!(
+                jitted_res, interpreted_res,
+                "JittedRes {jitted_res:?} should equal InterpretedRes {interpreted_res:?}"
             );
             assert_eq!(
                 jitted_res.error, self.expected_exception,
                 "Expected exception: {:?}, got {:?}",
                 self.expected_exception, jitted_res.error
             );
-
-            assert!(
-                interpreted_state.struct_ref::<FnManagerIdent>()
-                    == jitted_state.struct_ref::<FnManagerIdent>(),
-                "Interpreted and Jitted states should be equal."
-            );
-
-            // Only check steps against one state, as we know both interpreted/jit steps are equal.
-            let expected_steps = self.expected_steps.unwrap_or(self.instructions.len());
-            assert_eq!(
-                interpreted_res.steps, expected_steps,
-                "Scenario ran for {} steps, but expected {expected_steps}",
-                interpreted_res.steps
-            );
-
-            // Run the assert hooks. Since we have already verified that the states are equal,
-            // we can run the assert hooks on just the interpreted state.
-            if let Some(hook) = &self.assert_hook {
-                (hook)(&mut interpreted_state.core);
-            }
         }
     }
 
     /// A builder for creating scenarios.
     struct ScenarioBuilder {
         initial_pc: Option<u64>,
-        expected_steps: Option<usize>,
+        expected_steps: ScenarioSteps,
         instructions: Vec<Instruction>,
         setup_hook: Option<Box<SetupHook>>,
+        xregisters: Vec<(NonZeroXRegister, u64)>,
         assert_hook: Option<Box<AssertHook>>,
         expected_exception: Option<Exception>,
     }
@@ -497,7 +558,15 @@ mod tests {
         }
 
         fn set_expected_steps(mut self, expected_steps: usize) -> Self {
-            self.expected_steps = Some(expected_steps);
+            self.expected_steps = ScenarioSteps::Specific(expected_steps);
+            self
+        }
+
+        fn set_expect_max_steps(mut self) -> Self {
+            self.expected_steps = ScenarioSteps::Max;
+            // TODO: RV-803: remove workaround for assuming exception by default once
+            //     JIT has better budget checks
+            self.expected_exception = None;
             self
         }
 
@@ -511,15 +580,13 @@ mod tests {
             self
         }
 
-        fn set_expected_exception(mut self, exception: Exception) -> Self {
-            self.expected_exception = Some(exception);
+        fn with_xreg(mut self, reg: NonZeroXRegister, value: u64) -> Self {
+            self.xregisters.push((reg, value));
             self
         }
 
-        // TODO: RV-803: remove workaround for assuming exception by default once
-        //     JIT has better budget checks
-        fn unset_expected_exception(mut self) -> Self {
-            self.expected_exception = None;
+        fn set_expected_exception(mut self, exception: Exception) -> Self {
+            self.expected_exception = Some(exception);
             self
         }
 
@@ -529,6 +596,7 @@ mod tests {
                 expected_steps: self.expected_steps,
                 instructions: self.instructions,
                 setup_hook: self.setup_hook,
+                xregisters: self.xregisters,
                 assert_hook: self.assert_hook,
                 expected_exception: self.expected_exception,
             }
@@ -539,9 +607,10 @@ mod tests {
         fn default() -> Self {
             Self {
                 initial_pc: None,
-                expected_steps: None,
+                expected_steps: ScenarioSteps::Sequence,
                 instructions: vec![],
                 setup_hook: None,
+                xregisters: vec![],
                 assert_hook: None,
                 // TODO: RV-803:
                 //     due to the overestimate we are forced to make in terms of budget checks,
@@ -568,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_cnop() {
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             Scenario::simple(&[I::new_nop(Compressed)]),
             Scenario::simple(&[I::new_nop(Compressed), I::new_nop(Uncompressed)]),
             Scenario::simple(&[
@@ -592,24 +661,20 @@ mod tests {
         });
 
         // Arrange
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[I::new_li(x1, 1, Compressed), I::new_mv(x2, x1, Compressed)])
+                .with_xreg(x1, 1)
+                .set_instructions(&[I::new_mv(x2, x1, Compressed)])
                 .set_assert_hook(assert_x2_is_one.clone())
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 1, Uncompressed),
-                    I::new_mv(x2, x1, Uncompressed),
-                ])
+                .with_xreg(x1, 1)
+                .set_instructions(&[I::new_mv(x2, x1, Uncompressed)])
                 .set_assert_hook(assert_x2_is_one.clone())
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 1, Compressed),
-                    I::new_mv(x2, x1, Compressed),
-                    I::new_mv(x3, x2, Compressed),
-                ])
+                .with_xreg(x1, 1)
+                .set_instructions(&[I::new_mv(x2, x1, Compressed), I::new_mv(x3, x2, Compressed)])
                 .set_assert_hook(assert_x2_is_one)
                 .build(),
         ];
@@ -632,28 +697,24 @@ mod tests {
             );
         });
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, -1, Compressed),
-                    I::new_li(x3, 1, Compressed),
-                    I::new_neg(x2, x3, Compressed),
-                ])
+                .with_xreg(x1, -1_i64 as u64)
+                .with_xreg(x3, 1)
+                .set_instructions(&[I::new_neg(x2, x3, Compressed)])
                 .set_assert_hook(assert_x1_x2_equal.clone())
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(x1, 1)
                 .set_instructions(&[
-                    I::new_li(x1, 1, Uncompressed),
                     I::new_neg(x3, x1, Uncompressed),
                     I::new_neg(x2, x3, Compressed),
                 ])
                 .set_assert_hook(assert_x1_x2_equal)
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, i64::MIN, Uncompressed),
-                    I::new_neg(x2, x1, Uncompressed),
-                ])
+                .with_xreg(x1, i64::MIN as u64)
+                .set_instructions(&[I::new_neg(x2, x1, Uncompressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), i64::MIN as u64);
                 }))
@@ -674,8 +735,8 @@ mod tests {
         });
 
         let scenario: Scenario = ScenarioBuilder::default()
+            .with_xreg(x1, 1)
             .set_instructions(&[
-                I::new_li(x1, 1, Uncompressed),
                 I::new_x64_add(x2, x2, x1, Compressed),
                 I::new_x64_add(x1, x1, x2, Uncompressed),
                 I::new_x64_add(x2, x2, x1, Uncompressed),
@@ -693,15 +754,12 @@ mod tests {
 
         use crate::machine_state::registers::a0;
         use crate::machine_state::registers::a1;
-        use crate::machine_state::registers::nz;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, 10, Uncompressed),
-                    I::new_li(nz::a1, 1, Compressed),
-                    I::new_add_word(nz::a2, a0, a1, Compressed),
-                ])
+                .with_xreg(nz::a0, 10)
+                .with_xreg(nz::a1, 1)
+                .set_instructions(&[I::new_add_word(nz::a2, a0, a1, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a2), 11);
                 }))
@@ -710,11 +768,9 @@ mod tests {
             // operation 0xFFFFFFFF + 0xFFFFFFFF should produce a different result
             // for 32-bit (truncated sum with sign extension) vs 64-bit operations.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, 0xFFFFFFFF, Compressed),
-                    I::new_li(nz::a1, 0xFFFFFFFF, Uncompressed),
-                    I::new_add_word(nz::a2, a0, a1, Compressed),
-                ])
+                .with_xreg(nz::a0, 0xFFFFFFFF)
+                .with_xreg(nz::a1, 0xFFFFFFFF)
+                .set_instructions(&[I::new_add_word(nz::a2, a0, a1, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     // In 32-bit addition:
                     // 0xFFFFFFFF + 0xFFFFFFFF = 0x1FFFFFFFE
@@ -735,14 +791,11 @@ mod tests {
         use Instruction as I;
 
         use crate::machine_state::registers::a0;
-        use crate::machine_state::registers::nz;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, 10, Uncompressed),
-                    I::new_add_word_immediate(nz::a1, a0, 1_i64, Compressed),
-                ])
+                .with_xreg(nz::a0, 10)
+                .set_instructions(&[I::new_add_word_immediate(nz::a1, a0, 1_i64, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a1), 11);
                 }))
@@ -751,10 +804,13 @@ mod tests {
             // operation 0xFFFFFFFF + 0xFFFFFFFF should produce a different result
             // for 32-bit (truncated sum with sign extension) vs 64-bit operations.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, 0xFFFFFFFF, Compressed),
-                    I::new_add_word_immediate(nz::a1, a0, 0xFFFFFFFF_i64, Compressed),
-                ])
+                .with_xreg(nz::a0, 0xFFFFFFFF)
+                .set_instructions(&[I::new_add_word_immediate(
+                    nz::a1,
+                    a0,
+                    0xFFFFFFFF_i64,
+                    Compressed,
+                )])
                 .set_assert_hook(assert_hook!(|core| {
                     // In 32-bit addition:
                     // 0xFFFFFFFF + 0xFFFFFFFF = 0x1FFFFFFFE
@@ -776,32 +832,26 @@ mod tests {
 
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 10, Uncompressed),
-                    I::new_x64_sub(x2, x1, x1, Compressed),
-                ])
+                .with_xreg(x1, 10)
+                .set_instructions(&[I::new_x64_sub(x2, x1, x1, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 0);
                 }))
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 10, Compressed),
-                    I::new_li(x3, -10, Uncompressed),
-                    I::new_x64_sub(x2, x1, x3, Uncompressed),
-                ])
+                .with_xreg(x1, 10)
+                .with_xreg(x3, -10_i64 as u64)
+                .set_instructions(&[I::new_x64_sub(x2, x1, x3, Uncompressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 20);
                 }))
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 10, Uncompressed),
-                    I::new_li(x3, 100, Compressed),
-                    I::new_x64_sub(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, 10)
+                .with_xreg(x3, 100)
+                .set_instructions(&[I::new_x64_sub(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), (-90_i64) as u64);
                 }))
@@ -819,15 +869,12 @@ mod tests {
 
         use crate::machine_state::registers::a0;
         use crate::machine_state::registers::a1;
-        use crate::machine_state::registers::nz;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, 10, Uncompressed),
-                    I::new_li(nz::a1, 1, Compressed),
-                    I::new_sub_word(nz::a2, a0, a1, Compressed),
-                ])
+                .with_xreg(nz::a0, 10)
+                .with_xreg(nz::a1, 1)
+                .set_instructions(&[I::new_sub_word(nz::a2, a0, a1, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a2), 9);
                 }))
@@ -837,11 +884,9 @@ mod tests {
             // different result for 32-bit (all 1s) and 64-bit operations (only lower 32-bits
             // as 1s).
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, !0, Compressed),
-                    I::new_li(nz::a1, 0xFFFFFFFF00000000u64 as i64, Uncompressed),
-                    I::new_sub_word(nz::a2, a0, a1, Compressed),
-                ])
+                .with_xreg(nz::a0, !0)
+                .with_xreg(nz::a1, 0xFFFFFFFF00000000u64)
+                .set_instructions(&[I::new_sub_word(nz::a2, a0, a1, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a2), !0);
                 }))
@@ -864,31 +909,25 @@ mod tests {
             );
         });
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 // Bitwise and with all ones is self.
-                .set_instructions(&[
-                    I::new_li(x1, 13872, Uncompressed),
-                    I::new_li(x3, !0, Compressed),
-                    I::new_x64_and(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, 13872)
+                .with_xreg(x3, !0)
+                .set_instructions(&[I::new_x64_and(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             ScenarioBuilder::default()
                 // Bitwise and with itself is self.
-                .set_instructions(&[
-                    I::new_li(x1, 49666, Uncompressed),
-                    I::new_x64_and(x2, x1, x1, Compressed),
-                ])
+                .with_xreg(x1, 49666)
+                .set_instructions(&[I::new_x64_and(x2, x1, x1, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             ScenarioBuilder::default()
                 // Bitwise and with 0 is 0.
-                .set_instructions(&[
-                    I::new_li(x1, 0, Uncompressed),
-                    I::new_li(x3, 540921, Compressed),
-                    I::new_x64_and(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, 0)
+                .with_xreg(x3, 540921)
+                .set_instructions(&[I::new_x64_and(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal)
                 .build(),
         ];
@@ -909,47 +948,37 @@ mod tests {
             );
         });
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // Bitwise or with all ones is all-ones.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, !0, Uncompressed),
-                    I::new_li(x3, 13872, Compressed),
-                    I::new_x64_or(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, !0)
+                .with_xreg(x3, 13872)
+                .set_instructions(&[I::new_x64_or(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             // Bitwise or with itself is self.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 49666, Uncompressed),
-                    I::new_x64_or(x2, x1, x1, Compressed),
-                ])
+                .with_xreg(x1, 49666)
+                .set_instructions(&[I::new_x64_or(x2, x1, x1, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             // Bitwise or with 0 is self.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 540921, Uncompressed),
-                    I::new_li(x3, 0, Compressed),
-                    I::new_x64_or(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, 540921)
+                .with_xreg(x3, 0)
+                .set_instructions(&[I::new_x64_or(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal)
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 0xF0F0, Compressed),
-                    I::new_x64_or_immediate(x2, x1, 0x0F0F, Compressed),
-                ])
+                .with_xreg(x1, 0xF0F0)
+                .set_instructions(&[I::new_x64_or_immediate(x2, x1, 0x0F0F, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 0xFFFF);
                 }))
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 0x0000, Compressed),
-                    I::new_x64_or_immediate(x2, x1, 0x5555, Compressed),
-                ])
+                .with_xreg(x1, 0x0000)
+                .set_instructions(&[I::new_x64_or_immediate(x2, x1, 0x5555, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 0x5555);
                 }))
@@ -965,22 +994,18 @@ mod tests {
     fn test_x64_mul() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 5, Uncompressed),
-                    I::new_li(x3, 10, Compressed),
-                    I::new_mul(x2, x1, x3, Compressed),
-                ])
+                .with_xreg(x1, 5)
+                .with_xreg(x3, 10)
+                .set_instructions(&[I::new_mul(x2, x1, x3, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), 50);
                 }))
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, !0, Compressed),
-                    I::new_mul(x2, x1, x1, Uncompressed),
-                ])
+                .with_xreg(x1, !0)
+                .set_instructions(&[I::new_mul(x2, x1, x1, Uncompressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(
                         core.hart.xregisters.read_nz(x2),
@@ -989,11 +1014,9 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, -20, Compressed),
-                    I::new_li(x3, 40, Uncompressed),
-                    I::new_mul(x2, x1, x3, Uncompressed),
-                ])
+                .with_xreg(x1, -20_i64 as u64)
+                .with_xreg(x3, 40)
+                .set_instructions(&[I::new_mul(x2, x1, x3, Uncompressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), -800i64 as u64);
                 }))
@@ -1016,18 +1039,16 @@ mod tests {
                             instruction_width: InstrWidth|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(nz::a0, value1, instruction_width),
-                    I::new_li(nz::a1, value2, instruction_width),
-                    I::new_x32_mul(nz::a2, a0, a1, instruction_width),
-                ])
+                .with_xreg(nz::a0, value1 as u64)
+                .with_xreg(nz::a1, value2 as u64)
+                .set_instructions(&[I::new_x32_mul(nz::a2, a0, a1, instruction_width)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(nz::a2), expected_result);
                 }))
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             test_x32_mul(10, 5, 50, Uncompressed),
             // Test that we truncate to 32 bits before sign extending
             // 2^32 * 2 = 2^33, but truncated to 32 bits = 0
@@ -1051,50 +1072,156 @@ mod tests {
     }
 
     #[test]
-    fn test_div_jit() {
-        use crate::machine_state::registers::nz;
+    fn test_x32_div_rem_signed() {
         use crate::machine_state::registers::*;
 
-        let test_division = |numerator: i64, denominator: i64, expected: u64| {
+        let test_fn = |dividend, divisor| {
+            let expected = match (dividend, divisor) {
+                (_, 0) => -1_i32 as u32,
+                (i32::MIN, -1) => i32::MIN as u32,
+                _ => (dividend / divisor) as u32,
+            };
             ScenarioBuilder::default()
+                .with_xreg(nz::a0, dividend as u64)
+                .with_xreg(nz::a1, divisor as u64)
                 .set_instructions(&[
-                    I::new_li(nz::a0, numerator, Uncompressed),
-                    I::new_li(nz::a1, denominator, Compressed),
-                    I::new_x64_div_signed(nz::a2, a0, a1, Compressed),
+                    I::new_x32_div_signed(nz::a2, a0, a1, Compressed),
+                    I::new_x32_rem_signed(nz::a3, a0, a1, Compressed),
                     I::new_nop(Uncompressed),
                 ])
                 .set_assert_hook(assert_hook!(|core| {
-                    assert_eq!(core.hart.xregisters.read_nz(nz::a2), expected);
+                    let quotient = core.hart.xregisters.read_nz(nz::a2) as i32;
+                    let remainder = core.hart.xregisters.read_nz(nz::a3) as i32;
+                    assert_eq!(quotient, expected as i32);
+                    if !(dividend == i32::MIN && divisor == -1) {
+                        assert_eq!(dividend, divisor * quotient + remainder);
+                    }
                 }))
                 .build()
+                .run();
         };
 
-        let scenarios: &[Scenario] = &[
-            // check standard division
-            test_division(10, 2, 5),
-            // check signed division.
-            test_division(10, -2, -5_i64 as u64),
-            test_division(-10, -2, 5),
-            // check division by zero
-            test_division(i64::MAX, 0, -1_i64 as u64),
-            // check when `val(rs2) == -1` but `val(rs1) != i64::MIN`.
-            test_division(38294, -1, -38294_i64 as u64),
-            // check when `val(rs1) == i64::MIN` but `val(rs2) != -1`.
-            test_division(i64::MIN, i64::MIN, 1),
-            // check when `val(rs1) == i64::MIN` and `val(rs2) == -1`.
-            test_division(i64::MIN, -1, i64::MIN as u64),
-            // check division of a smaller-magnitude number by a larger-magnitude number.
-            test_division(40, -80, 0),
-        ];
+        proptest!(|(x: i32, y: i32)| test_fn(x, y));
 
-        for scenario in scenarios {
-            scenario.run();
-        }
+        // Test edge cases
+        test_fn(i32::MIN, i32::MIN);
+        // Division by zero
+        test_fn(i32::MIN, 0);
+        // Signed division overflow case
+        test_fn(i32::MIN, -1);
+    }
+
+    #[test]
+    fn test_x64_div_rem_signed() {
+        use crate::machine_state::registers::*;
+
+        let test_fn = |dividend, divisor| {
+            let expected = match (dividend, divisor) {
+                (_, 0) => -1_i64 as u64,
+                (i64::MIN, -1) => i64::MIN as u64,
+                _ => (dividend / divisor) as u64,
+            };
+            ScenarioBuilder::default()
+                .with_xreg(nz::a0, dividend as u64)
+                .with_xreg(nz::a1, divisor as u64)
+                .set_instructions(&[
+                    I::new_x64_div_signed(nz::a2, a0, a1, Compressed),
+                    I::new_x64_rem_signed(nz::a3, a0, a1, Compressed),
+                    I::new_nop(Uncompressed),
+                ])
+                .set_assert_hook(assert_hook!(|core| {
+                    let quotient = core.hart.xregisters.read_nz(nz::a2) as i64;
+                    let remainder = core.hart.xregisters.read_nz(nz::a3) as i64;
+                    assert_eq!(quotient, expected as i64);
+                    if !(dividend == i64::MIN && divisor == -1) {
+                        assert_eq!(dividend, divisor * quotient + remainder);
+                    }
+                }))
+                .build()
+                .run();
+        };
+
+        proptest!(|(x: i64, y: i64)| test_fn(x, y));
+
+        // Test edge cases
+        test_fn(i64::MIN, i64::MIN);
+        // Division by zero
+        test_fn(i64::MIN, 0);
+        // Signed division overflow case
+        test_fn(i64::MIN, -1);
+    }
+
+    #[test]
+    fn test_x32_div_rem_unsigned() {
+        use crate::machine_state::registers::*;
+
+        let test_fn = |dividend, divisor| {
+            let expected = match (dividend, divisor) {
+                (_, 0) => u32::MAX,
+                _ => dividend / divisor,
+            };
+            ScenarioBuilder::default()
+                .with_xreg(nz::a0, dividend as u64)
+                .with_xreg(nz::a1, divisor as u64)
+                .set_instructions(&[
+                    I::new_x32_div_unsigned(nz::a2, a0, a1, Compressed),
+                    I::new_x32_rem_unsigned(nz::a3, a0, a1, Compressed),
+                    I::new_nop(Uncompressed),
+                ])
+                .set_assert_hook(assert_hook!(|core| {
+                    let quotient = core.hart.xregisters.read_nz(nz::a2) as u32;
+                    let remainder = core.hart.xregisters.read_nz(nz::a3) as u32;
+                    assert_eq!(quotient, expected);
+                    assert_eq!(dividend, divisor * quotient + remainder);
+                }))
+                .build()
+                .run();
+        };
+
+        proptest!(|(x: u32, y: u32)| test_fn(x, y));
+
+        // Division by zero
+        test_fn(0, 0);
+        test_fn(u32::MAX, 0);
+    }
+
+    #[test]
+    fn test_x64_div_rem_unsigned() {
+        use crate::machine_state::registers::*;
+
+        let test_fn = |dividend, divisor| {
+            let expected = match (dividend, divisor) {
+                (_, 0) => u64::MAX,
+                _ => dividend / divisor,
+            };
+            ScenarioBuilder::default()
+                .with_xreg(nz::a0, dividend)
+                .with_xreg(nz::a1, divisor)
+                .set_instructions(&[
+                    I::new_x64_div_unsigned(nz::a2, a0, a1, Compressed),
+                    I::new_x64_rem_unsigned(nz::a3, a0, a1, Compressed),
+                    I::new_nop(Uncompressed),
+                ])
+                .set_assert_hook(assert_hook!(|core| {
+                    let quotient = core.hart.xregisters.read_nz(nz::a2);
+                    let remainder = core.hart.xregisters.read_nz(nz::a3);
+                    assert_eq!(quotient, expected);
+                    assert_eq!(dividend, divisor * quotient + remainder);
+                }))
+                .build()
+                .run();
+        };
+
+        proptest!(|(x: u64, y: u64)| test_fn(x, y));
+
+        // Division by zero
+        test_fn(0, 0);
+        test_fn(u64::MAX, 0);
     }
 
     #[test]
     fn test_jump_pc() {
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 // Jumping to the next instruction should exit the block
                 .set_instructions(&[
@@ -1149,8 +1276,7 @@ mod tests {
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
             ScenarioBuilder::default()
                 // jumping to start of the instruction sequence should exit the instruction sequence in both interpreted and jitted world
@@ -1169,8 +1295,7 @@ mod tests {
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1183,30 +1308,23 @@ mod tests {
     fn test_jr() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // JR not to start of instruction sequence should exit
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x2, 10, Compressed),
-                    I::new_jr(x2, Compressed),
-                    I::new_nop(Compressed),
-                ])
+                .with_xreg(x2, 10)
+                .set_instructions(&[I::new_jr(x2, Compressed), I::new_nop(Compressed)])
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 10) }))
-                .set_expected_steps(2)
+                .set_expected_steps(1)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JR to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x6, 0, Uncompressed),
-                    I::new_jr(x6, Compressed),
-                    I::new_nop(Compressed),
-                ])
+                .with_xreg(x6, 0)
+                .set_instructions(&[I::new_jr(x6, Compressed), I::new_nop(Compressed)])
                 // after 40 steps we will be evaluating the jump for the second time
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1219,30 +1337,23 @@ mod tests {
     fn test_jr_imm() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // JR_IMM not to start of instruction sequence should exit
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x2, 10, Compressed),
-                    I::new_jr_imm(x2, 10, Compressed),
-                    I::new_nop(Compressed),
-                ])
+                .with_xreg(x2, 10)
+                .set_instructions(&[I::new_jr_imm(x2, 10, Compressed), I::new_nop(Compressed)])
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 20) }))
-                .set_expected_steps(2)
+                .set_expected_steps(1)
                 .set_expected_exception(Exception::IllegalInstruction)
                 .build(),
             // JR_IMM to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x6, 10, Uncompressed),
-                    I::new_jr_imm(x6, -10, Uncompressed),
-                    I::new_nop(Compressed),
-                ])
+                .with_xreg(x6, 10)
+                .set_instructions(&[I::new_jr_imm(x6, -10, Uncompressed), I::new_nop(Compressed)])
                 // after 40 steps we will be evaluating the jump for the second time
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1255,7 +1366,7 @@ mod tests {
     fn test_jalr() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // JALR not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
@@ -1283,8 +1394,7 @@ mod tests {
                     assert_eq!(core.hart.xregisters.read_nz(x3), 8);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1297,7 +1407,7 @@ mod tests {
     fn test_jalr_imm() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // JALR_IMM not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
@@ -1325,8 +1435,7 @@ mod tests {
                     assert_eq!(core.hart.xregisters.read_nz(x6), 8);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1339,7 +1448,7 @@ mod tests {
     fn test_jalr_absolute() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // JALR_ABSOLUTE not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
@@ -1367,8 +1476,7 @@ mod tests {
                     assert_eq!(core.hart.xregisters.read_nz(x3), 6);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1379,7 +1487,7 @@ mod tests {
 
     #[test]
     fn test_j_absolute() {
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // J_ABSOLUTE not to start of instruction sequence should exit
             ScenarioBuilder::default()
                 .set_instructions(&[
@@ -1405,8 +1513,7 @@ mod tests {
                     assert_eq!(core.hart.pc.read(), 0);
                 }))
                 // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expected_steps(40)
-                .unset_expected_exception()
+                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1435,7 +1542,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             test_jump_and_link_pc(10, 0, 10, 2, Compressed),
             test_jump_and_link_pc(-10, 10, 0, 12, Compressed),
             test_jump_and_link_pc(1000, 1000, 2000, 1004, Uncompressed),
@@ -1464,7 +1571,7 @@ mod tests {
             assert_eq!(core.hart.xregisters.read_nz(x1), 5);
         });
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 .set_instructions(&[
                     I::new_addi(x1, x1, 2, Compressed),
@@ -1507,29 +1614,23 @@ mod tests {
             );
         });
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // Bitwise and with all ones is self.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 13872, Uncompressed),
-                    I::new_andi(x2, x1, !0, Compressed),
-                ])
+                .with_xreg(x1, 13872)
+                .set_instructions(&[I::new_andi(x2, x1, !0, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             // Bitwise and with itself is self.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 49666, Uncompressed),
-                    I::new_andi(x2, x1, 49666, Compressed),
-                ])
+                .with_xreg(x1, 49666)
+                .set_instructions(&[I::new_andi(x2, x1, 49666, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal.clone())
                 .build(),
             // Bitwise and with 0 is 0.
             ScenarioBuilder::default()
-                .set_instructions(&[
-                    I::new_li(x1, 0, Uncompressed),
-                    I::new_andi(x2, x1, 50230, Compressed),
-                ])
+                .with_xreg(x1, 0)
+                .set_instructions(&[I::new_andi(x2, x1, 50230, Compressed)])
                 .set_assert_hook(assert_x1_and_x2_equal)
                 .build(),
         ];
@@ -1546,16 +1647,26 @@ mod tests {
         const TRUE: u64 = 1;
         const FALSE: u64 = 0;
 
+        let with_maybe_zero_xreg =
+            |scenario_builder: ScenarioBuilder, (reg, val): (XRegister, i64)| -> ScenarioBuilder {
+                match reg.try_into() {
+                    Ok(nz) => scenario_builder.with_xreg(nz, val as u64),
+                    Err(_) => {
+                        assert_eq!(val, 0);
+                        scenario_builder
+                    }
+                }
+            };
+
         let test_slt = |constructor: fn(NonZeroXRegister, XRegister, XRegister) -> I,
                         lhs: (XRegister, i64),
                         rhs: (XRegister, i64),
                         expected: u64|
          -> Scenario {
-            ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(|core| {
-                    core.hart.xregisters.write(lhs.0, lhs.1 as u64);
-                    core.hart.xregisters.write(rhs.0, rhs.1 as u64);
-                }))
+            let scenario_builder = ScenarioBuilder::default();
+            let scenario_builder = with_maybe_zero_xreg(scenario_builder, lhs);
+            let scenario_builder = with_maybe_zero_xreg(scenario_builder, rhs);
+            scenario_builder
                 .set_instructions(&[constructor(nz::ra, lhs.0, rhs.0)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(
@@ -1572,10 +1683,9 @@ mod tests {
                             rhs: i64,
                             expected: u64|
          -> Scenario {
-            ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(|core| {
-                    core.hart.xregisters.write(lhs.0, lhs.1 as u64);
-                }))
+            let scenario_builder = ScenarioBuilder::default();
+            let scenario_builder = with_maybe_zero_xreg(scenario_builder, lhs);
+            scenario_builder
                 .set_instructions(&[constructor(nz::ra, lhs.0, rhs)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(
@@ -1587,25 +1697,25 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // -------------------------
             // equal values always false
             // -------------------------
             // Slt
             test_slt(I::new_set_less_than_signed, (x1, 1), (x2, 1), FALSE),
-            test_slt(I::new_set_less_than_signed, (x0, 1), (x2, 0), FALSE),
+            test_slt(I::new_set_less_than_signed, (x0, 0), (x2, 0), FALSE),
             test_slt(I::new_set_less_than_signed, (x3, -1), (x2, -1), FALSE),
             // Sltu
             test_slt(I::new_set_less_than_unsigned, (x1, 1), (x2, 1), FALSE),
-            test_slt(I::new_set_less_than_unsigned, (x0, 1), (x2, 0), FALSE),
+            test_slt(I::new_set_less_than_unsigned, (x0, 0), (x2, 0), FALSE),
             test_slt(I::new_set_less_than_unsigned, (x3, -1), (x2, -1), FALSE),
             // Slti
             test_slt_imm(I::new_set_less_than_immediate_signed, (x1, 1), 1, FALSE),
-            test_slt_imm(I::new_set_less_than_immediate_signed, (x0, 1), 0, FALSE),
+            test_slt_imm(I::new_set_less_than_immediate_signed, (x0, 0), 0, FALSE),
             test_slt_imm(I::new_set_less_than_immediate_signed, (x3, -1), -1, FALSE),
             // Sltiu
             test_slt_imm(I::new_set_less_than_immediate_unsigned, (x1, 1), 1, FALSE),
-            test_slt_imm(I::new_set_less_than_immediate_unsigned, (x0, 1), 0, FALSE),
+            test_slt_imm(I::new_set_less_than_immediate_unsigned, (x0, 0), 0, FALSE),
             test_slt_imm(I::new_set_less_than_immediate_unsigned, (x3, -1), -1, FALSE),
             // --------------------------------
             // greater than values always false
@@ -1687,7 +1797,7 @@ mod tests {
                     .build()
             };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // Equality
             test_branch(I::new_branch_equal, I::new_branch_not_equal, 2, 3),
             test_branch(I::new_branch_not_equal, I::new_branch_equal, 2, 2),
@@ -1774,7 +1884,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // Equality
             test_branch_compare_zero(I::new_branch_equal_zero, I::new_branch_not_equal_zero, 12),
             test_branch_compare_zero(I::new_branch_not_equal_zero, I::new_branch_equal_zero, 0),
@@ -1820,18 +1930,20 @@ mod tests {
 
     #[test]
     fn test_unknown() {
-        let scenarios: &[Scenario] = &[ScenarioBuilder::default()
-            .set_expected_steps(
-                // The unknown instruction raises an exception. This does not count as a full step.
-                1,
-            )
-            .set_expected_exception(Exception::IllegalInstruction)
-            .set_instructions(&[
-                I::new_nop(Uncompressed),
-                I::new_unknown(Compressed),
-                I::new_nop(Uncompressed),
-            ])
-            .build()];
+        let scenarios = vec![
+            ScenarioBuilder::default()
+                .set_expected_steps(
+                    // The unknown instruction raises an exception. This does not count as a full step.
+                    1,
+                )
+                .set_expected_exception(Exception::IllegalInstruction)
+                .set_instructions(&[
+                    I::new_nop(Uncompressed),
+                    I::new_unknown(Compressed),
+                    I::new_nop(Uncompressed),
+                ])
+                .build(),
+        ];
 
         for scenario in scenarios {
             scenario.run();
@@ -1918,7 +2030,7 @@ mod tests {
     fn test_add_immediate_to_pc() {
         use crate::machine_state::registers::NonZeroXRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 .set_initial_pc(1000)
                 .set_instructions(&[I::new_add_immediate_to_pc(x1, 4096, Compressed)])
@@ -1968,10 +2080,8 @@ mod tests {
                              expected: u64|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(|core| {
-                    core.hart.xregisters.write_nz(lhs.0, lhs.1 as u64);
-                    core.hart.xregisters.write_nz(rhs.0, rhs.1 as u64);
-                }))
+                .with_xreg(lhs.0, lhs.1 as u64)
+                .with_xreg(rhs.0, rhs.1 as u64)
                 .set_instructions(&[constructor(x2, lhs.0, rhs.0, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(
@@ -1985,16 +2095,14 @@ mod tests {
 
         let x32_shift_reg =
             |constructor: fn(NonZeroXRegister, XRegister, XRegister, InstrWidth) -> I,
-             lhs: (XRegister, i64),
-             rhs: (XRegister, i64),
+             lhs: (NonZeroXRegister, i64),
+             rhs: (NonZeroXRegister, i64),
              expected: u64|
              -> Scenario {
                 ScenarioBuilder::default()
-                    .set_setup_hook(setup_hook!(|core| {
-                        core.hart.xregisters.write(lhs.0, lhs.1 as u64);
-                        core.hart.xregisters.write(rhs.0, rhs.1 as u64);
-                    }))
-                    .set_instructions(&[constructor(x2, lhs.0, rhs.0, Compressed)])
+                    .with_xreg(lhs.0, lhs.1 as u64)
+                    .with_xreg(rhs.0, rhs.1 as u64)
+                    .set_instructions(&[constructor(x2, lhs.0.into(), rhs.0.into(), Compressed)])
                     .set_assert_hook(assert_hook!(|core| {
                         assert_eq!(
                             expected,
@@ -2005,7 +2113,7 @@ mod tests {
                     .build()
             };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             x64_shift_reg(I::new_x64_shift_left, (x1, 1), (x3, 1), 2),
             x64_shift_reg(
                 I::new_x64_shift_left,
@@ -2052,78 +2160,48 @@ mod tests {
                 -2_i64 as u64,
             ),
             // X32ShiftLeft tests
+            x32_shift_reg(I::new_x32_shift_left, (x1, 1), (x3, 1), 2),
             x32_shift_reg(
                 I::new_x32_shift_left,
-                (XRegister::x1, 1),
-                (XRegister::x3, 1),
-                2,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_left,
-                (XRegister::x1, 1),
-                (XRegister::x3, 31),
+                (x1, 1),
+                (x3, 31),
                 0xFFFF_FFFF_8000_0000,
             ),
+            x32_shift_reg(I::new_x32_shift_left, (x1, 2), (x3, 31), 0),
             x32_shift_reg(
                 I::new_x32_shift_left,
-                (XRegister::x1, 2),
-                (XRegister::x3, 31),
-                0,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_left,
-                (XRegister::x1, 1),
-                (XRegister::x3, 95),
+                (x1, 1),
+                (x3, 95),
                 0xFFFF_FFFF_8000_0000,
             ),
             // X32ShiftRightUnsigned tests
+            x32_shift_reg(I::new_x32_shift_right_unsigned, (x1, 2), (x3, 1), 1),
             x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
-                (XRegister::x1, 2),
-                (XRegister::x3, 1),
+                (x1, 0x80000000),
+                (x3, 31),
                 1,
             ),
+            x32_shift_reg(I::new_x32_shift_right_unsigned, (x1, 1), (x3, 31), 0),
             x32_shift_reg(
                 I::new_x32_shift_right_unsigned,
-                (XRegister::x1, 0x80000000),
-                (XRegister::x3, 31),
-                1,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_right_unsigned,
-                (XRegister::x1, 1),
-                (XRegister::x3, 31),
-                0,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_right_unsigned,
-                (XRegister::x1, 0x80000000),
-                (XRegister::x3, 95),
+                (x1, 0x80000000),
+                (x3, 95),
                 1,
             ),
             // X32ShiftRightSigned tests
+            x32_shift_reg(I::new_x32_shift_right_signed, (x1, 2), (x3, 1), 1),
             x32_shift_reg(
                 I::new_x32_shift_right_signed,
-                (XRegister::x1, 2),
-                (XRegister::x3, 1),
-                1,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_right_signed,
-                (XRegister::x1, 0x80000000),
-                (XRegister::x3, 31),
+                (x1, 0x80000000),
+                (x3, 31),
                 0xFFFF_FFFF_FFFF_FFFF,
             ),
+            x32_shift_reg(I::new_x32_shift_right_signed, (x1, 0x40000000), (x3, 31), 0),
             x32_shift_reg(
                 I::new_x32_shift_right_signed,
-                (XRegister::x1, 0x40000000),
-                (XRegister::x3, 31),
-                0,
-            ),
-            x32_shift_reg(
-                I::new_x32_shift_right_signed,
-                (XRegister::x1, 0x80000000),
-                (XRegister::x3, 95),
+                (x1, 0x80000000),
+                (x3, 95),
                 0xFFFF_FFFF_FFFF_FFFF,
             ),
         ];
@@ -2144,9 +2222,7 @@ mod tests {
              expected: u64|
              -> Scenario {
                 ScenarioBuilder::default()
-                    .set_setup_hook(setup_hook!(|core| {
-                        core.hart.xregisters.write_nz(lhs.0, lhs.1 as u64);
-                    }))
+                    .with_xreg(lhs.0, lhs.1 as u64)
                     .set_instructions(&[constructor(x2, lhs.0, imm, Compressed)])
                     .set_assert_hook(assert_hook!(|core| {
                         assert_eq!(
@@ -2158,7 +2234,7 @@ mod tests {
                     .build()
             };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             shift_imm(I::new_x64_shift_left_imm, (x1, 1), 1, 2),
             shift_imm(
                 I::new_x64_shift_left_imm,
@@ -2250,9 +2326,9 @@ mod tests {
             const STORE_ADDRESS_BASE: u64 = MEMORY_SIZE / 2;
 
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, STORE_ADDRESS_BASE)
+                .with_xreg(NZ::x2, XREG_VALUE)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, STORE_ADDRESS_BASE as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, XREG_VALUE as i64, InstrWidth::Compressed),
                     constructor(x1, x2, imm as i64, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
@@ -2270,9 +2346,9 @@ mod tests {
             let store_address_offset = 16;
 
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, store_address_base)
+                .with_xreg(NZ::x2, XREG_VALUE)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, store_address_base as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, XREG_VALUE as i64, InstrWidth::Compressed),
                     constructor(
                         x1,
                         x2,
@@ -2284,7 +2360,7 @@ mod tests {
                 // the load will fail due to being out of bounds
                 .set_expected_steps(
                     // A failed store does not count as a full step
-                    2,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2295,7 +2371,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // check stores - differing imm value to ensure both
             // aligned & unaligned stores are supported
             valid_store(I::new_x64_store, 8, XREG_VALUE),
@@ -2336,8 +2412,8 @@ mod tests {
                         .write(LOAD_ADDRESS_BASE + imm, expected)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, LOAD_ADDRESS_BASE)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, LOAD_ADDRESS_BASE as i64, InstrWidth::Compressed),
                     new_load(x2, x1, imm as i64, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
@@ -2354,15 +2430,15 @@ mod tests {
             let load_address_offset = 16;
 
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, load_address_base)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, load_address_base as i64, InstrWidth::Compressed),
                     new_load(x2, x1, load_address_offset as i64, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 // the load will fail due to being out of bounds
                 .set_expected_steps(
                     // A failed load does not count as a full step
-                    1,
+                    0,
                 )
                 .set_expected_exception(Exception::LoadAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2374,7 +2450,7 @@ mod tests {
 
         const XREG_VALUE: u64 = 0xFFEEDDCCBBAA9988;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // check loads - differing imm value to ensure both
             // aligned & unaligned loads are supported
             valid_load(I::new_x64_load_signed, 8, XREG_VALUE),
@@ -2412,9 +2488,7 @@ mod tests {
         let bitwise_test_xor_immediate =
             |lhs_reg: NonZeroXRegister, lhs_val: u64, imm: i64, expected: u64| -> Scenario {
                 ScenarioBuilder::default()
-                    .set_setup_hook(setup_hook!(|core| {
-                        core.hart.xregisters.write_nz(lhs_reg, lhs_val);
-                    }))
+                    .with_xreg(lhs_reg, lhs_val)
                     .set_instructions(&[I::new_x64_xor_immediate(x2, lhs_reg, imm, Compressed)])
                     .set_assert_hook(assert_hook!(|core| {
                         assert_eq!(core.hart.xregisters.read_nz(x2), expected);
@@ -2429,10 +2503,8 @@ mod tests {
                                 expected: u64|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(|core| {
-                    core.hart.xregisters.write_nz(lhs_reg, lhs_val);
-                    core.hart.xregisters.write_nz(rhs_reg, rhs_val);
-                }))
+                .with_xreg(lhs_reg, lhs_val)
+                .with_xreg(rhs_reg, rhs_val)
                 .set_instructions(&[I::new_x64_xor(x2, lhs_reg, rhs_reg, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), expected);
@@ -2440,7 +2512,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // XOR immediate tests
             bitwise_test_xor_immediate(x1, 0xF0F0, 0x0F0F, 0xFFFF),
             bitwise_test_xor_immediate(x1, 0xAAAA, 0x5555, 0xFFFF),
@@ -2483,9 +2555,9 @@ mod tests {
                 .set_setup_hook(setup_hook!(|core| {
                     core.main_memory.write(ADDRESS_BASE_ATOMICS, val1).unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x2, val2 as u64)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, val2, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
@@ -2512,9 +2584,9 @@ mod tests {
                 .set_setup_hook(setup_hook!(|core| {
                     core.main_memory.write(ADDRESS_BASE_ATOMICS, val1).unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x2, val2)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
@@ -2540,19 +2612,15 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS + 4, val1)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS + 4)
+                .with_xreg(NZ::x2, val2 as u64)
                 .set_instructions(&[
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS + 4) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(NZ::x2, val2, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // A failed atomic operation does not count as a full step
-                    2,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2577,19 +2645,15 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS + 4, val1)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS + 4)
+                .with_xreg(NZ::x2, val2)
                 .set_instructions(&[
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS + 4) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // A failed atomic operation does not count as a full step
-                    2,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2603,7 +2667,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             valid_x64_atomic_unsigned(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
             invalid_x64_atomic_unsigned(I::new_x64_atomic_add, 10, 30, u64::wrapping_add),
             valid_x64_atomic_unsigned(I::new_x64_atomic_and, 10, 30, u64::bitand),
@@ -2646,10 +2710,8 @@ mod tests {
                              expected: u64|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_setup_hook(setup_hook!(|core| {
-                    core.hart.xregisters.write_nz(lhs_reg, lhs_val);
-                    core.hart.xregisters.write_nz(rhs_reg, rhs_val);
-                }))
+                .with_xreg(lhs_reg, lhs_val)
+                .with_xreg(rhs_reg, rhs_val)
                 .set_instructions(&[constructor(x2, lhs_reg, rhs_reg, Compressed)])
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.xregisters.read_nz(x2), expected);
@@ -2657,7 +2719,7 @@ mod tests {
                 .build()
         };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // MULH (Signed × Signed)
             test_mul_high(
                 I::new_x64_mul_high_signed,
@@ -2742,15 +2804,15 @@ mod tests {
         const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get() as u64;
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(|core| {
                     core.main_memory.write(ADDRESS_BASE_ATOMICS, 100).unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // normal x32-atomic-load followed by x32-atomic-store.
-                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_store(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                 ])
@@ -2768,19 +2830,15 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS + 4, 100)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS + 2)
                 .set_instructions(&[
                     // x32-atomic-load with an address that is not aligned.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS + 2) as i64,
-                        InstrWidth::Compressed,
-                    ),
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // A failed atomic load does not count as a full step
-                    1,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2789,26 +2847,18 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 2)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x32-atomic-store with an address not aligned.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 2) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // The failed atomic operation does not count as a full step
-                    4,
+                    1,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2818,19 +2868,11 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 100)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x32-atomic-store with an address outside the reservation set.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 100) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
@@ -2847,19 +2889,11 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 100)
+                .with_xreg(NZ::x3, 200)
                 .set_instructions(&[
                     // x32-atomic-store with an address inside an expired reservation set.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 100) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x32_atomic_load(x3, x4, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
@@ -2892,15 +2926,15 @@ mod tests {
         const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get() as u64;
         const ADDRESS_BASE_ATOMICS: u64 = MEMORY_SIZE / 2;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
                 .set_setup_hook(setup_hook!(|core| {
                     core.main_memory.write(800, 100).unwrap();
                 }))
+                .with_xreg(NZ::x1, 800)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // normal x64-atomic-load followed by x64-atomic-store.
-                    I::new_li(NZ::x1, 800_i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x64_atomic_store(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                 ])
@@ -2918,19 +2952,15 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS + 4, 100)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS + 4)
                 .set_instructions(&[
                     // x64-atomic-load with an address that is not aligned.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS + 4) as i64,
-                        InstrWidth::Compressed,
-                    ),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // A failed atomic load does not count as a full step
-                    1,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2939,26 +2969,18 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 4)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x64-atomic-store with an address not aligned.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 4) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x64_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // The failed atomic operation does not count as a full step
-                    4,
+                    1,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -2968,19 +2990,11 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 80)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x64-atomic-store with an address outside the reservation set.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 80) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x64_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
@@ -2997,19 +3011,11 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x4, ADDRESS_BASE_ATOMICS + 80)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x64-atomic-store with an address inside an expired reservation set.
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(
-                        NZ::x4,
-                        (ADDRESS_BASE_ATOMICS + 80) as i64,
-                        InstrWidth::Uncompressed,
-                    ),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x64_atomic_load(x3, x4, false, false, InstrWidth::Uncompressed),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x64_atomic_store(x3, x4, x2, false, false, InstrWidth::Uncompressed),
@@ -3027,11 +3033,11 @@ mod tests {
                 }))
                 .build(),
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, 800)
+                .with_xreg(NZ::x4, 804)
+                .with_xreg(NZ::x2, 200)
                 .set_instructions(&[
                     // x32-atomic-store with an address in an x64-atomic-load reservation set.
-                    I::new_li(NZ::x1, 800_i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x4, 804_i64, InstrWidth::Uncompressed),
-                    I::new_li(NZ::x2, 200_i64, InstrWidth::Compressed),
                     I::new_x64_atomic_load(x3, x1, false, false, InstrWidth::Uncompressed),
                     I::new_x32_atomic_store(x3, x4, x2, false, false, InstrWidth::Compressed),
                     I::new_nop(InstrWidth::Compressed),
@@ -3056,7 +3062,7 @@ mod tests {
 
     #[test]
     fn test_rem() {
-        use crate::machine_state::registers::NonZeroXRegister::x2;
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::x1;
         use crate::machine_state::registers::XRegister::x3;
 
@@ -3067,18 +3073,16 @@ mod tests {
              expected: u64|
              -> Scenario {
                 ScenarioBuilder::default()
-                    .set_setup_hook(setup_hook!(|core| {
-                        core.hart.xregisters.write(x1, lhs_val);
-                        core.hart.xregisters.write(x3, rhs_val);
-                    }))
-                    .set_instructions(&[constructor(x2, x1, x3, Compressed)])
+                    .with_xreg(NZ::x1, lhs_val)
+                    .with_xreg(NZ::x3, rhs_val)
+                    .set_instructions(&[constructor(NZ::x2, x1, x3, Compressed)])
                     .set_assert_hook(assert_hook!(|core| {
-                        assert_eq!(core.hart.xregisters.read_nz(x2), expected);
+                        assert_eq!(core.hart.xregisters.read_nz(NZ::x2), expected);
                     }))
                     .build()
             };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // REM (Signed 64-bit) tests
             test_rem(I::new_x64_rem_signed, 20, 6, 2),
             test_rem(
@@ -3155,6 +3159,7 @@ mod tests {
     #[test]
     fn test_atomic_swap() {
         use crate::machine_state::instruction::Instruction as I;
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::x1;
         use crate::machine_state::registers::XRegister::x2;
         use crate::machine_state::registers::XRegister::x3;
@@ -3170,12 +3175,12 @@ mod tests {
              expected_mem: u64|
              -> Scenario {
                 ScenarioBuilder::default()
+                    .with_xreg(NZ::x1, addr)
+                    .with_xreg(NZ::x3, val)
                     .set_setup_hook(setup_hook!(|core| {
                         core.main_memory
                             .set_all_readable_writeable(NoopMemoryGovernanceListener);
                         core.main_memory.write(addr, expected_rd).unwrap();
-                        core.hart.xregisters.write(x1, addr);
-                        core.hart.xregisters.write(x3, val);
                     }))
                     .set_instructions(&[constructor(
                         x2,
@@ -3199,7 +3204,7 @@ mod tests {
                     .build()
             };
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             // 32-bit atomic swap (4-byte aligned address)
             test_atomic_swap(
                 I::new_x32_atomic_swap,
@@ -3262,9 +3267,9 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS, val1 as i32)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS)
+                .with_xreg(NZ::x2, val2 as u64)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, ADDRESS_BASE_ATOMICS as i64, InstrWidth::Compressed),
-                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
@@ -3289,19 +3294,15 @@ mod tests {
                         .write(ADDRESS_BASE_ATOMICS + 2, val1 as i32)
                         .unwrap();
                 }))
+                .with_xreg(NZ::x1, ADDRESS_BASE_ATOMICS + 2)
+                .with_xreg(NZ::x2, val2 as u64)
                 .set_instructions(&[
-                    I::new_li(
-                        NZ::x1,
-                        (ADDRESS_BASE_ATOMICS + 2) as i64,
-                        InstrWidth::Compressed,
-                    ),
-                    I::new_li(NZ::x2, val2 as i64, InstrWidth::Compressed),
                     constructor(x3, x1, x2, false, false, InstrWidth::Uncompressed),
                     I::new_nop(InstrWidth::Compressed),
                 ])
                 .set_expected_steps(
                     // A failed atomic operation does not count as a full step
-                    2,
+                    0,
                 )
                 .set_expected_exception(Exception::StoreAMOAccessFault)
                 .set_assert_hook(assert_hook!(|core| {
@@ -3322,7 +3323,7 @@ mod tests {
         let unsigned_min = |x: u32, y: u32| x.min(y);
         let unsigned_max = |x: u32, y: u32| x.max(y);
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             valid_x32_atomic(I::new_x32_atomic_add, 10, 20, u32::wrapping_add),
             invalid_x32_atomic(I::new_x32_atomic_add, 10, 20, u32::wrapping_add),
             valid_x32_atomic(
@@ -3373,10 +3374,10 @@ mod tests {
         use crate::machine_state::registers::NonZeroXRegister as NZ;
         use crate::machine_state::registers::XRegister::*;
 
-        let scenarios: &[Scenario] = &[
+        let scenarios = vec![
             ScenarioBuilder::default()
+                .with_xreg(NZ::x1, 13872)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, 13872, Uncompressed),
                     I::new_f64_from_x64_unsigned(
                         f2,
                         x1,
@@ -3398,8 +3399,8 @@ mod tests {
                     // resets the rounding mode in `frm` of `fcsr` register to NTE.
                     core.hart.csregisters.reset();
                 }))
+                .with_xreg(NZ::x1, 13872)
                 .set_instructions(&[
-                    I::new_li(NZ::x1, 13872, Uncompressed),
                     I::new_f64_from_x64_unsigned(f2, x1, InstrRoundingMode::Dynamic, Compressed),
                     I::new_nop(InstrWidth::Uncompressed),
                 ])
