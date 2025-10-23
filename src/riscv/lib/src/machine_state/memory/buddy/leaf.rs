@@ -65,7 +65,7 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         proof: D,
     ) -> crate::state_backend::VerifierAllocResult<D, Self> {
         let parser = Atom::into_verifier_alloc(proof)?;
-        Ok(parser.map(|(cell, merkle)| (Self::Allocated { set: cell }, merkle)))
+        Ok(parser.map(|cell| Self::Allocated { set: cell }))
     }
 
     fn partial_state_hash(

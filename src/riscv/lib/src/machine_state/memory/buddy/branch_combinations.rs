@@ -105,7 +105,7 @@ macro_rules! combined_buddy_branch {
                     use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verifier_alloc(proof)?;
-                    Ok(inner.map(|(inner, merkle)| ([<$name Alloc>](inner), merkle)))
+                    Ok(inner.map(|inner| [<$name Alloc>](inner)))
                 }
 
                 fn partial_state_hash(

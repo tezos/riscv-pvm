@@ -47,13 +47,14 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
             .map(OwnedParserComb::new)
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
-        self.deserialise_as_leaf()?
-            .map_present_fallible(|data| Ok((binary::deserialise::<T>(data.as_ref())?, data)))
-            .map(OwnedParserComb::new)
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>> {
+        let result = self
+            .deserialise_as_leaf()?
+            .map_present_fallible(|data| binary::deserialise::<T>(data.as_ref()))?;
+        Ok(OwnedParserComb::new(result))
     }
 
-    fn into_node(self) -> Result<(Self::DeserialiserNode, Partial<()>)> {
+    fn into_node(self) -> Result<Self::DeserialiserNode> {
         let branches = self.deserialise_as_node()?;
         Ok(OwnedBranchComb::new(branches))
     }
@@ -129,26 +130,23 @@ pub struct OwnedBranchComb<B> {
 impl<B> OwnedBranchComb<B> {
     /// Create a new [`OwnedBranchComb`] with the given branches,
     /// preserving the absent/blind/present information from the given [`Partial`].
-    fn new(branches: Partial<Vec<B>>) -> (Self, Partial<()>) {
-        // Similar to `map_present` but for `&Partial<R>`.
-        // This is done to preserve absent/blind/present information from node until calling `done()`.
-        // See test_blind_node_parsing for an example.
-        let result = match &branches {
-            Partial::Absent => Partial::Absent,
-            Partial::Blinded(hash) => Partial::Blinded(*hash),
-            Partial::Present(_) => Partial::Present(()),
-        };
-
-        let this = Self {
+    fn new(branches: Partial<Vec<B>>) -> Self {
+        Self {
             node_data: branches.map_present(VecDeque::from),
-        };
-
-        (this, result)
+        }
     }
 }
 
 impl<'t> DeserialiserNode for OwnedBranchComb<ProofTreeDeserialiser<'t>> {
     type Parent = ProofTreeDeserialiser<'t>;
+
+    fn presence(&self) -> Partial<()> {
+        match &self.node_data {
+            Partial::Absent => Partial::Absent,
+            Partial::Blinded(hash) => Partial::Blinded(*hash),
+            Partial::Present(_) => Partial::Present(()),
+        }
+    }
 
     fn next_branch<T>(
         mut self,
@@ -212,5 +210,14 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
 ) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
-    Ok(L::into_verifier_alloc::<ProofTreeDeserialiser>(proof.into())?.into_result())
+    let owned_proof = match proof {
+        ProofPart::Absent => OwnedProofPart::Absent,
+        ProofPart::Present(proof) => OwnedProofPart::Present(proof.clone()),
+    };
+
+    let context = ProofTreeDeserialiser::from(proof);
+    let parser = L::into_verifier_alloc::<ProofTreeDeserialiser>(context)?;
+    let result = parser.into_result();
+
+    Ok((result, owned_proof))
 }

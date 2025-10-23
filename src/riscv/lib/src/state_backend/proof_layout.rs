@@ -89,7 +89,7 @@ pub enum ProofError {
 
 /// Common result type for parsing a Merkle proof.
 pub(crate) type VerifierAllocResult<D, L> =
-    Result<<D as Deserialiser>::Suspended<(VerifierAlloc<L>, OwnedProofPart)>>;
+    Result<<D as Deserialiser>::Suspended<VerifierAlloc<L>>>;
 
 /// Regions for the verifier backend for a specific layout.
 pub type VerifierAlloc<L> = <L as Layout>::Allocated<verify_backend::Verifier>;
@@ -327,7 +327,7 @@ impl<T: ProofLayout> ProofLayout for Box<T> {
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        Ok(T::into_verifier_alloc(proof)?.map(|(data, merkle)| (Box::new(data), merkle)))
+        Ok(T::into_verifier_alloc(proof)?.map(Box::new))
     }
 
     fn partial_state_hash(
@@ -355,7 +355,7 @@ where
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
         let f = Array::<T, 1>::into_verifier_alloc(proof)?;
-        Ok(f.map(|(data, merkle)| (super::Cell::from(data), merkle)))
+        Ok(f.map(super::Cell::from))
     }
 
     fn partial_state_hash(
@@ -394,8 +394,7 @@ where
 
         Ok(proof
             .into_leaf::<super::Cells<T, LEN, Owned>>()?
-            .map(|leaf| {
-                let (region, merkle) = leaf.split();
+            .map(|region| {
                 let region = match region {
                     Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
                     Partial::Present(cells) => {
@@ -403,7 +402,7 @@ where
                         verify_backend::Region::Partial(arr)
                     }
                 };
-                (super::Cells::bind(region), merkle.into_leaf_proof_tree())
+                super::Cells::bind(region)
             }))
     }
 
@@ -448,54 +447,45 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
             start: usize,
             left_length: usize,
             proof: D,
-        ) -> Result<D::Suspended<(Vec<PageData>, OwnedProofPart)>> {
+        ) -> Result<D::Suspended<Vec<PageData>>> {
             let page = verify_backend::PageId::from_address(start);
 
             if left_length <= MERKLE_LEAF_SIZE.get() {
                 let ctx = proof.into_leaf_raw()?;
                 let ctx = ctx.map(move |data| match data {
-                    Partial::Absent => (vec![], OwnedProofPart::Absent),
-                    Partial::Blinded(hash) => (
-                        vec![],
-                        OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
-                    ),
-                    Partial::Present(data) => (
-                        vec![(page, data.clone())],
-                        OwnedProofPart::Present(MerkleProof::leaf_read(data.to_vec())),
-                    ),
+                    Partial::Absent => vec![],
+                    Partial::Blinded(_hash) => vec![],
+                    Partial::Present(data) => vec![(page, data.clone())],
                 });
                 Ok(ctx)
             } else {
-                let (ctx, parent) = proof.into_node()?;
+                let ctx = proof.into_node()?;
 
                 let mut pages_acc = Vec::new();
-                let mut proof_children_acc = Vec::new();
 
                 let mut work_brackets = work_merkle_params::<MERKLE_ARITY>(start, left_length);
                 let ctx = work_brackets.try_fold(
                     ctx,
                     |ctx, (start, length)| -> Result<_, ProofError> {
-                        let (ctx, (pages, proof)) =
+                        let (ctx, pages) =
                             ctx.next_branch(|proof| parse_pages_fn_getter(start, length, proof))?;
 
                         pages_acc.extend(pages);
-                        proof_children_acc.push(proof);
 
                         Ok(ctx)
                     },
                 )?;
 
-                let proof = OwnedProofPart::node_from_children(parent, proof_children_acc);
-                ctx.done((pages_acc, proof))
+                ctx.done(pages_acc)
             }
         }
 
         let pages_handler = parse_pages_fn_getter::<D>(0, LEN, proof)?;
 
         // After the recursive parsing, convert all pages into cells.
-        Ok(pages_handler.map(|(pages, merkle)| {
+        Ok(pages_handler.map(|pages| {
             let region = verify_backend::DynRegion::from_pages(pages);
-            (super::DynCells::bind(region), merkle)
+            super::DynCells::bind(region)
         }))
     }
 
@@ -601,11 +591,11 @@ impl<const LEN: usize> ProofLayout for DynArray<LEN> {
 /// ```
 macro_rules! tuple_branches_proof_layout {
     ($proof:expr, $($branches:ident),+) => {{
-        let (ctx, parent) = $proof.into_node()?;
+        let ctx = $proof.into_node()?;
 
         paste::paste! {
             $(
-                let (ctx, ([<$branches:lower>], [<$branches:lower _proof>])) = ctx.next_branch(|child_proof| [<$branches>]::into_verifier_alloc(child_proof))?;
+                let (ctx, [<$branches:lower>]) = ctx.next_branch(|child_proof| [<$branches>]::into_verifier_alloc(child_proof))?;
             )+
 
             let value = (
@@ -613,18 +603,9 @@ macro_rules! tuple_branches_proof_layout {
                     [<$branches:lower>]
                 ),+
             );
-
-            let proof = $crate::state_backend::proof_layout::OwnedProofPart::node_from_children(
-                parent,
-                [
-                    $(
-                        [<$branches:lower _proof>]
-                    ),+
-                ]
-            );
         }
 
-        ctx.done((value, proof))
+        ctx.done(value)
     }};
 }
 
@@ -830,17 +811,15 @@ where
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        let (ctx, parent) = proof.into_node()?;
+        let ctx = proof.into_node()?;
 
         let mut children_acc = Vec::with_capacity(LEN);
-        let mut child_proofs_acc = Vec::with_capacity(LEN);
 
         let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, ProofError> {
-            let (ctx, (child, proof)) =
+            let (ctx, child) =
                 ctx.next_branch(|child_proof| T::into_verifier_alloc(child_proof))?;
 
             children_acc.push(child);
-            child_proofs_acc.push(proof);
 
             Ok(ctx)
         })?;
@@ -849,9 +828,8 @@ where
             // We can't use expected because the error can't be displayed
             unreachable!("Conversion to array of fixed length doesn't fail")
         };
-        let proof = OwnedProofPart::node_from_children(parent, child_proofs_acc);
 
-        ctx.done((children, proof))
+        ctx.done(children)
     }
 
     fn partial_state_hash(
@@ -883,7 +861,7 @@ where
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
         // Avoids clippy warnings about the type being too complex.
-        type NestedSuspendedResult<T> = (Vec<AllocatedOf<T, Verifier>>, OwnedProofPart);
+        type NestedSuspendedResult<T> = Vec<AllocatedOf<T, Verifier>>;
 
         // Obtain a deserialiser for a given length, i.e. Many<T, length>
         // We know that AllocatedOf<Many<T, LEN>, Verifier> = Vec<AllocatedOf<T, Verifier>>.
@@ -895,30 +873,27 @@ where
             proof: D,
         ) -> Result<D::Suspended<NestedSuspendedResult<T>>> {
             if length == 1 {
-                Ok(T::into_verifier_alloc(proof)?.map(|(data, merkle)| (vec![data], merkle)))
+                Ok(T::into_verifier_alloc(proof)?.map(|data| vec![data]))
             } else {
-                let (ctx, parent) = proof.into_node()?;
+                let ctx = proof.into_node()?;
 
                 let mut children_acc = Vec::with_capacity(MERKLE_ARITY);
-                let mut child_proofs_acc = Vec::with_capacity(MERKLE_ARITY);
 
                 let mut child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
                 let ctx = child_length_iter.try_fold(
                     ctx,
                     |ctx, (_, child_length)| -> Result<_, ProofError> {
-                        let (ctx, (children, proof)) = ctx.next_branch(|child_proof| {
+                        let (ctx, children) = ctx.next_branch(|child_proof| {
                             parametrised_deserialiser::<T, D>(child_length, child_proof)
                         })?;
 
                         children_acc.extend(children);
-                        child_proofs_acc.push(proof);
 
                         Ok(ctx)
                     },
                 )?;
 
-                let proof = OwnedProofPart::node_from_children(parent, child_proofs_acc);
-                ctx.done((children_acc, proof))
+                ctx.done(children_acc)
             }
         }
 

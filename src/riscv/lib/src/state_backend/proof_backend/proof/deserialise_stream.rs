@@ -56,22 +56,6 @@ impl<'t> StreamInput<'t> {
     }
 }
 
-/// Current deserialisation context with regards to presence of the parent node
-enum Presence {
-    /// Absent node context
-    ///
-    /// This is because the parent node is either absent or blinded. In both cases, the potential
-    /// child nodes are not contained in the proof, hence we consider them absent for the purpose
-    /// of deserialisation.
-    Absent,
-
-    /// Present node context
-    ///
-    /// The parent is contained in the proof, hence we make no assumptions on the existence of
-    /// child nodes.
-    Present,
-}
-
 /// Deserialiser for [`Deserialiser`] based on a stream of bytes.
 pub struct StreamDeserialiser<'t> {
     /// Context layers with regard to presence
@@ -82,7 +66,7 @@ pub struct StreamDeserialiser<'t> {
     /// Contextual presence information is needed to allow moving the tag source through the
     /// different combinators without losing track of whether the parent node is currently absent
     /// or present.
-    context: Vec<Presence>,
+    context: Vec<Partial<()>>,
 
     /// Source of tags
     ///
@@ -95,17 +79,19 @@ pub struct StreamDeserialiser<'t> {
 impl<'t> StreamDeserialiser<'t> {
     /// Create a new deserialiser for a present context with the given tags.
     pub fn new_present(input: StreamInput<'t>) -> Self {
-        StreamDeserialiser {
-            context: vec![Presence::Present],
-            input,
-        }
+        Self::new(input, Partial::Present(()))
     }
 
     /// Create a new deserialiser for an absent context with the given tags.
     pub fn new_absent() -> Self {
+        Self::new(StreamInput::new(&[]), Partial::Absent)
+    }
+
+    /// Create a new deserialiser for a given context with the given tags.
+    fn new(input: StreamInput<'t>, context: Partial<()>) -> Self {
         StreamDeserialiser {
-            context: vec![Presence::Absent],
-            input: StreamInput::new(&[]),
+            context: vec![context],
+            input,
         }
     }
 
@@ -115,19 +101,16 @@ impl<'t> StreamDeserialiser<'t> {
     }
 
     /// Check if the current context is for an absent or blinded node.
-    fn is_absent(&self) -> bool {
-        matches!(self.context.last(), Some(Presence::Absent) | None)
+    fn is_absent_or_blinded(&self) -> bool {
+        matches!(
+            self.context.last(),
+            Some(Partial::Absent) | Some(Partial::Blinded(_)) | None
+        )
     }
 
-    /// Enter a context for an absent node.
-    fn enter_absent(mut self) -> Self {
-        self.context.push(Presence::Absent);
-        self
-    }
-
-    /// Enter a context for a present node.
-    fn enter_present(mut self) -> Self {
-        self.context.push(Presence::Present);
+    /// Enter a context for a node with the given presence.
+    fn enter_context(mut self, presence: Partial<()>) -> Self {
+        self.context.push(presence);
         self
     }
 
@@ -135,6 +118,11 @@ impl<'t> StreamDeserialiser<'t> {
     fn exit_context(mut self) -> Self {
         self.context.pop();
         self
+    }
+
+    /// Get the presence of the current context.
+    fn presence(&self) -> Partial<()> {
+        self.context.last().cloned().unwrap_or(Partial::Absent)
     }
 }
 
@@ -146,16 +134,25 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
     fn into_leaf_raw<const LEN: usize>(
         mut self,
     ) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>> {
-        if self.is_absent() {
-            return Ok(StreamParserComb::new(self, Partial::Absent));
+        if self.is_absent_or_blinded() {
+            return Ok(StreamParserComb {
+                result: Partial::Absent,
+                proof: OwnedProofPart::leaf_from_partial(Partial::Absent, std::convert::identity),
+                deser: self,
+            });
         }
 
         let tag = self.next_tag()?;
 
-        let result = match tag {
+        let (result, proof) = match tag {
             Tag::Node => return Err(ProofError::UnexpectedNode),
             Tag::Leaf(leaf_type) => match leaf_type {
-                LeafTag::Blind => Partial::Blinded(self.input.deserialise::<Hash>()?),
+                LeafTag::Blind => {
+                    let hash = self.input.deserialise::<Hash>()?;
+                    let result = Partial::Blinded(hash);
+                    let proof = Partial::Blinded(hash);
+                    (result, proof)
+                }
                 LeafTag::Read => {
                     let mut data = Box::new([0_u8; LEN]);
 
@@ -163,41 +160,69 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
                         return Err(ProofError::NotEnoughBytes(NotEnoughBytesError));
                     };
 
-                    Partial::Present(data)
+                    let proof = Partial::Present(data.as_ref().to_vec());
+                    let result = Partial::Present(data);
+
+                    (result, proof)
                 }
             },
         };
 
-        Ok(StreamParserComb::new(self, result))
+        let proof = OwnedProofPart::leaf_from_partial(proof, std::convert::identity);
+
+        Ok(StreamParserComb {
+            result,
+            proof,
+            deser: self,
+        })
     }
 
-    fn into_leaf<T: Decode<()>>(mut self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>> {
-        if self.is_absent() {
-            return Ok(StreamParserComb::new(self, Partial::Absent));
+    fn into_leaf<T: Decode<()>>(mut self) -> Result<Self::Suspended<Partial<T>>> {
+        if self.is_absent_or_blinded() {
+            let this = StreamParserComb {
+                result: Partial::Absent,
+                proof: OwnedProofPart::leaf_from_partial(Partial::Absent, std::convert::identity),
+                deser: self,
+            };
+            return Ok(this);
         }
 
         let tag = self.next_tag()?;
 
-        let result = match tag {
+        let (result, proof) = match tag {
             Tag::Node => return Err(ProofError::UnexpectedNode),
             Tag::Leaf(leaf_type) => match leaf_type {
-                LeafTag::Blind => Partial::Blinded(self.input.deserialise::<Hash>()?),
+                LeafTag::Blind => {
+                    let hash = self.input.deserialise::<Hash>()?;
+                    let result = Partial::Blinded(hash);
+                    let proof = Partial::Blinded(hash);
+                    (result, proof)
+                }
                 LeafTag::Read => {
                     let (data, raw_bytes) = self.input.capture_deserialise::<T>()?;
-                    Partial::Present((data, raw_bytes.to_vec()))
+                    let result = Partial::Present(data);
+                    let proof = Partial::Present(raw_bytes.to_vec());
+                    (result, proof)
                 }
             },
         };
 
-        Ok(StreamParserComb::new(self, result))
+        let proof = OwnedProofPart::leaf_from_partial(proof, std::convert::identity);
+
+        Ok(StreamParserComb {
+            result,
+            proof,
+            deser: self,
+        })
     }
 
-    fn into_node(mut self) -> Result<(Self::DeserialiserNode, Partial<()>)> {
-        if self.is_absent() {
+    fn into_node(mut self) -> Result<Self::DeserialiserNode> {
+        if self.is_absent_or_blinded() {
             let this = StreamBranchComb {
-                deser: self.enter_absent(),
+                proof_children: Vec::new(),
+                deser: self.enter_context(Partial::Absent),
             };
-            return Ok((this, Partial::Absent));
+            return Ok(this);
         }
 
         let tag = self.next_tag()?;
@@ -205,18 +230,21 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         match tag {
             Tag::Leaf(LeafTag::Read) => Err(ProofError::UnexpectedLeaf),
             Tag::Leaf(LeafTag::Blind) => {
-                let result = Partial::Blinded(self.input.deserialise::<Hash>()?);
+                let hash = self.input.deserialise::<Hash>()?;
+                let result = Partial::Blinded(hash);
                 let this = StreamBranchComb {
-                    deser: self.enter_absent(),
+                    proof_children: Vec::new(),
+                    deser: self.enter_context(result),
                 };
-                Ok((this, result))
+                Ok(this)
             }
             Tag::Node => {
                 let result = Partial::Present(());
                 let this = StreamBranchComb {
-                    deser: self.enter_present(),
+                    proof_children: Vec::new(),
+                    deser: self.enter_context(result),
                 };
-                Ok((this, result))
+                Ok(this)
             }
         }
     }
@@ -226,6 +254,9 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
 pub struct StreamParserComb<'t, R> {
     /// Parser result
     result: R,
+
+    /// Proof that represents the parsed parts
+    proof: OwnedProofPart,
 
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
@@ -243,25 +274,26 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
         StreamParserComb {
             result: map_f(self.result),
             deser: self.deser,
+            proof: self.proof,
         }
-    }
-}
-
-impl<'t, R> StreamParserComb<'t, R> {
-    /// Create a new [`StreamParserComb`] with the given function.
-    fn new(deser: StreamDeserialiser<'t>, result: R) -> Self {
-        StreamParserComb { result, deser }
     }
 }
 
 /// Branch combinator for [`StreamDeserialiser`] deserialiser.
 pub struct StreamBranchComb<'t> {
+    /// Children of the node within the Merkle proof
+    proof_children: Vec<OwnedProofPart>,
+
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
 }
 
 impl<'t> DeserialiserNode for StreamBranchComb<'t> {
     type Parent = StreamDeserialiser<'t>;
+
+    fn presence(&self) -> Partial<()> {
+        self.deser.presence()
+    }
 
     fn next_branch<T>(
         self,
@@ -270,14 +302,30 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
         )
             -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
     ) -> Result<(Self, T)> {
-        let StreamParserComb { result, deser } = branch_deserialiser(self.deser)?;
-        let this = StreamBranchComb { deser };
+        let Self {
+            deser,
+            mut proof_children,
+        } = self;
+
+        let StreamParserComb {
+            result,
+            proof,
+            deser,
+        } = branch_deserialiser(deser)?;
+        proof_children.push(proof);
+
+        let this = StreamBranchComb {
+            deser,
+            proof_children,
+        };
+
         Ok((this, result))
     }
 
     fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>> {
         Ok(StreamParserComb {
             result: value,
+            proof: OwnedProofPart::node_from_children(self.deser.presence(), self.proof_children),
             deser: self.deser.exit_context(),
         })
     }
@@ -285,14 +333,14 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
 
 impl<R> StreamParserComb<'_, R> {
     /// Deserialise the input and return the result if all bytes have been consumed.
-    pub fn into_result(self) -> Result<R> {
+    pub fn into_result(self) -> Result<(R, OwnedProofPart)> {
         if !self.deser.input.is_empty() {
             // Ending with left over bytes indicates that we have not parsed the proof correctly.
             // It could be that we have interpreted data as tags, or vice versa.
             return Err(ProofError::RemainingBytes);
         }
 
-        Ok(self.result)
+        Ok((self.result, self.proof))
     }
 }
 

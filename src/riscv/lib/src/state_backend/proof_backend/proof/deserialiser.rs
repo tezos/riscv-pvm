@@ -103,14 +103,10 @@ pub trait Deserialiser {
     fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    #[expect(
-        clippy::type_complexity,
-        reason = "Adding an alias for Partial<(T, Vec<u8>)> would only decrease readability"
-    )]
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<(T, Vec<u8>)>>>;
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
-    fn into_node(self) -> Result<(Self::DeserialiserNode, Partial<()>)>;
+    fn into_node(self) -> Result<Self::DeserialiserNode>;
 }
 
 /// The trait used for deserialising a proof's node.
@@ -118,6 +114,9 @@ pub trait Deserialiser {
 /// Deserialisers for each of its branches are expected to be provided to continue the deserialisation.
 pub trait DeserialiserNode: Sized {
     type Parent: Deserialiser;
+
+    /// Get the presence information for the node that is being parsed.
+    fn presence(&self) -> Partial<()>;
 
     /// The next branch of the current node is deserialised using the provided deserialiser `br_deser`.
     fn next_branch<T>(
@@ -181,16 +180,16 @@ mod tests {
 
         // Computation: return the value of the nested leaf
 
-        let (ctx, _partial) = proof.into_node()?;
+        let ctx = proof.into_node()?;
         let (ctx, _left) = ctx.next_branch(|br_proof| br_proof.into_leaf::<Hash>())?;
         let (ctx, right) = ctx.next_branch(|br_ctx| {
-            let (ctx, _) = br_ctx.into_node()?;
+            let ctx = br_ctx.into_node()?;
             let (ctx, result) = ctx.next_branch(|pr| pr.into_leaf::<T>())?;
             ctx.done(result)
         })?;
 
         ctx.done(match right {
-            Partial::Present((nr, _)) => nr.into(),
+            Partial::Present(nr) => nr.into(),
             Partial::Absent => 0,
             Partial::Blinded(_hash) => -1,
         })
@@ -216,9 +215,9 @@ mod tests {
 
         // Computation: sum the non-blinded leaves
 
-        let (ctx, partial) = proof.into_node()?;
+        let ctx = proof.into_node()?;
 
-        match partial {
+        match ctx.presence() {
             Partial::Absent => return ctx.done(0),
             Partial::Blinded(_) => return ctx.done(-1),
             Partial::Present(_) => {}
@@ -229,7 +228,7 @@ mod tests {
         let ctx = (0..4).try_fold(ctx, |ctx, _| -> Result<_> {
             let (ctx, val) = ctx.next_branch(|br_proof| br_proof.into_leaf::<i32>())?;
 
-            if let Partial::Present((val, _)) = val {
+            if let Partial::Present(val) = val {
                 data.push(val);
             }
 
@@ -256,7 +255,7 @@ mod tests {
     ) -> Result<i32> {
         let input = StreamInput::new(bytes);
         let comp_fn = deser(StreamDeserialiser::new_present(input))?;
-        comp_fn.into_result()
+        comp_fn.into_result().map(|(ret, _)| ret)
     }
 
     #[test]
@@ -281,7 +280,7 @@ mod tests {
         // Root is absent already
         let proof: StreamDeserialiser = StreamDeserialiser::new_absent();
         let comp_fn = computation_i16(proof).unwrap();
-        assert_eq!(comp_fn.into_result().unwrap(), 0);
+        assert_eq!(comp_fn.into_result().unwrap().0, 0);
 
         // Expect absent case in the computed result
         let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
@@ -463,7 +462,7 @@ mod tests {
 
         let input = StreamInput::new(&raw_bytes_content);
         let comp_fn = computation_i16::<StreamDeserialiser>(StreamDeserialiser::new_present(input));
-        let res = comp_fn.unwrap().into_result().unwrap();
+        let (res, _) = comp_fn.unwrap().into_result().unwrap();
 
         assert_eq!(res, -1);
 
