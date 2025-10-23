@@ -187,16 +187,14 @@ macro_rules! struct_layout {
 
                     let result = tuple_branches_proof_layout!(proof $(, [<$field_name:camel>])+)?;
 
-                    let result = result.map(|(values, proof)| {
+                    let result = result.map(|values| {
                         let ( $($field_name),+ ) = values;
 
-                        let allocated = Self::Allocated {
+                        Self::Allocated {
                             $(
                                 $field_name
                             ),+
-                        };
-
-                        (allocated, proof)
+                        }
                     });
 
                     Ok(result)
