@@ -12,7 +12,7 @@ on:
     branches: [main]
 
 concurrency:
-  # Cancel previous workflow runs for the same ref (e.g. same PR or branch) 
+  # Cancel previous workflow runs for the same ref (e.g. same PR or branch)
   group: ${{ github.workflow }}-${{ github.ref }}
 
   # Cancel only if it is not the main branch
@@ -52,6 +52,29 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
 
     steps:
+      - name: Aggressive cleanup
+        run: |
+          # Remove Java (JDKs)
+          sudo rm -rf /usr/lib/jvm
+
+          # Remove .NET SDKs
+          sudo rm -rf /usr/share/dotnet
+
+          # Remove Swift toolchain
+          sudo rm -rf /usr/share/swift
+
+          # Remove Haskell (GHC)
+          sudo rm -rf /usr/local/.ghcup
+
+          # Remove Android SDKs
+          sudo rm -rf /usr/local/lib/android
+
+          # Remove Azure CLI
+          sudo rm -rf /opt/az
+
+          # Remove PowerShell
+          sudo rm -rf /usr/local/share/powershell
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -89,7 +112,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
 
-      - name: Rust compilation cache 
+      - name: Rust compilation cache
         uses: Mozilla-Actions/sccache-action@v0.0.9
 
       - name: Pre-build Nix development shell
@@ -108,7 +131,7 @@ jobs:
       # All downloads should be cached. If there is a cache miss, we should ensure that the cache
       # contains all downloads.
       - name: Prefetch Cargo downloads
-        if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main' 
+        if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main'
         run: find . -iname Cargo.lock -execdir cargo fetch \;
 
       - name: Build dependencies
@@ -125,7 +148,6 @@ jobs:
           files: src/riscv/codecov.json
           fail_ci_if_error: true
 
-
       - name: Save Rustup and Cargo cache
         if: github.ref_name == 'main'
         uses: actions/cache/save@v4.3.0
@@ -137,7 +159,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-      
+
       # Only when the primary-key cache was not found do we actually produce a cache. In that case
       # we need to clean up the Nix store a little to save space.
       - name: Clean up Nix store
