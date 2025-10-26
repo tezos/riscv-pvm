@@ -3,4 +3,4 @@ let
 
   pkgs = inputs.nixpkgs.legacyPackages.${builtins.currentSystem};
 in
-  pkgs.callPackage ./nix/env.nix {}
+pkgs.callPackage ./nix/env.nix { }

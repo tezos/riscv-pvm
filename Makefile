@@ -23,6 +23,9 @@ clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean 
 audit:
 	@cargo audit
 
+check-nix:
+	@nix fmt
+
 ### Target proxies
 
 riscv/%: 
