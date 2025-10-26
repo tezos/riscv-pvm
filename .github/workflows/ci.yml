@@ -28,6 +28,9 @@ env:
   # Make sure Sccache automatically uses the GitHub Actions cache
   SCCACHE_GHA_ENABLED: "true"
 
+  # Ensure the Nix formatter fails on changes
+  TREEFMT_CI: "true"
+
 jobs:
   run-make-target:
     strategy:
@@ -35,7 +38,7 @@ jobs:
       matrix:
         include:
           - runs-on: ubuntu-latest
-            make-target: check build audit
+            make-target: check check-nix build audit
             title: Linux Checks
           - runs-on: ubuntu-latest
             make-target: test
