@@ -39,6 +39,7 @@ jobs:
             title: Linux Checks
           - runs-on: ubuntu-latest
             make-target: test
+            disk-cleanup: true
             title: Linux Tests
           - runs-on: ubuntu-latest
             make-target: riscv/codecov.json
@@ -53,6 +54,7 @@ jobs:
 
     steps:
       - name: Aggressive cleanup
+        if: matrix.disk-cleanup
         run: |
           # Remove Java (JDKs)
           sudo rm -rf /usr/lib/jvm
