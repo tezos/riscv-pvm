@@ -725,7 +725,7 @@ pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
 
 #[cfg(test)]
 mod tests {
-    use arbitrary_int::Number;
+    use arbitrary_int::traits::Integer;
     use strum::IntoEnumIterator;
 
     use super::*;
