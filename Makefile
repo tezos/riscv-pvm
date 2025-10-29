@@ -10,13 +10,13 @@ build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check
+check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check check-format
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
 test: riscv/test jstz/test etherlink/test
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
+clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean 
 
 ### Specific top-level targets
 
@@ -25,6 +25,11 @@ audit:
 
 check-nix:
 	@nix fmt
+
+check-format: taplo-check-format
+	
+taplo-check-format:
+	@taplo format --check
 
 ### Target proxies
 

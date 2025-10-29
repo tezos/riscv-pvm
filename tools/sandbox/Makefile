@@ -17,7 +17,7 @@ riscv-sandbox: cargo-build-sandbox-release
 riscv-sandbox.prof: cargo-build-sandbox-profiling
 	@ln -f ../../target/profiling/riscv-sandbox $@
 
-check: cargo-format cargo-check cargo-clippy taplo-format
+check: cargo-format cargo-check cargo-clippy
 
 clean:
 	@cargo clean
@@ -39,9 +39,6 @@ cargo-check:
 
 cargo-clippy:
 	@cargo clippy --all-targets -- --deny warnings
-
-taplo-format:
-	@taplo format Cargo.toml
 
 # Mark all targets as phony to make sure they're always executed
 .PHONY: all $(MAKECMDGOALS)

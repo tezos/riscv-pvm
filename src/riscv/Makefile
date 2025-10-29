@@ -59,7 +59,6 @@ coverage:
 .PHONY: check
 check:
 	@exec ../../scripts/format.sh --all --check
-	@taplo format --check $(shell ls **/Cargo.toml)
 
 	@cargo update --workspace --locked
 	@cargo check --workspace --all-targets
