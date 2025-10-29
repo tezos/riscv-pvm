@@ -50,4 +50,4 @@ assets/%:
 	@make -C assets ${@:assets/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check audit build test clean 
+.PHONY: all build-deps build-deps-slim check check-nix audit build test clean 
