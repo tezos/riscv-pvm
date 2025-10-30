@@ -7,6 +7,7 @@
 #![cfg(test)]
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::fmt;
 
 use proptest::prelude::Just;
@@ -25,7 +26,7 @@ use crate::jit::builder::control_flow_graph::Target;
 use crate::jit::builder::instruction::OutcomeProbability;
 
 /// Action associated with a test instruction outcome
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum TestInstrPostAction {
     /// Jump relative to the current program counter
     RelativeJump(i64),
@@ -63,6 +64,10 @@ struct TestInstrOutcome {
     /// Extra amount to increment the step counter if the program
     /// exits after executing this outcome.
     exit_delta: Cell<usize>,
+
+    /// The maximum number of steps that will be taken before another budget
+    /// check or exit will definitely occur.
+    budget_check: Cell<usize>,
 }
 
 impl TestInstrOutcome {
@@ -100,6 +105,7 @@ impl TestInstr {
                 probability: OutcomeProbability::Guaranteed,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
+                budget_check: Cell::new(1),
             }],
         }
     }
@@ -113,12 +119,14 @@ impl TestInstr {
                     probability: OutcomeProbability::High,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
+                    budget_check: Cell::new(1),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::Exit,
                     probability: OutcomeProbability::Low,
                     step_delta: Cell::new(0),
                     exit_delta: Cell::new(0),
+                    budget_check: Cell::new(1),
                 },
             ],
         }
@@ -141,12 +149,14 @@ impl TestInstr {
                     probability: probability_next,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
+                    budget_check: Cell::new(1),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(offset),
                     probability: probability_branch,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
+                    budget_check: Cell::new(1),
                 },
             ],
         }
@@ -160,6 +170,7 @@ impl TestInstr {
                 probability: OutcomeProbability::Guaranteed,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
+                budget_check: Cell::new(1),
             }],
         }
     }
@@ -217,16 +228,21 @@ fn program_strat() -> impl Strategy<Value = Vec<TestInstr>> {
 /// * `start`: Address of the first instruction in the program
 /// * `program`: Sequence of instructions to execute
 /// * `max_steps`: Maximum number of steps to execute (not exact, only to stop runaway programs)
+/// * `check_cycles`: Whether to check for cycles in execution without budget checks
 fn evaluate_program(
     seed: u64,
     mut pc: u64,
     start: u64,
     program: &[TestInstr],
     max_steps: usize,
+    check_cycles: bool,
 ) -> (usize, u64) {
     let mut steps = 0;
     let mut exit_steps = 0;
     let mut rng = StdRng::seed_from_u64(seed);
+
+    // Track the set of nodes seen since the last budget check.
+    let mut nodes_seen = HashSet::new();
 
     // We use a conditional loop break to not mess with how step counters are updated. For example,
     // if we are exact about the number of steps being run, we might exit the sequence earlier than
@@ -242,6 +258,18 @@ fn evaluate_program(
 
         let instr = &program[index as usize];
         let outcome = instr.run(&mut rng);
+
+        if check_cycles {
+            // Ensure we have not seen this node since the last budget check.
+            assert!(!nodes_seen.contains(&index));
+            nodes_seen.insert(index);
+
+            match outcome.budget_check.get() {
+                0 => {}
+                1 => nodes_seen.clear(),
+                n => panic!("invalid budget check value: {n}"),
+            }
+        }
 
         steps = steps
             .checked_add(outcome.step_delta.get())
@@ -260,16 +288,10 @@ fn evaluate_program(
     (steps, pc)
 }
 
-/// Run a program with sparse step counting.
-fn run_sparse_program(
-    seed: u64,
-    start: u64,
-    program: &[TestInstr],
-    max_steps: usize,
-) -> (usize, u64) {
-    // Analysis is performed on a slightly different representation of the program. So we need
-    // to transform it.
-    let infos = program
+/// Graph analysis is performed on a slightly different representation of the program.
+/// This function transforms the test program into that representation.
+fn transform_program_type(program: &[TestInstr], start: u64) -> Vec<NodeInfo<&TestInstrOutcome>> {
+    program
         .iter()
         .enumerate()
         .map(|(index, instr)| {
@@ -287,8 +309,17 @@ fn run_sparse_program(
                 outgoing,
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
 
+/// Run a program with sparse step counting.
+fn run_sparse_program(
+    seed: u64,
+    start: u64,
+    program: &[TestInstr],
+    max_steps: usize,
+) -> (usize, u64) {
+    let infos = transform_program_type(program, start);
     let graph = ControlFlowGraph::new(infos.iter());
     let step_updates = graph.find_step_counter_updates();
 
@@ -317,7 +348,7 @@ fn run_sparse_program(
         outcome.exit_delta.set(update.exit_delta);
     }
 
-    evaluate_program(seed, start, start, program, max_steps)
+    evaluate_program(seed, start, start, program, max_steps, false)
 }
 
 /// This test generates random programs and ensures that sparse step counting (i.e. not for every
@@ -341,10 +372,10 @@ fn random_program_step_counting() {
         // step counting and step budget checks, we can only guarantee that step counting is
         // accurate and we don't overrun the step budget. Performing a precise number of steps
         // is not universally possible.
-        let (steps, pc) = evaluate_program(seed, start, start, &program, sparse_steps);
+        let (steps, pc) = evaluate_program(seed, start, start, &program, sparse_steps, false);
 
-        prop_assert_eq!(steps, sparse_steps);
-        prop_assert_eq!(pc, sparse_pc);
+        prop_assert_eq!(steps, sparse_steps, "step counts do not match.");
+        prop_assert_eq!(pc, sparse_pc, "program counters do not match.");
 
         Ok(())
     }
@@ -390,4 +421,91 @@ fn finishes_on_mid_sequence_recursion() {
 
     assert_eq!(steps, 101);
     assert_eq!(pc, 0x1001);
+}
+
+/// This test generates random programs and ensures that there are no cycles in the execution
+/// that do not include a budget check. We do this by tracking the nodes seen as we traverse in
+/// a HashSet, and clearing the set when we hit a budget check. If we ever see a node twice
+/// without hitting a budget check, we have a cycle.
+#[test]
+fn test_no_cycles_without_budget_checks() {
+    // The `proptest!` macro prevents formatting. Defining this function outside of the macro means
+    // we get formatting. We call this function from inside the macro.
+    fn inner(
+        seed: u64,
+        start: u64,
+        program: Vec<TestInstr>,
+        max_steps: usize,
+    ) -> Result<(), TestCaseError> {
+        let infos = transform_program_type(&program, start);
+
+        // Build the CFG and find the locations of budget checks.
+        let graph = ControlFlowGraph::new(infos.iter());
+        let bc_locations = graph.find_budget_check_locations();
+
+        // Ensure there are no budget-checks by default in the sparse program. The goal is to insert
+        // budget-check operations at the identified locations so they are hit least often.
+        for instr in program.iter() {
+            for outcome in instr.outcomes.iter() {
+                outcome.budget_check.set(0);
+            }
+        }
+
+        for (_, outcome) in bc_locations.iter() {
+            if let Some(bc) = outcome.data() {
+                bc.edge().info.budget_check.set(1);
+            }
+        }
+
+        evaluate_program(seed, start, start, &program, max_steps, true);
+
+        Ok(())
+    }
+
+    proptest::proptest! {
+        |(
+            seed: u64,
+            start: u64,
+            program in program_strat(),
+            max_steps in 1..1000usize,
+        )| {
+            inner(seed, start, program, max_steps)?;
+        }
+    }
+}
+
+/// In this program, the BC should be placed on the final jump back edge.
+/// (0) `next` -> (1) `next` -> (2) `next` -> (3) `next` -> (4) `jump backward` -> (1).
+///
+/// If the branch priorities were not taken into account, the BC could be placed
+/// on the second instruction's `next` outcome, if the path traversed was
+/// (0) `branch forward` -> (2) `next` -> (3) `jump backward 2` -> (1) next` -> (2).
+#[test]
+fn test_budget_check_locations_based_on_branch_probability() {
+    let program = [
+        TestInstr::branch_or_next(2), // unlikely branch forward
+        TestInstr::next(),
+        TestInstr::next(),
+        TestInstr::jump(-2), // likely branch backward
+    ];
+    let start = 0x1000u64;
+
+    let infos = transform_program_type(&program, start);
+
+    let graph = ControlFlowGraph::new(infos.iter());
+    let bc_locations = graph.find_budget_check_locations();
+
+    // assert only one budget check location.
+    let num_bc_locations = bc_locations
+        .iter()
+        .filter(|(_, outcome)| outcome.data().is_some())
+        .count();
+    assert_eq!(num_bc_locations, 1);
+
+    for (_, outcome) in bc_locations.iter() {
+        if let Some(bc) = outcome.data() {
+            // Ensure the budget check is on the final jump back edge.
+            assert_eq!(bc.edge().info.action, TestInstrPostAction::RelativeJump(-2));
+        }
+    }
 }

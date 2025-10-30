@@ -16,10 +16,14 @@
 
 use std::collections::VecDeque;
 
+use itertools::Itertools;
+
+use crate::jit::builder::instr_map::InstrId;
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
 use crate::jit::builder::instruction::OutcomeProbability;
 use crate::jit::builder::outcome_map::Graph;
+use crate::jit::builder::outcome_map::OutcomeId;
 use crate::jit::builder::outcome_map::OutcomeMap;
 use crate::jit::builder::outcome_map::OutcomeMapBuilder;
 use crate::jit::builder::outcome_map::SourceInstrLoc;
@@ -111,6 +115,22 @@ impl<'info, T> StepCounterUpdate<'info, T> {
     }
 
     /// Information about the edge where the step counter needs updating.
+    pub fn edge(&self) -> &'info DirectedEdgeInfo<T> {
+        self.edge
+    }
+}
+
+/// The location of a budget-check. Any budget-check point allows for
+/// an exit of the sequence.
+#[derive(Debug)]
+pub struct BudgetCheckLoc<'info, T> {
+    // TODO: RV-812: fallback to interpreter at budget-check locations if
+    // budget check fails.
+    edge: &'info DirectedEdgeInfo<T>,
+}
+
+impl<'info, T> BudgetCheckLoc<'info, T> {
+    /// Information about the edge where the budget check occurs.
     pub fn edge(&self) -> &'info DirectedEdgeInfo<T> {
         self.edge
     }
@@ -252,6 +272,81 @@ where
 
         step_updates
     }
+
+    /// Get outgoing outcomes from a node, sorted by probability, with most probable first.
+    fn sorted_outgoings(&self, source_node: InstrId) -> impl Iterator<Item = &OutcomeId> {
+        self.graph
+            .outgoing_outcomes(SourceInstrLoc::Internal(source_node))
+            .iter()
+            .sorted_by_key(|child_outcome| {
+                self.outcomes[**child_outcome]
+                    .data()
+                    .expect("All outgoings from a node must have associated outcome data.")
+                    .probability
+            })
+    }
+
+    /// Iterative DFS to detect cycles in the control flow graph.
+    /// Marks edges that close cycles as budget check locations.
+    pub fn find_budget_check_locations(&self) -> OutcomeMap<Option<BudgetCheckLoc<'_, T>>> {
+        let mut budget_checks = self.outcomes.map(|_, _| None);
+        let mut nodes = self.nodes.map(|_, _| NodeState::Unchecked);
+
+        let mut work_stack = self
+            .graph
+            .outgoing_outcomes(SourceInstrLoc::Entry)
+            .iter()
+            .filter_map(|outcome| {
+                self.outcomes[*outcome]
+                    .to()
+                    .as_internal()
+                    .map(|&node_id| (node_id, self.sorted_outgoings(node_id)))
+            })
+            .collect_vec();
+
+        while let Some((node_id, mut child_outcomes)) = work_stack.pop() {
+            nodes[node_id] = NodeState::Checking;
+
+            let Some(child_outcome) = child_outcomes.next() else {
+                // All children processed, mark node as visited.
+                nodes[node_id] = NodeState::Checked;
+                continue;
+            };
+
+            // Push the current node back onto the stack to process remaining children later.
+            work_stack.push((node_id, child_outcomes));
+
+            let child_node_id = match self.outcomes[*child_outcome].to() {
+                TargetInstrLoc::Internal(id) => id,
+                TargetInstrLoc::Exit => continue,
+            };
+
+            match nodes[child_node_id] {
+                NodeState::Checked => continue,
+                NodeState::Checking => {
+                    // we found a cycle. Mark this edge as a budget check.
+                    let loc_data = budget_checks[*child_outcome].data_mut();
+                    *loc_data = Some(BudgetCheckLoc {
+                        edge: self.outcomes[*child_outcome]
+                            .data()
+                            .expect("Internal edge must have edge info."),
+                    });
+                }
+                NodeState::Unchecked => {
+                    work_stack.push((child_node_id, self.sorted_outgoings(child_node_id)));
+                }
+            }
+        }
+
+        budget_checks
+    }
+}
+
+/// State of a node during DFS traversal for budget check detection.
+enum NodeState {
+    Unchecked,
+    Checking,
+    Checked,
 }
 
 // By convention, test modules are at the end of the file.
