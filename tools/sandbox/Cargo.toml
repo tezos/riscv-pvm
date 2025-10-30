@@ -1,7 +1,8 @@
 [package]
 name = "riscv-sandbox"
-version = "0.0.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 default-run = "riscv-sandbox"
 
 [[bin]]
