@@ -1192,10 +1192,13 @@ mod tests {
 
     use super::*;
     use crate::state_backend::Cells;
+    use crate::state_backend::CommitmentLayout;
+    use crate::state_backend::DynCells;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
+    use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const CELLS_SIZE: usize = 32;
@@ -1253,5 +1256,171 @@ mod tests {
                 <TestLayout as ProofLayout>::partial_state_hash(ref_verifier_state, ProofTree::Present(&merkle_proof)).is_ok()
             );
         })
+    }
+
+    /// Test the proof generation and verification for a computation against a dynamic region.
+    ///
+    /// # Safety
+    ///
+    /// The `test_proof` and `test_verify` function must be the same function instantiated to
+    /// different managers.
+    ///
+    /// Due to Rust's limitation on higher-ranked polymorphism, we can't accept
+    /// a single function and instantiate it within the function body with the respective managers
+    /// `ProofGen<_>` and `Verifier`. One could work around this restriction by using a trait to
+    /// simulate the rank-2-ness, but that means you can't provide closures as the implementation
+    /// any more. If any of the given `test_proof` or `test_verify` capture an environment, this
+    /// would no longer work.
+    unsafe fn test_dyn_array_with_funs(
+        len: usize,
+        test_proof: impl FnOnce(&mut DynCells<ProofGen<Ref<'_, Owned>>>),
+        test_verify: impl FnOnce(&mut DynCells<Verifier>),
+    ) {
+        let owned_cell = DynCells::new(len);
+
+        // We require the initial hash to ensure that the generated proof, but also the
+        // instantiated state from the proof match the "before" state.
+        let init_hash = {
+            let state_ref = owned_cell.struct_ref::<FnManagerIdent>();
+            DynArray::state_hash(state_ref).unwrap()
+        };
+
+        // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
+        // setup for proof generation. You can think of this as starting the recording for a proof.
+        let mut proof_cell = owned_cell.struct_ref::<ProofWrapper>();
+
+        test_proof(&mut proof_cell);
+
+        // The post-hash is required to ensure that the verifier's final state matches the prover's
+        // final state.
+        let post_hash = DynArray::state_hash(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
+
+        let tree = DynArray::to_merkle_tree(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
+        let proof_tree = tree.to_merkle_proof();
+        assert_eq!(proof_tree.root_hash(), init_hash);
+
+        // Instantiating the verifier state allows us to replay the computation and verify it does
+        // the right things.
+        let (mut verify_cell, out_proof) =
+            deserialise_owned::deserialise::<DynArray>(ProofTree::Present(&proof_tree)).unwrap();
+
+        let OwnedProofPart::Present(out_proof) = out_proof else {
+            panic!("Expected present proof");
+        };
+        assert_eq!(proof_tree, out_proof);
+
+        let out_proof_tree = ProofTree::Present(&out_proof);
+
+        // The initial verifier state must match that of the initial state against which we
+        // produced the proof.
+        let verifier_init_hash = {
+            let state_ref = verify_cell.struct_ref::<FnManagerIdent>();
+            DynArray::partial_state_hash(state_ref, out_proof_tree).unwrap()
+        };
+        assert_eq!(verifier_init_hash, init_hash);
+
+        test_verify(&mut verify_cell);
+
+        // Once we're doing replaying the computation on the verifier side, the final state must
+        // match that of the prover's. If not, that means we produced a proof that results in a
+        // transition that we did not intend to prove.
+        let verifier_post_hash = {
+            let state_ref = verify_cell.struct_ref::<FnManagerIdent>();
+            DynArray::partial_state_hash(state_ref, out_proof_tree).unwrap()
+        };
+        assert_eq!(verifier_post_hash, post_hash);
+    }
+
+    /// Generate a test for dynamic regions using a given size and closure which operates on the
+    /// [`DynCells`]. This effectively demonstrates that the actions performed by the given closure
+    /// can be proven and verified correctly.
+    macro_rules! test_dyn_array_with {
+        ($len:literal, | $param:ident | { $($body:tt)* }) => {
+            {
+                let test_proof = |$param: &mut DynCells<ProofGen<Ref<'_, Owned>>>| {
+                    $($body)*
+                };
+
+                let test_verify = |$param: &mut DynCells<Verifier>| {
+                    $($body)*
+                };
+
+                // SAFETY: This function is intended to be used only in this macro.
+                unsafe {
+                    test_dyn_array_with_funs($len, test_proof, test_verify);
+                }
+            }
+        };
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_nothing() {
+        test_dyn_array_with!(65536, |_cell| {});
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_read() {
+        proptest!(|(addr in 0..65528usize)| {
+            test_dyn_array_with!(65536, |cell| {
+                cell.read::<u64>(addr);
+            });
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_write() {
+        proptest!(|(addr in 0..65528usize, val: u64)| {
+            test_dyn_array_with!(65536, |cell| {
+                cell.write::<u64>(addr, val);
+            });
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_len() {
+        test_dyn_array_with!(65536, |cell| {
+            cell.len();
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_read_and_len() {
+        proptest!(|(addr in 0..65528usize)| {
+            test_dyn_array_with!(65536, |cell| {
+                cell.read::<u64>(addr);
+                cell.len();
+            });
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_write_and_len() {
+        proptest!(|(addr in 0..65528usize, val: u64)| {
+            test_dyn_array_with!(65536, |cell| {
+                cell.write::<u64>(addr, val);
+                cell.len();
+            });
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_read_and_write() {
+        proptest!(|(addr in 0..65528usize, val: u64)| {
+            test_dyn_array_with!(65536, |cell| {
+                let x = cell.read::<u64>(addr);
+                cell.write(addr, x.wrapping_add(val));
+            });
+        });
+    }
+
+    #[test]
+    fn test_dyn_array_proofs_read_and_write_and_len() {
+        proptest!(|(addr in 0..65528usize, val: u64)| {
+            test_dyn_array_with!(65536, |cell| {
+                let x = cell.read::<u64>(addr);
+                cell.write(addr, x.wrapping_add(val));
+                cell.len();
+            });
+        });
     }
 }
