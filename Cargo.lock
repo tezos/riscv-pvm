@@ -1699,6 +1699,9 @@ dependencies = [
 [[package]]
 name = "octez-riscv-data"
 version = "0.0.0"
+dependencies = [
+ "bincode",
+]
 
 [[package]]
 name = "octez-riscv-durable-storage"
