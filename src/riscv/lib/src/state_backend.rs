@@ -73,7 +73,6 @@
 pub mod clone_layout;
 mod commitment_layout;
 mod elems;
-pub mod hash;
 mod layout;
 pub mod owned_backend;
 pub mod proof_backend;
@@ -94,6 +93,7 @@ pub use clone_layout::*;
 pub use commitment_layout::*;
 pub use elems::*;
 pub use layout::*;
+pub use octez_riscv_data::hash;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;

@@ -3,4 +3,5 @@
 //
 // SPDX-License-Identifier: MIT
 
+pub mod hash;
 pub mod serialisation;
