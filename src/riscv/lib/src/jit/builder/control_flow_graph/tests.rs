@@ -12,6 +12,7 @@ use std::fmt;
 
 use proptest::prelude::Just;
 use proptest::prelude::Strategy;
+use proptest::prop_assert;
 use proptest::prop_assert_eq;
 use proptest::prop_oneof;
 use proptest::test_runner::TestCaseError;
@@ -219,24 +220,33 @@ fn program_strat() -> impl Strategy<Value = Vec<TestInstr>> {
     })
 }
 
-/// Evaluate a program consisting of test instructions.
+/// Evaluate a program consisting of test instructions. Enabling budget-checking
+/// enforces that the program does not exceed the maximum step count. All cycles
+/// in execution must include a budget check.
 ///
 /// # Arguments
 ///
 /// * `seed`: Seed for the random number generator to ensure consistent execution
 /// * `pc`: Initial program counter
 /// * `start`: Address of the first instruction in the program
+/// * `program_min_budget`: Minimum budget required to enter the program.
 /// * `program`: Sequence of instructions to execute
 /// * `max_steps`: Maximum number of steps to execute (not exact, only to stop runaway programs)
-/// * `check_cycles`: Whether to check for cycles in execution without budget checks
+/// * 'with_budget_checks': Whether to include budget checks in the program.
 fn evaluate_program(
     seed: u64,
     mut pc: u64,
     start: u64,
+    program_min_budget: usize,
     program: &[TestInstr],
     max_steps: usize,
-    check_cycles: bool,
+    with_budget_checks: bool,
 ) -> (usize, u64) {
+    if program_min_budget > max_steps {
+        // we can't enter the sequence if the minimum budget exceeds the maximum steps allowed.
+        return (0, pc);
+    }
+
     let mut steps = 0;
     let mut exit_steps = 0;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -259,15 +269,16 @@ fn evaluate_program(
         let instr = &program[index as usize];
         let outcome = instr.run(&mut rng);
 
-        if check_cycles {
-            // Ensure we have not seen this node since the last budget check.
-            assert!(!nodes_seen.contains(&index));
+        if with_budget_checks {
+            assert!(
+                !nodes_seen.contains(&index),
+                "cycle detected without budget check."
+            );
             nodes_seen.insert(index);
 
-            match outcome.budget_check.get() {
-                0 => {}
-                1 => nodes_seen.clear(),
-                n => panic!("invalid budget check value: {n}"),
+            if outcome.budget_check.get() > 0 {
+                // Clear the seen nodes if the outcome includes a budget check.
+                nodes_seen.clear();
             }
         }
 
@@ -280,6 +291,15 @@ fn evaluate_program(
         match outcome.action {
             TestInstrPostAction::RelativeJump(offset) => pc = pc.wrapping_add_signed(offset),
             TestInstrPostAction::Exit => break,
+        }
+
+        if with_budget_checks {
+            let required_budget = outcome.budget_check.get();
+            let steps_remaining = max_steps.saturating_sub(steps + exit_steps);
+            if required_budget > steps_remaining {
+                // Budget check has failed. Exit the program.
+                break;
+            }
         }
     }
 
@@ -313,15 +333,21 @@ fn transform_program_type(program: &[TestInstr], start: u64) -> Vec<NodeInfo<&Te
 }
 
 /// Run a program with sparse step counting.
+///
+/// `with_budget_checks` indicates whether budget checks should be included in the program.
 fn run_sparse_program(
     seed: u64,
     start: u64,
     program: &[TestInstr],
     max_steps: usize,
+    with_budget_checks: bool,
 ) -> (usize, u64) {
     let infos = transform_program_type(program, start);
     let graph = ControlFlowGraph::new(infos.iter());
-    let step_updates = graph.find_step_counter_updates();
+    let (step_updates, exit_deltas) = graph.find_step_counter_updates();
+
+    let mut min_budget = infos.len(); // Default budget if no budget checks are inserted.
+    let min_budget_ptr = &mut min_budget;
 
     // Ensure there is no step counting by default in the sparse program. The goal is to insert
     // the minimum number of step counter operations to get accurate step counting.
@@ -345,17 +371,57 @@ fn run_sparse_program(
         };
 
         outcome.step_delta.set(step_delta);
-        outcome.exit_delta.set(update.exit_delta);
+        if !with_budget_checks {
+            // If budget checks are not being inserted, we need to set the exit delta here.
+            outcome.exit_delta.set(update.exit_delta);
+        }
     }
 
-    evaluate_program(seed, start, start, program, max_steps, false)
+    if with_budget_checks {
+        let bc_locations = graph.find_budget_check_locations();
+        let seq_budget = graph.annotate_budget_checks(&bc_locations, &exit_deltas);
+        let min_budget = seq_budget.min_budget();
+        let budget_checks = seq_budget.budget_checks();
+
+        *min_budget_ptr = min_budget;
+
+        // Ensure there are no budget-checks by default in the sparse program.
+        for instr in program.iter() {
+            for outcome in instr.outcomes.iter() {
+                outcome.budget_check.set(0);
+            }
+        }
+
+        for (_, outcome) in budget_checks.iter() {
+            if let Some(bc) = outcome.data() {
+                let outcome = bc.edge().info;
+                outcome.budget_check.set(bc.budget());
+                outcome.exit_delta.set(bc.exit_delta());
+            }
+        }
+    }
+
+    evaluate_program(
+        seed,
+        start,
+        start,
+        min_budget,
+        program,
+        max_steps,
+        with_budget_checks,
+    )
 }
 
-/// This test generates random programs and ensures that sparse step counting (i.e. not for every
-/// instruction) produces accurate step counts. We validate this by running the same program with
-/// and without sparse step counting and ensuring that the results match.
+/// This test generates random programs to validate step-counting and budget-checking analysis.
+///
+/// It ensures that sparse step counting (i.e. not for every instruction) produces accurate step
+/// counts. We validate this by running the same program with and without sparse step counting
+/// and ensuring that the results match.
+///
+/// It also tests enabling budget checks, ensuring the program does not exceed the maximum step
+/// count and all cycles in execution include a budget check.
 #[test]
-fn random_program_step_counting() {
+fn random_program_validation() {
     // The `proptest!` macro prevents formatting. Defining this function outside of the macro means
     // we get formatting. We call this function from inside the macro.
     fn inner(
@@ -363,23 +429,41 @@ fn random_program_step_counting() {
         start: u64,
         program: Vec<TestInstr>,
         max_steps: usize,
+        with_budget_checks: bool,
     ) -> Result<(), TestCaseError> {
         let sparse_program = program.clone();
-        let (sparse_steps, sparse_pc) = run_sparse_program(seed, start, &sparse_program, max_steps);
+        let (sparse_steps, sparse_pc) =
+            run_sparse_program(seed, start, &sparse_program, max_steps, with_budget_checks);
 
         // We can't pass `max_steps` to the non-sparse evaluation mode. Step counting on its own
         // does not protect against overrunning the maximum step counter. Generally, with sparse
-        // step counting and step budget checks, we can only guarantee that step counting is
-        // accurate and we don't overrun the step budget. Performing a precise number of steps
-        // is not universally possible.
-        let (steps, pc) = evaluate_program(seed, start, start, &program, sparse_steps, false);
+        // step counting, we can only guarantee that step counting is accurate and we don't overrun
+        // the step budget. Performing a precise number of steps is not universally possible.
+        let (steps, pc) = evaluate_program(
+            seed,
+            start,
+            start,
+            sparse_steps,
+            &program,
+            sparse_steps,
+            with_budget_checks,
+        );
 
         prop_assert_eq!(steps, sparse_steps, "step counts do not match.");
         prop_assert_eq!(pc, sparse_pc, "program counters do not match.");
 
+        if with_budget_checks {
+            // Ensure that we never exceed the maximum step count when budget checks are enabled.
+            prop_assert!(
+                steps <= max_steps,
+                "step count exceeded maximum with budget checks enabled."
+            );
+        }
+
         Ok(())
     }
 
+    // Test with budget checks disabled.
     proptest::proptest! {
         |(
             seed: u64,
@@ -387,21 +471,34 @@ fn random_program_step_counting() {
             program in program_strat(),
             max_steps in 1..1000usize,
         )| {
-            inner(seed, start, program, max_steps)?;
+            inner(seed, start, program, max_steps, false)?;
+        }
+    }
+
+    // Test with budget checks enabled.
+    proptest::proptest! {
+        |(
+            seed: u64,
+            start: u64,
+            program in program_strat(),
+            max_steps in 1..1000usize,
+        )| {
+            inner(seed, start, program, max_steps, true)?;
         }
     }
 }
 
 #[test]
 fn finishes_on_entry_recursion() {
-    let (steps, pc) = run_sparse_program(
-        0,
-        0x1000u64,
-        &[TestInstr::next(), TestInstr::next(), TestInstr::jump(-2)],
-        100,
-    );
+    let program = [TestInstr::next(), TestInstr::next(), TestInstr::jump(-2)];
+    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100, false);
 
     assert_eq!(steps, 102);
+    assert_eq!(pc, 0x1000);
+
+    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100, true);
+
+    assert_eq!(steps, 99);
     assert_eq!(pc, 0x1000);
 }
 
@@ -410,7 +507,7 @@ fn finishes_on_mid_sequence_recursion() {
     let program = [TestInstr::next(), TestInstr::next(), TestInstr::jump(-1)];
 
     // perform analysis and run the program.
-    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100);
+    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100, false);
 
     // Ensure the step counting analysis inserted the expected step counter updates.
     // In this case, we only expect a step counter update on the jump back to the previous
@@ -421,64 +518,20 @@ fn finishes_on_mid_sequence_recursion() {
 
     assert_eq!(steps, 101);
     assert_eq!(pc, 0x1001);
-}
 
-/// This test generates random programs and ensures that there are no cycles in the execution
-/// that do not include a budget check. We do this by tracking the nodes seen as we traverse in
-/// a HashSet, and clearing the set when we hit a budget check. If we ever see a node twice
-/// without hitting a budget check, we have a cycle.
-#[test]
-fn test_no_cycles_without_budget_checks() {
-    // The `proptest!` macro prevents formatting. Defining this function outside of the macro means
-    // we get formatting. We call this function from inside the macro.
-    fn inner(
-        seed: u64,
-        start: u64,
-        program: Vec<TestInstr>,
-        max_steps: usize,
-    ) -> Result<(), TestCaseError> {
-        let infos = transform_program_type(&program, start);
+    let (steps, pc) = run_sparse_program(0, 0x1000u64, &program, 100, true);
 
-        // Build the CFG and find the locations of budget checks.
-        let graph = ControlFlowGraph::new(infos.iter());
-        let bc_locations = graph.find_budget_check_locations();
-
-        // Ensure there are no budget-checks by default in the sparse program. The goal is to insert
-        // budget-check operations at the identified locations so they are hit least often.
-        for instr in program.iter() {
-            for outcome in instr.outcomes.iter() {
-                outcome.budget_check.set(0);
-            }
-        }
-
-        for (_, outcome) in bc_locations.iter() {
-            if let Some(bc) = outcome.data() {
-                bc.edge().info.budget_check.set(1);
-            }
-        }
-
-        evaluate_program(seed, start, start, &program, max_steps, true);
-
-        Ok(())
-    }
-
-    proptest::proptest! {
-        |(
-            seed: u64,
-            start: u64,
-            program in program_strat(),
-            max_steps in 1..1000usize,
-        )| {
-            inner(seed, start, program, max_steps)?;
-        }
-    }
+    assert_eq!(steps, 99);
+    assert_eq!(pc, 4097);
 }
 
 /// In this program, the BC should be placed on the final jump back edge.
-/// (0) `next` -> (1) `next` -> (2) `next` -> (3) `next` -> (4) `jump backward` -> (1).
+///
+/// (0) `fallthrough` -> (1) `next` -> (2) `next` -> (3) `jump backward` -> (1).
 ///
 /// If the branch priorities were not taken into account, the BC could be placed
 /// on the second instruction's `next` outcome, if the path traversed was
+///
 /// (0) `branch forward` -> (2) `next` -> (3) `jump backward 2` -> (1) next` -> (2).
 #[test]
 fn test_budget_check_locations_based_on_branch_probability() {
