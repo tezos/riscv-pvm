@@ -136,6 +136,41 @@ impl<'info, T> BudgetCheckLoc<'info, T> {
     }
 }
 
+/// Information about a step budget check.
+///
+/// A budget is the maximum number of steps that can be taken from this point
+/// before having the opportunity to exit again. This would be either by reaching
+/// another budget-check point (which would exit if the budget is greater than
+/// the remaining steps), or by reaching a direct exit point.
+#[derive(Debug)]
+pub struct BudgetCheck<'info, T> {
+    /// Number of steps that may be run from this point, before another budget check takes place.
+    budget: usize,
+    /// The uncommitted step-count upon taking this edge.
+    /// If the program exits after this outcome, the step counter must be further increased by this
+    /// amount, as subsequent step-counter updates will not fire.
+    exit_delta: usize,
+    /// Edge where the budget check occurs.
+    edge: &'info DirectedEdgeInfo<T>,
+}
+
+impl<'info, T> BudgetCheck<'info, T> {
+    /// Returns the budget associated with this budget check.
+    pub fn budget(&self) -> usize {
+        self.budget
+    }
+
+    /// Returns the uncommitted step-count upon taking this edge.
+    pub fn exit_delta(&self) -> usize {
+        self.exit_delta
+    }
+
+    /// Returns the edge where the budget check occurs.
+    pub fn edge(&self) -> &'info DirectedEdgeInfo<T> {
+        self.edge
+    }
+}
+
 /// Control flow graph of instructions
 #[derive(Debug)]
 pub struct ControlFlowGraph<'info, T> {
@@ -210,14 +245,21 @@ where
         }
     }
 
-    /// Find all the edges where the step counter needs updating.
-    pub fn find_step_counter_updates(&self) -> OutcomeMap<Option<StepCounterUpdate<'_, T>>> {
+    /// Find all the edges where the step counter needs updating and the uncommitted step-count after
+    /// every transition.
+    pub fn find_step_counter_updates(
+        &self,
+    ) -> (
+        OutcomeMap<Option<StepCounterUpdate<'_, T>>>,
+        OutcomeMap<usize>,
+    ) {
         // The delta is the number of steps performed since the last StepCounterUpdate.
         // 0 means the step counter was updated through an incoming edge.
         // None means the value has not been computed yet.
         let mut instr_deltas: InstrMap<Option<usize>> = self.nodes.map(|_, _| None);
 
         let mut step_updates = self.outcomes.map(|_, _| None);
+        let mut exit_deltas = self.outcomes.map(|_, _| 0usize);
 
         let mut outcome_queue =
             VecDeque::from(self.graph.outgoing_outcomes(SourceInstrLoc::Entry).to_vec());
@@ -256,10 +298,12 @@ where
                         };
 
                         *step_updates[outcome_id].data_mut() = Some(sc_update);
+                        *exit_deltas[outcome_id].data_mut() = existing_delta;
                     }
                     None => {
-                        instr_deltas[dest_id] =
-                            Some(source_delta.map_or(0, |delta| delta.wrapping_add(1)));
+                        let dest_delta = source_delta.map_or(0, |delta| delta.wrapping_add(1));
+                        instr_deltas[dest_id] = Some(dest_delta);
+                        *exit_deltas[outcome_id].data_mut() = dest_delta;
 
                         outcome_queue.extend(
                             self.graph
@@ -270,7 +314,7 @@ where
             }
         }
 
-        step_updates
+        (step_updates, exit_deltas)
     }
 
     /// Get outgoing outcomes from a node, sorted by probability, with most probable first.
@@ -340,6 +384,107 @@ where
 
         budget_checks
     }
+
+    /// Find the budget required for each node to guarantee reaching either an exit or a budget check.
+    fn calculate_node_budgets(
+        &self,
+        bc_locations: &OutcomeMap<Option<BudgetCheckLoc<'info, T>>>,
+    ) -> InstrMap<Option<usize>> {
+        let mut budgets = self.nodes.map(|_, _| None);
+
+        let mut work_stack = self
+            .graph
+            .outgoing_outcomes(SourceInstrLoc::Entry)
+            .iter()
+            .filter_map(|outcome| {
+                let &node_id = self.outcomes[*outcome].to().as_internal()?;
+                let work_item = (node_id, self.sorted_outgoings(node_id).collect_vec());
+                Some(work_item)
+            })
+            .collect_vec();
+
+        while let Some((node_id, child_outcomes)) = work_stack.pop() {
+            let mut max_budget = 1;
+            for &&child_outcome in &child_outcomes {
+                if bc_locations[child_outcome].data().is_some() {
+                    // Budget check edge, budget is 1.
+                    continue;
+                }
+
+                let child_node_id = match self.outcomes[child_outcome].to() {
+                    TargetInstrLoc::Internal(id) => id,
+                    TargetInstrLoc::Exit => {
+                        continue;
+                    }
+                };
+
+                match budgets[child_node_id] {
+                    Some(child_budget) => {
+                        max_budget = max_budget.max(1 + child_budget);
+                    }
+                    None => {
+                        // A child node's budget has not yet been computed.
+                        // Push the current node back onto the stack, followed by the child node.
+                        // This ensures the child's budget is computed first before returning
+                        // to process the current node.
+                        //
+                        // Infinite loops are avoided because cycles in the graph are broken by
+                        // budget check edges. A node will not appear on the stack more than once.
+                        work_stack.push((node_id, child_outcomes));
+                        work_stack.push((
+                            child_node_id,
+                            self.sorted_outgoings(child_node_id).collect_vec(),
+                        ));
+                        break;
+                    }
+                }
+            }
+
+            budgets[node_id] = Some(max_budget);
+        }
+
+        budgets
+    }
+
+    /// Fill in budgets at the given budget check locations, returning the calculated values
+    /// along with the minimum budget for entering the sequence.
+    pub fn annotate_budget_checks(
+        &self,
+        bc_locations: &OutcomeMap<Option<BudgetCheckLoc<'info, T>>>,
+        exit_deltas: &OutcomeMap<usize>,
+    ) -> SequenceBudget<'info, T> {
+        let budgets = self.calculate_node_budgets(bc_locations);
+
+        // The minimum starting budget is the maximum budget across all entry nodes, which is only
+        // one node in the current design.
+        let min_budget = self
+            .graph
+            .outgoing_outcomes(SourceInstrLoc::Entry)
+            .iter()
+            .filter_map(|&outcome| {
+                let &node_id = self.outcomes[outcome].to().as_internal()?;
+                budgets[node_id]
+            })
+            .max()
+            .expect("At least one entry point must exist.");
+
+        let budget_checks = bc_locations.map(|outcome_id, outcome| {
+            let bc_loc = outcome.data().as_ref()?;
+            let exit_delta = *exit_deltas[outcome_id].data();
+            let &node_id = self.outcomes[outcome_id].to().as_internal()?;
+            let budget_check = BudgetCheck {
+                budget: budgets[node_id]?,
+                exit_delta,
+                edge: bc_loc.edge(),
+            };
+            Some(budget_check)
+        });
+
+        SequenceBudget {
+            min_budget,
+            budget_checks,
+        }
+    }
 }
 
 /// State of a node during DFS traversal for budget check detection.
@@ -347,6 +492,24 @@ enum NodeState {
     Unchecked,
     Checking,
     Checked,
+}
+
+/// Budget information for a sequence of instructions.
+pub struct SequenceBudget<'info, T> {
+    min_budget: usize,
+    budget_checks: OutcomeMap<Option<BudgetCheck<'info, T>>>,
+}
+
+impl<T> SequenceBudget<'_, T> {
+    /// Get the minimum budget required for the entry to the sequence.
+    pub fn min_budget(&self) -> usize {
+        self.min_budget
+    }
+
+    /// Get the budget checks for the sequence.
+    pub fn budget_checks(&self) -> &OutcomeMap<Option<BudgetCheck<'_, T>>> {
+        &self.budget_checks
+    }
 }
 
 // By convention, test modules are at the end of the file.
