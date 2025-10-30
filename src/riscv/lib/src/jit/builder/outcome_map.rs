@@ -140,6 +140,16 @@ pub enum TargetInstrLoc {
     Exit,
 }
 
+impl TargetInstrLoc {
+    /// Retrieve target instruction id, unless the target is an exit.
+    pub fn as_internal(&self) -> Option<&InstrId> {
+        match self {
+            TargetInstrLoc::Internal(id) => Some(id),
+            TargetInstrLoc::Exit => None,
+        }
+    }
+}
+
 /// Graph with single direction edges
 ///
 /// These graphs can be used to represent either forward and backward control flow relationships
