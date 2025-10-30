@@ -9,3 +9,7 @@ workspace = true
 
 [dependencies]
 bincode.workspace = true
+blake3.workspace = true
+derive_more.workspace = true
+hex.workspace = true
+thiserror.workspace = true

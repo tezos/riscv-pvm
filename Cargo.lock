@@ -1701,6 +1701,10 @@ name = "octez-riscv-data"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "blake3",
+ "derive_more",
+ "hex",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

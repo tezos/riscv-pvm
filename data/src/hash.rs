@@ -3,7 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Common type for hashes
+//! Hashing
 
 use std::borrow::Borrow;
 use std::num::NonZeroUsize;
@@ -13,7 +13,7 @@ use bincode::Encode;
 use bincode::error::EncodeError;
 use thiserror::Error;
 
-use crate::storage::binary;
+use crate::serialisation as binary;
 
 #[derive(Error, Debug)]
 pub enum HashError {
@@ -187,10 +187,7 @@ impl std::io::Write for HashWriter {
 ///
 /// # Panics
 /// Panics if `arity < 2`.
-pub(crate) fn build_custom_merkle_hash(
-    arity: usize,
-    mut nodes: Vec<Hash>,
-) -> Result<Hash, HashError> {
+pub fn build_custom_merkle_hash(arity: usize, mut nodes: Vec<Hash>) -> Result<Hash, HashError> {
     assert!(arity >= 2, "Arity must be at least 2");
 
     if nodes.is_empty() {
