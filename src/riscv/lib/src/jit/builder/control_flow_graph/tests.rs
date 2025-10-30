@@ -22,6 +22,7 @@ use crate::jit::builder::control_flow_graph::ControlFlowGraph;
 use crate::jit::builder::control_flow_graph::DirectedEdgeInfo;
 use crate::jit::builder::control_flow_graph::NodeInfo;
 use crate::jit::builder::control_flow_graph::Target;
+use crate::jit::builder::instruction::OutcomeProbability;
 
 /// Action associated with a test instruction outcome
 #[derive(Clone)]
@@ -53,6 +54,9 @@ struct TestInstrOutcome {
     /// What to do after executing the instruction
     action: TestInstrPostAction,
 
+    /// Probability of the outcome occurring
+    probability: OutcomeProbability,
+
     /// Amount to increment the step counter by if this outcome is taken
     step_delta: Cell<usize>,
 
@@ -66,6 +70,7 @@ impl TestInstrOutcome {
     fn to_edge(&self, instr_pc: u64) -> DirectedEdgeInfo<&'_ Self> {
         DirectedEdgeInfo {
             target: self.action.to_target(instr_pc),
+            probability: self.probability,
             info: self,
         }
     }
@@ -92,6 +97,7 @@ impl TestInstr {
         Self {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(1),
+                probability: OutcomeProbability::Guaranteed,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
             }],
@@ -104,11 +110,13 @@ impl TestInstr {
             outcomes: vec![
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(1),
+                    probability: OutcomeProbability::High,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::Exit,
+                    probability: OutcomeProbability::Low,
                     step_delta: Cell::new(0),
                     exit_delta: Cell::new(0),
                 },
@@ -119,15 +127,24 @@ impl TestInstr {
     /// Construct an instruction that either branches to the given offset or goes to the next
     /// instruction.
     fn branch_or_next(offset: i64) -> Self {
+        // Ensure the branch is the likely outcome if it goes backwards, and the unlikely outcome
+        // if it goes forwards, as according to the RISC-V Specification Chapter 2.5 .
+        let (probability_next, probability_branch) = if offset > 0 {
+            (OutcomeProbability::High, OutcomeProbability::Low)
+        } else {
+            (OutcomeProbability::Low, OutcomeProbability::High)
+        };
         Self {
             outcomes: vec![
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(1),
+                    probability: probability_next,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
                 },
                 TestInstrOutcome {
                     action: TestInstrPostAction::RelativeJump(offset),
+                    probability: probability_branch,
                     step_delta: Cell::new(1),
                     exit_delta: Cell::new(0),
                 },
@@ -140,6 +157,7 @@ impl TestInstr {
         Self {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(offset),
+                probability: OutcomeProbability::Guaranteed,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
             }],
