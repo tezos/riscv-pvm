@@ -18,6 +18,7 @@ use std::collections::VecDeque;
 
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
+use crate::jit::builder::instruction::OutcomeProbability;
 use crate::jit::builder::outcome_map::Graph;
 use crate::jit::builder::outcome_map::OutcomeMap;
 use crate::jit::builder::outcome_map::OutcomeMapBuilder;
@@ -52,6 +53,9 @@ pub enum Target {
 pub struct DirectedEdgeInfo<Info> {
     /// Destination of the edge
     pub target: Target,
+
+    /// Probability of this outcome being taken.
+    pub probability: OutcomeProbability,
 
     /// Extra information about the edge, but not relevant to the analysis
     pub info: Info,

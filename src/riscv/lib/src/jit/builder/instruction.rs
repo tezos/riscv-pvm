@@ -55,6 +55,21 @@ use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
+/// Probability of taking an outcome of a particular instruction.
+///
+/// As detailed in RISC-V Control Transfer Instructions specification (2.5),
+/// backward-branches should be treated as likely taken, while forward-branches
+/// should be treated as likely not-taken. Also, exception handlers should be treated
+/// as likely not-taken (except for a few instructions, such as `ECall`, which are guaranteed to
+/// result in an exception).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OutcomeProbability {
+    Guaranteed,
+    High,
+    Low,
+}
+
 /// Instruction execution outcome
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum Outcome {
