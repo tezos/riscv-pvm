@@ -1,7 +1,9 @@
 [package]
 name = "analyse-jit-functions"
-version = "0.0.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
 
 [dependencies]
 anyhow.workspace = true
