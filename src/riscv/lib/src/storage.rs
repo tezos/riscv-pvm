@@ -3,7 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-pub(crate) mod binary;
 mod chunked_io;
 
 use std::io;
@@ -15,6 +14,7 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+pub use octez_riscv_data::serialisation as binary;
 use thiserror::Error;
 
 pub use crate::state_backend::hash::DIGEST_SIZE;

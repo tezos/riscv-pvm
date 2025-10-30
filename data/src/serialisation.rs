@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+//! Serialisation and deserialisation
+
 use std::io::Read;
 use std::io::Write;
 
@@ -22,13 +24,13 @@ const fn bincode_default() -> impl Config {
 }
 
 /// Deserialise a slice of bytes into a value of type `T`.
-pub(crate) fn deserialise<T: Decode<()>>(data: &[u8]) -> Result<T, DecodeError> {
+pub fn deserialise<T: Decode<()>>(data: &[u8]) -> Result<T, DecodeError> {
     let (value, _) = bincode::decode_from_slice(data, bincode_default())?;
     Ok(value)
 }
 
 /// Deserialise a value of type `T` from a byte source.
-pub(crate) fn deserialise_from<T: Decode<()>, R: Read>(source: &mut R) -> Result<T, DecodeError> {
+pub fn deserialise_from<T: Decode<()>, R: Read>(source: &mut R) -> Result<T, DecodeError> {
     bincode::decode_from_std_read(source, bincode_default())
 }
 
@@ -38,9 +40,6 @@ pub fn serialise<T: Encode>(value: T) -> Result<Vec<u8>, EncodeError> {
 }
 
 /// Serialize `T` into a sink.
-pub(crate) fn serialise_into<T: Encode, W: Write>(
-    value: T,
-    sink: &mut W,
-) -> Result<usize, EncodeError> {
+pub fn serialise_into<T: Encode, W: Write>(value: T, sink: &mut W) -> Result<usize, EncodeError> {
     bincode::encode_into_std_write(value, sink, bincode_default())
 }
