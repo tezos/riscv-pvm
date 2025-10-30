@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "src/riscv/lib",
   "durable-storage",
+  "data",
   "tools/sandbox",
   "tools/analyse-jit-functions",
   "test-utils",
@@ -117,6 +118,9 @@ default-features = false
 
 [workspace.dependencies.octez-riscv]
 path = "src/riscv/lib"
+
+[workspace.dependencies.octez-riscv-data]
+path = "data"
 
 [workspace.dependencies.octez-riscv-test-utils]
 path = "test-utils"

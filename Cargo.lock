@@ -1671,6 +1671,7 @@ dependencies = [
  "libsecp256k1",
  "memmap2",
  "num_enum",
+ "octez-riscv-data",
  "octez-riscv-test-utils",
  "paste",
  "perfect-derive",
@@ -1694,6 +1695,10 @@ dependencies = [
  "zerocopy",
  "zerocopy-derive",
 ]
+
+[[package]]
+name = "octez-riscv-data"
+version = "0.0.0"
 
 [[package]]
 name = "octez-riscv-durable-storage"
