@@ -261,55 +261,7 @@ where
         // Reset hart state & set pc to entrypoint
         self.machine_state.core.hart.reset(program.entrypoint);
 
-        let program_start = program.segments.keys().min().copied().unwrap_or(0);
-        let program_end = program
-            .segments
-            .iter()
-            .map(|(addr, data)| addr.saturating_add(data.len() as u64))
-            .max()
-            .unwrap_or(0);
-
-        let (main_memory, mut listener) = self.machine_state.memory_with_listener();
-
-        let program_length = program_end.saturating_sub(program_start) as usize;
-        if let Some(program_length) = NonZeroUsize::new(program_length) {
-            // Allow the program to be written to main memory
-            main_memory.protect_pages(
-                program_start,
-                program_length,
-                Permissions::WRITE,
-                &mut listener,
-            )?;
-
-            // Write program to main memory
-            for (&addr, data) in program.segments.iter() {
-                main_memory.write_all(addr, data)?;
-            }
-
-            // Remove access to the program that has just been placed into memory
-            main_memory.protect_pages(
-                program_start,
-                program_length,
-                Permissions::NONE,
-                &mut listener,
-            )?;
-        };
-
-        // Configure memory permissions using the ELF program headers, if present
-        if let Some(program_headers) = &program.program_headers {
-            for mem_perms in program_headers.permissions.iter() {
-                let Some(length) = NonZeroUsize::new(mem_perms.length as usize) else {
-                    continue;
-                };
-
-                main_memory.protect_pages(
-                    mem_perms.start_address,
-                    length,
-                    mem_perms.permissions,
-                    &mut listener,
-                )?;
-            }
-        }
+        let (program_start, program_end) = self.machine_state.setup_boot_program(program)?;
 
         // Other parts of the supervisor make use of program start and end to properly divide the
         // memory. These addresses need to be properly aligned.
