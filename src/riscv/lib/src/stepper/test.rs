@@ -122,11 +122,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
 
         stepper.machine_state.setup_boot_program(&elf_program)?;
 
-        let (main_memory, listener) = stepper.machine_state.memory_with_listener();
-        main_memory
-            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC, listener)
-            .unwrap();
-
         // Set booting Hart ID (a0) to 0
         stepper
             .machine_state
@@ -136,6 +131,19 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
             .write(registers::a0, 0);
 
         Ok((stepper, elf_program.parsed()))
+    }
+
+    /// Allows to override permissions for the entirety of memory.
+    ///
+    /// For certain tests, relying on permissions as given by the program headers
+    /// may not be sufficient. For these tests, it's required to be able to
+    /// set permissions more loosely.
+    #[cfg(test)]
+    pub fn set_all_read_write_exec(&mut self) {
+        let (main_memory, listener) = self.machine_state.memory_with_listener();
+        main_memory
+            .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC, listener)
+            .unwrap();
     }
 
     fn handle_step_result(
