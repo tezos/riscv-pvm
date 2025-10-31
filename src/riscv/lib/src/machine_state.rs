@@ -12,6 +12,7 @@ pub(crate) mod registers;
 pub(crate) mod reservation_set;
 
 use std::num::NonZeroU64;
+use std::num::NonZeroUsize;
 use std::ops::Bound;
 use std::ops::ControlFlow;
 
@@ -23,6 +24,7 @@ use memory::BadMemoryAccess;
 use memory::Memory;
 use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
+use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
@@ -574,22 +576,66 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     }
 
     /// Install a program and set the program counter to its start.
-    pub fn setup_boot(&mut self, program: &Program<MC>) -> Result<(), MachineError>
+    ///
+    /// Returns the `program_start` and `program_end`, if successful.
+    pub fn setup_boot_program(
+        &mut self,
+        program: &Program<MC>,
+    ) -> Result<(Address, Address), MachineError>
     where
         M: backend::ManagerReadWrite,
     {
-        // Reset hart state & set pc to entrypoint
-        self.core.hart.reset(program.entrypoint);
+        let program_start = program.segments.keys().min().copied().unwrap_or(0);
+        let program_end = program
+            .segments
+            .iter()
+            .map(|(addr, data)| addr.saturating_add(data.len() as u64))
+            .max()
+            .unwrap_or(0);
 
-        // Write program to main memory and point the PC at its start
-        for (addr, data) in program.segments.iter() {
-            self.core.main_memory.write_all(*addr, data)?;
+        let (main_memory, mut listener) = self.memory_with_listener();
+
+        let program_length = program_end.saturating_sub(program_start) as usize;
+        if let Some(program_length) = NonZeroUsize::new(program_length) {
+            // Allow the program to be written to main memory
+            main_memory.protect_pages(
+                program_start,
+                program_length,
+                Permissions::WRITE,
+                &mut listener,
+            )?;
+
+            // Write program to main memory
+            for (&addr, data) in program.segments.iter() {
+                main_memory.write_all(addr, data)?;
+            }
+
+            // Remove access to the program that has just been placed into memory
+            main_memory.protect_pages(
+                program_start,
+                program_length,
+                Permissions::NONE,
+                &mut listener,
+            )?;
+        };
+
+        // Configure memory permissions using the ELF program headers, if present
+        if let Some(program_headers) = &program.program_headers {
+            for mem_perms in program_headers.permissions.iter() {
+                let Some(length) = NonZeroUsize::new(mem_perms.length as usize) else {
+                    continue;
+                };
+
+                main_memory.protect_pages(
+                    mem_perms.start_address,
+                    length,
+                    mem_perms.permissions,
+                    &mut listener,
+                )?;
+            }
         }
 
-        // Set booting Hart ID (a0) to 0
-        self.core.hart.xregisters.write(registers::a0, 0);
-
-        Ok(())
+        Ok((program_start, program_end))
     }
 
     fn dispatch_signal_or_trap(&mut self, signal: Signal)

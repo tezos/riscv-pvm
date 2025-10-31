@@ -27,6 +27,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::Interpreted;
+use crate::machine_state::registers;
 use crate::program::Program;
 use crate::state::NewState;
 use crate::state_backend::owned_backend::Owned;
@@ -119,12 +120,20 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
         // The interpreter needs a program to run.
         let elf_program = Program::<MC>::from_elf(program)?;
 
+        stepper.machine_state.setup_boot_program(&elf_program)?;
+
         let (main_memory, listener) = stepper.machine_state.memory_with_listener();
         main_memory
             .protect_pages(0, MC::TOTAL_BYTES, Permissions::READ_WRITE_EXEC, listener)
             .unwrap();
 
-        stepper.machine_state.setup_boot(&elf_program)?;
+        // Set booting Hart ID (a0) to 0
+        stepper
+            .machine_state
+            .core
+            .hart
+            .xregisters
+            .write(registers::a0, 0);
 
         Ok((stepper, elf_program.parsed()))
     }
