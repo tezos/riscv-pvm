@@ -24,7 +24,17 @@ const TESTS_DIR: &str = "../../../assets/generated";
 const GOLDEN_DIR: &str = "tests/expected";
 const MAX_STEPS: usize = 1_000_000;
 
-fn run_test<CPE: CodePageEntry<M1M, Owned>>(path: &str, compiler: CPE::Compiler) -> CPE::Compiler {
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Permissions {
+    FromProgramHeaders,
+    Rwx,
+}
+
+fn run_test<CPE: CodePageEntry<M1M, Owned>>(
+    path: &str,
+    compiler: CPE::Compiler,
+    required_perms: Permissions,
+) -> CPE::Compiler {
     // Create a Mint instance: when it goes out of scope (at the end of interpret_test),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
@@ -34,6 +44,10 @@ fn run_test<CPE: CodePageEntry<M1M, Owned>>(path: &str, compiler: CPE::Compiler)
 
     let mut interpreter: TestStepper<M1M, CPE> =
         TestStepper::new(&contents, compiler).expect("Boot failed");
+
+    if required_perms == Permissions::Rwx {
+        interpreter.set_all_read_write_exec();
+    }
 
     let res = interpreter.step_max(Bound::Included(MAX_STEPS));
     // Record the result to compare to the expected result
@@ -59,39 +73,43 @@ fn run_test<CPE: CodePageEntry<M1M, Owned>>(path: &str, compiler: CPE::Compiler)
     interpreter.recover_builder()
 }
 
-fn interpret_test(path: &str) {
+fn interpret_test(path: &str, required_perms: Permissions) {
     let compiler = Default::default();
-    run_test::<Interpreted<M1M, Owned>>(path, compiler);
+    run_test::<Interpreted<M1M, Owned>>(path, compiler, required_perms);
 }
 
 /// For the JIT, we run it twice - the first run to build up the blocks, and the
 /// second to run with these blocks already compiled (so that we actually use them).
-fn inline_jit_test(path: &str) {
+fn inline_jit_test(path: &str, required_perms: Permissions) {
     type EntrypointImpl = Jitted<InlineCompiler<M1M>, M1M>;
 
     let compiler = Default::default();
-    let compiler = run_test::<EntrypointImpl>(path, compiler);
+    let compiler = run_test::<EntrypointImpl>(path, compiler, required_perms);
 
-    run_test::<EntrypointImpl>(path, compiler);
+    run_test::<EntrypointImpl>(path, compiler, required_perms);
 }
 
 macro_rules! test_case {
     // Run the test cases without specifying xregisters to check
     ($(#[$m:meta],)* $name: ident, $path: expr) => {
+        test_case!($(#[$m],)* $name, $path, Permissions::FromProgramHeaders);
+    };
+
+    ($(#[$m:meta],)* $name: ident, $path: expr, $required_perms: expr) => {
         paste! {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                interpret_test($path)
+                interpret_test($path, $required_perms)
             }
 
             #[test]
             $(#[$m])*
             fn [< $name _inline_jit >]() {
-                inline_jit_test($path)
+                inline_jit_test($path, $required_perms)
             }
         }
-    };
+    }
 }
 
 // RV64-UA
@@ -116,7 +134,7 @@ test_case!(test_suite_rv64ua_p_amoxor_w, "rv64ua-p-amoxor_w");
 test_case!(test_suite_rv64ua_p_lrsc, "rv64ua-p-lrsc");
 
 // RV64-UC
-test_case!(test_suite_rv64uc_p_rvc, "rv64uc-p-rvc");
+test_case!(test_suite_rv64uc_p_rvc, "rv64uc-p-rvc", Permissions::Rwx);
 
 // RV64-UD
 test_case!(test_suite_rv64ud_p_fadd, "rv64ud-p-fadd");
@@ -159,7 +177,11 @@ test_case!(test_suite_rv64ui_p_bgeu, "rv64ui-p-bgeu");
 test_case!(test_suite_rv64ui_p_blt, "rv64ui-p-blt");
 test_case!(test_suite_rv64ui_p_bltu, "rv64ui-p-bltu");
 test_case!(test_suite_rv64ui_p_bne, "rv64ui-p-bne");
-test_case!(test_suite_rv64ui_p_fence_i, "rv64ui-p-fence_i");
+test_case!(
+    test_suite_rv64ui_p_fence_i,
+    "rv64ui-p-fence_i",
+    Permissions::Rwx
+);
 test_case!(test_suite_rv64ui_p_jal, "rv64ui-p-jal");
 test_case!(test_suite_rv64ui_p_jalr, "rv64ui-p-jalr");
 test_case!(test_suite_rv64ui_p_lb, "rv64ui-p-lb");
