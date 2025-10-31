@@ -15,9 +15,6 @@ use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
-use crate::machine_state::registers::XRegister;
-use crate::machine_state::registers::XValue;
-use crate::state_backend::ManagerRead;
 use crate::state_backend::owned_backend::Owned;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
@@ -27,29 +24,8 @@ const TESTS_DIR: &str = "../../../assets/generated";
 const GOLDEN_DIR: &str = "tests/expected";
 const MAX_STEPS: usize = 1_000_000;
 
-fn check_register_values<S: Stepper>(stepper: &S, check_xregs: &[(XRegister, XValue)])
-where
-    S::Manager: ManagerRead,
-{
-    let failure = check_xregs
-        .iter()
-        .filter_map(|(xreg, xval)| {
-            let res = stepper.machine_state().hart.xregisters.read(*xreg);
-            (res != *xval).then(|| format!("\n- check {xreg} == {xval} | got {res}"))
-        })
-        .collect::<String>();
-
-    if !failure.is_empty() {
-        panic!("XRegisters conditions not satisfied: {failure}");
-    };
-}
-
-fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
-    path: &str,
-    check_xregs: &[(XRegister, u64)],
-    compiler: CPE::Compiler,
-) -> CPE::Compiler {
-    // Create a Mint instance: when it goes out of scope (at the end of interpret_test_with_check),
+fn run_test<CPE: CodePageEntry<M1M, Owned>>(path: &str, compiler: CPE::Compiler) -> CPE::Compiler {
+    // Create a Mint instance: when it goes out of scope (at the end of interpret_test),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
     let mut golden = mint.new_goldenfile(format!("{path}.out")).unwrap();
@@ -63,7 +39,7 @@ fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
     // Record the result to compare to the expected result
     writeln!(golden, "{res:?}").unwrap();
     match res {
-        Exit { code: 0, .. } => check_register_values(&interpreter, check_xregs),
+        Exit { code: 0, .. } => {}
         Exit { code, steps } => {
             panic!("Failed at test case: {} - Steps done: {}", code >> 1, steps)
         }
@@ -83,41 +59,36 @@ fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
     interpreter.recover_builder()
 }
 
-fn interpret_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
+fn interpret_test(path: &str) {
     let compiler = Default::default();
-    run_test_with_check::<Interpreted<M1M, Owned>>(path, check_xregs, compiler);
+    run_test::<Interpreted<M1M, Owned>>(path, compiler);
 }
 
 /// For the JIT, we run it twice - the first run to build up the blocks, and the
 /// second to run with these blocks already compiled (so that we actually use them).
-fn inline_jit_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
+fn inline_jit_test(path: &str) {
     type EntrypointImpl = Jitted<InlineCompiler<M1M>, M1M>;
 
     let compiler = Default::default();
-    let compiler = run_test_with_check::<EntrypointImpl>(path, check_xregs, compiler);
+    let compiler = run_test::<EntrypointImpl>(path, compiler);
 
-    run_test_with_check::<EntrypointImpl>(path, check_xregs, compiler);
+    run_test::<EntrypointImpl>(path, compiler);
 }
 
 macro_rules! test_case {
     // Run the test cases without specifying xregisters to check
     ($(#[$m:meta],)* $name: ident, $path: expr) => {
-        test_case!($(#[$m],)* $name, $path, &[]);
-    };
-
-    // Run the test cases, check xregisters
-    ($(#[$m:meta],)* $name: ident, $path: expr, $xchecks: expr) => {
         paste! {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                interpret_test_with_check($path, $xchecks)
+                interpret_test($path)
             }
 
             #[test]
             $(#[$m])*
             fn [< $name _inline_jit >]() {
-                inline_jit_test_with_check($path, $xchecks)
+                inline_jit_test($path)
             }
         }
     };
