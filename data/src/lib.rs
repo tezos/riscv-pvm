@@ -5,4 +5,5 @@
 
 pub mod clone;
 pub mod hash;
+pub mod mode;
 pub mod serialisation;
