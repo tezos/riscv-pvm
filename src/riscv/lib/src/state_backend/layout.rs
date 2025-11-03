@@ -164,8 +164,8 @@ macro_rules! struct_layout {
                 #[inline]
                 fn to_merkle_tree<'outer, 'inner: 'outer>(
                     state: $crate::state_backend::RefProveAlloc<'outer, 'inner, Self>,
-                ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, octez_riscv_data::hash::HashError> {
-                    Ok($crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
+                ) -> std::result::Result<octez_riscv_data::merkle_tree::MerkleTree, octez_riscv_data::hash::HashError> {
+                    Ok(octez_riscv_data::merkle_tree::MerkleTree::make_merkle_node(
                         vec![
                             $(
                                 [<$field_name:camel>]::to_merkle_tree(state.$field_name)?
@@ -316,6 +316,7 @@ mod tests {
     use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
 
@@ -393,7 +394,7 @@ mod tests {
             assert_eq!(hash, tree_root_hash);
 
             // Produce a proof
-            let proof = tree.to_merkle_proof();
+            let proof = merkle_tree_to_merkle_proof(tree);
             let proof_hash = proof.root_hash();
             assert_eq!(hash, proof_hash);
 

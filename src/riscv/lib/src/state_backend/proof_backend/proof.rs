@@ -12,7 +12,7 @@
 //!   * Tags which dictate the shape of the proof (a partial Merkle tree)
 //!   * Leaf contents
 //!
-//! - Convert [`super::merkle::MerkleTree`] to [`MerkleProof`]
+//! - Convert [`octez_riscv_data::merkle_tree::MerkleTree`] to [`MerkleProof`]
 
 use bincode::Encode;
 use bincode::enc::write::Writer;
@@ -90,7 +90,7 @@ impl Proof {
 /// so the number of children of a node and the sizes of the leaves
 /// do not need to be stored in either the proof or its encoding.
 ///
-/// [`MerkleTree`]: super::merkle::MerkleTree
+/// [`MerkleTree`]: octez_riscv_data::merkle_tree::MerkleTree
 pub type MerkleProof = Tree<MerkleProofLeaf>;
 
 impl bincode::Encode for MerkleProof {
@@ -137,7 +137,7 @@ pub enum MerkleProofLeaf {
     /// Contains the hash of the contents from initial state.
     ///
     /// Note: a blinded leaf can correspond to a blinded subtree
-    /// in a [`super::merkle::MerkleTree`] due to compression.
+    /// in a [`octez_riscv_data::merkle_tree::MerkleTree`] due to compression.
     Blind(Hash),
     /// A leaf that is read. It may also be written.
     /// Contains the read data from the initial state.

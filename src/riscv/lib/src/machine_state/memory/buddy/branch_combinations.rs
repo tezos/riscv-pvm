@@ -17,6 +17,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_tree::MerkleTree;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -38,7 +39,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
-use crate::state_backend::proof_backend::merkle::MerkleTree;
 
 /// Generate a new combined Buddy branch.
 macro_rules! combined_buddy_branch {

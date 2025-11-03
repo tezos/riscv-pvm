@@ -44,6 +44,7 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::ProofWrapper;
+use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -390,7 +391,7 @@ impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove
         let _ = self.input_request();
 
         let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof();
+        let merkle_proof = merkle_tree_to_merkle_proof(PvmLayout::<MC>::to_merkle_tree(refs)?);
 
         let final_hash = self.hash_state();
         let proof = Proof::new(merkle_proof, final_hash);

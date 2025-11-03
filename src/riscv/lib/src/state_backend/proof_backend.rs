@@ -12,7 +12,7 @@
 //! The structure of the Merkle tree is informed by the layout of the state,
 //! which needs to implement [`ProofLayout`].
 //!
-//! [`MerkleTree`]: merkle::MerkleTree
+//! [`MerkleTree`]: octez_riscv_data::merkle_tree::MerkleTree
 //! [`ProofLayout`]: super::ProofLayout
 
 use std::cell::Cell;
@@ -469,12 +469,12 @@ mod tests {
     use std::collections::VecDeque;
 
     use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
     use proptest::array;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
-    use tests::merkle::MerkleTree;
 
     use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
