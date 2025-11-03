@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024-2025 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -23,10 +24,7 @@ use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
-use perfect_derive::perfect_derive;
 
-use super::EnrichedValue;
-use super::EnrichedValueLinked;
 use super::FnManager;
 use super::ManagerBase;
 use super::ManagerRead;
@@ -52,19 +50,7 @@ impl<M: ManagerBase> ManagerBase for ProofGen<M> {
 
     type DynRegion<const LEN: usize> = ProofDynRegion<LEN, M>;
 
-    type EnrichedCell<V: EnrichedValue> = ProofEnrichedCell<V, M>;
-
     type ManagerRoot = Self;
-
-    fn enrich_cell<V: EnrichedValueLinked>(
-        underlying: Self::Region<V::E, 1>,
-    ) -> Self::EnrichedCell<V> {
-        ProofEnrichedCell { underlying }
-    }
-
-    fn as_devalued_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> &Self::Region<V::E, 1> {
-        &cell.underlying
-    }
 }
 
 impl<M: ManagerAlloc> ManagerAlloc for ProofGen<M> {
@@ -116,29 +102,6 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
             );
         }
     }
-
-    fn enriched_cell_read_stored<V>(cell: &Self::EnrichedCell<V>) -> V::E
-    where
-        V: EnrichedValue,
-        V::E: Copy,
-    {
-        Self::region_read(&cell.underlying, 0)
-    }
-
-    fn enriched_cell_read_derived<V>(cell: &Self::EnrichedCell<V>) -> V::D
-    where
-        V: EnrichedValueLinked,
-        V::D: Copy,
-    {
-        V::derive(Self::enriched_cell_ref_stored(cell))
-    }
-
-    fn enriched_cell_ref_stored<V>(cell: &Self::EnrichedCell<V>) -> &V::E
-    where
-        V: EnrichedValue,
-    {
-        Self::region_ref(&cell.underlying, 0)
-    }
 }
 
 /// Implementation of [`ManagerWrite`] which wraps another manager and
@@ -189,13 +152,6 @@ impl<M: ManagerBase> ManagerWrite for ProofGen<M> {
                 value,
             )
         }
-    }
-
-    fn enriched_cell_write<V>(cell: &mut Self::EnrichedCell<V>, value: V::E)
-    where
-        V: EnrichedValueLinked,
-    {
-        Self::region_write(&mut cell.underlying, 0, value);
     }
 }
 
@@ -300,14 +256,6 @@ impl<M: ManagerClone> ManagerClone for ProofGen<M> {
 
     fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
         region.clone()
-    }
-
-    fn clone_enriched_cell<V>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
-    where
-        V: EnrichedValue,
-        V::E: Clone,
-    {
-        cell.clone()
     }
 }
 
@@ -437,31 +385,6 @@ impl<const LEN: usize, M: ManagerClone> Clone for ProofDynRegion<LEN, M> {
             reads: self.reads.clone(),
             writes: self.writes.clone(),
         }
-    }
-}
-
-/// Proof enriched cell which wraps an enriched cell managed by another manager.
-///
-/// Similar to [`ManagerBase::Region`], a [`ManagerBase::EnrichedCell`] is never
-/// split across multiple leaves when Merkleised.
-/// The underlying cell is never mutated, but written values are recorded
-/// in order to preserve the integrity of subsequent reads.
-#[perfect_derive(Clone)]
-pub struct ProofEnrichedCell<V: EnrichedValue, M: ManagerBase> {
-    underlying: ProofRegion<V::E, 1, M>,
-}
-
-impl<V: EnrichedValue, M: ManagerBase> ProofEnrichedCell<V, M> {
-    /// Bind a pre-existing enriched cell.
-    pub fn bind(source: M::Region<V::E, 1>) -> Self {
-        Self {
-            underlying: ProofRegion::bind(source),
-        }
-    }
-
-    /// Get a copy of the access log.
-    pub fn get_access_info(&self) -> bool {
-        self.underlying.access.get()
     }
 }
 
@@ -753,51 +676,6 @@ mod tests {
                     }
                 }
             }
-        });
-    }
-
-    #[test]
-    fn test_proof_gen_enriched_cell() {
-        pub struct Enriching;
-
-        impl EnrichedValue for Enriching {
-            type E = u64;
-            type D = T;
-        }
-
-        #[derive(Clone, Copy, Debug, PartialEq)]
-        pub struct T(u64);
-
-        impl<'a> From<&'a u64> for T {
-            fn from(value: &'a u64) -> Self {
-                T(value.wrapping_add(1))
-            }
-        }
-
-        proptest!(|(value_before: u64, value_after: u64)| {
-            // A read followed by a write
-            let value = [value_before];
-            let mut proof_cell: ProofEnrichedCell<Enriching, Ref<'_, Owned>> = ProofEnrichedCell::bind(&value);
-            prop_assert!(!proof_cell.get_access_info());
-            let value = ProofGen::<Ref<'_, Owned>>::enriched_cell_read_stored(&proof_cell);
-            prop_assert_eq!(value, value_before);
-            let derived = ProofGen::<Ref<'_, Owned>>::enriched_cell_read_derived(&proof_cell);
-            prop_assert_eq!(derived, T::from(&value_before));
-            prop_assert!(proof_cell.get_access_info());
-            ProofGen::<Ref<'_, Owned>>::enriched_cell_write(&mut proof_cell, value_after);
-            prop_assert!(proof_cell.get_access_info());
-
-            // A write followed by a read
-            let value = [value_before];
-            let mut proof_cell: ProofEnrichedCell<Enriching, Ref<'_, Owned>> = ProofEnrichedCell::bind(&value);
-            prop_assert!(!proof_cell.get_access_info());
-            ProofGen::<Ref<'_, Owned>>::enriched_cell_write(&mut proof_cell, value_after);
-            prop_assert!(proof_cell.get_access_info());
-            let value = ProofGen::<Ref<'_, Owned>>::enriched_cell_read_stored(&proof_cell);
-            prop_assert_eq!(value, value_after);
-            let derived = ProofGen::<Ref<'_, Owned>>::enriched_cell_read_derived(&proof_cell);
-            prop_assert_eq!(derived, T::from(&value_after));
-            prop_assert!(proof_cell.get_access_info());
         });
     }
 
