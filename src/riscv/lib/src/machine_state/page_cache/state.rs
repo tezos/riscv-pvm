@@ -53,9 +53,6 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
 ///
 /// [page cache]: super::PageCache
 pub(crate) struct PageEntry<CPE> {
-    // TODO: RV-773: consider re-using something like the EnrichedCell mechanism for faster
-    // interpreted dispatch here.
-    //
     // TODO: RV-790: consider raising this pointer (Arc) out of `PageEntry` to exploit the
     // `Option<Arc<_>>` optimisation.
     entries: Arc<[CPE; INSTRUCTION_ENTRIES]>,

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -11,11 +11,9 @@ use std::panic::resume_unwind;
 use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
-use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use super::Cell;
-use super::EnrichedValue;
 use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
@@ -85,19 +83,7 @@ impl ManagerBase for Verifier {
 
     type DynRegion<const LEN: usize> = DynRegion<{ MERKLE_LEAF_SIZE.get() }, LEN>;
 
-    type EnrichedCell<V: EnrichedValue> = EnrichedCell<V>;
-
     type ManagerRoot = Self;
-
-    fn enrich_cell<V: super::EnrichedValueLinked>(
-        underlying: Self::Region<V::E, 1>,
-    ) -> Self::EnrichedCell<V> {
-        EnrichedCell { underlying }
-    }
-
-    fn as_devalued_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> &Self::Region<V::E, 1> {
-        &cell.underlying
-    }
 }
 
 #[cfg(test)]
@@ -169,30 +155,6 @@ impl ManagerRead for Verifier {
             );
         }
     }
-
-    fn enriched_cell_read_stored<V>(cell: &Self::EnrichedCell<V>) -> V::E
-    where
-        V: EnrichedValue,
-        V::E: Copy,
-    {
-        *Self::enriched_cell_ref_stored(cell)
-    }
-
-    fn enriched_cell_read_derived<V>(cell: &Self::EnrichedCell<V>) -> V::D
-    where
-        V: super::EnrichedValueLinked,
-        V::D: Copy,
-    {
-        let stored = Self::enriched_cell_ref_stored(cell);
-        V::derive(stored)
-    }
-
-    fn enriched_cell_ref_stored<V>(cell: &Self::EnrichedCell<V>) -> &V::E
-    where
-        V: EnrichedValue,
-    {
-        Self::region_ref(&cell.underlying, 0)
-    }
 }
 
 impl ManagerWrite for Verifier {
@@ -248,13 +210,6 @@ impl ManagerWrite for Verifier {
             );
         }
     }
-
-    fn enriched_cell_write<V>(cell: &mut Self::EnrichedCell<V>, value: V::E)
-    where
-        V: super::EnrichedValueLinked,
-    {
-        Self::region_write(&mut cell.underlying, 0, value);
-    }
 }
 
 impl ManagerReadWrite for Verifier {
@@ -278,15 +233,6 @@ impl ManagerClone for Verifier {
 
     fn clone_dyn_region<const LEN: usize>(region: &Self::DynRegion<LEN>) -> Self::DynRegion<LEN> {
         region.clone()
-    }
-
-    fn clone_enriched_cell<V>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
-    where
-        V: EnrichedValue,
-        V::E: Clone,
-        V::D: Clone,
-    {
-        cell.clone()
     }
 }
 
@@ -566,12 +512,6 @@ impl<const LEAF_SIZE: usize, const LEN: usize> Default for DynRegion<LEAF_SIZE, 
     }
 }
 
-/// Verifier enriched cell
-#[perfect_derive(Clone)]
-pub struct EnrichedCell<V: EnrichedValue> {
-    underlying: Region<V::E, 1>,
-}
-
 impl<E> Cell<E, Verifier> {
     /// Construct an absent verifier cell.
     pub const fn absent() -> Self {
@@ -603,10 +543,8 @@ impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verifier>>> for Cell<E, Owned> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state_backend;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
-    use crate::state_backend::EnrichedValueLinked;
 
     /// Ensures that page indices are properly calculated.
     #[test]
@@ -695,60 +633,6 @@ mod tests {
             let value = handle_stepper_panics(|| cells.read(i)).ok();
             assert_eq!(value, None);
         }
-    }
-
-    /// Construct a [`state_backend::EnrichedCell`] from a proptest value.
-    fn arb_to_enriched_cell<V: EnrichedValueLinked>(
-        value: Option<V::E>,
-    ) -> state_backend::EnrichedCell<V, Verifier> {
-        let cell = match value {
-            Some(value) => Region::Partial(Box::new([Some(value)])),
-            None => Region::Absent,
-        };
-        let cell = Cell::bind(cell);
-        state_backend::EnrichedCell::bind(cell)
-    }
-
-    /// Check the functionality of an enriched cell whose value may or may not be present.
-    #[test]
-    fn enriched_cell() {
-        struct Ident;
-
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        struct Derived(u64);
-
-        impl From<&'_ u64> for Derived {
-            fn from(value: &u64) -> Self {
-                Derived(*value)
-            }
-        }
-
-        impl EnrichedValue for Ident {
-            type E = u64;
-
-            type D = Derived;
-        }
-
-        proptest::proptest!(|(initial: Option<u64>)| {
-            let mut cell = arb_to_enriched_cell::<Ident>(initial);
-
-            let stored = handle_stepper_panics(|| cell.read_stored()).ok();
-            proptest::prop_assert_eq!(stored, initial);
-
-            let derived = handle_stepper_panics(|| cell.read_derived()).ok();
-            let expected_derived = initial.as_ref().map(<Ident as EnrichedValueLinked>::derive);
-            proptest::prop_assert_eq!(derived, expected_derived);
-
-            let new_value = rand::random();
-            cell.write(new_value);
-
-            let read_value = cell.read_stored();
-            proptest::prop_assert_eq!(read_value, new_value);
-
-            let new_derived = <Ident as EnrichedValueLinked>::derive(&new_value);
-            let read_derived = cell.read_derived();
-            proptest::prop_assert_eq!(read_derived, new_derived);
-        });
     }
 
     macro_rules! assert_eq_found {

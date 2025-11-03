@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -18,8 +18,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 
 use super::Elem;
-use super::EnrichedValue;
-use super::EnrichedValueLinked;
 use super::ManagerAlloc;
 use super::ManagerBase;
 use super::ManagerClone;
@@ -49,19 +47,7 @@ impl ManagerBase for Owned {
 
     type DynRegion<const LEN: usize> = memmap2::MmapMut;
 
-    type EnrichedCell<V: EnrichedValue> = (V::E, V::D);
-
     type ManagerRoot = Self;
-
-    fn enrich_cell<V: EnrichedValueLinked>(cell: Self::Region<V::E, 1>) -> Self::EnrichedCell<V> {
-        let [value] = cell;
-        let derived = V::derive(&value);
-        (value, derived)
-    }
-
-    fn as_devalued_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> &Self::Region<V::E, 1> {
-        array::from_ref(&cell.0)
-    }
 }
 
 impl ManagerAlloc for Owned {
@@ -121,29 +107,6 @@ impl ManagerRead for Owned {
             );
         }
     }
-
-    fn enriched_cell_read_stored<V>(cell: &Self::EnrichedCell<V>) -> V::E
-    where
-        V: EnrichedValue,
-        V::E: Copy,
-    {
-        cell.0
-    }
-
-    fn enriched_cell_read_derived<V>(cell: &Self::EnrichedCell<V>) -> V::D
-    where
-        V: EnrichedValue,
-        V::D: Copy,
-    {
-        cell.1
-    }
-
-    fn enriched_cell_ref_stored<V>(cell: &Self::EnrichedCell<V>) -> &V::E
-    where
-        V: EnrichedValue,
-    {
-        &cell.0
-    }
 }
 
 impl ManagerWrite for Owned {
@@ -186,16 +149,6 @@ impl ManagerWrite for Owned {
                 *value,
             );
         }
-    }
-
-    fn enriched_cell_write<V>(cell: &mut Self::EnrichedCell<V>, value: V::E)
-    where
-        V: EnrichedValueLinked,
-    {
-        let derived = V::derive(&value);
-
-        cell.0 = value;
-        cell.1 = derived;
     }
 }
 
@@ -265,14 +218,6 @@ impl ManagerClone for Owned {
         new_region.copy_from_slice(region.deref());
         new_region
     }
-
-    fn clone_enriched_cell<V: EnrichedValue>(cell: &Self::EnrichedCell<V>) -> Self::EnrichedCell<V>
-    where
-        V::E: Clone,
-        V::D: Clone,
-    {
-        cell.clone()
-    }
 }
 
 #[cfg(test)]
@@ -281,8 +226,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
-    use crate::state_backend::EnrichedCell;
-    use crate::state_backend::FnManagerIdent;
     use crate::state_backend::Ref;
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofGen;
@@ -359,86 +302,6 @@ pub(crate) mod test_helpers {
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
             let proof_bytes = binary::serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
-        });
-    }
-
-    /// Ensure [`EnrichedCell`] can be serialised and deserialised in a consistent way.
-    #[test]
-    fn enriched_cell_serialise() {
-        pub struct Enriching;
-
-        impl EnrichedValue for Enriching {
-            type E = u64;
-            type D = T;
-        }
-
-        #[derive(Clone, Copy)]
-        pub struct T(u64);
-
-        impl<'a> From<&'a u64> for T {
-            fn from(value: &'a u64) -> Self {
-                T(value.wrapping_add(1))
-            }
-        }
-
-        proptest::proptest!(|(value: u64)| {
-            let cell = Cell::bind([0u64]);
-            let mut cell: EnrichedCell<Enriching, Owned> = EnrichedCell::bind(cell);
-            cell.write(value);
-
-            let read_value = cell.read_ref_stored();
-
-            assert_eq!(value, *read_value);
-            let bytes = binary::serialise(&cell).unwrap();
-
-            let cell_after: EnrichedCell<Enriching, Owned> = binary::deserialise(&bytes).unwrap();
-
-            assert_eq!(*cell.read_ref_stored(), *cell_after.read_ref_stored());
-
-            let derived = cell.read_derived();
-            let derived_after = cell_after.read_derived();
-
-            assert_eq!(T::from(read_value).0, derived.0);
-            assert_eq!(derived.0, derived_after.0);
-
-            // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cell: EnrichedCell<Enriching, Ref<'_, Owned>> = EnrichedCell::bind(cell.struct_ref::<FnManagerIdent>());
-            let proof_bytes = binary::serialise(&proof_cell).unwrap();
-            assert_eq!(bytes, proof_bytes);
-        });
-    }
-
-    /// Ensure [`EnrichedCell`] is serialized identically to [`Cell`].
-    #[test]
-    fn enriched_cell_serialise_match_cell() {
-        pub struct Enriching;
-        pub struct Fun;
-
-        impl EnrichedValue for Enriching {
-            type E = u64;
-            type D = Fun;
-        }
-
-        impl<'a> From<&'a u64> for Fun {
-            fn from(_value: &'a u64) -> Self {
-                Self
-            }
-        }
-
-        proptest::proptest!(|(value: u64)| {
-            let cell = Cell::bind([0u64]);
-            let mut ecell: EnrichedCell<Enriching, Owned> = EnrichedCell::bind(cell);
-            let mut cell: Cell<u64, Owned> = Cell::bind([0; 1]);
-            ecell.write(value);
-            cell.write(value);
-
-            assert_eq!(value, ecell.read_stored());
-            assert_eq!(value, cell.read());
-
-            let ebytes = binary::serialise(&ecell).unwrap();
-            let cbytes = binary::serialise(&cell).unwrap();
-
-            assert_eq!(ebytes, cbytes, "Serializing EnrichedCell and Cell should match");
         });
     }
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2023,2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2024-2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -14,8 +14,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 
-use super::EnrichedValue;
-use super::EnrichedValueLinked;
 use super::FnManager;
 use super::ManagerAlloc;
 use super::ManagerBase;
@@ -39,156 +37,6 @@ use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
 use crate::state_context::projection::Projection;
 use crate::state_context::projection::ProjectionOffset;
-
-/// Link a stored value directly with a derived value -
-/// that would either be expensive to compute each time, or cannot
-/// itself be stored.
-///
-/// Only the value of `V::E` forms part of the 'state' for the purposes of commitments etc.
-pub struct EnrichedCell<V: EnrichedValue, M: ManagerBase> {
-    cell: M::EnrichedCell<V>,
-}
-
-impl<V: EnrichedValue, M: ManagerBase> EnrichedCell<V, M> {
-    /// Allocate a new enriched cell with the given value.
-    pub fn new_with(value: V::E) -> Self
-    where
-        M: ManagerAlloc,
-        V: EnrichedValueLinked,
-    {
-        let region = M::allocate_region([value]);
-        let cell = M::enrich_cell(region);
-        Self { cell }
-    }
-
-    /// Bind this state to the enriched cell.
-    pub fn bind(cell: Cell<V::E, M>) -> Self
-    where
-        V: EnrichedValueLinked,
-    {
-        let region = cell.into_region();
-        let cell = M::enrich_cell(region);
-        Self { cell }
-    }
-
-    /// Obtain a reference to the underlying cell.
-    pub fn cell_ref(&self) -> &M::EnrichedCell<V> {
-        &self.cell
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cell<V::E, F::Output> {
-        let cell = self.cell_ref();
-        let region = M::as_devalued_cell(cell);
-        let region = F::map_region(region);
-        Cell::bind(region)
-    }
-
-    /// Write the value back to the enriched cell.
-    ///
-    /// Reading the new value will produce the new derived value also.
-    pub fn write(&mut self, value: V::E)
-    where
-        M: ManagerWrite,
-        V: EnrichedValueLinked,
-    {
-        M::enriched_cell_write(&mut self.cell, value)
-    }
-
-    /// Read the stored value from the enriched cell.
-    pub fn read_stored(&self) -> V::E
-    where
-        M: ManagerRead,
-        V::E: Copy,
-    {
-        M::enriched_cell_read_stored(&self.cell)
-    }
-
-    /// Read the derived value from the enriched cell.
-    pub fn read_derived(&self) -> V::D
-    where
-        M: ManagerRead,
-        V: EnrichedValueLinked,
-        V::D: Copy,
-    {
-        M::enriched_cell_read_derived(&self.cell)
-    }
-
-    /// Obtain a reference to the value contained within the cell.
-    pub fn read_ref_stored(&self) -> &V::E
-    where
-        M: ManagerRead,
-    {
-        M::enriched_cell_ref_stored(&self.cell)
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerBase> NewState<M> for EnrichedCell<V, M>
-where
-    V: EnrichedValueLinked,
-    V::E: ConstDefault,
-{
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self::new_with(<V::E as ConstDefault>::DEFAULT)
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerClone> Clone for EnrichedCell<V, M>
-where
-    V::E: Clone,
-    V::D: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            cell: M::clone_enriched_cell(&self.cell),
-        }
-    }
-}
-
-impl<V, M: ManagerRead> PartialEq for EnrichedCell<V, M>
-where
-    V: EnrichedValueLinked,
-    V::E: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        M::enriched_cell_ref_stored(&self.cell) == M::enriched_cell_ref_stored(&other.cell)
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerSerialise> AccessInfoAggregatable
-    for EnrichedCell<V, Ref<'_, ProofGen<M>>>
-{
-    fn aggregate_access_info(&self) -> bool {
-        self.cell.get_access_info()
-    }
-}
-
-impl<V: EnrichedValue, M: ManagerSerialise> Encode for EnrichedCell<V, M>
-where
-    V::E: Encode,
-{
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let cell = self.cell_ref();
-        let region = M::as_devalued_cell(cell);
-        M::serialise_region(region, encoder)
-    }
-}
-
-impl<V, M: ManagerDeserialise> Decode<()> for EnrichedCell<V, M>
-where
-    V: EnrichedValueLinked,
-    V::E: Decode<()>,
-{
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let region = M::deserialise_region(decoder)?;
-        let cell = M::enrich_cell(region);
-        Ok(Self { cell })
-    }
-}
 
 /// Single element of type `E`
 #[perfect_derive(Clone)]
