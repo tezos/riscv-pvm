@@ -14,6 +14,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_tree::MerkleTree;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -36,7 +37,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
-use crate::state_backend::proof_backend::merkle::MerkleTree;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafLayout<const PAGES: u64>;

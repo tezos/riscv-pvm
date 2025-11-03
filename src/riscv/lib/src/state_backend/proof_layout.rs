@@ -17,6 +17,7 @@ use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
@@ -33,7 +34,6 @@ use super::RefProveAlloc;
 use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
-use super::proof_backend::merkle::MerkleTree;
 use super::proof_backend::merkle::MerkleWriter;
 use super::proof_backend::merkle::build_custom_merkle_tree;
 use super::proof_backend::merkle::chunks_to_writer;
@@ -1236,6 +1236,7 @@ mod tests {
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const CELLS_SIZE: usize = 32;
@@ -1264,9 +1265,8 @@ mod tests {
 
             let proof_state = (proof_cells1, proof_cells2);
 
-            let merkle_proof = <TestLayout as ProofLayout>::to_merkle_tree(proof_state)
-                .unwrap()
-                .to_merkle_proof();
+            let merkle_proof = merkle_tree_to_merkle_proof( <TestLayout as ProofLayout>::to_merkle_tree(proof_state)
+                .unwrap());
 
             let verifier_state = deserialise_owned::deserialise::<TestLayout>(
                 ProofTree::Present(&merkle_proof)
@@ -1327,7 +1327,7 @@ mod tests {
         let post_hash = proof_cell.hash_state();
 
         let tree = DynArray::to_merkle_tree(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
-        let proof_tree = tree.to_merkle_proof();
+        let proof_tree = merkle_tree_to_merkle_proof(tree);
         assert_eq!(proof_tree.root_hash(), init_hash);
 
         // Instantiating the verifier state allows us to replay the computation and verify it does

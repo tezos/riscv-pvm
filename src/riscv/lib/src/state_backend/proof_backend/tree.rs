@@ -8,7 +8,7 @@
 //! which is required for serialisation / deserialisation
 
 /// Generic tree structure used to model the [`super::proof::MerkleProof`],
-/// as well as the full & partial shapes of a [`super::merkle::MerkleTree`].
+/// as well as the full & partial shapes of a [`octez_riscv_data::merkle_tree::MerkleTree`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tree<A> {
     Node(Vec<Self>),
