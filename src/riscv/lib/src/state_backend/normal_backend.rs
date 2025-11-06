@@ -28,8 +28,7 @@ use super::StaticCopy;
 use crate::machine_state::memory::PAGE_SIZE;
 
 /// Manager that allows state binders to own the state storage
-#[derive(Clone, Copy, Debug)]
-pub struct Normal;
+pub enum Normal {}
 
 impl Normal {
     /// Get the byte offset from a pointer to `Normal::Region` to the start of the element at `index`.
