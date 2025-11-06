@@ -448,16 +448,16 @@ pub mod tests {
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
 
     #[test]
     fn bounds_check() {
-        type OwnedM4K = <M4K as MemoryConfig>::State<Owned>;
+        type NormalM4K = <M4K as MemoryConfig>::State<Normal>;
 
         // Bounds checks
-        assert!(OwnedM4K::check_bounds(4095, NonZeroUsize::new(1).unwrap(), ()).is_ok());
-        assert!(OwnedM4K::check_bounds(4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
-        assert!(OwnedM4K::check_bounds(2 * 4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
+        assert!(NormalM4K::check_bounds(4095, NonZeroUsize::new(1).unwrap(), ()).is_ok());
+        assert!(NormalM4K::check_bounds(4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
+        assert!(NormalM4K::check_bounds(2 * 4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
     }
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the

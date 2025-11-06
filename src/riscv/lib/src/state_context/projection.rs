@@ -27,7 +27,7 @@ use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -92,7 +92,7 @@ impl TypeCons for MachineCoreCons {
     type Applied<MC: MemoryConfig, M: ManagerBase> = MachineCoreState<MC, M>;
 }
 
-/// Offset from a base pointer to a [projection's] subject, within the owned backend.
+/// Offset from a base pointer to a [projection's] subject with a state in normal mode.
 ///
 /// Additional offsets may be added to an existing one, to build up offsets within
 /// layered projections. All such additions will panic on overflowing the `i32` range.
@@ -227,9 +227,8 @@ pub trait Projection {
 
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
-    /// value. This is exclusive to the [`crate::state_backend::owned_backend::Owned`] state
-    /// backend.
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
+    /// value. This is exclusive to the [`crate::state_backend::normal_backend::Normal`] mode.
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
 }
 
 /// A projection from [`Box`] to its inner type
@@ -267,8 +266,8 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_write::<MC, M>(state.deref_mut(), param, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        let offset = P::owned_pointer_offset::<MC>(param);
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        let offset = P::normal_pointer_offset::<MC>(param);
         ProjectionOffset::Indirect {
             offset: 0,
             inner: Box::new(offset),
@@ -323,7 +322,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         P::project_write::<MC, M>(inner_state, param.inner_param, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
         assert!(
             param.index < LEN,
             "Array index out of bounds: {} >= {}",
@@ -331,9 +330,9 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
             LEN
         );
 
-        let inner_offset = P::owned_pointer_offset::<MC>(param.inner_param);
+        let inner_offset = P::normal_pointer_offset::<MC>(param.inner_param);
 
-        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Owned>>();
+        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>();
         let offset = param
             .index
             .checked_mul(elem_size)
@@ -408,19 +407,19 @@ macro_rules! impl_projection {
                 )
             }
 
-            fn owned_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
+            fn normal_pointer_offset<MC: $crate::machine_state::memory::MemoryConfig>(
                 param: Self::Parameter
             ) -> $crate::state_context::projection::ProjectionOffset {
                 let field_offset = std::mem::offset_of!(
                     $crate::state_context::projection::ApplyCons<
                         $subject,
                         MC,
-                        $crate::state_backend::owned_backend::Owned
+                        $crate::state_backend::normal_backend::Normal
                     >,
                     $($field).+
                 );
 
-                <$target>::owned_pointer_offset::<MC>(param) + field_offset
+                <$target>::normal_pointer_offset::<MC>(param) + field_offset
             }
         }
     };

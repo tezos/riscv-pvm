@@ -34,7 +34,7 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::RefProofGenOwnedAlloc;
+use crate::state_backend::RefProofGenAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
@@ -89,7 +89,7 @@ macro_rules! combined_buddy_branch {
                 [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
             {
                 fn to_merkle_tree<'outer, 'inner: 'outer>(
-                    state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+                    state: RefProofGenAlloc<'outer, 'inner, Self>,
                 ) -> Result<MerkleTree, HashError> {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_merkle_tree(state.0)
                 }

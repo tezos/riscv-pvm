@@ -15,7 +15,7 @@ use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
 use crate::stepper::test::TestStepperResult::*;
@@ -30,7 +30,7 @@ enum Permissions {
     Rwx,
 }
 
-fn run_test<CPE: CodePageEntry<M1M, Owned>>(
+fn run_test<CPE: CodePageEntry<M1M, Normal>>(
     path: &str,
     compiler: CPE::Compiler,
     required_perms: Permissions,
@@ -75,7 +75,7 @@ fn run_test<CPE: CodePageEntry<M1M, Owned>>(
 
 fn interpret_test(path: &str, required_perms: Permissions) {
     let compiler = Default::default();
-    run_test::<Interpreted<M1M, Owned>>(path, compiler, required_perms);
+    run_test::<Interpreted<M1M, Normal>>(path, compiler, required_perms);
 }
 
 /// For the JIT, we run it twice - the first run to build up the blocks, and the

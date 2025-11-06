@@ -14,7 +14,7 @@ use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::machine_state::page_cache::Interpreted;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::owned_backend::Owned;
+use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::NotFound;
@@ -100,7 +100,7 @@ fn test_initial_proof_regression(inputs: TestConfig) {
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 }
 
-fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC, Owned>, inputs: TestConfig)
+fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC, Normal>, inputs: TestConfig)
 where
     MC: MemoryConfig,
 {
@@ -130,7 +130,7 @@ fn run_steps_ladder<MC, F>(
     make_stepper: F,
     ladder: &[usize],
     expected_hash: Option<hash::Hash>,
-    verify_fn: StepperVerifyFn<MC, Owned>,
+    verify_fn: StepperVerifyFn<MC, Normal>,
 ) where
     MC: MemoryConfig,
     F: Fn() -> PvmStepper<NoHooks, MC>,
@@ -209,7 +209,7 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig>(
     stepper: &PvmStepper<NoHooks, MC>,
     proof: &Proof,
     state_hash: hash::Hash,
-    verify_fn: StepperVerifyFn<MC, Owned>,
+    verify_fn: StepperVerifyFn<MC, Normal>,
 ) {
     // A fully blinded proof could only be valid if every single leaf
     // in the state is written to and proof compression were to optimise

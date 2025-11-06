@@ -21,9 +21,9 @@ use super::DynArray;
 use super::Layout;
 use super::Many;
 use super::Ref;
-use super::RefProofGenOwnedAlloc;
+use super::RefProofGenAlloc;
 use super::RefVerifierAlloc;
-use super::owned_backend::Owned;
+use super::normal_backend::Normal;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::merkle::MerkleTree;
@@ -312,7 +312,7 @@ pub trait ProofLayout: Layout {
     /// Obtain the complete Merkle tree which captures an execution trace
     /// using the proof-generating backend.
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError>;
 
     /// Parse a Merkle proof into the allocated form of this layout.
@@ -328,7 +328,7 @@ pub trait ProofLayout: Layout {
 
 impl<T: ProofLayout> ProofLayout for Box<T> {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         T::to_merkle_tree(*state)
     }
@@ -350,14 +350,14 @@ where
     T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         // The Merkle leaf must hold the serialisation of the initial state.
         // Directly serialising the `ProofGen` state would produce the serialisation
-        // of the final state. Therefore, we rebind and serialise the wrapped `Owned` state.
+        // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
         let region = state.into_region();
         let access_info = region.get_access_info();
-        let cell = super::Cell::<T, Ref<'_, Owned>>::bind(region.inner_region_ref());
+        let cell = super::Cell::<T, Ref<'_, Normal>>::bind(region.inner_region_ref());
         let serialised = serialisation::serialise(&cell)?;
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
@@ -385,17 +385,17 @@ where
     T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         // RV-282: Break down into multiple leaves if the size of the `Cells`
         // is too large for a proof.
         //
         // The Merkle leaf must hold the serialisation of the initial state.
         // Directly serialising the `ProofGen` state would produce the serialisation
-        // of the final state. Therefore, we rebind and serialise the wrapped `Owned` state.
+        // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
         let region = state.into_region();
         let access_info = region.get_access_info();
-        let cells = super::Cells::<T, LEN, Ref<'_, Owned>>::bind(region.inner_region_ref());
+        let cells = super::Cells::<T, LEN, Ref<'_, Normal>>::bind(region.inner_region_ref());
         let serialised = serialisation::serialise(&cells)?;
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
@@ -404,7 +404,7 @@ where
         use super::proof_backend::proof::deserialiser::Partial;
 
         Ok(proof
-            .into_leaf::<super::Cells<T, LEN, Owned>>()?
+            .into_leaf::<super::Cells<T, LEN, Normal>>()?
             .map(|region| {
                 let region = match region {
                     Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
@@ -432,7 +432,7 @@ where
 
 impl ProofLayout for DynArray {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let len = state.len();
 
@@ -752,7 +752,7 @@ where
     B: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![A::to_merkle_tree(state.0)?, B::to_merkle_tree(state.1)?];
         Ok(MerkleTree::make_merkle_node(children))
@@ -784,7 +784,7 @@ where
     C: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -822,7 +822,7 @@ where
     D: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -863,7 +863,7 @@ where
     E: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -906,7 +906,7 @@ where
     F: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -947,7 +947,7 @@ where
     T: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = state
             .into_iter()
@@ -998,7 +998,7 @@ where
     T: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+        state: RefProofGenAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let leaves = state
             .into_iter()
@@ -1242,17 +1242,17 @@ mod tests {
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
             // Bind `ProofGen` cells and write at one address
             let cells1 = [value_before; CELLS_SIZE];
-            let mut proof_region1: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
+            let mut proof_region1: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
                 ProofRegion::bind(&cells1);
-            ProofGen::<Ref<'_, Owned>>::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
+            ProofGen::<Ref<'_, Normal>>::region_write(&mut proof_region1, i, value_after);
+            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Normal>>>> =
                 Cells::bind(&proof_region1);
 
             // Bind `ProofGen` cells and do not access them
             let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
+            let proof_region2: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
                 ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
+            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Normal>>>> =
                 Cells::bind(&proof_region2);
 
             let proof_state = (proof_cells1, proof_cells2);
@@ -1300,7 +1300,7 @@ mod tests {
     /// would no longer work.
     unsafe fn test_dyn_array_with_funs(
         len: usize,
-        test_proof: impl FnOnce(&mut DynCells<ProofGen<Ref<'_, Owned>>>),
+        test_proof: impl FnOnce(&mut DynCells<ProofGen<Ref<'_, Normal>>>),
         test_verify: impl FnOnce(&mut DynCells<Verifier>),
     ) {
         let owned_cell = DynCells::new(len);
@@ -1361,7 +1361,7 @@ mod tests {
     macro_rules! test_dyn_array_with {
         ($len:literal, | $param:ident | { $($body:tt)* }) => {
             {
-                let test_proof = |$param: &mut DynCells<ProofGen<Ref<'_, Owned>>>| {
+                let test_proof = |$param: &mut DynCells<ProofGen<Ref<'_, Normal>>>| {
                     $($body)*
                 };
 

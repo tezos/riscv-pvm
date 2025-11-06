@@ -18,7 +18,7 @@ use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::machine_state::page_cache::Jitted;
 use octez_riscv::machine_state::page_cache::OutlineCompiler;
 use octez_riscv::pvm::hooks::PvmHooks;
-use octez_riscv::state_backend::owned_backend::Owned;
+use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
@@ -67,7 +67,7 @@ fn regression_frozen_etherlink() {
 }
 
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
-    test_regression_for_block::<Interpreted<M64M, Owned>>(
+    test_regression_for_block::<Interpreted<M64M, Normal>>(
         InterpretedCompiler,
         &inputs,
         capture_volatile_properties,
@@ -82,7 +82,7 @@ fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
     );
 }
 
-fn test_regression_for_block<CPE: CodePageEntry<M64M, Owned>>(
+fn test_regression_for_block<CPE: CodePageEntry<M64M, Normal>>(
     compiler: CPE::Compiler,
     inputs: &TestConfig,
     capture_volatile_properties: bool,
@@ -108,7 +108,7 @@ fn test_regression_for_block<CPE: CodePageEntry<M64M, Owned>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<_, M64M, Owned, CPE>::new(
+        let mut stepper = PvmStepper::<_, M64M, Normal, CPE>::new(
             &program,
             inbox,
             hooks,

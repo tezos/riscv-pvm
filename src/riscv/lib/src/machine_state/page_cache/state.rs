@@ -115,7 +115,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
 
 #[cfg(test)]
 impl<const PAGES: usize, D, MC>
-    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, crate::state_backend::owned_backend::Owned>
+    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, crate::state_backend::normal_backend::Normal>
 where
     MC: MemoryConfig,
     D: super::dispatch::DispatchCompiler<MC>,
@@ -328,7 +328,7 @@ mod tests {
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
 
     fn count_active_pages<const PAGES: usize, CPE, MC, M>(
         cache: &PageCacheImpl<PAGES, CPE, MC, M>,
@@ -343,7 +343,7 @@ mod tests {
     fn test_page_invalidation_resets_pages() {
         const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
 
-        let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Owned>::new();
+        let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Normal>::new();
 
         let make_page = || PageEntry {
             entries: Arc::from(
