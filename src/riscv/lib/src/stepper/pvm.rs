@@ -117,6 +117,25 @@ impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Norm
 }
 
 impl<H, MC: MemoryConfig> PvmStepper<H, MC, Normal> {
+    /// Create a new stepper in which the existing PVM is put into [`Prove`] mode.
+    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove> {
+        PvmStepper {
+            pvm: self.pvm.start_proof(),
+            rollup_address: self.rollup_address,
+            origination_level: self.origination_level,
+
+            // The inbox needs to be cloned because we should not mutate it through the new stepper
+            // instance.
+            inbox: self.inbox.clone(),
+
+            // We don't want to re-use the same hooks to avoid polluting logs with refutation game
+            // output. Instead we use hooks that don't do anything.
+            hooks: NoHooks,
+
+            reveal_request_response_map: self.reveal_request_response_map.clone(),
+        }
+    }
+
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
     pub fn produce_proof(&mut self) -> Option<Proof> {
@@ -232,26 +251,6 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + 
 }
 
 impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
-    /// Create a new stepper in which the existing PVM is managed by
-    /// the proof-generating backend.
-    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove<Ref<'_, M>>> {
-        PvmStepper {
-            pvm: self.pvm.start_proof(),
-            rollup_address: self.rollup_address,
-            origination_level: self.origination_level,
-
-            // The inbox needs to be cloned because we should not mutate it through the new stepper
-            // instance.
-            inbox: self.inbox.clone(),
-
-            // We don't want to re-use the same hooks to avoid polluting logs with refutation game
-            // output. Instead we use hooks that don't do anything.
-            hooks: NoHooks,
-
-            reveal_request_response_map: self.reveal_request_response_map.clone(),
-        }
-    }
-
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
     ///
     /// Useful for testing the stream deserialisation.

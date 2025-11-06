@@ -814,7 +814,7 @@ pub(crate) mod test_helpers {
         }
     }
 
-    impl ReinitMachine<Prove<Normal>> for TestMachineOf<Prove<Normal>> {
+    impl<'normal> ReinitMachine<Prove<'normal>> for TestMachineOf<Prove<'normal>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
             let new_state = MachineState::new(InterpretedCompiler);
             RefMutOrOwned::Owned(new_state)

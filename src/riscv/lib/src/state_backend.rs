@@ -347,7 +347,7 @@ pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
 pub type RefProveAlloc<'outer, 'inner, L> =
-    AllocatedOf<L, Ref<'outer, proof_backend::Prove<Ref<'inner, Normal>>>>;
+    AllocatedOf<L, Ref<'outer, proof_backend::Prove<'inner>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
@@ -437,7 +437,7 @@ pub(crate) mod test_helpers {
                 }
 
                 inner::<Normal>();
-                inner::<Prove<Normal>>();
+                inner::<Prove>();
                 inner::<Verifier>();
             }
         };
