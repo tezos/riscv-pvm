@@ -40,6 +40,7 @@ use super::verify_backend;
 use super::verify_backend::PartialState;
 use super::verify_backend::Verifier;
 use crate::array_utils::boxed_array;
+use crate::state_backend::Cell;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser::Partial;
@@ -393,25 +394,28 @@ where
         // The Merkle leaf must hold the serialisation of the initial state.
         // Directly serialising the `ProofGen` state would produce the serialisation
         // of the final state. Therefore, we rebind and serialise the wrapped `Owned` state.
-        let region = state.into_region();
-        let access_info = region.get_access_info();
-        let cells = super::Cells::<T, LEN, Ref<'_, Owned>>::bind(region.inner_region_ref());
-        let serialised = binary::serialise(&cells)?;
+
+        let region = state.into_region().map(|cell| cell.into_region());
+        let access_info = region.iter().any(|cell| cell.get_access_info());
+        let prev_region = region.map(|cell| cell.inner_region_ref());
+        let serialised = binary::serialise(prev_region)?;
+
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
     fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        use super::proof_backend::proof::deserialiser::Partial;
-
         Ok(proof
             .into_leaf::<super::Cells<T, LEN, Owned>>()?
             .map(|region| {
                 let region = match region {
-                    Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
-                    Partial::Present(cells) => {
-                        let arr: Box<[Option<T>; LEN]> = Box::new(cells.into_region().map(Some));
-                        verify_backend::Region::Partial(arr)
+                    Partial::Absent | Partial::Blinded(_) => {
+                        std::array::from_fn(|_| Cell::bind(verify_backend::Region::Absent))
                     }
+                    Partial::Present(cells) => cells.into_region().map(|cell| {
+                        let values = cell.into_region().map(Some);
+                        let values = Box::new(values);
+                        Cell::bind(verify_backend::Region::Partial(values))
+                    }),
                 };
                 super::Cells::bind(region)
             }))
@@ -421,12 +425,29 @@ where
         state: RefVerifierAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
-        let region = state.into_region();
-        match region.get_partial_region() {
-            PartialState::Complete(region) => Ok(Hash::blake3_hash(region)?),
-            PartialState::Absent => proof.partial_hash_leaf(),
-            PartialState::Incomplete => Err(PartialHashError::Fatal),
+        let region = state.into_region().map(Cell::into_region);
+
+        let values = region
+            .iter()
+            .filter_map(|region| {
+                let verify_backend::Region::Partial(value) = region else {
+                    return None;
+                };
+
+                value[0].as_ref()
+            })
+            .collect::<Vec<_>>();
+
+        if values.is_empty() {
+            // Everything is absent, rely on the proof to obtain the hash.
+            return proof.partial_hash_leaf();
         }
+
+        let Ok(values) = <[&T; LEN]>::try_from(values) else {
+            return Err(PartialHashError::Fatal);
+        };
+
+        Ok(Hash::blake3_hash(values)?)
     }
 }
 
@@ -1222,9 +1243,7 @@ mod tests {
     use crate::state_backend::CommitmentLayout;
     use crate::state_backend::DynCells;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofGen;
-    use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
@@ -1241,20 +1260,15 @@ mod tests {
 
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
             // Bind `ProofGen` cells and write at one address
-            let cells1 = [value_before; CELLS_SIZE];
-            let mut proof_region1: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
-                ProofRegion::bind(&cells1);
-            ProofGen::<Ref<'_, Owned>>::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
-                Cells::bind(&proof_region1);
+            let cells1 = Cells::new_with([value_before; CELLS_SIZE]);
+            let mut proof_region1 = cells1.struct_ref::<ProofWrapper>();
+            proof_region1.write(i, value_after);
+            let proof_cells1 = proof_region1.struct_ref::<FnManagerIdent>();
 
             // Bind `ProofGen` cells and do not access them
-            let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
-                ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
-                Cells::bind(&proof_region2);
-
+            let cells2 = Cells::new_with([value_before; CELLS_SIZE]);
+            let proof_region2 = cells2.struct_ref::<ProofWrapper>();
+            let proof_cells2 = proof_region2.struct_ref::<FnManagerIdent>();
             let proof_state = (proof_cells1, proof_cells2);
 
             let merkle_proof = <TestLayout as ProofLayout>::to_merkle_tree(proof_state)

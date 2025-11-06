@@ -30,6 +30,7 @@ use crate::state::NewState;
 use crate::state_backend::CellsProj;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_context::StateContext;
+use crate::state_context::projection::ArrayProjParam;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
@@ -683,7 +684,10 @@ pub fn read_xregister_nz<SC: StateContext + ?Sized>(
     state: &mut SC,
     reg: NonZeroXRegister,
 ) -> SC::Value<XValue> {
-    state.read_proj::<XRegisterProj>((reg as usize,))
+    state.read_proj::<XRegisterProj>(ArrayProjParam {
+        index: reg as usize,
+        inner_param: (),
+    })
 }
 
 /// Write to a non-zero integer register.
@@ -693,7 +697,13 @@ pub fn write_xregister_nz<SC: StateContext + ?Sized>(
     reg: NonZeroXRegister,
     value: SC::Value<XValue>,
 ) {
-    state.write_proj::<XRegisterProj>((reg as usize,), value)
+    state.write_proj::<XRegisterProj>(
+        ArrayProjParam {
+            index: reg as usize,
+            inner_param: (),
+        },
+        value,
+    )
 }
 
 /// Read from an integer register.
@@ -703,7 +713,10 @@ pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue
         return icb.xvalue_of_imm(0);
     }
 
-    icb.read_proj::<XRegisterProj>((reg as usize,))
+    icb.read_proj::<XRegisterProj>(ArrayProjParam {
+        index: reg as usize,
+        inner_param: (),
+    })
 }
 
 /// Write to an integer register.
@@ -713,7 +726,13 @@ pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::X
         return;
     }
 
-    icb.write_proj::<XRegisterProj>((reg as usize,), value)
+    icb.write_proj::<XRegisterProj>(
+        ArrayProjParam {
+            index: reg as usize,
+            inner_param: (),
+        },
+        value,
+    )
 }
 
 impl_projection! {
@@ -727,13 +746,22 @@ impl_projection! {
 /// Read from a floating-point number register.
 #[inline]
 pub fn read_fregister<I: ICB>(icb: &mut I, reg: FRegister) -> I::FValue {
-    icb.read_proj::<FRegisterProj>((reg as usize,))
+    icb.read_proj::<FRegisterProj>(ArrayProjParam {
+        index: reg as usize,
+        inner_param: (),
+    })
 }
 
 /// Write to a floating-point number register.
 #[inline]
 pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
-    icb.write_proj::<FRegisterProj>((reg as usize,), value)
+    icb.write_proj::<FRegisterProj>(
+        ArrayProjParam {
+            index: reg as usize,
+            inner_param: (),
+        },
+        value,
+    )
 }
 
 #[cfg(test)]
@@ -743,7 +771,6 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
-    use crate::state_backend::ManagerRead;
 
     backend_test!(test_zero, F, {
         let mut registers = XRegisters::<F>::new();
@@ -851,7 +878,7 @@ mod tests {
 
         for reg in NonZeroXRegister::iter() {
             let offset = XRegisters::<Owned>::xregister_offset(reg);
-            let val: &XValue = Owned::region_ref(registers.registers.region_ref(), reg as usize);
+            let val: &XValue = registers.registers.read_ref(reg as usize);
 
             // Safety: both pointers are valid
             let offset_refs = unsafe { (val as *const XValue).byte_offset_from(registers_ptr) };

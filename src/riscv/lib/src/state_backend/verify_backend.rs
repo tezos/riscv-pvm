@@ -583,10 +583,13 @@ mod tests {
     /// Construct [`Cells`] from a proptest value.
     fn arb_to_cells<E, const LEN: usize>(region: RegionArb<E, LEN>) -> Cells<E, LEN, Verifier> {
         let region = match region {
-            Some(data) => Region::Partial(data),
-            None => Region::Absent,
+            Some(data) => data.map(|data| {
+                let data = Box::new([data]);
+                let region = Region::Partial(data);
+                Cell::bind(region)
+            }),
+            None => std::array::from_fn(|_| Cell::bind(Region::Absent)),
         };
-
         Cells::bind(region)
     }
 

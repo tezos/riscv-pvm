@@ -38,7 +38,7 @@ impl<E: Clone + 'static, const LEN: usize> CloneLayout for Array<E, LEN> {
         space: Self::Allocated<Ref<'a, M>>,
     ) -> Self::Allocated<M> {
         let region = space.into_region();
-        let region = M::clone_region(region);
+        let region = region.map(Atom::clone_allocated);
         Cells::bind(region)
     }
 }

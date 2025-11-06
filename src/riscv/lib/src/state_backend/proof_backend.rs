@@ -425,25 +425,34 @@ impl<M: ManagerBase> FnManager<M> for ProofWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::collections::VecDeque;
 
     use proptest::array;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
-    use tests::merkle::MerkleTree;
 
     use super::merkle::MERKLE_LEAF_SIZE;
-    use super::*;
+    use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::CommitmentLayout;
     use crate::state_backend::DynArray;
     use crate::state_backend::DynCells;
+    use crate::state_backend::Elem;
+    use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerAlloc;
+    use crate::state_backend::ManagerRead;
+    use crate::state_backend::ManagerWrite;
     use crate::state_backend::ProofLayout;
     use crate::state_backend::Ref;
     use crate::state_backend::layout::Array;
     use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::proof_backend::ProofDynRegion;
+    use crate::state_backend::proof_backend::ProofGen;
+    use crate::state_backend::proof_backend::ProofRegion;
+    use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::merkle::MerkleTree;
 
     const CELLS_SIZE: usize = 32;
 
@@ -451,73 +460,68 @@ mod tests {
     fn test_proof_gen_region() {
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
             // A read followed by a write
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
+            let cells = Cells::new_with([value_before; CELLS_SIZE]);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = cells.struct_ref::<ProofWrapper>();
 
-            prop_assert!(!region.region_ref().get_access_info());
-            let value = region.read(i);
+            prop_assert!(!proof_cells.get_access_info());
+            let value = proof_cells.read(i);
             prop_assert_eq!(value, value_before);
-            prop_assert!(region.region_ref().get_access_info());
-            region.write(i, value_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(proof_cells.get_access_info());
+            proof_cells.write(i, value_after);
+            prop_assert!(proof_cells.get_access_info());
 
             // A write followed by a read
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            region.write(i, value_after);
-            prop_assert!(region.region_ref().get_access_info());
-            let value = region.read(i);
+            let cells = Cells::new_with([value_before; CELLS_SIZE]);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = cells.struct_ref::<ProofWrapper>();
+            prop_assert!(!proof_cells.get_access_info());
+            proof_cells.write(i, value_after);
+            prop_assert!(proof_cells.get_access_info());
+            let value = proof_cells.read(i);
             prop_assert_eq!(value, value_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(proof_cells.get_access_info());
 
             // Replace
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            let value = region.replace(i, value_after);
+            let cells = Cells::new_with([value_before; CELLS_SIZE]);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = cells.struct_ref::<ProofWrapper>();
+            prop_assert!(!proof_cells.get_access_info());
+            let value = proof_cells.replace(i, value_after);
             prop_assert_eq!(value, value_before);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(proof_cells.get_access_info());
 
             let data_before = [value_before; CELLS_SIZE];
             let data_after = [value_after; CELLS_SIZE];
 
             // A read_all followed by a write_all
-            let cells = data_before;
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            let values = region.read_all();
+            let cells = Cells::new_with(data_before);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = cells.struct_ref::<ProofWrapper>();
+            prop_assert!(!proof_cells.get_access_info());
+            let values = proof_cells.read_all();
             prop_assert_eq!(values.as_slice(), data_before);
-            prop_assert!(region.region_ref().get_access_info());
-            region.write_all(&data_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(proof_cells.get_access_info());
+            proof_cells.write_all(&data_after);
+            prop_assert!(proof_cells.get_access_info());
 
             // A write_all followed by a read_all
-            let cells = data_before;
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            region.write_all(&data_after);
-            prop_assert!(region.region_ref().get_access_info());
-            let values = region.read_all();
+            let cells = Cells::new_with(data_before);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = cells.struct_ref::<ProofWrapper>();
+            prop_assert!(!proof_cells.get_access_info());
+            proof_cells.write_all(&data_after);
+            prop_assert!(proof_cells.get_access_info());
+            let values = proof_cells.read_all();
             prop_assert_eq!(values.as_slice(), data_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(proof_cells.get_access_info());
 
             // Check correct Merkleisation
-            let cells = [value_before; CELLS_SIZE];
-            let cells_owned: Cells<u64, CELLS_SIZE, Ref<'_, Owned>> = Cells::bind(&cells);
+            let cells = Cells::new_with([value_before; CELLS_SIZE]);
+            let cells_owned: Cells<u64, CELLS_SIZE, Ref<'_, Owned>> = cells.struct_ref::<FnManagerIdent>();
             let initial_root_hash =
                 <Array<u64, CELLS_SIZE> as CommitmentLayout>::state_hash(cells_owned).unwrap();
 
-            let mut proof_region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
-                ProofRegion::bind(&cells);
-            ProofGen::<Ref<'_, Owned>>::region_write(&mut proof_region, i, value_after);
+            let mut proof_cells: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> =
+                cells.struct_ref::<ProofWrapper>();
+            proof_cells.write(i, value_after);
             let proof_cells: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Owned>>>> =
-                Cells::bind(&proof_region);
+                proof_cells.struct_ref::<FnManagerIdent>();
 
             let merkle_tree =
                 <Array<u64, CELLS_SIZE> as ProofLayout>::to_merkle_tree(proof_cells).unwrap();
@@ -685,7 +689,7 @@ mod tests {
     #[test]
     fn test_proof_gen_region_replace() {
         let region: ProofRegion<u64, 1, Owned> = ProofRegion::bind([0u64; 1]);
-        let mut cells: Cells<u64, 1, ProofGen<Owned>> = Cells::bind(region);
+        let mut cells: Cells<u64, 1, ProofGen<Owned>> = Cells::bind([Cell::bind(region)]);
 
         cells.write(0, 13);
 

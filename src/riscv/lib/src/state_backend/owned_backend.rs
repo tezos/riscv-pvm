@@ -203,6 +203,7 @@ pub(crate) mod test_helpers {
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
+    use crate::state_backend::proof_backend::ProofWrapper;
     use crate::storage::binary;
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
@@ -231,7 +232,7 @@ pub(crate) mod test_helpers {
     #[test]
     fn cells_serialise() {
         proptest::proptest!(|(a: u64, b: u64, c: u64)|{
-            let cell: Cells<u64, 3, Owned> = Cells::bind([a, b, c]);
+            let cell: Cells<u64, 3, Owned> = Cells::new_with([a, b, c]);
             let bytes = binary::serialise(&cell).unwrap();
 
             let cell_after: Cells<u64, 3, Owned> = binary::deserialise(&bytes).unwrap();
@@ -246,8 +247,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Owned>>> =
-                Cells::bind(ProofRegion::bind(cell.region_ref()));
+            let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Owned>>> = cell.struct_ref::<ProofWrapper>();
             let proof_bytes = binary::serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
         });

@@ -12,6 +12,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 
 use super::FnManager;
 use super::ManagerAlloc;
@@ -24,12 +25,14 @@ use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
 use super::owned_backend::Owned;
+use super::proof_backend::ProofGen;
 use crate::default::ConstDefault;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
 use crate::state_backend::RegionProj;
 use crate::state_context::projection::ApplyCons;
+use crate::state_context::projection::ArrayProj;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
 use crate::state_context::projection::Projection;
@@ -69,6 +72,11 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
         self.region
     }
 
+    /// Obtain a reference to the underlying region.
+    pub fn region_ref(&self) -> &M::Region<E, 1> {
+        &self.region
+    }
+
     /// Read the value managed by the cell.
     #[inline(always)]
     pub fn read(&self) -> E
@@ -99,6 +107,13 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
     }
 }
 
+impl<E: 'static, M: ManagerBase> Cell<E, ProofGen<M>> {
+    /// TODO
+    pub fn get_access_info(&self) -> bool {
+        self.region_ref().get_access_info()
+    }
+}
+
 impl<T: Clone, M: ManagerClone> Clone for Cell<T, M> {
     fn clone(&self) -> Self {
         let region = M::clone_region(&self.region);
@@ -117,9 +132,8 @@ impl<E: ConstDefault, M: ManagerBase> NewState<M> for Cell<E, M> {
 
 impl<E: 'static, M: ManagerBase> From<Cells<E, 1, M>> for Cell<E, M> {
     fn from(cells: Cells<E, 1, M>) -> Self {
-        Self {
-            region: cells.region,
-        }
+        let [cell] = cells.region;
+        cell
     }
 }
 
@@ -206,9 +220,10 @@ impl<E: 'static> Projection for CellProj<E> {
 }
 
 /// Multiple elements of type `E`
+#[perfect_derive(Clone)]
 #[repr(transparent)]
 pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
-    region: M::Region<E, LEN>,
+    region: [Cell<E, M>; LEN],
 }
 
 impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
@@ -217,31 +232,39 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     where
         M: ManagerAlloc,
     {
-        let region = M::allocate_region(values);
+        let region = values.map(Cell::new_with);
         Self { region }
     }
 
     /// Bind this state to the given region.
-    pub const fn bind(region: M::Region<E, LEN>) -> Self {
+    pub const fn bind(region: [Cell<E, M>; LEN]) -> Self {
         Self { region }
     }
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
     pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cells<E, LEN, F::Output> {
-        Cells {
-            region: F::map_region(&self.region),
-        }
+        let region = self.region.each_ref().map(|cell| cell.struct_ref::<F>());
+        Cells { region }
     }
 
     /// Obtain a reference to the underlying region.
-    pub fn region_ref(&self) -> &M::Region<E, LEN> {
+    pub fn region_ref(&self) -> &[Cell<E, M>; LEN] {
         &self.region
     }
 
     /// Obtain the underlying region.
-    pub fn into_region(self) -> M::Region<E, LEN> {
+    pub fn into_region(self) -> [Cell<E, M>; LEN] {
         self.region
+    }
+
+    /// Get a reference to an element in the region.
+    #[inline]
+    pub fn read_ref(&self, index: usize) -> &E
+    where
+        M: ManagerRead,
+    {
+        self.region[index].as_ref()
     }
 
     /// Read an element in the region.
@@ -251,7 +274,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         E: Copy,
         M: ManagerRead,
     {
-        M::region_read(&self.region, index)
+        self.region[index].read()
     }
 
     /// Read all elements in the region.
@@ -261,7 +284,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         E: Copy,
         M: ManagerRead,
     {
-        M::region_read_all(&self.region)
+        self.region.iter().map(Cell::read).collect()
     }
 
     /// Update an element in the region.
@@ -270,7 +293,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     where
         M: ManagerWrite,
     {
-        M::region_write(&mut self.region, index, value)
+        self.region[index].write(value);
     }
 
     /// Update all elements in the region.
@@ -280,7 +303,9 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         E: Copy,
         M: ManagerWrite,
     {
-        M::region_write_all(&mut self.region, value)
+        for (region, value) in self.region.iter_mut().zip(value) {
+            region.write(*value);
+        }
     }
 
     /// Update the element in the region and return the previous value.
@@ -290,7 +315,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         E: Copy,
         M: ManagerReadWrite,
     {
-        M::region_replace(&mut self.region, index, value)
+        self.region[index].replace(value)
     }
 }
 
@@ -299,6 +324,13 @@ impl<E: 'static, const LEN: usize> Cells<E, LEN, Owned> {
     /// `index`.
     pub(crate) const fn region_elem_offset(index: usize) -> usize {
         std::mem::offset_of!(Self, region) + Owned::region_elem_offset::<E, LEN>(index)
+    }
+}
+
+impl<E: 'static, const LEN: usize> Cells<E, LEN, ProofGen<Ref<'_, Owned>>> {
+    /// TODO
+    pub fn get_access_info(&self) -> bool {
+        self.region_ref().iter().any(|cell| cell.get_access_info())
     }
 }
 
@@ -313,13 +345,13 @@ impl<E: ConstDefault + 'static, const LEN: usize, M: ManagerBase> NewState<M> fo
 
 impl<T: Encode, const LEN: usize, M: ManagerSerialise> Encode for Cells<T, LEN, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        M::serialise_region(&self.region, encoder)
+        self.region.encode(encoder)
     }
 }
 
 impl<E: Decode<()>, const LEN: usize, M: ManagerDeserialise> Decode<()> for Cells<E, LEN, M> {
     fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let region = M::deserialise_region(decoder)?;
+        let region = Decode::decode(decoder)?;
         Ok(Self { region })
     }
 }
@@ -332,13 +364,7 @@ impl<A: PartialEq<B> + Copy, B: Copy, const LEN: usize, M: ManagerRead, N: Manag
     }
 }
 
-impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
-    fn clone(&self) -> Self {
-        Self {
-            region: M::clone_region(&self.region),
-        }
-    }
-}
+type CellsInnerProj<E, const LEN: usize> = ArrayProj<CellProj<E>, LEN>;
 
 /// Projection from [`Cells`] to its element type `E`
 pub struct CellsProj<E, const LEN: usize>(PhantomData<E>);
@@ -348,14 +374,14 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
 
     type Target = E;
 
-    type Parameter = <RegionProj<E, LEN> as Projection>::Parameter;
+    type Parameter = <CellsInnerProj<E, LEN> as Projection>::Parameter;
 
     #[inline]
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> &'a Self::Target {
-        RegionProj::<E, LEN>::project_ref::<MC, M>(&state.region, param)
+        CellsInnerProj::<E, LEN>::project_ref::<MC, M>(&state.region, param)
     }
 
     #[inline]
@@ -366,7 +392,7 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
     where
         Self::Target: Copy,
     {
-        RegionProj::<E, LEN>::project_read::<MC, M>(&state.region, param)
+        CellsInnerProj::<E, LEN>::project_read::<MC, M>(&state.region, param)
     }
 
     #[inline]
@@ -375,13 +401,12 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
         param: Self::Parameter,
         value: Self::Target,
     ) {
-        RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
+        CellsInnerProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
     fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
         let field_offset = std::mem::offset_of!(Cells<E, LEN, Owned>, region);
-
-        RegionProj::<E, LEN>::owned_pointer_offset::<MC>(param) + field_offset
+        CellsInnerProj::<E, LEN>::owned_pointer_offset::<MC>(param) + field_offset
     }
 }
 
