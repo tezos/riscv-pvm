@@ -1242,18 +1242,15 @@ mod tests {
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
             // Bind `Prove` cells and write at one address
             let cells1 = [value_before; CELLS_SIZE];
-            let mut proof_region1: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
-                ProofRegion::bind(&cells1);
-            Prove::<Ref<'_, Normal>>::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, Prove<Ref<'_, Normal>>>> =
-                Cells::bind(&proof_region1);
+            let mut proof_region1: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells1);
+            Prove::region_write(&mut proof_region1, i, value_after);
+            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region1);
 
             // Bind `Prove` cells and do not access them
             let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
+            let proof_region2: ProofRegion<u64, CELLS_SIZE> =
                 ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, Prove<Ref<'_, Normal>>>> =
-                Cells::bind(&proof_region2);
+            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region2);
 
             let proof_state = (proof_cells1, proof_cells2);
 
@@ -1300,7 +1297,7 @@ mod tests {
     /// would no longer work.
     unsafe fn test_dyn_array_with_funs(
         len: usize,
-        test_proof: impl FnOnce(&mut DynCells<Prove<Ref<'_, Normal>>>),
+        test_proof: impl FnOnce(&mut DynCells<Prove>),
         test_verify: impl FnOnce(&mut DynCells<Verifier>),
     ) {
         let owned_cell = DynCells::new(len);
@@ -1361,7 +1358,7 @@ mod tests {
     macro_rules! test_dyn_array_with {
         ($len:literal, | $param:ident | { $($body:tt)* }) => {
             {
-                let test_proof = |$param: &mut DynCells<Prove<Ref<'_, Normal>>>| {
+                let test_proof = |$param: &mut DynCells<Prove>| {
                     $($body)*
                 };
 

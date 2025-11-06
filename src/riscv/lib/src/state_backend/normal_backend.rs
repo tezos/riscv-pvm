@@ -185,7 +185,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
-    use crate::state_backend::Ref;
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::Prove;
@@ -205,7 +204,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cell: Cell<u64, Prove<Ref<'_, Normal>>> =
+            let proof_cell: Cell<u64, Prove> =
                 Cell::bind(ProofRegion::bind(&region));
             let proof_bytes = serialise(&proof_cell).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -231,7 +230,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cells: Cells<u64, 3, Prove<Ref<'_, Normal>>> =
+            let proof_cells: Cells<u64, 3, Prove> =
                 Cells::bind(ProofRegion::bind(cell.region_ref()));
             let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -262,7 +261,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cells: DynCells<Prove<Ref<'_, Normal>>> =
+            let proof_cells: DynCells<Prove> =
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
             let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
