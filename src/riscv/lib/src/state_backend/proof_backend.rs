@@ -39,12 +39,12 @@ pub mod merkle;
 pub mod proof;
 pub mod tree;
 
-/// Proof-generating backend
-pub struct ProofGen<M: ManagerBase> {
+/// Proof-generating mode
+pub struct Prove<M: ManagerBase> {
     _pd: std::marker::PhantomData<M>,
 }
 
-impl<M: ManagerBase> ManagerBase for ProofGen<M> {
+impl<M: ManagerBase> ManagerBase for Prove<M> {
     type Region<E: 'static, const LEN: usize> = ProofRegion<E, LEN, M>;
 
     type DynRegion = ProofDynRegion<M>;
@@ -52,7 +52,7 @@ impl<M: ManagerBase> ManagerBase for ProofGen<M> {
     type ManagerRoot = Self;
 }
 
-impl<M: ManagerAlloc> ManagerAlloc for ProofGen<M> {
+impl<M: ManagerAlloc> ManagerAlloc for Prove<M> {
     fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
         ProofRegion::bind(M::allocate_region::<E, LEN>(init_value))
     }
@@ -64,7 +64,7 @@ impl<M: ManagerAlloc> ManagerAlloc for ProofGen<M> {
 
 /// Implementation of [`ManagerRead`] which wraps another manager and
 /// additionally records read locations.
-impl<M: ManagerRead> ManagerRead for ProofGen<M> {
+impl<M: ManagerRead> ManagerRead for Prove<M> {
     fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
         *Self::region_ref(region, index)
     }
@@ -90,7 +90,7 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
 
 /// Implementation of [`ManagerWrite`] which wraps another manager and
 /// records written locations but does not write to the wrapped region directly.
-impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
+impl<M: ManagerRead> ManagerWrite for Prove<M> {
     fn region_write<E, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
         index: usize,
@@ -119,10 +119,10 @@ impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
 }
 
 /// Implementation of [`ManagerSerialise`] which wraps another manager and
-/// serialises data as recorded by the `ProofGen` backend, reconstructed
+/// serialises data as recorded during the `Prove` mode, reconstructed
 /// via variants of [`ManagerRead`] functions which do not record access
 /// information.
-impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
+impl<M: ManagerSerialise> ManagerSerialise for Prove<M> {
     fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
         region: &Self::Region<T, LEN>,
         mut encoder: E,
@@ -196,7 +196,7 @@ impl<M: ManagerSerialise> ManagerSerialise for ProofGen<M> {
     }
 }
 
-impl<M: ManagerClone> ManagerClone for ProofGen<M> {
+impl<M: ManagerClone> ManagerClone for Prove<M> {
     fn clone_region<E: 'static + Clone, const LEN: usize>(
         region: &Self::Region<E, LEN>,
     ) -> Self::Region<E, LEN> {
@@ -389,21 +389,21 @@ impl DynAccess {
     }
 }
 
-/// Natural transformation from a manager `M` to a proof-generating manager `ProofGen<M>`
+/// Natural transformation from a manager `M` to a proof-generating manager `Prove<M>`
 pub enum ProofWrapper {}
 
 impl<'normal, M: ManagerBase + 'normal> FnManager<'normal, M> for ProofWrapper {
-    type Output = ProofGen<super::Ref<'normal, M>>;
+    type Output = Prove<super::Ref<'normal, M>>;
 
     fn map_region<E: 'static, const LEN: usize>(
         input: &'normal <M as ManagerBase>::Region<E, LEN>,
-    ) -> <ProofGen<super::Ref<'normal, M>> as ManagerBase>::Region<E, LEN> {
+    ) -> <Prove<super::Ref<'normal, M>> as ManagerBase>::Region<E, LEN> {
         ProofRegion::bind(input)
     }
 
     fn map_dyn_region(
         input: &'normal <M as ManagerBase>::DynRegion,
-    ) -> <ProofGen<super::Ref<'normal, M>> as ManagerBase>::DynRegion {
+    ) -> <Prove<super::Ref<'normal, M>> as ManagerBase>::DynRegion {
         ProofDynRegion::bind(input)
     }
 }
@@ -438,7 +438,7 @@ mod tests {
             // A read followed by a write
             let cells = [value_before; CELLS_SIZE];
             let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Normal>>> = Cells::bind(region);
+            let mut region: Cells<u64, CELLS_SIZE, Prove<Ref<'_, Normal>>> = Cells::bind(region);
 
             prop_assert!(!region.region_ref().get_access_info());
             let value = region.read(i);
@@ -450,7 +450,7 @@ mod tests {
             // A write followed by a read
             let cells = [value_before; CELLS_SIZE];
             let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Normal>>> = Cells::bind(region);
+            let mut region: Cells<u64, CELLS_SIZE, Prove<Ref<'_, Normal>>> = Cells::bind(region);
             prop_assert!(!region.region_ref().get_access_info());
             region.write(i, value_after);
             prop_assert!(region.region_ref().get_access_info());
@@ -464,7 +464,7 @@ mod tests {
             // A read_all followed by a write_all
             let cells = data_before;
             let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Normal>>> = Cells::bind(region);
+            let mut region: Cells<u64, CELLS_SIZE, Prove<Ref<'_, Normal>>> = Cells::bind(region);
             prop_assert!(!region.region_ref().get_access_info());
             let values = region.read_all();
             prop_assert_eq!(values.as_slice(), data_before);
@@ -475,7 +475,7 @@ mod tests {
             // A write_all followed by a read_all
             let cells = data_before;
             let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Normal>>> = Cells::bind(region);
+            let mut region: Cells<u64, CELLS_SIZE, Prove<Ref<'_, Normal>>> = Cells::bind(region);
             prop_assert!(!region.region_ref().get_access_info());
             region.write_all(&data_after);
             prop_assert!(region.region_ref().get_access_info());
@@ -490,8 +490,8 @@ mod tests {
 
             let mut proof_region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
                 ProofRegion::bind(&cells);
-            ProofGen::<Ref<'_, Normal>>::region_write(&mut proof_region, i, value_after);
-            let proof_cells: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Normal>>>> =
+            Prove::<Ref<'_, Normal>>::region_write(&mut proof_region, i, value_after);
+            let proof_cells: Cells<u64, CELLS_SIZE, Ref<'_, Prove<Ref<'_, Normal>>>> =
                 Cells::bind(&proof_region);
 
             let merkle_tree =
@@ -528,7 +528,7 @@ mod tests {
             let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
             let dyn_region: ProofDynRegion<Normal> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<ProofGen<Normal>> = DynCells::bind(dyn_region);
+            let mut dyn_cells: DynCells<Prove<Normal>> = DynCells::bind(dyn_region);
 
             // Perform static memory accesses
             let value_before = u64::from_le_bytes([byte_before; ELEM_SIZE]);
@@ -543,7 +543,7 @@ mod tests {
             let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
             let dyn_region: ProofDynRegion<Normal> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<ProofGen<Normal>> = DynCells::bind(dyn_region);
+            let mut dyn_cells: DynCells<Prove<Normal>> = DynCells::bind(dyn_region);
 
             // Perform dynamic memory accesses as `u16`
             let value_before = [u16::from_le_bytes([byte_before; 2]); ELEM_SIZE / 2];
@@ -564,7 +564,7 @@ mod tests {
             let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
             let dyn_region: ProofDynRegion<Normal> = ProofDynRegion::bind(cells);
-            let mut dyn_cells: DynCells<ProofGen<Normal>> = DynCells::bind(dyn_region);
+            let mut dyn_cells: DynCells<Prove<Normal>> = DynCells::bind(dyn_region);
 
             // Perform dynamic memory accesses as bytes
             let value_before = [byte_before; ELEM_SIZE];
@@ -593,12 +593,12 @@ mod tests {
             let value_before = [byte_before; ELEM_SIZE];
             reads.iter().try_for_each(|i| {
                 let mut value = [0u8; ELEM_SIZE];
-                ProofGen::<Ref<'_, Normal>>::dyn_region_read_all(&proof_dyn_region, *i, &mut value);
+                Prove::<Ref<'_, Normal>>::dyn_region_read_all(&proof_dyn_region, *i, &mut value);
                 prop_assert_eq!(value, value_before);
                 Ok::<(), proptest::test_runner::TestCaseError>(())
             })?;
             writes.iter().for_each(|i| {
-                ProofGen::<Ref<'_, Normal>>::dyn_region_write_all(
+                Prove::<Ref<'_, Normal>>::dyn_region_write_all(
                     &mut proof_dyn_region,
                     *i,
                     &bytes_after,
@@ -607,7 +607,7 @@ mod tests {
 
             // Build the Merkle tree and check that it has the root hash of the
             // initial wrapped region.
-            let proof_dyn_cells: DynCells<Ref<'_, ProofGen<Ref<'_, Normal>>>> =
+            let proof_dyn_cells: DynCells<Ref<'_, Prove<Ref<'_, Normal>>>> =
                 DynCells::bind(&proof_dyn_region);
             let merkle_tree =
                 <DynArray as ProofLayout>::to_merkle_tree(proof_dyn_cells).unwrap();

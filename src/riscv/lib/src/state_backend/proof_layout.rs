@@ -22,7 +22,7 @@ use super::DynArray;
 use super::Layout;
 use super::Many;
 use super::Ref;
-use super::RefProofGenAlloc;
+use super::RefProveAlloc;
 use super::RefVerifierAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
@@ -312,7 +312,7 @@ pub trait ProofLayout: Layout {
     /// Obtain the complete Merkle tree which captures an execution trace
     /// using the proof-generating backend.
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError>;
 
     /// Parse a Merkle proof into the allocated form of this layout.
@@ -328,7 +328,7 @@ pub trait ProofLayout: Layout {
 
 impl<T: ProofLayout> ProofLayout for Box<T> {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         T::to_merkle_tree(*state)
     }
@@ -350,10 +350,10 @@ where
     T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         // The Merkle leaf must hold the serialisation of the initial state.
-        // Directly serialising the `ProofGen` state would produce the serialisation
+        // Directly serialising the `Prove` state would produce the serialisation
         // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
         let region = state.into_region();
         let access_info = region.get_access_info();
@@ -385,13 +385,13 @@ where
     T: Encode + Decode<()> + 'static,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         // RV-282: Break down into multiple leaves if the size of the `Cells`
         // is too large for a proof.
         //
         // The Merkle leaf must hold the serialisation of the initial state.
-        // Directly serialising the `ProofGen` state would produce the serialisation
+        // Directly serialising the `Prove` state would produce the serialisation
         // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
         let region = state.into_region();
         let access_info = region.get_access_info();
@@ -432,7 +432,7 @@ where
 
 impl ProofLayout for DynArray {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let len = state.len();
 
@@ -752,7 +752,7 @@ where
     B: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![A::to_merkle_tree(state.0)?, B::to_merkle_tree(state.1)?];
         Ok(MerkleTree::make_merkle_node(children))
@@ -784,7 +784,7 @@ where
     C: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -822,7 +822,7 @@ where
     D: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -863,7 +863,7 @@ where
     E: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -906,7 +906,7 @@ where
     F: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = vec![
             A::to_merkle_tree(state.0)?,
@@ -947,7 +947,7 @@ where
     T: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let children = state
             .into_iter()
@@ -998,7 +998,7 @@ where
     T: ProofLayout,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         let leaves = state
             .into_iter()
@@ -1223,14 +1223,14 @@ mod tests {
     use crate::state_backend::DynCells;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerWrite;
-    use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::Prove;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const CELLS_SIZE: usize = 32;
 
-    // When producing a proof from a `ProofGen` state, values written during
+    // When producing a proof from a state in `Prove` mode, values written during
     // the execution of the tick being proven should not be blinded, whereas
     // values which were not accessed should be blinded. When a proof contains
     // blinded values, it should be possible to compute the final hash of the
@@ -1240,19 +1240,19 @@ mod tests {
         type TestLayout = (Array<u64, CELLS_SIZE>, Array<u64, CELLS_SIZE>);
 
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
-            // Bind `ProofGen` cells and write at one address
+            // Bind `Prove` cells and write at one address
             let cells1 = [value_before; CELLS_SIZE];
             let mut proof_region1: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
                 ProofRegion::bind(&cells1);
-            ProofGen::<Ref<'_, Normal>>::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Normal>>>> =
+            Prove::<Ref<'_, Normal>>::region_write(&mut proof_region1, i, value_after);
+            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, Prove<Ref<'_, Normal>>>> =
                 Cells::bind(&proof_region1);
 
-            // Bind `ProofGen` cells and do not access them
+            // Bind `Prove` cells and do not access them
             let cells2 = [value_before; CELLS_SIZE];
             let proof_region2: ProofRegion<u64, CELLS_SIZE, Ref<'_, Normal>> =
                 ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, ProofGen<Ref<'_, Normal>>>> =
+            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, Prove<Ref<'_, Normal>>>> =
                 Cells::bind(&proof_region2);
 
             let proof_state = (proof_cells1, proof_cells2);
@@ -1294,13 +1294,13 @@ mod tests {
     ///
     /// Due to Rust's limitation on higher-ranked polymorphism, we can't accept
     /// a single function and instantiate it within the function body with the respective managers
-    /// `ProofGen<_>` and `Verifier`. One could work around this restriction by using a trait to
+    /// `Prove<_>` and `Verifier`. One could work around this restriction by using a trait to
     /// simulate the rank-2-ness, but that means you can't provide closures as the implementation
     /// any more. If any of the given `test_proof` or `test_verify` capture an environment, this
     /// would no longer work.
     unsafe fn test_dyn_array_with_funs(
         len: usize,
-        test_proof: impl FnOnce(&mut DynCells<ProofGen<Ref<'_, Normal>>>),
+        test_proof: impl FnOnce(&mut DynCells<Prove<Ref<'_, Normal>>>),
         test_verify: impl FnOnce(&mut DynCells<Verifier>),
     ) {
         let owned_cell = DynCells::new(len);
@@ -1361,7 +1361,7 @@ mod tests {
     macro_rules! test_dyn_array_with {
         ($len:literal, | $param:ident | { $($body:tt)* }) => {
             {
-                let test_proof = |$param: &mut DynCells<ProofGen<Ref<'_, Normal>>>| {
+                let test_proof = |$param: &mut DynCells<Prove<Ref<'_, Normal>>>| {
                     $($body)*
                 };
 

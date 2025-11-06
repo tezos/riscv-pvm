@@ -163,7 +163,7 @@ macro_rules! struct_layout {
             {
                 #[inline]
                 fn to_merkle_tree<'outer, 'inner: 'outer>(
-                    state: $crate::state_backend::RefProofGenAlloc<'outer, 'inner, Self>,
+                    state: $crate::state_backend::RefProveAlloc<'outer, 'inner, Self>,
                 ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, octez_riscv_data::hash::HashError> {
                     Ok($crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
                         vec![
@@ -364,7 +364,7 @@ mod tests {
             };
             let hash = refs.hash_state();
 
-            // Obtain the Merkle tree via the `ProofGen` backend
+            // Obtain the Merkle tree via the `Prove` mode
             let mut proof_foo = FooF {
                 bar: foo.bar.struct_ref::<ProofWrapper>(),
                 qux: foo.qux.struct_ref::<ProofWrapper>(),

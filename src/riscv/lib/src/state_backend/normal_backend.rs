@@ -187,8 +187,8 @@ pub(crate) mod test_helpers {
     use crate::state_backend::DynCells;
     use crate::state_backend::Ref;
     use crate::state_backend::proof_backend::ProofDynRegion;
-    use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
+    use crate::state_backend::proof_backend::Prove;
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
     #[test]
@@ -204,8 +204,8 @@ pub(crate) mod test_helpers {
             let bytes_after = serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
-            // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cell: Cell<u64, ProofGen<Ref<'_, Normal>>> =
+            // Serialisation is consistent with that of the `Prove` mode.
+            let proof_cell: Cell<u64, Prove<Ref<'_, Normal>>> =
                 Cell::bind(ProofRegion::bind(&region));
             let proof_bytes = serialise(&proof_cell).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -230,8 +230,8 @@ pub(crate) mod test_helpers {
             let bytes_after = serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
-            // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Normal>>> =
+            // Serialisation is consistent with that of the `Prove` mode.
+            let proof_cells: Cells<u64, 3, Prove<Ref<'_, Normal>>> =
                 Cells::bind(ProofRegion::bind(cell.region_ref()));
             let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -261,8 +261,8 @@ pub(crate) mod test_helpers {
             let bytes_after = serialise(&cells_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
-            // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: DynCells<ProofGen<Ref<'_, Normal>>> =
+            // Serialisation is consistent with that of the `Prove` mode.
+            let proof_cells: DynCells<Prove<Ref<'_, Normal>>> =
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
             let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);

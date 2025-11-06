@@ -43,7 +43,7 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::proof_backend::ProofGen;
+use crate::state_backend::proof_backend::Prove;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
@@ -234,7 +234,7 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + 
 impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Create a new stepper in which the existing PVM is managed by
     /// the proof-generating backend.
-    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, ProofGen<Ref<'_, M>>> {
+    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove<Ref<'_, M>>> {
         PvmStepper {
             pvm: self.pvm.start_proof(),
             rollup_address: self.rollup_address,
