@@ -42,8 +42,8 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
+use crate::state_backend::proof_backend::Prove;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -104,11 +104,8 @@ const INITIAL_VERSION: u64 = 0;
 /// Proof generator for the PVM.
 ///
 /// Uses the interpreted compiler.
-pub(crate) type PvmProofGen<'a, MC, M> = Pvm<
-    MC,
-    Interpreted<MC, ProofGen<state_backend::Ref<'a, M>>>,
-    ProofGen<state_backend::Ref<'a, M>>,
->;
+pub(crate) type PvmProve<'a, MC, M> =
+    Pvm<MC, Interpreted<MC, Prove<state_backend::Ref<'a, M>>>, Prove<state_backend::Ref<'a, M>>>;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone)]
@@ -186,7 +183,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     }
 
     /// Generate a proof-generating version of this PVM.
-    pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, M>
+    pub(crate) fn start_proof(&self) -> PvmProve<'_, MC, M>
     where
         M: state_backend::ManagerRead,
     {
@@ -391,8 +388,8 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     }
 }
 
-impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Normal>>>>
-    Pvm<MC, CPE, ProofGen<Ref<'a, Normal>>>
+impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<Ref<'a, Normal>>>>
+    Pvm<MC, CPE, Prove<Ref<'a, Normal>>>
 {
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {

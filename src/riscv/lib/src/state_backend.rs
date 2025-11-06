@@ -59,15 +59,15 @@
 //! - [Verifier]
 //!   Backend capable of partially allocating a state and verify a given proof.
 //!   Needs to be light on memory usage since it runs in the protocol.
-//! - [ProofGen]
-//!   Backend capable of generating a proof for running one step.
+//! - [Prove]
+//!   Mode capable of generating a proof for running one step.
 //! - [Ref]
 //!   Helper backend to wrap another backend through a reference to it.
 //!
 //! [Layouts]: layout::Layout
 //! [Normal]: octez_riscv_data::mode::Normal
 //! [Verifier]: verify_backend::Verifier
-//! [ProofGen]: proof_backend::ProofGen
+//! [Prove]: proof_backend::Prove
 
 mod elems;
 mod layout;
@@ -346,8 +346,8 @@ impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
 pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProofGenAlloc<'outer, 'inner, L> =
-    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, Normal>>>>;
+pub type RefProveAlloc<'outer, 'inner, L> =
+    AllocatedOf<L, Ref<'outer, proof_backend::Prove<Ref<'inner, Normal>>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
@@ -428,7 +428,7 @@ pub(crate) mod test_helpers {
             #[test]
             fn $name() {
                 use octez_riscv_data::mode::Normal;
-                use $crate::state_backend::proof_backend::ProofGen;
+                use $crate::state_backend::proof_backend::Prove;
                 use $crate::state_backend::verify_backend::Verifier;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
 
@@ -437,7 +437,7 @@ pub(crate) mod test_helpers {
                 }
 
                 inner::<Normal>();
-                inner::<ProofGen<Normal>>();
+                inner::<Prove<Normal>>();
                 inner::<Verifier>();
             }
         };

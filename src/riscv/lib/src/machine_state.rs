@@ -741,7 +741,7 @@ pub(crate) mod test_helpers {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::state_backend::ManagerBase;
-    use crate::state_backend::proof_backend::ProofGen;
+    use crate::state_backend::proof_backend::Prove;
     use crate::state_backend::verify_backend::Verifier;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
@@ -785,7 +785,7 @@ pub(crate) mod test_helpers {
     /// Trait used to obtain initial values for testing purposes.
     ///
     /// It is useful to choose how objects are reinitialised in tests to improve performance, for
-    /// example the [`ProofGen`] would rather be newly created than be reset or cloned.
+    /// example the [`Prove`] would rather be newly created than be reset or cloned.
     pub trait ManagerTestInit: ManagerBase {
         /// This type is used to downcast the initialisation function to the actual type that is the
         /// subject of initialisation.
@@ -814,7 +814,7 @@ pub(crate) mod test_helpers {
         }
     }
 
-    impl ReinitMachine<ProofGen<Normal>> for TestMachineOf<ProofGen<Normal>> {
+    impl ReinitMachine<Prove<Normal>> for TestMachineOf<Prove<Normal>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
             let new_state = MachineState::new(InterpretedCompiler);
             RefMutOrOwned::Owned(new_state)

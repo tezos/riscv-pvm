@@ -22,7 +22,7 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::RefProofGenAlloc;
+use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::VerifierAllocResult;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
@@ -43,7 +43,7 @@ where
     (): BuddyLayoutMatch<PAGES>,
 {
     fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProofGenAlloc<'outer, 'inner, Self>,
+        state: RefProveAlloc<'outer, 'inner, Self>,
     ) -> Result<MerkleTree, HashError> {
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
