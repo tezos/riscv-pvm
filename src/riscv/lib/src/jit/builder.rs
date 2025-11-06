@@ -29,7 +29,7 @@ use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_context::projection::MachineCoreProjection;
 
 impl From<Predicate> for IntCC {
@@ -52,7 +52,7 @@ impl From<Predicate> for IntCC {
 fn read_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
-    base: Pointer<MachineCoreState<MC, Owned>>,
+    base: Pointer<MachineCoreState<MC, Normal>>,
     param: P::Parameter,
 ) -> Value<P::Target>
 where
@@ -60,7 +60,7 @@ where
     P: MachineCoreProjection,
     P::Target: typed::Typed,
 {
-    let (base, offset) = P::owned_pointer_offset::<MC>(param).build_base_and_offset(
+    let (base, offset) = P::normal_pointer_offset::<MC>(param).build_base_and_offset(
         target_config,
         builder,
         base.to_value(),
@@ -84,14 +84,14 @@ where
 fn write_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
-    base: Pointer<MachineCoreState<MC, Owned>>,
+    base: Pointer<MachineCoreState<MC, Normal>>,
     param: P::Parameter,
     value: Value<P::Target>,
 ) where
     MC: MemoryConfig,
     P: MachineCoreProjection,
 {
-    let (base, offset) = P::owned_pointer_offset::<MC>(param).build_base_and_offset(
+    let (base, offset) = P::normal_pointer_offset::<MC>(param).build_base_and_offset(
         target_config,
         builder,
         base.to_value(),

@@ -32,7 +32,7 @@ use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
 use crate::state_backend::ManagerSerialise;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -282,12 +282,12 @@ impl<M: backend::ManagerBase> XRegisters<M> {
     }
 }
 
-impl XRegisters<Owned> {
+impl XRegisters<Normal> {
     /// Get the byte offset from a pointer to `XRegisters` to the memory of the value
     /// stored in the `reg` in question.
     pub(crate) const fn xregister_offset(reg: NonZeroXRegister) -> usize {
         std::mem::offset_of!(Self, registers)
-            + backend::Cells::<XValue, 31, Owned>::region_elem_offset(reg as usize)
+            + backend::Cells::<XValue, 31, Normal>::region_elem_offset(reg as usize)
     }
 }
 
@@ -878,12 +878,12 @@ mod tests {
 
     #[test]
     fn test_xregister_offsets() {
-        let registers = XRegisters::<Owned>::new();
-        let registers_ptr = (&registers) as *const XRegisters<Owned>;
+        let registers = XRegisters::<Normal>::new();
+        let registers_ptr = (&registers) as *const XRegisters<Normal>;
 
         for reg in NonZeroXRegister::iter() {
-            let offset = XRegisters::<Owned>::xregister_offset(reg);
-            let val: &XValue = Owned::region_ref(registers.registers.region_ref(), reg as usize);
+            let offset = XRegisters::<Normal>::xregister_offset(reg);
+            let val: &XValue = Normal::region_ref(registers.registers.region_ref(), reg as usize);
 
             // Safety: both pointers are valid
             let offset_refs = unsafe { (val as *const XValue).byte_offset_from(registers_ptr) };

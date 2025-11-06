@@ -28,7 +28,7 @@ use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
-use super::owned_backend::Owned;
+use super::normal_backend::Normal;
 use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
@@ -214,10 +214,10 @@ impl<E: 'static> Projection for CellProj<E> {
         state.write(value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
-        let field_offset = std::mem::offset_of!(Cell<E, Owned>, region.region);
+    fn normal_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
+        let field_offset = std::mem::offset_of!(Cell<E, Normal>, region.region);
 
-        RegionProj::<E, 1>::owned_pointer_offset::<MC>((0,)) + field_offset
+        RegionProj::<E, 1>::normal_pointer_offset::<MC>((0,)) + field_offset
     }
 }
 
@@ -300,11 +300,11 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     }
 }
 
-impl<E: 'static, const LEN: usize> Cells<E, LEN, Owned> {
+impl<E: 'static, const LEN: usize> Cells<E, LEN, Normal> {
     /// Obtain the byte offset from a pointer to `Cells<E, LEN, M>` to the memory of the elem at
     /// `index`.
     pub(crate) const fn region_elem_offset(index: usize) -> usize {
-        std::mem::offset_of!(Self, region) + Owned::region_elem_offset::<E, LEN>(index)
+        std::mem::offset_of!(Self, region) + Normal::region_elem_offset::<E, LEN>(index)
     }
 }
 
@@ -404,10 +404,10 @@ impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
         RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        let field_offset = std::mem::offset_of!(Cells<E, LEN, Owned>, region);
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        let field_offset = std::mem::offset_of!(Cells<E, LEN, Normal>, region);
 
-        RegionProj::<E, LEN>::owned_pointer_offset::<MC>(param) + field_offset
+        RegionProj::<E, LEN>::normal_pointer_offset::<MC>(param) + field_offset
     }
 }
 

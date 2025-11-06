@@ -27,7 +27,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use octez_riscv::state_backend::owned_backend::Owned;
+use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -37,7 +37,7 @@ use super::sample::Symbols;
 
 /// Run profiling on the given stepper
 pub(crate) fn profile_stepper(
-    mut stepper: impl Stepper<Manager = Owned>,
+    mut stepper: impl Stepper<Manager = Normal>,
     program: &[u8],
     sample_interval: Duration,
     max_steps: Option<usize>,

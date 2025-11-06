@@ -53,8 +53,8 @@
 //!
 //! These backends can be:
 //!
-//! - [Owned]
-//!   Backend which has the full state allocated in memory. It can execute one step
+//! - [Normal]
+//!   Mode which has the full state allocated in memory. It can execute one step
 //!   or multiple steps at a time faster.
 //! - [Verifier]
 //!   Backend capable of partially allocating a state and verify a given proof.
@@ -65,13 +65,13 @@
 //!   Helper backend to wrap another backend through a reference to it.
 //!
 //! [Layouts]: layout::Layout
-//! [Owned]: owned_backend::Owned
+//! [Normal]: normal_backend::Normal
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
 mod elems;
 mod layout;
-pub mod owned_backend;
+pub mod normal_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
 mod region;
@@ -110,10 +110,10 @@ pub trait ManagerBase: Sized {
     /// The root manager may either be itself, or occasionally the manager that this manager
     /// wraps.
     ///
-    /// For example, the [`Ref`] backend is often use to wrap the [`Owned`] backend to gain access
-    /// to its regions. In this case, the root manager would be the owned backend.
+    /// For example, the [`Ref`] backend is often use to wrap the [`Normal`] mode to gain access
+    /// to its regions. In this case, the root state would be in [`Normal`] mode.
     ///
-    /// [`Owned`]: owned_backend::Owned
+    /// [`Normal`]: normal_backend::Normal
     type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 }
 
@@ -338,15 +338,15 @@ impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
     }
 }
 
-/// Alias for the allocated structure with references to regions of
-/// the [Owned] backend
+/// Alias for the allocated structure with references to regions in
+/// the [Normal] mode
 ///
-/// [Owned]: owned_backend::Owned
-pub type RefOwnedAlloc<'a, L> = AllocatedOf<L, Ref<'a, owned_backend::Owned>>;
+/// [Normal]: normal_backend::Normal
+pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, normal_backend::Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProofGenOwnedAlloc<'outer, 'inner, L> =
-    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, owned_backend::Owned>>>>;
+pub type RefProofGenAlloc<'outer, 'inner, L> =
+    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, normal_backend::Normal>>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
@@ -393,7 +393,7 @@ impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
         M::region_write(state, param.0, value);
     }
 
-    fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
         assert!(
             param.0 < LEN,
             "Region index out of bounds: {} >= {}",
@@ -426,7 +426,7 @@ pub(crate) mod test_helpers {
             $(#[$m])*
             #[test]
             fn $name() {
-                use $crate::state_backend::owned_backend::Owned;
+                use $crate::state_backend::normal_backend::Normal;
                 use $crate::state_backend::proof_backend::ProofGen;
                 use $crate::state_backend::verify_backend::Verifier;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
@@ -435,8 +435,8 @@ pub(crate) mod test_helpers {
                     $expr
                 }
 
-                inner::<Owned>();
-                inner::<ProofGen<Owned>>();
+                inner::<Normal>();
+                inner::<ProofGen<Normal>>();
                 inner::<Verifier>();
             }
         };
@@ -464,10 +464,10 @@ mod tests {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
 
     #[test]
-    fn test_example_owned() {
+    fn test_example_normal() {
         struct Example<M: ManagerBase> {
             first: Cell<u64, M>,
             second: Cells<u32, 4, M>,
@@ -476,7 +476,7 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut instance: Example<Owned> = Example {
+        let mut instance: Example<Normal> = Example {
             first: Cell::new(),
             second: Cells::new(),
         };

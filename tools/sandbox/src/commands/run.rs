@@ -16,7 +16,7 @@ use std::time::Duration;
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::machine_state::page_cache::CodePageEntry;
-use octez_riscv::state_backend::owned_backend::Owned;
+use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -32,7 +32,7 @@ use crate::memory_config::MemoryConfigValue;
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::owned_backend::Owned>;
+        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::normal_backend::Normal>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Execution strategy for entrypoints.
         pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler<MC>, MC>;
@@ -86,9 +86,9 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, CPE> = PvmStepper<Console<'static>, MC, Owned, CPE>;
+type PvmStepperRunner<MC, CPE> = PvmStepper<Console<'static>, MC, Normal, CPE>;
 
-pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Owned>>(
+pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Normal>>(
     program: &[u8],
     common: &CommonOptions,
     compiler: CPE::Compiler,
@@ -106,7 +106,7 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, 
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, Owned, CPE>::new(
+    let stepper = PvmStepper::<_, MC, Normal, CPE>::new(
         program,
         inbox.build(),
         console,

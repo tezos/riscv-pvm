@@ -19,7 +19,7 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
 use crate::machine_state::page_cache::DispatchTarget;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// Maximum number of instructions we pass to a compilation request
 ///
@@ -61,7 +61,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_interpreted(
         page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
-        core: &mut MachineCoreState<MC, Owned>,
+        core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
         result: &mut ExceptionCode,
@@ -97,7 +97,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_not_compiled(
         page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
-        core: &mut MachineCoreState<MC, Owned>,
+        core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
         result: &mut ExceptionCode,
@@ -148,7 +148,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> From<Instruction> for Jitted<D, 
     }
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jitted<D, MC> {
+impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Jitted<D, MC> {
     type Compiler = D;
 
     /// Run from an entrypoint, using the currently selected dispatch mechanism
@@ -161,7 +161,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Owned> for Jit
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     unsafe fn run_entrypoint(
         page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
-        core: &mut MachineCoreState<MC, Owned>,
+        core: &mut MachineCoreState<MC, Normal>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,
         max_steps: usize,

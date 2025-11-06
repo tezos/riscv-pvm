@@ -30,7 +30,7 @@ use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::state::NewState;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 #[derive(Clone, Debug)]
 pub enum TestStepperResult {
@@ -83,13 +83,13 @@ pub enum TestStepperError {
 
 pub struct TestStepper<
     MC: MemoryConfig = M1G,
-    CPE: CodePageEntry<MC, Owned> = Interpreted<MC, Owned>,
+    CPE: CodePageEntry<MC, Normal> = Interpreted<MC, Normal>,
 > {
-    machine_state: MachineState<MC, CPE, Owned>,
-    posix_state: PosixState<Owned>,
+    machine_state: MachineState<MC, CPE, Normal>,
+    posix_state: PosixState<Normal>,
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
     /// Initialise an interpreter with a given `program`.
     #[inline]
     pub fn new(program: &[u8], compiler: CPE::Compiler) -> Result<Self, TestStepperError> {
@@ -113,7 +113,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
         compiler: CPE::Compiler,
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
-            posix_state: PosixState::<Owned>::new(),
+            posix_state: PosixState::<Normal>::new(),
             machine_state: MachineState::new(compiler),
         };
 
@@ -172,10 +172,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> TestStepper<MC, CPE> {
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Stepper for TestStepper<MC, CPE> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Stepper for TestStepper<MC, CPE> {
     type MemoryConfig = MC;
 
-    type Manager = Owned;
+    type Manager = Normal;
 
     #[inline(always)]
     fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager> {
