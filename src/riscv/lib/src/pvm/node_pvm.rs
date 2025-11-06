@@ -24,7 +24,7 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::Verifier;
@@ -47,7 +47,7 @@ type NodePvmState<M> = Pvm<NodePvmMemConfig, Interpreted<NodePvmMemConfig, M>, M
 #[perfect_derive(Clone)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
-pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
+pub struct NodePvm<M: state_backend::ManagerBase = Normal> {
     state: Box<NodePvmState<M>>,
 }
 
@@ -287,7 +287,7 @@ impl PvmStorage {
 
     /// Checkout the PVM state committed under `id`, if the commit exists.
     pub fn checkout(&self, id: &Hash) -> Result<NodePvm, PvmStorageError> {
-        let allocated: AllocatedOf<NodePvmLayout, Owned> = self.repo.checkout_serialised(id)?;
+        let allocated: AllocatedOf<NodePvmLayout, Normal> = self.repo.checkout_serialised(id)?;
         Ok(NodePvm::bind(allocated))
     }
 

@@ -34,7 +34,7 @@ use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::RefProofGenOwnedAlloc;
+use crate::state_backend::RefProofGenAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
@@ -55,7 +55,7 @@ impl<const PAGES: u64> CommitmentLayout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
+    fn to_merkle_tree(state: RefProofGenAlloc<Self>) -> Result<MerkleTree, HashError> {
         Atom::to_merkle_tree(state.set)
     }
 

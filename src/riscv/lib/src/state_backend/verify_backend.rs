@@ -25,7 +25,7 @@ use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::hash::Hash;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Panic payload that is raised when a value isn't present in a part of the Verifier backend.
@@ -527,14 +527,14 @@ impl<E> Cell<E, Verifier> {
     }
 
     /// Construct a verifier cell with a value.
-    pub fn from_owned(cell: Cell<E, Owned>) -> Self {
+    pub fn from_owned(cell: Cell<E, Normal>) -> Self {
         let values = Box::new(cell.into_region().map(Some));
         let region = Region::Partial(values);
         Cell::bind(region)
     }
 }
 
-impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verifier>>> for Cell<E, Owned> {
+impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verifier>>> for Cell<E, Normal> {
     type Error = PartialHashError;
 
     fn try_from(cell: Cell<E, Ref<'_, Verifier>>) -> Result<Self, Self::Error> {

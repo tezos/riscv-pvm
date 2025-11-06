@@ -29,7 +29,7 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::hash::Hash;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// Alias for the function signature produced by the JIT compilation.
 ///
@@ -49,7 +49,7 @@ use crate::state_backend::owned_backend::Owned;
 pub type JitFn<MC> = unsafe extern "C" fn(
     // ignored
     *const c_void,
-    &mut MachineCoreState<MC, Owned>,
+    &mut MachineCoreState<MC, Normal>,
     // ignored
     u64,
     usize,
@@ -322,11 +322,11 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
 
-    type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Owned>);
-    type AssertHook = dyn Fn(&MachineCoreState<M4K, Owned>);
+    type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Normal>);
+    type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
 
     /// Machine state for test scenarios with a configurable [`Block`] type.
-    type TestMachineState<CPE> = MachineState<M4K, CPE, Owned>;
+    type TestMachineState<CPE> = MachineState<M4K, CPE, Normal>;
 
     enum ScenarioSteps {
         /// Steps equal to the instruction sequence.
@@ -437,7 +437,7 @@ mod tests {
             let initial_pc = self.initial_pc.unwrap_or_default();
 
             // Push the given instructions to the correct page
-            let mut interpreted_page = PageEntry::<Interpreted<M4K, Owned>>::zeroed();
+            let mut interpreted_page = PageEntry::<Interpreted<M4K, Normal>>::zeroed();
             interpreted_page.push_instructions(initial_pc, self.instructions.iter().cloned());
 
             interpreted_state
@@ -625,13 +625,13 @@ mod tests {
 
     macro_rules! setup_hook {
         (|$core:ident| $block:block) => {
-            Box::new(move |$core: &mut MachineCoreState<M4K, Owned>| $block)
+            Box::new(move |$core: &mut MachineCoreState<M4K, Normal>| $block)
         };
     }
 
     macro_rules! assert_hook {
         (|$core:ident| $block:block) => {
-            Box::new(move |$core: &MachineCoreState<M4K, Owned>| $block)
+            Box::new(move |$core: &MachineCoreState<M4K, Normal>| $block)
         };
     }
 

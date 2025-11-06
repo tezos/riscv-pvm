@@ -36,7 +36,7 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
@@ -382,7 +382,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Pvm<MC, CPE, Owned> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     pub(crate) fn empty(compiler: CPE::Compiler) -> Self {
         Self::new(compiler)
     }
@@ -393,8 +393,8 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Pvm<MC, CPE, Owned> {
     }
 }
 
-impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
-    Pvm<MC, CPE, ProofGen<Ref<'a, Owned>>>
+impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Normal>>>>
+    Pvm<MC, CPE, ProofGen<Ref<'a, Normal>>>
 {
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
@@ -486,7 +486,7 @@ mod tests {
     use crate::pvm::common::tests::memory::Address;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
 
     impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
         /// Handle an exception using the defined Execution Environment.
@@ -509,10 +509,10 @@ mod tests {
     #[test]
     fn test_read_input() {
         type MC = M1M;
-        type Cpe = page_cache::Interpreted<MC, Owned>;
+        type Cpe = page_cache::Interpreted<MC, Normal>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -613,12 +613,12 @@ mod tests {
             written: [u8; WRITTEN_SIZE],
         )|{
             type MC = M1M;
-            type Cpe = page_cache::Interpreted<MC, Owned>;
+            type Cpe = page_cache::Interpreted<MC, Normal>;
 
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
+            let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();

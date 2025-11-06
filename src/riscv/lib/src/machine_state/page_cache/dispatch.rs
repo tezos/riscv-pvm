@@ -23,7 +23,7 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::jitted::Jitted;
 use crate::machine_state::page_cache::jitted::JittedPage;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// The function signature for dispatching an entrypoint run.
 ///
@@ -33,7 +33,7 @@ use crate::state_backend::owned_backend::Owned;
 /// The first and last parameters must be thin-references, for ABI-compatibility reasons.
 pub type DispatchFn<D, MC> = unsafe extern "C" fn(
     &JittedPage<D, MC>,
-    &mut MachineCoreState<MC, Owned>,
+    &mut MachineCoreState<MC, Normal>,
     Address,
     usize,
     &mut ExceptionCode,
@@ -369,7 +369,7 @@ mod tests {
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::jitted::Jitted;
     use crate::machine_state::page_cache::jitted::JittedPage;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
 
     #[test]
     fn test_dispatch_debug_classification() {
@@ -391,7 +391,7 @@ mod tests {
 
         unsafe extern "C" fn compiled_dummy<D: DispatchCompiler<M4K>>(
             _: &JittedPage<D, M4K>,
-            _: &mut MachineCoreState<M4K, Owned>,
+            _: &mut MachineCoreState<M4K, Normal>,
             _: Address,
             _: usize,
             _: &mut ExceptionCode,

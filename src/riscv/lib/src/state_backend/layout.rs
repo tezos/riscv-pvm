@@ -166,7 +166,7 @@ macro_rules! struct_layout {
             {
                 #[inline]
                 fn to_merkle_tree(
-                    state: $crate::state_backend::RefProofGenOwnedAlloc<Self>,
+                    state: $crate::state_backend::RefProofGenAlloc<Self>,
                 ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, $crate::storage::HashError> {
                     Ok($crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
                         vec![
@@ -337,7 +337,7 @@ mod tests {
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
     use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -372,7 +372,7 @@ mod tests {
         }
 
         fn inner(bar: u64, qux: [u8; 64]) {
-            let mut foo = AllocatedOf::<Foo, Owned> {
+            let mut foo = AllocatedOf::<Foo, Normal> {
                 bar: Cell::new(),
                 qux: Cells::new(),
             };
@@ -420,7 +420,7 @@ mod tests {
             let proof_hash = proof.root_hash();
             assert_eq!(hash, proof_hash);
 
-            // Apply the same modification on the `Owned` state in order to obtain
+            // Apply the same modification on the `Normal` state in order to obtain
             // the final state hash
             foo.bar.write(bar.wrapping_add(1));
             foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));

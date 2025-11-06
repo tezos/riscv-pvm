@@ -39,7 +39,7 @@ use crate::machine_state::hart_state::write_pc;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
@@ -60,7 +60,7 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     entry_block: Block,
 
     /// Parameter pointing to the `MachineCoreState`
-    core_param: Pointer<MachineCoreState<MC, Owned>>,
+    core_param: Pointer<MachineCoreState<MC, Normal>>,
 
     /// The program counter of the start of the sequence
     program_counter: Address,
@@ -127,10 +127,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         builder.append_block_params_for_function_params(param_block);
         builder.switch_to_block(param_block);
 
-        // SAFETY: `JitFn` accepts a `&mut MachineCoreState<MC, Owned>` as the 2nd parameter.
+        // SAFETY: `JitFn` accepts a `&mut MachineCoreState<MC, Normal>` as the 2nd parameter.
         let core_param = unsafe {
             let raw_value = builder.block_params(param_block)[1];
-            Pointer::<MachineCoreState<MC, Owned>>::from_raw(raw_value)
+            Pointer::<MachineCoreState<MC, Normal>>::from_raw(raw_value)
         };
 
         // SAFETY: `JitFn` accepts a `usize` as the 4th parameter.

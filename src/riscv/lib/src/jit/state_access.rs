@@ -42,7 +42,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// Exception codes used for efficient exception handling in JIT-compiled code
 ///
@@ -133,7 +133,7 @@ impl typed::Typed for ExceptionCode {
 /// If the store fails (due to out of bounds etc) then the appropriate exception code
 /// is returned to indicate the type of failure that occurred.
 extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
+    core: &mut MachineCoreState<MC, Normal>,
     address: u64,
     value: E,
 ) -> ExceptionCode {
@@ -152,7 +152,7 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
 /// If the load fails (due to out of bounds etc) then the appropriate exception code
 /// is returned to indicate the type of failure that occurred.
 extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
-    core: &MachineCoreState<MC, Owned>,
+    core: &MachineCoreState<MC, Normal>,
     address: u64,
     xval_out: &mut MaybeUninit<E>,
 ) -> ExceptionCode {
@@ -167,7 +167,7 @@ extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
 }
 
 extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
+    core: &mut MachineCoreState<MC, Normal>,
     xval: XValue,
 ) -> FValue {
     MachineCoreState::f64_from_x64_unsigned_dynamic(core, xval)
@@ -175,7 +175,7 @@ extern "C" fn f64_from_x64_unsigned_dynamic<MC: MemoryConfig>(
 
 /// Convert an unsigned 64-bit `XValue` to a 64-bit `FValue` using the given static rounding mode.
 extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
+    core: &mut MachineCoreState<MC, Normal>,
     xval: XValue,
 ) -> FValue {
     MachineCoreState::f64_from_x64_unsigned_static(core, xval, RM::ROUND)
@@ -183,7 +183,7 @@ extern "C" fn f64_from_x64_unsigned_static<RM: StaticRoundingMode, MC: MemoryCon
 
 /// Write to a Control and Status register.
 extern "C" fn csr_write<MC: MemoryConfig>(
-    core: &mut MachineCoreState<MC, Owned>,
+    core: &mut MachineCoreState<MC, Normal>,
     csr: CSRegister,
     value: XValue,
 ) {
@@ -192,7 +192,7 @@ extern "C" fn csr_write<MC: MemoryConfig>(
 
 /// Read from a Control and Status register.
 extern "C" fn csr_read<MC: MemoryConfig>(
-    core: &MachineCoreState<MC, Owned>,
+    core: &MachineCoreState<MC, Normal>,
     csr: CSRegister,
 ) -> XValue {
     core.hart.csregisters.read(csr)
@@ -222,7 +222,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn memory_store<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         phys_address: Value<Address>,
         value: Value<XValue>,
     ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder) + 'static> {
@@ -248,7 +248,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn memory_load<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         phys_address: Value<Address>,
     ) -> ErrnoImpl<Value<XValue>, impl FnOnce(&mut FunctionBuilder) -> Value<XValue> + 'static>
     {
@@ -284,7 +284,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn f64_from_x64_unsigned_dynamic(
         &mut self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         xval: Value<XValue>,
     ) -> Value<FValue> {
         // SAFETY: The reference argument lifetimes are valid for the duration of the call:
@@ -303,7 +303,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn f64_from_x64_unsigned_static(
         &mut self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         xval: Value<XValue>,
         rm: RoundingMode,
     ) -> Value<FValue> {
@@ -330,7 +330,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn csr_write(
         &self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         csr: CSRegister,
         value: Value<XValue>,
     ) {
@@ -357,7 +357,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn csr_read(
         &self,
         builder: &mut FunctionBuilder,
-        core_ptr: Pointer<MachineCoreState<MC, Owned>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         csr: CSRegister,
     ) -> Value<XValue> {
         // SAFETY: We construct the typed value from the CSRegister enum discriminant, ensuring

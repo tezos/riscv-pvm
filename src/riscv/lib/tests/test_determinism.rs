@@ -11,7 +11,7 @@ use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::CloneLayout;
-use octez_riscv::state_backend::RefOwnedAlloc;
+use octez_riscv::state_backend::RefNormalAlloc;
 use octez_riscv::state_backend::hash;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -57,12 +57,12 @@ fn test_determinism(inputs: TestConfig) {
 fn run_steps_ladder<MC, F>(
     make_stepper: F,
     ladder: &[usize],
-    expected_refs: &RefOwnedAlloc<PvmLayout<MC>>,
+    expected_refs: &RefNormalAlloc<PvmLayout<MC>>,
     expected_hash: hash::Hash,
 ) where
     MC: MemoryConfig,
     PvmLayout<MC>: CloneLayout,
-    for<'a> RefOwnedAlloc<'a, PvmLayout<MC>>: PartialEq,
+    for<'a> RefNormalAlloc<'a, PvmLayout<MC>>: PartialEq,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
@@ -109,10 +109,10 @@ fn run_steps_ladder<MC, F>(
 }
 
 fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig>(
-    refs: RefOwnedAlloc<'regions1, PvmLayout<MC>>,
-    expected: &'a RefOwnedAlloc<'regions2, PvmLayout<MC>>,
+    refs: RefNormalAlloc<'regions1, PvmLayout<MC>>,
+    expected: &'a RefNormalAlloc<'regions2, PvmLayout<MC>>,
 ) where
-    RefOwnedAlloc<'regions2, PvmLayout<MC>>: PartialEq,
+    RefNormalAlloc<'regions2, PvmLayout<MC>>: PartialEq,
 {
     // SAFETY: Rust does not allow us to compare two references with different lifetimes.
     // Theoretically this should be possible and safe thanks to `PartialEq`. However, Rust's
@@ -122,6 +122,6 @@ fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig>(
     // the `==` operator need to be identical in type. This also means lifetimes are forcibly
     // unified. We can work around this by transmuting the references to the same lifetime. This is
     // safe because lifetimes are not violated as dictated by the interface of this function.
-    let refs: RefOwnedAlloc<'regions2, PvmLayout<MC>> = unsafe { std::mem::transmute(refs) };
+    let refs: RefNormalAlloc<'regions2, PvmLayout<MC>> = unsafe { std::mem::transmute(refs) };
     assert!(&refs == expected);
 }

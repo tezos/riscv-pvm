@@ -31,10 +31,10 @@ use crate::machine_state::memory::PAGE_SIZE;
 
 /// Manager that allows state binders to own the state storage
 #[derive(Clone, Copy, Debug)]
-pub struct Owned;
+pub struct Normal;
 
-impl Owned {
-    /// Get the byte offset from a pointer to `Owned::Region` to the start of the element at `index`.
+impl Normal {
+    /// Get the byte offset from a pointer to `Normal::Region` to the start of the element at `index`.
     pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
         assert!(index < LEN, "Out of bounds access for region");
 
@@ -42,7 +42,7 @@ impl Owned {
     }
 }
 
-impl ManagerBase for Owned {
+impl ManagerBase for Normal {
     type Region<E: 'static, const LEN: usize> = [E; LEN];
 
     type DynRegion = memmap2::MmapMut;
@@ -50,7 +50,7 @@ impl ManagerBase for Owned {
     type ManagerRoot = Self;
 }
 
-impl ManagerAlloc for Owned {
+impl ManagerAlloc for Normal {
     fn allocate_region<E: 'static, const LEN: usize>(value: [E; LEN]) -> Self::Region<E, LEN> {
         value
     }
@@ -68,7 +68,7 @@ impl ManagerAlloc for Owned {
     }
 }
 
-impl ManagerRead for Owned {
+impl ManagerRead for Normal {
     fn region_read<E: StaticCopy, const LEN: usize>(
         region: &Self::Region<E, LEN>,
         index: usize,
@@ -106,7 +106,7 @@ impl ManagerRead for Owned {
     }
 }
 
-impl ManagerWrite for Owned {
+impl ManagerWrite for Normal {
     fn region_write<E: 'static, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
         index: usize,
@@ -145,7 +145,7 @@ impl ManagerWrite for Owned {
     }
 }
 
-impl ManagerReadWrite for Owned {
+impl ManagerReadWrite for Normal {
     fn region_replace<E: StaticCopy, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
         index: usize,
@@ -155,7 +155,7 @@ impl ManagerReadWrite for Owned {
     }
 }
 
-impl ManagerSerialise for Owned {
+impl ManagerSerialise for Normal {
     fn serialise_region<T: Encode + 'static, const LEN: usize, E: Encoder>(
         region: &Self::Region<T, LEN>,
         mut encoder: E,
@@ -178,7 +178,7 @@ impl ManagerSerialise for Owned {
     }
 }
 
-impl ManagerDeserialise for Owned {
+impl ManagerDeserialise for Normal {
     fn deserialise_region<T: Decode<()> + 'static, const LEN: usize, D: Decoder<Context = ()>>(
         mut decoder: D,
     ) -> Result<Self::Region<T, LEN>, DecodeError> {
@@ -198,14 +198,14 @@ impl ManagerDeserialise for Owned {
     ) -> Result<Self::DynRegion, DecodeError> {
         let len = u64::decode(&mut decoder)? as usize;
 
-        let mut target = Owned::allocate_dyn_region(len);
+        let mut target = Normal::allocate_dyn_region(len);
         decoder.reader().read(&mut target)?;
 
         Ok(target)
     }
 }
 
-impl ManagerClone for Owned {
+impl ManagerClone for Normal {
     fn clone_region<E: Clone + 'static, const LEN: usize>(
         region: &Self::Region<E, LEN>,
     ) -> Self::Region<E, LEN> {
@@ -214,7 +214,7 @@ impl ManagerClone for Owned {
 
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         let len = region.len();
-        let mut new_region = Owned::allocate_dyn_region(len);
+        let mut new_region = Normal::allocate_dyn_region(len);
         new_region.copy_from_slice(region.deref());
         new_region
     }
@@ -237,17 +237,17 @@ pub(crate) mod test_helpers {
     fn cell_serialise() {
         proptest::proptest!(|(value: u64)|{
             let region = [value; 1];
-            let cell: Cell<u64, Owned> = Cell::bind(region);
+            let cell: Cell<u64, Normal> = Cell::bind(region);
             let bytes = binary::serialise(&cell).unwrap();
 
-            let cell_after: Cell<u64, Owned> = binary::deserialise(&bytes).unwrap();
+            let cell_after: Cell<u64, Normal> = binary::deserialise(&bytes).unwrap();
             assert_eq!(cell.read(), cell_after.read());
 
             let bytes_after = binary::serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cell: Cell<u64, ProofGen<Ref<'_, Owned>>> =
+            let proof_cell: Cell<u64, ProofGen<Ref<'_, Normal>>> =
                 Cell::bind(ProofRegion::bind(&region));
             let proof_bytes = binary::serialise(&proof_cell).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -258,10 +258,10 @@ pub(crate) mod test_helpers {
     #[test]
     fn cells_serialise() {
         proptest::proptest!(|(a: u64, b: u64, c: u64)|{
-            let cell: Cells<u64, 3, Owned> = Cells::bind([a, b, c]);
+            let cell: Cells<u64, 3, Normal> = Cells::bind([a, b, c]);
             let bytes = binary::serialise(&cell).unwrap();
 
-            let cell_after: Cells<u64, 3, Owned> = binary::deserialise(&bytes).unwrap();
+            let cell_after: Cells<u64, 3, Normal> = binary::deserialise(&bytes).unwrap();
 
             assert_eq!(cell.read_all(), cell_after.read_all());
 
@@ -273,7 +273,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Owned>>> =
+            let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Normal>>> =
                 Cells::bind(ProofRegion::bind(cell.region_ref()));
             let proof_bytes = binary::serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -284,12 +284,12 @@ pub(crate) mod test_helpers {
     #[test]
     fn dyn_cells_serialise() {
         proptest::proptest!(|(address in (0usize..120), value: u64)|{
-            let mapping = Owned::allocate_dyn_region(128);
-            let mut cells: DynCells<Owned> = DynCells::bind(mapping);
+            let mapping = Normal::allocate_dyn_region(128);
+            let mut cells: DynCells<Normal> = DynCells::bind(mapping);
             cells.write(address, value);
             let bytes = binary::serialise(&cells).unwrap();
 
-            let cells_after: DynCells<Owned> = binary::deserialise(&bytes).unwrap();
+            let cells_after: DynCells<Normal> = binary::deserialise(&bytes).unwrap();
             for i in 0..128 {
                 assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
             }
@@ -298,7 +298,7 @@ pub(crate) mod test_helpers {
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
-            let proof_cells: DynCells<ProofGen<Ref<'_, Owned>>> =
+            let proof_cells: DynCells<ProofGen<Ref<'_, Normal>>> =
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
             let proof_bytes = binary::serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
@@ -309,7 +309,7 @@ pub(crate) mod test_helpers {
     /// directly instead of wrapping it into an array (as it is an array under the hood).
     #[test]
     fn cell_direct_serialise() {
-        let cell: Cell<u64, Owned> = Cell::bind([42]);
+        let cell: Cell<u64, Normal> = Cell::bind([42]);
         let binary_value = binary::serialise(cell).unwrap();
         let expected_binary_value = binary::serialise(42u64).unwrap();
         assert_eq!(binary_value, expected_binary_value);
@@ -319,7 +319,7 @@ pub(crate) mod test_helpers {
     #[test]
     fn region_init() {
         proptest::proptest!(|(init_value: [u64; 17])| {
-            let region = Owned::allocate_region(init_value);
+            let region = Normal::allocate_region(init_value);
             proptest::prop_assert_eq!(region, init_value);
         });
     }

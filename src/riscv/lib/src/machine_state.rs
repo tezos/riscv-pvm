@@ -641,7 +641,7 @@ pub(crate) mod test_helpers {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::state_backend::ManagerBase;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::verify_backend::Verifier;
 
@@ -708,14 +708,14 @@ pub(crate) mod test_helpers {
         type TestMachine = TestMachineOf<Self>;
     }
 
-    impl ReinitMachine<Owned> for TestMachineOf<Owned> {
+    impl ReinitMachine<Normal> for TestMachineOf<Normal> {
         fn reinit_machine_state(mut dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
             dirty_state.reset();
             RefMutOrOwned::RefMut(dirty_state)
         }
     }
 
-    impl ReinitMachine<ProofGen<Owned>> for TestMachineOf<ProofGen<Owned>> {
+    impl ReinitMachine<ProofGen<Normal>> for TestMachineOf<ProofGen<Normal>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
             let new_state = MachineState::new(InterpretedCompiler);
             RefMutOrOwned::Owned(new_state)

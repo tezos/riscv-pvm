@@ -29,7 +29,7 @@ use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_context::projection::MachineCoreProjection;
 
 impl From<Predicate> for IntCC {
@@ -52,7 +52,7 @@ impl From<Predicate> for IntCC {
 fn read_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
-    base: Pointer<MachineCoreState<MC, Owned>>,
+    base: Pointer<MachineCoreState<MC, Normal>>,
     param: P::Parameter,
 ) -> Value<P::Target>
 where
@@ -84,7 +84,7 @@ where
 fn write_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
-    base: Pointer<MachineCoreState<MC, Owned>>,
+    base: Pointer<MachineCoreState<MC, Normal>>,
     param: P::Parameter,
     value: Value<P::Target>,
 ) where

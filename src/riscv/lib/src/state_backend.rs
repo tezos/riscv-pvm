@@ -54,7 +54,7 @@
 //!
 //! These backends can be:
 //!
-//! - [Owned]
+//! - [Normal]
 //!   Backend which has the full state allocated in memory. It can execute one step
 //!   or multiple steps at a time faster.
 //! - [Verifier]
@@ -66,7 +66,7 @@
 //!   Helper backend to wrap another backend through a reference to it.
 //!
 //! [Layouts]: layout::Layout
-//! [Owned]: owned_backend::Owned
+//! [Normal]: normal_backend::Normal
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
@@ -74,7 +74,7 @@ pub mod clone_layout;
 mod commitment_layout;
 mod elems;
 mod layout;
-pub mod owned_backend;
+pub mod normal_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
 mod region;
@@ -115,10 +115,10 @@ pub trait ManagerBase: Sized {
     /// The root manager may either be itself, or occasionally the manager that this manager
     /// wraps.
     ///
-    /// For example, the [`Ref`] backend is often use to wrap the [`Owned`] backend to gain access
+    /// For example, the [`Ref`] backend is often use to wrap the [`Normal`] backend to gain access
     /// to its regions. In this case, the root manager would be the owned backend.
     ///
-    /// [`Owned`]: owned_backend::Owned
+    /// [`Normal`]: normal_backend::Normal
     type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 }
 
@@ -279,14 +279,14 @@ impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
 }
 
 /// Alias for the allocated structure with references to regions of
-/// the [Owned] backend
+/// the [Normal] backend
 ///
-/// [Owned]: owned_backend::Owned
-pub type RefOwnedAlloc<'a, L> = AllocatedOf<L, Ref<'a, owned_backend::Owned>>;
+/// [Normal]: normal_backend::Normal
+pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, normal_backend::Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProofGenOwnedAlloc<'a, 'b, L> =
-    AllocatedOf<L, Ref<'a, proof_backend::ProofGen<Ref<'b, owned_backend::Owned>>>>;
+pub type RefProofGenAlloc<'a, 'b, L> =
+    AllocatedOf<L, Ref<'a, proof_backend::ProofGen<Ref<'b, normal_backend::Normal>>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
@@ -365,7 +365,7 @@ pub(crate) mod test_helpers {
             $(#[$m])*
             #[test]
             fn $name() {
-                use $crate::state_backend::owned_backend::Owned;
+                use $crate::state_backend::normal_backend::Normal;
                 use $crate::state_backend::proof_backend::ProofGen;
                 use $crate::state_backend::verify_backend::Verifier;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
@@ -374,8 +374,8 @@ pub(crate) mod test_helpers {
                     $expr
                 }
 
-                inner::<Owned>();
-                inner::<ProofGen<Owned>>();
+                inner::<Normal>();
+                inner::<ProofGen<Normal>>();
                 inner::<Verifier>();
             }
         };
@@ -400,7 +400,7 @@ mod tests {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::owned_backend::Owned;
+    use crate::state_backend::normal_backend::Normal;
     use crate::storage::binary;
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
         let first_value: u64 = rand::random();
         let second_value: [u32; 4] = rand::random();
 
-        let mut instance: Example<Owned> = Example {
+        let mut instance: Example<Normal> = Example {
             first: Cell::new(),
             second: Cells::new(),
         };

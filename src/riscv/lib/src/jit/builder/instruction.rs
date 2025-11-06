@@ -51,7 +51,7 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 
@@ -170,7 +170,7 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     instruction_pc: Address,
 
     /// Parameter pointing to the `MachineCoreState`
-    core_param: Pointer<MachineCoreState<MC, Owned>>,
+    core_param: Pointer<MachineCoreState<MC, Normal>>,
 
     /// Parameter pointing to the sequence result
     result_param: Pointer<ExceptionCode>,
@@ -194,7 +194,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
         ext_calls: &'seq mut JsaCalls<MC>,
         entry_block: Block,
         instruction_pc: Address,
-        core_param: Pointer<MachineCoreState<MC, Owned>>,
+        core_param: Pointer<MachineCoreState<MC, Normal>>,
         result_param: Pointer<ExceptionCode>,
         width: InstrWidth,
     ) -> Self {

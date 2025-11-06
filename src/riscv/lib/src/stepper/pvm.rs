@@ -40,7 +40,7 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::clone_layout::CloneLayout;
 use crate::state_backend::hash::Hash;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -64,7 +64,7 @@ pub enum PvmStepperError {
 pub struct PvmStepper<
     H,
     MC: MemoryConfig = M1G,
-    M: ManagerBase = Owned,
+    M: ManagerBase = Normal,
     CPE: CodePageEntry<MC, M> = Interpreted<MC, M>,
 > {
     pvm: Pvm<MC, CPE, M>,
@@ -78,7 +78,7 @@ pub struct PvmStepper<
 /// Variant of the [`PvmStepper`] used for verifying proofs
 type PvmVerifier<MC> = PvmStepper<NoHooks, MC, Verifier>;
 
-impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> PvmStepper<H, MC, Owned, CPE> {
+impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Normal, CPE> {
     /// Create a new PVM stepper.
     pub fn new(
         program: &[u8],
@@ -114,7 +114,7 @@ impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> PvmStepper<H, MC, Owned
     }
 }
 
-impl<H, MC: MemoryConfig> PvmStepper<H, MC, Owned> {
+impl<H, MC: MemoryConfig> PvmStepper<H, MC, Normal> {
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
     pub fn produce_proof(&mut self) -> Option<Proof> {
@@ -378,12 +378,12 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verifier>>
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Stepper
-    for PvmStepper<H, MC, Owned, CPE>
+impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Stepper
+    for PvmStepper<H, MC, Normal, CPE>
 {
     type MemoryConfig = MC;
 
-    type Manager = Owned;
+    type Manager = Normal;
 
     fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager> {
         &self.pvm.machine_state.core

@@ -18,7 +18,7 @@ use crate::machine_state::page_cache::Jitted;
 use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
 use crate::stepper::test::TestStepperResult::*;
@@ -44,7 +44,7 @@ where
     };
 }
 
-fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
+fn run_test_with_check<CPE: CodePageEntry<M1M, Normal>>(
     path: &str,
     check_xregs: &[(XRegister, u64)],
     compiler: CPE::Compiler,
@@ -85,7 +85,7 @@ fn run_test_with_check<CPE: CodePageEntry<M1M, Owned>>(
 
 fn interpret_test_with_check(path: &str, check_xregs: &[(XRegister, u64)]) {
     let compiler = Default::default();
-    run_test_with_check::<Interpreted<M1M, Owned>>(path, check_xregs, compiler);
+    run_test_with_check::<Interpreted<M1M, Normal>>(path, check_xregs, compiler);
 }
 
 /// For the JIT, we run it twice - the first run to build up the blocks, and the

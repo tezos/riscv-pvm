@@ -27,7 +27,7 @@ use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::owned_backend::Owned;
+use crate::state_backend::normal_backend::Normal;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -227,7 +227,7 @@ pub trait Projection {
 
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
-    /// value. This is exclusive to the [`crate::state_backend::owned_backend::Owned`] state
+    /// value. This is exclusive to the [`crate::state_backend::normal_backend::Normal`] state
     /// backend.
     fn owned_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
 }
@@ -333,7 +333,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
 
         let inner_offset = P::owned_pointer_offset::<MC>(param.inner_param);
 
-        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Owned>>();
+        let elem_size = std::mem::size_of::<<P::Subject as TypeCons>::Applied<MC, Normal>>();
         let offset = param
             .index
             .checked_mul(elem_size)
@@ -415,7 +415,7 @@ macro_rules! impl_projection {
                     $crate::state_context::projection::ApplyCons<
                         $subject,
                         MC,
-                        $crate::state_backend::owned_backend::Owned
+                        $crate::state_backend::normal_backend::Normal
                     >,
                     $($field).+
                 );

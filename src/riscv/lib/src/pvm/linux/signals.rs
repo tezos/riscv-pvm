@@ -833,9 +833,9 @@ mod tests {
 
     backend_test!(test_step_into_handler, F, {
         type MC = M1M;
-        type Cpe = Interpreted<MC, Owned>;
+        type Cpe = Interpreted<MC, Normal>;
 
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
 
         pvm.machine_state.reset();
 
@@ -909,9 +909,9 @@ mod tests {
 
     backend_test!(test_jump_to_restorer, F, {
         type MC = M1M;
-        type Cpe = Interpreted<MC, Owned>;
+        type Cpe = Interpreted<MC, Normal>;
 
-        let mut pvm = Pvm::<MC, Cpe, Owned>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
 
         pvm.machine_state.reset();
 
