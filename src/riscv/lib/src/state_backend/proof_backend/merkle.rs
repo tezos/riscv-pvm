@@ -176,21 +176,6 @@ impl CompressedAccessInfo {
     }
 }
 
-pub trait AccessInfoAggregatable {
-    /// Aggregate the access information of the Merkle tree described by
-    /// the layout of the given data, without constructing the tree.
-    ///
-    /// Used in implementations of `to_merkle_tree` in which certain leaves can
-    /// combine data corresponding to multiple layout elements.
-    fn aggregate_access_info(&self) -> bool;
-}
-
-impl AccessInfoAggregatable for () {
-    fn aggregate_access_info(&self) -> bool {
-        false
-    }
-}
-
 /// Helper function which allows iterating over chunks of a dynamic array
 /// and writing them to a writer. The last chunk may be smaller than the
 /// Merkle leaf size. The implementations of [`CommitmentLayout`] and

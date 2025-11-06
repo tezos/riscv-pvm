@@ -24,8 +24,6 @@ use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
 use super::owned_backend::Owned;
-use super::proof_backend::ProofGen;
-use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
@@ -145,14 +143,6 @@ impl<A: PartialEq<B>, B, M: ManagerRead, N: ManagerRead> PartialEq<Cell<B, N>> f
 }
 
 impl<E: Eq, M: ManagerRead> Eq for Cell<E, M> {}
-
-impl<'a, E: Encode, M: ManagerSerialise + 'a> AccessInfoAggregatable
-    for Cell<E, Ref<'a, ProofGen<M>>>
-{
-    fn aggregate_access_info(&self) -> bool {
-        self.region.get_access_info()
-    }
-}
 
 impl<E, M: ManagerRead> AsRef<E> for Cell<E, M> {
     #[inline]
@@ -339,14 +329,6 @@ impl<A: PartialEq<B> + Copy, B: Copy, const LEN: usize, M: ManagerRead, N: Manag
 {
     fn eq(&self, other: &Cells<B, LEN, N>) -> bool {
         (0..LEN).all(|i| self.read(i) == other.read(i))
-    }
-}
-
-impl<'a, E: Encode, const LEN: usize, M: ManagerSerialise + 'a> AccessInfoAggregatable
-    for Cells<E, LEN, Ref<'a, ProofGen<M>>>
-{
-    fn aggregate_access_info(&self) -> bool {
-        self.region.get_access_info()
     }
 }
 
