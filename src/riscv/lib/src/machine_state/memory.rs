@@ -29,7 +29,6 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::Ref;
 
 /// Number of bits needed so you can address every byte in a page
 pub const OFFSET_BITS: NonZeroU64 = NonZeroU64::new(12).expect("OFFSET_BITS is non-zero");
@@ -335,7 +334,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     fn struct_ref<'a, M, F>(instance: &'a Self::State<M>) -> AllocatedOf<Self::Layout, F::Output>
     where
         M: ManagerBase + 'a,
-        F: FnManager<Ref<'a, M>>;
+        F: FnManager<'a, M>;
 }
 
 // Re-export memory configurations

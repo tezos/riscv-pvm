@@ -3,32 +3,34 @@
 // SPDX-License-Identifier: MIT
 
 use super::ManagerBase;
+use crate::state_backend::Ref;
 
-/// Transformation from a manager `I` to another manager
-pub trait FnManager<I: ManagerBase> {
+/// Transformer of borrowed regions of manager `I`
+pub trait FnManager<'a, I: ManagerBase> {
     /// Resulting manager type
     type Output: ManagerBase;
 
-    /// Transform the region of manager `I` to one of manager `O`.
+    /// Create a region of the output manager from a borrowed region of the input manager.
     fn map_region<E: 'static, const LEN: usize>(
-        input: I::Region<E, LEN>,
+        input: &'a I::Region<E, LEN>,
     ) -> <Self::Output as ManagerBase>::Region<E, LEN>;
 
-    /// Transform the dynamic region of manager `I` to one of manager `O`.
-    fn map_dyn_region(input: I::DynRegion) -> <Self::Output as ManagerBase>::DynRegion;
+    /// Create a dynamic region of the output manager from a borrowed dynamic region of the input
+    /// manager.
+    fn map_dyn_region(input: &'a I::DynRegion) -> <Self::Output as ManagerBase>::DynRegion;
 }
 
 /// Identity transformation for [`FnManager`]
 pub enum FnManagerIdent {}
 
-impl<M: ManagerBase> FnManager<M> for FnManagerIdent {
-    type Output = M;
+impl<'a, M: ManagerBase + 'a> FnManager<'a, M> for FnManagerIdent {
+    type Output = Ref<'a, M>;
 
-    fn map_region<E: 'static, const LEN: usize>(input: M::Region<E, LEN>) -> M::Region<E, LEN> {
+    fn map_region<E: 'static, const LEN: usize>(input: &M::Region<E, LEN>) -> &M::Region<E, LEN> {
         input
     }
 
-    fn map_dyn_region(input: M::DynRegion) -> M::DynRegion {
+    fn map_dyn_region(input: &M::DynRegion) -> &M::DynRegion {
         input
     }
 }

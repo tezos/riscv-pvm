@@ -137,7 +137,7 @@ macro_rules! combined_buddy_branch {
 
                 fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
                 where
-                    F: FnManager<Ref<'a, M>>,
+                    F: FnManager<'a, M>,
                 {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::struct_ref::<F, M>(&space.0);
                     [<$name Alloc>](inner)

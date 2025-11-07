@@ -100,7 +100,7 @@ where
         space: &'a Self::Buddy<M>,
     ) -> Self::Allocated<F::Output>
     where
-        F: FnManager<Ref<'a, M>>,
+        F: FnManager<'a, M>,
     {
         <PickLayout<PAGES> as BuddyLayout>::struct_ref::<F, M>(space)
     }

@@ -25,7 +25,6 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerSerialise;
-use crate::state_backend::Ref;
 use crate::struct_layout;
 
 /// Information about what is free in each buddy
@@ -71,7 +70,7 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
 
     fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
     where
-        F: FnManager<Ref<'a, M>>,
+        F: FnManager<'a, M>,
     {
         BuddyBranch2LayoutF {
             free_info: space.free_info.struct_ref::<F>(),

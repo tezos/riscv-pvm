@@ -66,7 +66,7 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cell<E, F::Output> {
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> Cell<E, F::Output> {
         Cell {
             region: self.region.struct_ref::<F>(),
         }
@@ -235,7 +235,7 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> Cells<E, LEN, F::Output> {
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> Cells<E, LEN, F::Output> {
         Cells {
             region: F::map_region(&self.region),
         }
@@ -427,7 +427,7 @@ impl<M: ManagerBase> DynCells<M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(&'a self) -> DynCells<F::Output> {
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> DynCells<F::Output> {
         DynCells {
             region: F::map_dyn_region(&self.region),
         }

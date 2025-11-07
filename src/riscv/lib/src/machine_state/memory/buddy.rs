@@ -33,7 +33,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ProofLayout;
-use crate::state_backend::Ref;
 
 /// Layout for a Buddy-style memory manager
 pub trait BuddyLayout: CommitmentLayout + ProofLayout + CloneLayout {
@@ -48,7 +47,7 @@ pub trait BuddyLayout: CommitmentLayout + ProofLayout + CloneLayout {
     fn struct_ref<'a, F, M>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
     where
         M: ManagerBase + 'a,
-        F: FnManager<Ref<'a, M>>;
+        F: FnManager<'a, M>;
 }
 
 /// Buddy-style memory manager
