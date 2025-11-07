@@ -407,18 +407,18 @@ impl DynAccess {
 /// Natural transformation from a manager `M` to a proof-generating manager `ProofGen<M>`
 pub enum ProofWrapper {}
 
-impl<M: ManagerBase> FnManager<M> for ProofWrapper {
-    type Output = ProofGen<M>;
+impl<'normal, M: ManagerBase + 'normal> FnManager<'normal, M> for ProofWrapper {
+    type Output = ProofGen<super::Ref<'normal, M>>;
 
     fn map_region<E: 'static, const LEN: usize>(
-        input: <M as ManagerBase>::Region<E, LEN>,
-    ) -> <ProofGen<M> as ManagerBase>::Region<E, LEN> {
+        input: &'normal <M as ManagerBase>::Region<E, LEN>,
+    ) -> <ProofGen<super::Ref<'normal, M>> as ManagerBase>::Region<E, LEN> {
         ProofRegion::bind(input)
     }
 
     fn map_dyn_region(
-        input: <M as ManagerBase>::DynRegion,
-    ) -> <ProofGen<M> as ManagerBase>::DynRegion {
+        input: &'normal <M as ManagerBase>::DynRegion,
+    ) -> <ProofGen<super::Ref<'normal, M>> as ManagerBase>::DynRegion {
         ProofDynRegion::bind(input)
     }
 }

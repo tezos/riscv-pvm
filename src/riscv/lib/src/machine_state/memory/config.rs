@@ -17,7 +17,6 @@ use crate::state_backend::DynCells;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::Ref;
 
 /// State layout for the memory component
 pub struct MemoryConfig<const PAGES: usize, const TOTAL_BYTES: usize>;
@@ -91,7 +90,7 @@ where
     fn struct_ref<'a, M, F>(instance: &'a Self::State<M>) -> AllocatedOf<Self::Layout, F::Output>
     where
         M: ManagerBase,
-        F: FnManager<Ref<'a, M>>,
+        F: FnManager<'a, M>,
     {
         (
             instance.data.struct_ref::<F>(),

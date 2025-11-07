@@ -50,7 +50,6 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Ref;
 use crate::struct_layout;
 
 /// Thread identifier for the main thread
@@ -483,7 +482,7 @@ impl<M: ManagerBase> SupervisorState<M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(
         &'a self,
     ) -> AllocatedOf<SupervisorStateLayout, F::Output> {
         SupervisorStateLayoutF {

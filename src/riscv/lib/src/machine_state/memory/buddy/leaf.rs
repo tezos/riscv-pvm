@@ -98,7 +98,7 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
 
     fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
     where
-        F: FnManager<Ref<'a, M>>,
+        F: FnManager<'a, M>,
     {
         BuddyLeaf {
             set: space.set.struct_ref::<F>(),

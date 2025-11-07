@@ -15,7 +15,6 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::Ref;
 
 /// Reveal request layout
 pub type RevealRequestLayout = (DynArray, Atom<u64>);
@@ -41,7 +40,7 @@ impl<M: ManagerBase> RevealRequest<M> {
     /// Given a manager morphism `f : &M -> N`, return the reveal request layout's
     /// allocated structure containing the constituents of `N` that were produced
     /// from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(
         &'a self,
     ) -> AllocatedOf<RevealRequestLayout, F::Output> {
         (self.bytes.struct_ref::<F>(), self.size.struct_ref::<F>())

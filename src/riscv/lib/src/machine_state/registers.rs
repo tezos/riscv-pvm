@@ -208,7 +208,7 @@ impl<M: backend::ManagerBase> XRegisters<M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
         &'a self,
     ) -> backend::AllocatedOf<XRegistersLayout, F::Output> {
         self.registers.struct_ref::<F>()
@@ -623,7 +623,7 @@ impl<M: backend::ManagerBase> FRegisters<M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
         &'a self,
     ) -> backend::AllocatedOf<FRegistersLayout, F::Output> {
         self.registers.struct_ref::<F>()

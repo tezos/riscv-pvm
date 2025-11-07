@@ -95,7 +95,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
         &'a self,
     ) -> backend::AllocatedOf<MachineCoreStateLayout<MC>, F::Output> {
         (
@@ -309,7 +309,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<backend::Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
         &'a self,
     ) -> backend::AllocatedOf<MachineStateLayout<MC>, F::Output> {
         self.core.struct_ref::<F>()

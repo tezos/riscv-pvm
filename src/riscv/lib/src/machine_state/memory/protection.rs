@@ -28,7 +28,6 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Many;
 use crate::state_backend::NarrowlySized;
-use crate::state_backend::Ref;
 
 /// State layout for page permissions
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
@@ -51,7 +50,7 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
 
     /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<Ref<'a, M>>>(
+    pub fn struct_ref<'a, F: FnManager<'a, M>>(
         &'a self,
     ) -> AllocatedOf<PagePermissionsLayout<PAGES>, F::Output> {
         self.pages
