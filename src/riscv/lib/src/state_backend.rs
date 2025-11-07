@@ -45,28 +45,28 @@
 //! - [ManagerRead]
 //! - [ManagerWrite]
 //!
-//! # Backends
+//! # Modes
 //!
-//! Backends are ZST implementing these traits.
+//! Modes are ZSTs implementing these traits.
 //! The main difference between them is the top-level functionality it provides
 //! and management of the underlying state memory.
 //!
-//! These backends can be:
+//! These modes can be:
 //!
 //! - [Normal]
 //!   Mode which has the full state allocated in memory. It can execute one step
 //!   or multiple steps at a time faster.
-//! - [Verifier]
-//!   Backend capable of partially allocating a state and verify a given proof.
+//! - [Verify]
+//!   Mode capable of partially allocating a state and verify a given proof.
 //!   Needs to be light on memory usage since it runs in the protocol.
 //! - [Prove]
 //!   Mode capable of generating a proof for running one step.
 //! - [Ref]
-//!   Helper backend to wrap another backend through a reference to it.
+//!   Helper mode to wrap another backend through a reference to it.
 //!
 //! [Layouts]: layout::Layout
 //! [Normal]: octez_riscv_data::mode::Normal
-//! [Verifier]: verify_backend::Verifier
+//! [Verify]: verify_backend::Verify
 //! [Prove]: proof_backend::Prove
 
 mod elems;
@@ -349,11 +349,10 @@ pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
 pub type RefProveAlloc<'outer, 'inner, L> =
     AllocatedOf<L, Ref<'outer, proof_backend::Prove<'inner>>>;
 
-/// Alias for the allocated structure with references to regions of
-/// the [Verifier] backend
+/// Alias for the allocated structure with references to regions in [Verify] mode
 ///
-/// [Verifier]: verify_backend::Verifier
-pub type RefVerifierAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verifier>>;
+/// [Verify]: verify_backend::Verify
+pub type RefVerifyAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verify>>;
 
 /// Projection from [`ManagerBase::Region`] to the element type `E`
 pub struct RegionProj<E, const LEN: usize>(PhantomData<E>);
@@ -429,7 +428,7 @@ pub(crate) mod test_helpers {
             fn $name() {
                 use octez_riscv_data::mode::Normal;
                 use $crate::state_backend::proof_backend::Prove;
-                use $crate::state_backend::verify_backend::Verifier;
+                use $crate::state_backend::verify_backend::Verify;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
 
                 fn inner<$fac_name: TestBackendFactory>() {
@@ -438,7 +437,7 @@ pub(crate) mod test_helpers {
 
                 inner::<Normal>();
                 inner::<Prove>();
-                inner::<Verifier>();
+                inner::<Verify>();
             }
         };
     }

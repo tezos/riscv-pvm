@@ -34,7 +34,7 @@ use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
-use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::RefVerifyAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 
@@ -52,17 +52,17 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         Atom::to_merkle_tree(state.set)
     }
 
-    fn into_verifier_alloc<
+    fn into_verify_alloc<
         D: crate::state_backend::proof_backend::proof::deserialiser::Deserialiser,
     >(
         proof: D,
-    ) -> crate::state_backend::VerifierAllocResult<D, Self> {
-        let parser = Atom::into_verifier_alloc(proof)?;
+    ) -> crate::state_backend::VerifyAllocResult<D, Self> {
+        let parser = Atom::into_verify_alloc(proof)?;
         Ok(parser.map(|cell| Self::Allocated { set: cell }))
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         Atom::partial_state_hash(state.set, proof)

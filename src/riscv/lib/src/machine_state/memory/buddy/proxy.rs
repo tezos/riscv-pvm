@@ -23,8 +23,8 @@ use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
-use crate::state_backend::RefVerifierAlloc;
-use crate::state_backend::VerifierAllocResult;
+use crate::state_backend::RefVerifyAlloc;
+use crate::state_backend::VerifyAllocResult;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser;
 
@@ -48,14 +48,12 @@ where
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
 
-    fn into_verifier_alloc<D: deserialiser::Deserialiser>(
-        proof: D,
-    ) -> VerifierAllocResult<D, Self> {
-        <PickLayout<PAGES> as ProofLayout>::into_verifier_alloc(proof)
+    fn into_verify_alloc<D: deserialiser::Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
+        <PickLayout<PAGES> as ProofLayout>::into_verify_alloc(proof)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         <PickLayout<PAGES> as ProofLayout>::partial_state_hash(state, proof)

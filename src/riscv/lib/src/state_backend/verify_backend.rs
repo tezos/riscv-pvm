@@ -27,7 +27,7 @@ use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
-/// Panic payload that is raised when a value isn't present in a part of the Verifier backend.
+/// Panic payload that is raised when a value isn't present when running in `Verify` mode.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]
 pub struct NotFound;
 
@@ -75,9 +75,9 @@ pub enum ProofVerificationFailure {
 }
 
 /// Proof verification backend
-pub struct Verifier;
+pub struct Verify;
 
-impl ManagerBase for Verifier {
+impl ManagerBase for Verify {
     type Region<E: 'static, const LEN: usize> = Region<E, LEN>;
 
     type DynRegion = DynRegion<{ MERKLE_LEAF_SIZE.get() }>;
@@ -91,7 +91,7 @@ mod test_helpers {
     use crate::state_backend::verify_backend::DynRegion;
     use crate::state_backend::verify_backend::PageId;
     use crate::state_backend::verify_backend::Region;
-    use crate::state_backend::verify_backend::Verifier;
+    use crate::state_backend::verify_backend::Verify;
 
     impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         /// Construct a zero-initialized dynamic region.
@@ -113,7 +113,7 @@ mod test_helpers {
         }
     }
 
-    impl ManagerAlloc for Verifier {
+    impl ManagerAlloc for Verify {
         fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
             Region::Partial(Box::new(init_value.map(Some)))
         }
@@ -126,7 +126,7 @@ mod test_helpers {
     }
 }
 
-impl ManagerRead for Verifier {
+impl ManagerRead for Verify {
     fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
         region[index]
     }
@@ -152,7 +152,7 @@ impl ManagerRead for Verifier {
     }
 }
 
-impl ManagerWrite for Verifier {
+impl ManagerWrite for Verify {
     fn region_write<E: 'static, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
         index: usize,
@@ -189,7 +189,7 @@ impl ManagerWrite for Verifier {
     }
 }
 
-impl ManagerClone for Verifier {
+impl ManagerClone for Verify {
     fn clone_region<E: Clone + 'static, const LEN: usize>(
         region: &Self::Region<E, LEN>,
     ) -> Self::Region<E, LEN> {
@@ -213,7 +213,7 @@ pub enum Region<E: 'static, const LEN: usize> {
     ),
 }
 
-/// Represents either a present and complete region of the `Verifier` state
+/// Represents either a present and complete region in `Verify` mode
 /// or specifies whether it is only partially present or completely absent.
 pub enum PartialState<T> {
     /// A region is fully present
@@ -224,7 +224,7 @@ pub enum PartialState<T> {
     Incomplete,
 }
 
-/// Reference to a complete region of the Verifier backend
+/// Reference to a complete region in `Verify` mode
 pub struct CompleteRegionRef<'a, E, const LEN: usize> {
     region: &'a [Option<E>; LEN],
 }
@@ -484,7 +484,7 @@ impl<const LEAF_SIZE: usize> Default for DynRegion<LEAF_SIZE> {
     }
 }
 
-impl<E> Cell<E, Verifier> {
+impl<E> Cell<E, Verify> {
     /// Construct an absent verifier cell.
     pub const fn absent() -> Self {
         Cell::bind(Region::Absent)
@@ -498,10 +498,10 @@ impl<E> Cell<E, Verifier> {
     }
 }
 
-impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verifier>>> for Cell<E, Normal> {
+impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verify>>> for Cell<E, Normal> {
     type Error = PartialHashError;
 
-    fn try_from(cell: Cell<E, Ref<'_, Verifier>>) -> Result<Self, Self::Error> {
+    fn try_from(cell: Cell<E, Ref<'_, Verify>>) -> Result<Self, Self::Error> {
         match cell.into_region() {
             Region::Absent => Err(PartialHashError::PotentiallyRecoverable),
             Region::Partial(value) => match value.as_ref() {
@@ -568,7 +568,7 @@ mod tests {
     type RegionArb<E, const LEN: usize> = Option<PartialRegionArb<E, LEN>>;
 
     /// Construct [`Cells`] from a proptest value.
-    fn arb_to_cells<E, const LEN: usize>(region: RegionArb<E, LEN>) -> Cells<E, LEN, Verifier> {
+    fn arb_to_cells<E, const LEN: usize>(region: RegionArb<E, LEN>) -> Cells<E, LEN, Verify> {
         let region = match region {
             Some(data) => Region::Partial(data),
             None => Region::Absent,
@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn region_present() {
         proptest::proptest!(|(reg: PartialRegionArb<u64, 32>)| {
-            let mut cells: Cells<_, 32, Verifier> = arb_to_cells(Some(reg.clone()));
+            let mut cells: Cells<_, 32, Verify> = arb_to_cells(Some(reg.clone()));
 
             for i in 0..32 {
                 let value = handle_stepper_panics(|| cells.read(i)).ok();
@@ -599,7 +599,7 @@ mod tests {
     /// Check functionality of a region that is absent.
     #[test]
     fn region_absent() {
-        let cells: Cells<u64, 32, Verifier> = arb_to_cells(None);
+        let cells: Cells<u64, 32, Verify> = arb_to_cells(None);
 
         for i in 0..32 {
             let value = handle_stepper_panics(|| cells.read(i)).ok();
@@ -648,7 +648,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
         unsafe {
@@ -729,7 +729,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
+        let mut dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         unsafe {
             assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);

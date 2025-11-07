@@ -28,7 +28,7 @@ use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::verify_backend::Verifier;
+use crate::state_backend::verify_backend::Verify;
 
 pub mod deserialise_owned;
 pub mod deserialise_stream;
@@ -349,10 +349,10 @@ fn deserialise_final_hash(
 
 /// Deserialise a [`Proof`] from an iterator of bytes.
 ///
-/// Obtain a [`Proof`] and the associated [`NodePvm<Verifier>`] backend.
+/// Obtain a [`Proof`] and the associated [`NodePvm<Verify>`].
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> deserialiser::Result<(Proof, NodePvm<Verifier>)> {
+) -> deserialiser::Result<(Proof, NodePvm<Verify>)> {
     let final_state_hash =
         deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
 

@@ -175,9 +175,9 @@ macro_rules! struct_layout {
                 }
 
                 #[inline]
-                fn into_verifier_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
+                fn into_verify_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
                     proof: D,
-                ) -> $crate::state_backend::VerifierAllocResult<D, Self> {
+                ) -> $crate::state_backend::VerifyAllocResult<D, Self> {
                     use $crate::state_backend::proof_layout::tuple_branches_proof_layout;
                     use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
                     use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
@@ -199,7 +199,7 @@ macro_rules! struct_layout {
 
                 #[inline]
                 fn partial_state_hash(
-                    state: $crate::state_backend::RefVerifierAlloc<Self>,
+                    state: $crate::state_backend::RefVerifyAlloc<Self>,
                     proof: $crate::state_backend::ProofTree,
                 ) -> std::result::Result<octez_riscv_data::hash::Hash, $crate::state_backend::PartialHashError> {
                     let (branches, proof_hash) = proof.into_branches_with_hash()?;
@@ -416,7 +416,7 @@ mod tests {
                 assert_eq!(bar, verify_foo.bar.read());
                 assert_eq!(qux, verify_foo.qux.read_all().as_slice());
 
-                // Apply the same modification on the `Verifier` state and check
+                // Apply the same modification to the state in `Verify` mode and check
                 // that the final hash is correct
                 verify_foo.bar.write(bar.wrapping_add(1));
                 verify_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
