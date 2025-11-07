@@ -45,8 +45,9 @@ pub trait BuddyLayout: CommitmentLayout + ProofLayout + CloneLayout {
 
     /// Given a manager morphism `F : &M -> N`, return the layout's allocated structure containing
     /// the constituents of `N` that were produced from the constituents of `&M`.
-    fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
+    fn struct_ref<'a, F, M>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
     where
+        M: ManagerBase + 'a,
         F: FnManager<Ref<'a, M>>;
 }
 

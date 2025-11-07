@@ -97,7 +97,9 @@ macro_rules! combined_buddy_branch {
             where
                 [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
             {
-                fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
+                fn to_merkle_tree<'outer, 'inner: 'outer>(
+                    state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+                ) -> Result<MerkleTree, HashError> {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_merkle_tree(state.0)
                 }
 
@@ -117,7 +119,7 @@ macro_rules! combined_buddy_branch {
             }
 
             impl<B: CloneLayout> CloneLayout for [<$name Layout>]<B> {
-                fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+                fn clone_allocated<'a, M: ManagerClone + 'a>(space: Self::Allocated<Ref<'a, M>>) -> Self::Allocated<M> {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::clone_allocated(space.0);
                     [<$name Alloc>](inner)
                 }

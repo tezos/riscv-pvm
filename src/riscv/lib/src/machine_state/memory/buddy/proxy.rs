@@ -55,7 +55,9 @@ impl<const PAGES: usize> ProofLayout for BuddyLayoutProxy<PAGES>
 where
     (): BuddyLayoutMatch<PAGES>,
 {
-    fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
+    fn to_merkle_tree<'outer, 'inner: 'outer>(
+        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+    ) -> Result<MerkleTree, HashError> {
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
 
@@ -77,8 +79,8 @@ impl<const PAGES: usize> CloneLayout for BuddyLayoutProxy<PAGES>
 where
     (): BuddyLayoutMatch<PAGES>,
 {
-    fn clone_allocated<M: crate::state_backend::ManagerClone>(
-        space: Self::Allocated<Ref<'_, M>>,
+    fn clone_allocated<'a, M: crate::state_backend::ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
     ) -> Self::Allocated<M> {
         <PickLayout<PAGES> as CloneLayout>::clone_allocated(space)
     }
@@ -94,7 +96,9 @@ where
         <PickLayout<PAGES> as BuddyLayout>::bind(space)
     }
 
-    fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
+    fn struct_ref<'a, F, M: ManagerBase + 'a>(
+        space: &'a Self::Buddy<M>,
+    ) -> Self::Allocated<F::Output>
     where
         F: FnManager<Ref<'a, M>>,
     {

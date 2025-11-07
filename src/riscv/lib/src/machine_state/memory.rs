@@ -334,7 +334,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     /// `&M`.
     fn struct_ref<'a, M, F>(instance: &'a Self::State<M>) -> AllocatedOf<Self::Layout, F::Output>
     where
-        M: ManagerBase,
+        M: ManagerBase + 'a,
         F: FnManager<Ref<'a, M>>;
 }
 
