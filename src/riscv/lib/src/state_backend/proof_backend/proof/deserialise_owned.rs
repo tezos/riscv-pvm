@@ -22,7 +22,7 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::state_backend::proof_backend::tree::Tree;
-use crate::state_backend::verify_backend::Verifier;
+use crate::state_backend::verify_backend::Verify;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
@@ -206,17 +206,17 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
     }
 }
 
-/// Given a [`ProofTree`] deserialise it into an allocated [`Verifier`] backend.
+/// Given a [`ProofTree`] deserialise it as an allocated state in [`Verify`] mode.
 pub fn deserialise<L: ProofLayout>(
     proof: ProofTree,
-) -> deserialiser::Result<(AllocatedOf<L, Verifier>, OwnedProofPart)> {
+) -> deserialiser::Result<(AllocatedOf<L, Verify>, OwnedProofPart)> {
     let owned_proof = match proof {
         ProofPart::Absent => OwnedProofPart::Absent,
         ProofPart::Present(proof) => OwnedProofPart::Present(proof.clone()),
     };
 
     let context = ProofTreeDeserialiser::from(proof);
-    let parser = L::into_verifier_alloc::<ProofTreeDeserialiser>(context)?;
+    let parser = L::into_verify_alloc::<ProofTreeDeserialiser>(context)?;
     let result = parser.into_result();
 
     Ok((result, owned_proof))

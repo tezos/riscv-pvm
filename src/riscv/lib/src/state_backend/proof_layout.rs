@@ -23,7 +23,7 @@ use super::Layout;
 use super::Many;
 use super::Ref;
 use super::RefProveAlloc;
-use super::RefVerifierAlloc;
+use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::merkle::MerkleTree;
@@ -39,7 +39,7 @@ use super::proof_backend::proof::deserialiser::Suspended;
 use super::proof_backend::tree::Tree;
 use super::verify_backend;
 use super::verify_backend::PartialState;
-use super::verify_backend::Verifier;
+use super::verify_backend::Verify;
 use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
@@ -91,13 +91,12 @@ pub enum ProofError {
 }
 
 /// Common result type for parsing a Merkle proof.
-pub(crate) type VerifierAllocResult<D, L> =
-    Result<<D as Deserialiser>::Suspended<VerifierAlloc<L>>>;
+pub(crate) type VerifyAllocResult<D, L> = Result<<D as Deserialiser>::Suspended<VerifyAlloc<L>>>;
 
 /// Regions for the verifier backend for a specific layout.
-pub type VerifierAlloc<L> = <L as Layout>::Allocated<verify_backend::Verifier>;
+pub type VerifyAlloc<L> = <L as Layout>::Allocated<verify_backend::Verify>;
 
-/// Errors that may occur when hashing a [`verify_backend::Verifier`] state
+/// Errors that may occur when hashing a state in [`verify_backend::Verify`] mode
 #[derive(Debug, thiserror::Error)]
 pub enum PartialHashError {
     /// The hash could not be computed because encoding a value to bytes failed. The byte
@@ -188,7 +187,7 @@ impl<'a> ProofTree<'a> {
         }
     }
 
-    /// For the purpose of computing the final hash of a `Verifier` state,
+    /// For the purpose of computing the final hash of a state in `Verify` mode,
     /// interpret this part of a Merkle proof as a leaf and return its hash if
     /// it is a blinded leaf or hash the data if it is present.
     pub(crate) fn partial_hash_leaf(self) -> Result<Hash, PartialHashError> {
@@ -208,7 +207,7 @@ impl<'a> ProofTree<'a> {
         Ok(hash)
     }
 
-    /// For the purpose of computing the final hash of a `Verifier` state,
+    /// For the purpose of computing the final hash of a state in `Verify` mode,
     /// if present, try to interpret this part of a Merkle proof as:
     /// - a node with `LEN` branches, in which case return the proof branches
     ///   and no proof hash
@@ -316,12 +315,12 @@ pub trait ProofLayout: Layout {
     ) -> Result<MerkleTree, HashError>;
 
     /// Parse a Merkle proof into the allocated form of this layout.
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self>;
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self>;
 
-    /// Compute the state hash of a partial `Verifier` state using its
+    /// Compute the state hash of a partial state in `Verify` mode using its
     /// corresponding proof tree where data is missing.
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError>;
 }
@@ -333,12 +332,12 @@ impl<T: ProofLayout> ProofLayout for Box<T> {
         T::to_merkle_tree(*state)
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        Ok(T::into_verifier_alloc(proof)?.map(Box::new))
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
+        Ok(T::into_verify_alloc(proof)?.map(Box::new))
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         T::partial_state_hash(*state, proof)
@@ -362,13 +361,13 @@ where
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
-        let f = Array::<T, 1>::into_verifier_alloc(proof)?;
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
+        let f = Array::<T, 1>::into_verify_alloc(proof)?;
         Ok(f.map(super::Cell::from))
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let region = state.into_region();
@@ -400,7 +399,7 @@ where
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         use super::proof_backend::proof::deserialiser::Partial;
 
         Ok(proof
@@ -418,7 +417,7 @@ where
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let region = state.into_region();
@@ -463,7 +462,7 @@ impl ProofLayout for DynArray {
         Ok(root_node)
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         type PageData = (
             PageId<{ MERKLE_LEAF_SIZE.get() }>,
             Box<[u8; MERKLE_LEAF_SIZE.get()]>,
@@ -553,7 +552,7 @@ impl ProofLayout for DynArray {
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let region = state.region_ref();
@@ -714,12 +713,12 @@ impl ProofLayout for DynArray {
 /// use octez_riscv::state_backend::proof_backend::proof::deserialiser::Deserialiser;
 /// use octez_riscv::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
 /// use octez_riscv::state_backend::ProofLayout;
-/// use octez_riscv::state_backend::VerifierAlloc;
+/// use octez_riscv::state_backend::VerifyAlloc;
 /// use octez_riscv::state_backend::FromProofError;
 ///
 /// fn compute_branch_case<A: ProofLayout, B: ProofLayout, D: Deserialiser>(
 ///     de: D,
-/// ) -> VerifierAllocResult<D, (A, B)>
+/// ) -> VerifyAllocResult<D, (A, B)>
 /// {
 ///     tuple_branches_proof_layout!(de, A, B)
 /// }
@@ -730,7 +729,7 @@ macro_rules! tuple_branches_proof_layout {
 
         paste::paste! {
             $(
-                let (ctx, [<$branches:lower>]) = ctx.next_branch(|child_proof| [<$branches>]::into_verifier_alloc(child_proof))?;
+                let (ctx, [<$branches:lower>]) = ctx.next_branch(|child_proof| [<$branches>]::into_verify_alloc(child_proof))?;
             )+
 
             let value = (
@@ -758,12 +757,12 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
+    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<2>()?;
@@ -794,12 +793,12 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
+    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<3>()?;
@@ -833,12 +832,12 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
+    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<4>()?;
@@ -875,11 +874,11 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
+    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D, E)
     }
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<5>()?;
@@ -919,12 +918,12 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<De: Deserialiser>(proof: De) -> VerifierAllocResult<De, Self> {
+    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D, E, F)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<6>()?;
@@ -957,14 +956,13 @@ where
         Ok(MerkleTree::make_merkle_node(children))
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         let ctx = proof.into_node()?;
 
         let mut children_acc = Vec::with_capacity(LEN);
 
         let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, ProofError> {
-            let (ctx, child) =
-                ctx.next_branch(|child_proof| T::into_verifier_alloc(child_proof))?;
+            let (ctx, child) = ctx.next_branch(|child_proof| T::into_verify_alloc(child_proof))?;
 
             children_acc.push(child);
 
@@ -980,7 +978,7 @@ where
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         let (branches, proof_hash) = proof.into_branches_with_hash::<LEN>()?;
@@ -1008,12 +1006,12 @@ where
         build_custom_merkle_tree(MERKLE_ARITY, leaves)
     }
 
-    fn into_verifier_alloc<D: Deserialiser>(proof: D) -> VerifierAllocResult<D, Self> {
+    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         // Avoids clippy warnings about the type being too complex.
-        type NestedSuspendedResult<T> = Vec<AllocatedOf<T, Verifier>>;
+        type NestedSuspendedResult<T> = Vec<AllocatedOf<T, Verify>>;
 
         // Obtain a deserialiser for a given length, i.e. Many<T, length>
-        // We know that AllocatedOf<Many<T, LEN>, Verifier> = Vec<AllocatedOf<T, Verifier>>.
+        // We know that AllocatedOf<Many<T, LEN>, Verify> = Vec<AllocatedOf<T, Verify>>.
 
         // Ideally, this function should return Many<T, LEN> (wrapped in suspended + result)
         // but the function is recursive & dynamic in LEN
@@ -1022,7 +1020,7 @@ where
             proof: D,
         ) -> Result<D::Suspended<NestedSuspendedResult<T>>> {
             if length == 1 {
-                Ok(T::into_verifier_alloc(proof)?.map(|data| vec![data]))
+                Ok(T::into_verify_alloc(proof)?.map(|data| vec![data]))
             } else {
                 let ctx = proof.into_node()?;
 
@@ -1046,13 +1044,13 @@ where
             }
         }
 
-        // The below function's result type Result<D::Suspended<Vec<AllocatedOf<T, Verifier>>>> is precisely
-        // this functions's Result<D::Suspended<VerifierAlloc<Self>>> type, so we can directly return it.
+        // The below function's result type Result<D::Suspended<Vec<AllocatedOf<T, Verify>>>> is precisely
+        // this functions's Result<D::Suspended<VerifyAlloc<Self>>> type, so we can directly return it.
         parametrised_deserialiser::<T, D>(LEN, proof)
     }
 
     fn partial_state_hash(
-        state: RefVerifierAlloc<Self>,
+        state: RefVerifyAlloc<Self>,
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         enum Event<'a> {
@@ -1234,7 +1232,7 @@ mod tests {
     // the execution of the tick being proven should not be blinded, whereas
     // values which were not accessed should be blinded. When a proof contains
     // blinded values, it should be possible to compute the final hash of the
-    // `Verifier` state constructed from this proof.
+    // state in `Verify` mode constructed from this proof.
     #[test]
     fn test_proof_blinding() {
         type TestLayout = (Array<u64, CELLS_SIZE>, Array<u64, CELLS_SIZE>);
@@ -1290,15 +1288,15 @@ mod tests {
     /// different managers.
     ///
     /// Due to Rust's limitation on higher-ranked polymorphism, we can't accept
-    /// a single function and instantiate it within the function body with the respective managers
-    /// `Prove<_>` and `Verifier`. One could work around this restriction by using a trait to
+    /// a single function and instantiate it within the function body with the respective modes
+    /// `Prove<_>` and `Verify`. One could work around this restriction by using a trait to
     /// simulate the rank-2-ness, but that means you can't provide closures as the implementation
     /// any more. If any of the given `test_proof` or `test_verify` capture an environment, this
     /// would no longer work.
     unsafe fn test_dyn_array_with_funs(
         len: usize,
         test_proof: impl FnOnce(&mut DynCells<Prove>),
-        test_verify: impl FnOnce(&mut DynCells<Verifier>),
+        test_verify: impl FnOnce(&mut DynCells<Verify>),
     ) {
         let owned_cell = DynCells::new(len);
 
@@ -1362,7 +1360,7 @@ mod tests {
                     $($body)*
                 };
 
-                let test_verify = |$param: &mut DynCells<Verifier>| {
+                let test_verify = |$param: &mut DynCells<Verify>| {
                     $($body)*
                 };
 

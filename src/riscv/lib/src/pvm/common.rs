@@ -46,7 +46,7 @@ use crate::state_backend::proof_backend::Prove;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
-use crate::state_backend::verify_backend::Verifier;
+use crate::state_backend::verify_backend::Verify;
 use crate::struct_layout;
 
 /// Type of input that can be passed to the PVM
@@ -446,7 +446,7 @@ pub enum InputRequest {
     NeedsReveal(Box<[u8]>),
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verifier>> Pvm<MC, CPE, Verifier> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
         let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))

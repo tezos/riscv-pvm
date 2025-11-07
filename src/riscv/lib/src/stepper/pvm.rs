@@ -49,7 +49,7 @@ use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
-use crate::state_backend::verify_backend::Verifier;
+use crate::state_backend::verify_backend::Verify;
 use crate::state_backend::verify_backend::handle_stepper_panics;
 
 /// Error during PVM stepping
@@ -78,7 +78,7 @@ pub struct PvmStepper<
 }
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
-type PvmVerifier<MC> = PvmStepper<NoHooks, MC, Verifier>;
+type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify>;
 
 impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Normal, CPE> {
     /// Create a new PVM stepper.
@@ -300,9 +300,9 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
 
     fn as_verify_stepper(
         &self,
-        space: AllocatedOf<PvmLayout<MC>, Verifier>,
-    ) -> Result<PvmVerifier<MC>, ProofVerificationFailure> {
-        let pvm = Pvm::<MC, Interpreted<MC, Verifier>, Verifier>::bind(space, InterpretedCompiler);
+        space: AllocatedOf<PvmLayout<MC>, Verify>,
+    ) -> Result<PvmVerify<MC>, ProofVerificationFailure> {
+        let pvm = Pvm::<MC, Interpreted<MC, Verify>, Verify>::bind(space, InterpretedCompiler);
         Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
@@ -328,10 +328,8 @@ impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H,
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verifier>>
-    PvmStepper<H, MC, Verifier, CPE>
-{
-    /// Try to take one step. Stepping with the [`Verifier`] backend may panic
+impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> PvmStepper<H, MC, Verify, CPE> {
+    /// Try to take one step. Stepping in the [`Verify`] mode may panic
     /// when attempting to access absent data. Return [`NotFound`] panics, which
     /// are expected in the case of verifying an invalid proof, as
     /// [`ProofVerificationFailure::AbsentDataAccess`] and all other panics

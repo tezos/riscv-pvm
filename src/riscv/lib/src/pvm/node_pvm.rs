@@ -29,7 +29,7 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::verify_backend::Verifier;
+use crate::state_backend::verify_backend::Verify;
 use crate::storage;
 use crate::storage::Repo;
 
@@ -200,7 +200,7 @@ impl NodePvm {
     }
 }
 
-impl NodePvm<Verifier> {
+impl NodePvm<Verify> {
     /// Verify the proof with the given input by evaluating one step.
     /// Upon success, return the input request which corresponds to the initial state of the proof.      
     pub fn verify_proof(

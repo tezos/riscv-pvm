@@ -35,7 +35,7 @@ use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
-use crate::state_backend::RefVerifierAlloc;
+use crate::state_backend::RefVerifyAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
 
@@ -94,15 +94,15 @@ macro_rules! combined_buddy_branch {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_merkle_tree(state.0)
                 }
 
-                fn into_verifier_alloc<D: Deserialiser>(proof: D) -> $crate::state_backend::VerifierAllocResult<D, Self> {
+                fn into_verify_alloc<D: Deserialiser>(proof: D) -> $crate::state_backend::VerifyAllocResult<D, Self> {
                     use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verifier_alloc(proof)?;
+                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verify_alloc(proof)?;
                     Ok(inner.map(|inner| [<$name Alloc>](inner)))
                 }
 
                 fn partial_state_hash(
-                    state: RefVerifierAlloc<Self>,
+                    state: RefVerifyAlloc<Self>,
                     proof: ProofTree,
                 ) -> Result<Hash, PartialHashError> {
                     <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::partial_state_hash(state.0, proof)
