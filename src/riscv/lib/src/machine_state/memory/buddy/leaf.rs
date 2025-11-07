@@ -55,7 +55,9 @@ impl<const PAGES: u64> CommitmentLayout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn to_merkle_tree(state: RefProofGenOwnedAlloc<Self>) -> Result<MerkleTree, HashError> {
+    fn to_merkle_tree<'outer, 'inner: 'outer>(
+        state: RefProofGenOwnedAlloc<'outer, 'inner, Self>,
+    ) -> Result<MerkleTree, HashError> {
         Atom::to_merkle_tree(state.set)
     }
 
@@ -77,7 +79,9 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> CloneLayout for BuddyLeafLayout<PAGES> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let region = space.set.into_region();
         let region = M::clone_region(region);
         let set = Cell::bind(region);

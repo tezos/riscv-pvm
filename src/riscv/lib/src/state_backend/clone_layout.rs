@@ -18,11 +18,15 @@ use crate::state_backend::Ref;
 /// [`Layout`] which can be cloned.
 pub trait CloneLayout: Layout {
     /// Clone the allocated space of this layout behind a [`Ref`].
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M>;
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M>;
 }
 
 impl<E: Clone + 'static> CloneLayout for Atom<E> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let region = space.into_region();
         let region = M::clone_region(region);
         Cell::bind(region)
@@ -30,7 +34,9 @@ impl<E: Clone + 'static> CloneLayout for Atom<E> {
 }
 
 impl<E: Clone + 'static, const LEN: usize> CloneLayout for Array<E, LEN> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let region = space.into_region();
         let region = M::clone_region(region);
         Cells::bind(region)
@@ -38,7 +44,9 @@ impl<E: Clone + 'static, const LEN: usize> CloneLayout for Array<E, LEN> {
 }
 
 impl<A: CloneLayout, B: CloneLayout> CloneLayout for (A, B) {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let a = A::clone_allocated(space.0);
         let b = B::clone_allocated(space.1);
         (a, b)
@@ -46,7 +54,9 @@ impl<A: CloneLayout, B: CloneLayout> CloneLayout for (A, B) {
 }
 
 impl<A: CloneLayout, B: CloneLayout, C: CloneLayout> CloneLayout for (A, B, C) {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let a = A::clone_allocated(space.0);
         let b = B::clone_allocated(space.1);
         let c = C::clone_allocated(space.2);
@@ -55,7 +65,9 @@ impl<A: CloneLayout, B: CloneLayout, C: CloneLayout> CloneLayout for (A, B, C) {
 }
 
 impl<A: CloneLayout, B: CloneLayout, C: CloneLayout, D: CloneLayout> CloneLayout for (A, B, C, D) {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let a = A::clone_allocated(space.0);
         let b = B::clone_allocated(space.1);
         let c = C::clone_allocated(space.2);
@@ -67,7 +79,9 @@ impl<A: CloneLayout, B: CloneLayout, C: CloneLayout, D: CloneLayout> CloneLayout
 impl<A: CloneLayout, B: CloneLayout, C: CloneLayout, D: CloneLayout, E: CloneLayout> CloneLayout
     for (A, B, C, D, E)
 {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let a = A::clone_allocated(space.0);
         let b = B::clone_allocated(space.1);
         let c = C::clone_allocated(space.2);
@@ -78,7 +92,9 @@ impl<A: CloneLayout, B: CloneLayout, C: CloneLayout, D: CloneLayout, E: CloneLay
 }
 
 impl CloneLayout for DynArray {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         let region = space.region_ref();
         let region = M::clone_dyn_region(region);
         DynCells::bind(region)
@@ -86,19 +102,25 @@ impl CloneLayout for DynArray {
 }
 
 impl<L: CloneLayout, const LEN: usize> CloneLayout for [L; LEN] {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         space.map(L::clone_allocated)
     }
 }
 
 impl<L: CloneLayout, const LEN: usize> CloneLayout for Many<L, LEN> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         space.into_iter().map(L::clone_allocated).collect()
     }
 }
 
 impl<L: CloneLayout> CloneLayout for Box<L> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
+    fn clone_allocated<'a, M: ManagerClone + 'a>(
+        space: Self::Allocated<Ref<'a, M>>,
+    ) -> Self::Allocated<M> {
         Box::new(L::clone_allocated(*space))
     }
 }

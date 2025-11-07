@@ -165,8 +165,8 @@ macro_rules! struct_layout {
             >
             {
                 #[inline]
-                fn to_merkle_tree(
-                    state: $crate::state_backend::RefProofGenOwnedAlloc<Self>,
+                fn to_merkle_tree<'outer, 'inner: 'outer>(
+                    state: $crate::state_backend::RefProofGenOwnedAlloc<'outer, 'inner, Self>,
                 ) -> std::result::Result<$crate::state_backend::proof_backend::merkle::MerkleTree, $crate::storage::HashError> {
                     Ok($crate::state_backend::proof_backend::merkle::MerkleTree::make_merkle_node(
                         vec![
@@ -226,8 +226,8 @@ macro_rules! struct_layout {
                 ),+
             >
             {
-                fn clone_allocated<M: $crate::state_backend::ManagerClone>(
-                    space: $crate::state_backend::AllocatedOf<Self, $crate::state_backend::Ref<'_, M>>
+                fn clone_allocated<'a, M: $crate::state_backend::ManagerClone + 'a>(
+                    space: $crate::state_backend::AllocatedOf<Self, $crate::state_backend::Ref<'a, M>>
                 ) -> $crate::state_backend::AllocatedOf<Self, M> {
                     [<$layout_t F>] {
                         $(

@@ -81,6 +81,7 @@ mod region;
 mod trans;
 pub mod verify_backend;
 
+use std::convert::Infallible;
 use std::marker::PhantomData;
 
 use bincode::de::Decode;
@@ -126,7 +127,7 @@ pub trait ManagerBase: Sized {
 ///
 /// Any `ManagerAlloc` inherently has read & write capabilities,
 /// since the manager creates the values on the first allocation.
-pub trait ManagerAlloc: 'static + ManagerReadWrite {
+pub trait ManagerAlloc: ManagerReadWrite {
     /// Allocate a region in the state storage.
     fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN>;
 
@@ -301,9 +302,9 @@ pub trait ManagerClone: ManagerBase {
 }
 
 /// Manager wrapper around `M` whose regions are immutable references to regions of `M`
-pub struct Ref<'backend, M>(std::marker::PhantomData<fn(&'backend M)>);
+pub struct Ref<'backend, M>(PhantomData<&'backend M>, Infallible);
 
-impl<'backend, M: ManagerBase> ManagerBase for Ref<'backend, M> {
+impl<'backend, M: ManagerBase + 'backend> ManagerBase for Ref<'backend, M> {
     type Region<E: 'static, const LEN: usize> = &'backend M::Region<E, LEN>;
 
     type DynRegion = &'backend M::DynRegion;
@@ -311,7 +312,7 @@ impl<'backend, M: ManagerBase> ManagerBase for Ref<'backend, M> {
     type ManagerRoot = M::ManagerRoot;
 }
 
-impl<M: ManagerSerialise> ManagerSerialise for Ref<'_, M> {
+impl<'backend, M: ManagerSerialise + 'backend> ManagerSerialise for Ref<'backend, M> {
     fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
         region: &Self::Region<T, LEN>,
         encoder: E,
@@ -327,7 +328,7 @@ impl<M: ManagerSerialise> ManagerSerialise for Ref<'_, M> {
     }
 }
 
-impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
+impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
     fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
         M::region_read(region, index)
     }
@@ -360,8 +361,8 @@ impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
 pub type RefOwnedAlloc<'a, L> = AllocatedOf<L, Ref<'a, owned_backend::Owned>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProofGenOwnedAlloc<'a, 'b, L> =
-    AllocatedOf<L, Ref<'a, proof_backend::ProofGen<Ref<'b, owned_backend::Owned>>>>;
+pub type RefProofGenOwnedAlloc<'outer, 'inner, L> =
+    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, owned_backend::Owned>>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
