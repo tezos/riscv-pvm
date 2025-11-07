@@ -75,7 +75,7 @@ pub enum ProofVerificationFailure {
 }
 
 /// Proof verification backend
-pub struct Verify;
+pub enum Verify {}
 
 impl ManagerBase for Verify {
     type Region<E: 'static, const LEN: usize> = Region<E, LEN>;
