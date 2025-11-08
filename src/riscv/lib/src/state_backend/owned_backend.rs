@@ -88,11 +88,9 @@ impl ManagerRead for Owned {
         region.len()
     }
 
-    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
-        assert!(address + E::STORED_SIZE.get() <= region.len());
+    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
+        debug_assert!(address + E::STORED_SIZE.get() <= region.len());
 
-        // SAFETY: The assertion above ensures that the address can be read for at least
-        // `E::STORED_SIZE` bytes.
         unsafe { E::read_unaligned(region.as_ptr().add(address)) }
     }
 }
@@ -113,11 +111,9 @@ impl ManagerWrite for Owned {
         region.copy_from_slice(value)
     }
 
-    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
-        assert!(address + E::STORED_SIZE.get() <= region.len());
+    unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
+        debug_assert!(address + E::STORED_SIZE.get() <= region.len());
 
-        // SAFETY: The assertion above ensures that the address can be written for at least
-        // `E::STORED_SIZE` bytes.
         unsafe { value.write_unaligned(region.as_mut_ptr().add(address)) }
     }
 }
@@ -260,15 +256,21 @@ pub(crate) mod test_helpers {
     /// Ensure [`DynCells`] can be serialised and deserialised in a consistent way.
     #[test]
     fn dyn_cells_serialise() {
-        proptest::proptest!(|(address in (0usize..120), value: u64)|{
+        proptest::proptest!(|(address in (0usize..120), value: u64)| {
             let mapping = Owned::allocate_dyn_region(128);
             let mut cells: DynCells<Owned> = DynCells::bind(mapping);
-            cells.write(address, value);
+
+            unsafe {
+                cells.write(address, value);
+            }
+
             let bytes = binary::serialise(&cells).unwrap();
 
             let cells_after: DynCells<Owned> = binary::deserialise(&bytes).unwrap();
             for i in 0..128 {
-                assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
+                unsafe {
+                    assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
+                }
             }
 
             let bytes_after = binary::serialise(&cells_after).unwrap();

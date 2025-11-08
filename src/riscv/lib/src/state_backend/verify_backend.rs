@@ -144,7 +144,7 @@ impl ManagerRead for Verifier {
         region.len()
     }
 
-    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
+    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         let mut raw_data = vec![0u8; E::STORED_SIZE.get()];
         region.read_bytes(address, &mut raw_data);
 
@@ -184,7 +184,7 @@ impl ManagerWrite for Verifier {
         }
     }
 
-    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
+    unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         let raw_data = elem_bytes(value);
         region.write_bytes(address, &raw_data);
     }
@@ -664,41 +664,57 @@ mod tests {
         let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(0), [1, 3, 3, 7]);
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(1), [3, 3, 7, 1]);
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 4), [1, 3, 3, 7]);
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(0), [1, 3, 3, 7]);
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(1), [3, 3, 7, 1]);
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 4), [1, 3, 3, 7]);
+        }
 
         // Read things that span the first and second leaf.
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 2), [3, 7, 11, 14]);
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 2), [3, 7, 11, 14]);
+        }
 
         // Read things that are contained in the second leaf.
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE), [11, 14, 14, 15]);
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE + 1), [14, 14, 15, 11]);
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE), [11, 14, 14, 15]);
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE + 1), [14, 14, 15, 11]);
+        }
 
         // Read more than is available.
-        assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE * 3 + 1]>(0));
+        unsafe {
+            assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE * 3 + 1]>(0));
+        }
 
         // Read at an offset that is out of bounds.
-        assert_not_found!(dyn_cells.read::<u8>(LEAF_SIZE * 2));
+        unsafe {
+            assert_not_found!(dyn_cells.read::<u8>(LEAF_SIZE * 2));
+        }
 
         // Write to an index that is out of bounds.
-        assert_not_found!(dyn_cells.clone().write(LEAF_SIZE * 3, 0u8));
+        unsafe {
+            assert_not_found!(dyn_cells.clone().write(LEAF_SIZE * 3, 0u8));
+        }
 
         // Add more to the third leaf.
-        let dyn_cells = handle_stepper_panics(move || {
+        let dyn_cells = handle_stepper_panics(move || unsafe {
             dyn_cells.write(LEAF_SIZE * 2, [255u8, 0]);
             dyn_cells
         })
         .unwrap();
-        assert_eq_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE * 2 - 4), [
-            11, 14, 14, 15, 255, 0
-        ]);
-        assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2), [255, 0]);
-        assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE * 2));
-        assert_not_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2 + 2));
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE * 2 - 4), [
+                11, 14, 14, 15, 255, 0
+            ]);
+            assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2), [255, 0]);
+            assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE * 2));
+            assert_not_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2 + 2));
+        }
 
         // Read at an offset that is out of bounds.
-        assert_not_found!(dyn_cells.read::<u8>(LEAF_SIZE * 3));
+        unsafe {
+            assert_not_found!(dyn_cells.read::<u8>(LEAF_SIZE * 3));
+        }
     }
 
     /// Check the functionality of a region that has gaps between its pages.
@@ -728,27 +744,35 @@ mod tests {
 
         let mut dyn_cells: DynCells<Verifier> = DynCells::bind(dyn_region);
 
-        assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);
-        assert_eq_found!(dyn_cells.read::<[u8; 2]>(1), [3, 3]);
-        assert_eq_found!(dyn_cells.read::<[u8; 1]>(LEAF_SIZE * 2), [42]);
-        assert_eq_found!(dyn_cells.read::<[u8; 1]>(LEAF_SIZE * 2 + 1), [41]);
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);
+            assert_eq_found!(dyn_cells.read::<[u8; 2]>(1), [3, 3]);
+            assert_eq_found!(dyn_cells.read::<[u8; 1]>(LEAF_SIZE * 2), [42]);
+            assert_eq_found!(dyn_cells.read::<[u8; 1]>(LEAF_SIZE * 2 + 1), [41]);
+        }
 
         // Read a range that covers a gap.
-        assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE + 4]>(LEAF_SIZE - 2));
-        assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE]>(LEAF_SIZE));
+        unsafe {
+            assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE + 4]>(LEAF_SIZE - 2));
+            assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE]>(LEAF_SIZE));
+        }
 
         // Write within the gap.
-        let dyn_cells = handle_stepper_panics(move || {
+        let dyn_cells = handle_stepper_panics(move || unsafe {
             dyn_cells.write(LEAF_SIZE - 1, [1u8, 1, 3]);
             dyn_cells
         })
         .unwrap();
 
-        assert_eq_found!(dyn_cells.read::<[u8; 3]>(LEAF_SIZE - 1), [1, 1, 3]);
-        assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE), [1, 3]);
-        assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 2), [3, 1, 1, 3]);
+        unsafe {
+            assert_eq_found!(dyn_cells.read::<[u8; 3]>(LEAF_SIZE - 1), [1, 1, 3]);
+            assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE), [1, 3]);
+            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 2), [3, 1, 1, 3]);
+        }
 
-        assert_not_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE - 1));
-        assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE));
+        unsafe {
+            assert_not_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE - 1));
+            assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE));
+        }
     }
 }

@@ -449,12 +449,16 @@ impl<M: ManagerBase> DynCells<M> {
     }
 
     /// Read an element in the region. `address` is in bytes.
+    ///
+    /// # Safety
+    ///
+    /// See [`ManagerRead::dyn_region_read`] for safety requirements.
     #[inline]
-    pub fn read<E: Elem>(&self, address: usize) -> E
+    pub unsafe fn read<E: Elem>(&self, address: usize) -> E
     where
         M: ManagerRead,
     {
-        M::dyn_region_read(&self.region, address)
+        unsafe { M::dyn_region_read(&self.region, address) }
     }
 
     /// Read elements from the region. `address` is in bytes.
@@ -467,12 +471,16 @@ impl<M: ManagerBase> DynCells<M> {
     }
 
     /// Update an element in the region. `address` is in bytes.
+    ///
+    /// # Safety
+    ///
+    /// See [`ManagerWrite::dyn_region_write`] for safety requirements.
     #[inline]
-    pub fn write<E: Elem>(&mut self, address: usize, value: E)
+    pub unsafe fn write<E: Elem>(&mut self, address: usize, value: E)
     where
         M: ManagerWrite,
     {
-        M::dyn_region_write(&mut self.region, address, value)
+        unsafe { M::dyn_region_write(&mut self.region, address, value) }
     }
 
     /// Update multiple elements in the region. `address` is in bytes.
@@ -507,8 +515,12 @@ impl<M: ManagerRead, N: ManagerRead> PartialEq<DynCells<N>> for DynCells<M> {
         }
 
         for i in 0..len {
-            if self.read::<u8>(i) != other.read::<u8>(i) {
-                return false;
+            // SAFETY: We know that `i < len` from the loop condition. Therefore, the reads are
+            // always within the maximum bounds.
+            unsafe {
+                if self.read::<u8>(i) != other.read::<u8>(i) {
+                    return false;
+                }
             }
         }
 
@@ -662,7 +674,9 @@ pub(crate) mod tests {
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
-            state.write(LEN * Flipper::STORED_SIZE.get(), Flipper { a: 1, b: 2 });
+            unsafe {
+                state.write(LEN * Flipper::STORED_SIZE.get(), Flipper { a: 1, b: 2 });
+            }
         }
     );
 
@@ -670,10 +684,12 @@ pub(crate) mod tests {
         // Writing to one item of the region must convert to stored format.
         let mut region = DynCells::<F>::new(4096);
 
-        region.write(0, Flipper { a: 13, b: 37 });
-        assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });
+        unsafe {
+            region.write(0, Flipper { a: 13, b: 37 });
+            assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });
+        }
 
-        let buffer = region.read::<[u8; 2]>(0);
+        let buffer = unsafe { region.read::<[u8; 2]>(0) };
         assert_eq!(buffer, [37, 13]);
 
         // Writing to the entire region must convert properly to stored format.
@@ -693,7 +709,7 @@ pub(crate) mod tests {
             Flipper { a: 17, b: 28 },
         ]);
 
-        let buffer = region.read::<[u8; 8]>(0);
+        let buffer = unsafe { region.read::<[u8; 8]>(0) };
         assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);
     });
 }
