@@ -149,7 +149,15 @@ pub trait ManagerRead: ManagerBase {
     fn dyn_region_len(region: &Self::DynRegion) -> usize;
 
     /// Read an element in the region. `address` is in bytes.
-    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds.
+    ///
+    /// ```
+    /// address + E:STORED <= region.len()
+    /// ```
+    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
 
     /// Read elements from the region. `address` is in bytes.
     ///
@@ -196,7 +204,15 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
     fn region_write_all<E: Copy, const LEN: usize>(region: &mut Self::Region<E, LEN>, value: &[E]);
 
     /// Update an element in the region. `address` is in bytes.
-    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds.
+    ///
+    /// ```
+    /// address + E:STORED <= region.len()
+    /// ```
+    unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
 
     /// Update multiple elements in the region. `address` is in bytes.
     ///
@@ -328,8 +344,8 @@ impl<M: ManagerRead> ManagerRead for Ref<'_, M> {
         M::dyn_region_len(region)
     }
 
-    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
-        M::dyn_region_read(region, address)
+    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
+        unsafe { M::dyn_region_read(region, address) }
     }
 
     fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {

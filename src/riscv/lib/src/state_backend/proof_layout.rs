@@ -434,8 +434,11 @@ impl ProofLayout for DynArray {
             region.get_write(),
             len.div_ceil(MERKLE_ARITY),
         );
-        let read =
-            |address| -> [u8; MERKLE_LEAF_SIZE.get()] { region.inner_dyn_region_read(address) };
+        let read = |address| -> [u8; MERKLE_LEAF_SIZE.get()] {
+            // SAFETY: The chunk writer will only request data within the given bounds. The bounds
+            // are set to the length of the dynamic array.
+            unsafe { region.inner_dyn_region_read(address) }
+        };
         chunks_to_writer::<_, _>(&mut writer, len, read)?;
 
         let pages_node = writer.finalise()?;
@@ -1362,7 +1365,9 @@ mod tests {
     fn test_dyn_array_proofs_read() {
         proptest!(|(addr in 0..65528usize)| {
             test_dyn_array_with!(65536, |cell| {
-                cell.read::<u64>(addr);
+                unsafe {
+                    cell.read::<u64>(addr);
+                }
             });
         });
     }
@@ -1371,7 +1376,9 @@ mod tests {
     fn test_dyn_array_proofs_write() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
             test_dyn_array_with!(65536, |cell| {
-                cell.write::<u64>(addr, val);
+                unsafe {
+                    cell.write::<u64>(addr, val);
+                }
             });
         });
     }
@@ -1387,7 +1394,10 @@ mod tests {
     fn test_dyn_array_proofs_read_and_len() {
         proptest!(|(addr in 0..65528usize)| {
             test_dyn_array_with!(65536, |cell| {
-                cell.read::<u64>(addr);
+                unsafe {
+                    cell.read::<u64>(addr);
+                }
+
                 cell.len();
             });
         });
@@ -1397,7 +1407,10 @@ mod tests {
     fn test_dyn_array_proofs_write_and_len() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
             test_dyn_array_with!(65536, |cell| {
-                cell.write::<u64>(addr, val);
+                unsafe {
+                    cell.write::<u64>(addr, val);
+                }
+
                 cell.len();
             });
         });
@@ -1407,8 +1420,10 @@ mod tests {
     fn test_dyn_array_proofs_read_and_write() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
             test_dyn_array_with!(65536, |cell| {
-                let x = cell.read::<u64>(addr);
-                cell.write(addr, x.wrapping_add(val));
+                unsafe {
+                    let x = cell.read::<u64>(addr);
+                    cell.write(addr, x.wrapping_add(val));
+                }
             });
         });
     }
@@ -1417,8 +1432,11 @@ mod tests {
     fn test_dyn_array_proofs_read_and_write_and_len() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
             test_dyn_array_with!(65536, |cell| {
-                let x = cell.read::<u64>(addr);
-                cell.write(addr, x.wrapping_add(val));
+                unsafe {
+                    let x = cell.read::<u64>(addr);
+                    cell.write(addr, x.wrapping_add(val));
+                }
+
                 cell.len();
             });
         });
