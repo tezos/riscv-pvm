@@ -43,16 +43,6 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Manage
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 {
-    /// Ensure the access is within bounds.
-    #[inline]
-    fn check_bounds<E>(address: Address, length: NonZeroUsize, error: E) -> Result<(), E> {
-        if length.get() > TOTAL_BYTES.saturating_sub(address as usize) {
-            return Err(error);
-        }
-
-        Ok(())
-    }
-
     /// Mark the whole memory as readable and writeable
     #[cfg(test)]
     pub(crate) fn set_all_readable_writeable(&mut self, listener: impl MemoryGovernanceListener)
@@ -83,7 +73,6 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     {
         let length = E::STORED_SIZE;
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
         let pages = page_range(address, length);
 
         // SAFETY: The bounds check above ensures the access is safe.
@@ -110,8 +99,6 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
-
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
             if !self.readable_pages.can_access_narrow::<E>(address) {
@@ -129,8 +116,6 @@ where
         E: Elem,
         M: ManagerRead,
     {
-        Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
-
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
             // Checking for executable access is sufficient as that implies read access
@@ -160,8 +145,6 @@ where
 
         let length = E::STORED_SIZE.saturating_mul(values_len);
 
-        Self::check_bounds(address, length, BadMemoryAccess)?;
-
         let pages = page_range(address, length);
 
         // SAFETY: The bounds check above ensures the access check below is safe
@@ -181,8 +164,6 @@ where
         E: Elem,
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
-
         // SAFETY: The bounds check above ensures the access check below is safe
         unsafe {
             if !self.writable_pages.can_access_narrow::<E>(address) {
@@ -209,7 +190,6 @@ where
         };
 
         let length = E::STORED_SIZE.saturating_mul(values_len);
-        Self::check_bounds(address, length, BadMemoryAccess)?;
 
         let pages = page_range(address, length);
 
@@ -285,8 +265,6 @@ where
     where
         M: ManagerWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
-
         let pages = page_range(address, length);
 
         self.readable_pages
@@ -309,8 +287,6 @@ where
     where
         M: ManagerReadWrite,
     {
-        Self::check_bounds(address, length, super::MemoryGovernanceError)?;
-
         // See RV-561: Use `u64` for indices and lengths that come from the PVM
         let pages = (length.get() as u64).div_ceil(super::PAGE_SIZE.get());
 
@@ -338,8 +314,6 @@ where
         match address_hint {
             // Caller wants to allocate at a specific address
             Some(address) => {
-                Self::check_bounds(address, length, super::MemoryGovernanceError)?;
-
                 // Buddy memory manager works on page indices, not addresses
                 let idx = address >> super::OFFSET_BITS.get();
                 self.allocated_pages
@@ -431,17 +405,6 @@ pub mod tests {
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::owned_backend::Owned;
-
-    #[test]
-    fn bounds_check() {
-        type OwnedM4K = <M4K as MemoryConfig>::State<Owned>;
-
-        // Bounds checks
-        assert!(OwnedM4K::check_bounds(4095, NonZeroUsize::new(1).unwrap(), ()).is_ok());
-        assert!(OwnedM4K::check_bounds(4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
-        assert!(OwnedM4K::check_bounds(2 * 4096, NonZeroUsize::new(1).unwrap(), ()).is_err());
-    }
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the
     // requested length, when allocating memory.
