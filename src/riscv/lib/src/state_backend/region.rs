@@ -479,7 +479,7 @@ impl<M: ManagerBase> DynCells<M> {
     #[inline]
     pub fn write_all<E: Elem + Copy>(&mut self, address: usize, values: &[E])
     where
-        M: ManagerWrite,
+        M: ManagerWrite + ManagerRead,
     {
         M::dyn_region_write_all(&mut self.region, address, values)
     }

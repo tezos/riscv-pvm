@@ -87,18 +87,6 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         region.reads.borrow_mut().insert::<E>(address);
         region.unrecorded_read(address)
     }
-
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
-        for (offset, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read(
-                region,
-                E::STORED_SIZE
-                    .get()
-                    .wrapping_mul(offset)
-                    .wrapping_add(address),
-            );
-        }
-    }
 }
 
 /// Implementation of [`ManagerWrite`] which wraps another manager and
@@ -127,23 +115,6 @@ impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
 
         for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
             region.writes.insert(address + offset, byte);
-        }
-    }
-
-    fn dyn_region_write_all<E: Elem + Copy>(
-        region: &mut Self::DynRegion,
-        address: usize,
-        values: &[E],
-    ) {
-        for (offset, &value) in values.iter().enumerate() {
-            Self::dyn_region_write(
-                region,
-                E::STORED_SIZE
-                    .get()
-                    .wrapping_mul(offset)
-                    .wrapping_add(address),
-                value,
-            )
         }
     }
 }

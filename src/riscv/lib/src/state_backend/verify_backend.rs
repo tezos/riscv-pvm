@@ -151,15 +151,6 @@ impl ManagerRead for Verifier {
         // SAFETY: The byte vector has been allocated with sufficient space.
         unsafe { E::read_unaligned(raw_data.as_ptr()) }
     }
-
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
-        for (i, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read(
-                region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-            );
-        }
-    }
 }
 
 impl ManagerWrite for Verifier {
@@ -196,20 +187,6 @@ impl ManagerWrite for Verifier {
     fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         let raw_data = elem_bytes(value);
         region.write_bytes(address, &raw_data);
-    }
-
-    fn dyn_region_write_all<E: Elem + Copy>(
-        region: &mut Self::DynRegion,
-        address: usize,
-        values: &[E],
-    ) {
-        for (i, value) in values.iter().enumerate() {
-            Self::dyn_region_write(
-                region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-                *value,
-            );
-        }
     }
 }
 

@@ -152,7 +152,31 @@ pub trait ManagerRead: ManagerBase {
     fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
 
     /// Read elements from the region. `address` is in bytes.
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]);
+    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
+        if values.is_empty() {
+            return;
+        }
+
+        assert!(
+            values
+                .len()
+                .checked_mul(E::STORED_SIZE.get())
+                .expect("Total length should not overflow")
+                .checked_add(address)
+                .expect("End address should not overflow")
+                <= Self::dyn_region_len(region),
+        );
+
+        for (i, value) in values.iter_mut().enumerate() {
+            // SAFETY: The assertion above ensures all reads are within bounds.
+            unsafe {
+                *value = Self::dyn_region_read::<E>(
+                    region,
+                    E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                )
+            };
+        }
+    }
 }
 
 /// Manager with write capabilities
@@ -175,7 +199,34 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
         region: &mut Self::DynRegion,
         address: usize,
         values: &[E],
-    );
+    ) where
+        Self: ManagerRead,
+    {
+        if values.is_empty() {
+            return;
+        }
+
+        assert!(
+            values
+                .len()
+                .checked_mul(E::STORED_SIZE.get())
+                .expect("Total length should not overflow")
+                .checked_add(address)
+                .expect("End address should not overflow")
+                <= Self::dyn_region_len(region)
+        );
+
+        for (i, value) in values.iter().enumerate() {
+            // SAFETY: The assertion above ensures all writes are within bounds.
+            unsafe {
+                Self::dyn_region_write::<E>(
+                    region,
+                    E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
+                    *value,
+                );
+            }
+        }
+    }
 }
 
 /// Manager with capabilities that require both read and write

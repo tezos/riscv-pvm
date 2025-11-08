@@ -95,15 +95,6 @@ impl ManagerRead for Owned {
         // `E::STORED_SIZE` bytes.
         unsafe { E::read_unaligned(region.as_ptr().add(address)) }
     }
-
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
-        for (i, value) in values.iter_mut().enumerate() {
-            *value = Self::dyn_region_read::<E>(
-                region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-            );
-        }
-    }
 }
 
 impl ManagerWrite for Owned {
@@ -128,20 +119,6 @@ impl ManagerWrite for Owned {
         // SAFETY: The assertion above ensures that the address can be written for at least
         // `E::STORED_SIZE` bytes.
         unsafe { value.write_unaligned(region.as_mut_ptr().add(address)) }
-    }
-
-    fn dyn_region_write_all<E: Elem + Copy>(
-        region: &mut Self::DynRegion,
-        address: usize,
-        values: &[E],
-    ) {
-        for (i, value) in values.iter().enumerate() {
-            Self::dyn_region_write::<E>(
-                region,
-                E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-                *value,
-            );
-        }
     }
 }
 
