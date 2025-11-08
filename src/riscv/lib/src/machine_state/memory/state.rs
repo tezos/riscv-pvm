@@ -86,9 +86,14 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
         Self::check_bounds(address, length, BadMemoryAccess)?;
         let pages = page_range(address, length);
 
-        self.data.write(address as usize, value);
+        // SAFETY: The bounds check above ensures the access is safe.
+        unsafe {
+            self.data.write(address as usize, value);
+        }
+
         self.readable_pages.modify_access(pages.clone(), true);
         self.executable_pages.modify_access(pages, true);
+
         Ok(())
     }
 }
@@ -114,7 +119,8 @@ where
             }
         }
 
-        Ok(self.data.read(address as usize))
+        // SAFETY: The bounds check above ensures the access is safe.
+        unsafe { Ok(self.data.read(address as usize)) }
     }
 
     #[inline]
@@ -133,7 +139,8 @@ where
             }
         }
 
-        let data = self.data.read(address as usize);
+        // SAFETY: The bounds check above ensures the access is safe.
+        let data = unsafe { self.data.read(address as usize) };
 
         // SAFETY: The bounds check above ensures the access check below is safe
         let writable = unsafe { self.writable_pages.can_access_narrow::<E>(address) };
@@ -183,7 +190,11 @@ where
             }
         }
 
-        self.data.write(address as usize, value);
+        // SAFETY: The bounds check above ensures the access is safe.
+        unsafe {
+            self.data.write(address as usize, value);
+        }
+
         Ok(())
     }
 
@@ -237,14 +248,22 @@ where
 
         // Write 64-bit chunks
         while outstanding >= SIZE_OF_U64 {
-            self.data.write(address, 0u64);
+            // SAFETY: The loop condition ensures we don't go out of bounds.
+            unsafe {
+                self.data.write(address, 0u64);
+            }
+
             address += SIZE_OF_U64;
             outstanding -= SIZE_OF_U64;
         }
 
         // Write remaining bytes
         for i in 0..outstanding {
-            self.data.write(address.saturating_add(i), 0u8);
+            // SAFETY: The loop is for the exact number of remaining bytes, so we don't go out of
+            // bounds.
+            unsafe {
+                self.data.write(address.saturating_add(i), 0u8);
+            }
         }
 
         self.readable_pages.reset();
@@ -370,13 +389,22 @@ where
         while remaining >= 8 {
             remaining -= 8;
             let address = (address as usize).saturating_add(remaining);
-            self.data.write(address, 0u64);
+
+            // SAFETY: The loop condition ensures we don't go out of bounds.
+            unsafe {
+                self.data.write(address, 0u64);
+            }
         }
 
         // Zero initialise the tail byte by byte
         for i in 0..remaining {
             let address = (address as usize).saturating_add(i);
-            self.data.write(address, 0u8);
+
+            // SAFETY: The loop is for the exact number of remaining bytes, so we don't go out of
+            // bounds.
+            unsafe {
+                self.data.write(address, 0u8);
+            }
         }
 
         Ok(address)
@@ -425,7 +453,9 @@ pub mod tests {
 
         // Write a pattern to ensure memory contains non-zero values
         for i in 0..PAGE_SIZE.get() {
-            memory.data.write(i as usize, 0xFFu8);
+            unsafe {
+                memory.data.write(i as usize, 0xFFu8);
+            }
         }
 
         // Request size that's not a multiple of page size
@@ -444,7 +474,7 @@ pub mod tests {
         // Verify that memory is zeroed for the entire page, not just the requested length
         for i in 0..PAGE_SIZE.get() {
             let offset = i as usize;
-            let value = memory.data.read::<u8>((address as usize) + offset);
+            let value = unsafe { memory.data.read::<u8>((address as usize) + offset) };
             assert_eq!(
                 value,
                 0,

@@ -83,7 +83,7 @@ impl<M: ManagerRead> ManagerRead for ProofGen<M> {
         region.len()
     }
 
-    fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
+    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
         region.reads.borrow_mut().insert::<E>(address);
         region.unrecorded_read(address)
     }
@@ -110,8 +110,8 @@ impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
         }
     }
 
-    fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
-        assert!(address + E::STORED_SIZE.get() <= region.unrecorded_len());
+    unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
+        debug_assert!(address + E::STORED_SIZE.get() <= region.unrecorded_len());
 
         for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
             region.writes.insert(address + offset, byte);
@@ -332,8 +332,12 @@ impl<M: ManagerBase> ProofDynRegion<M> {
 
 impl<M: ManagerRead> ProofDynRegion<M> {
     /// Read from the wrapped dynamic region.
-    pub fn inner_dyn_region_read<E: Elem>(&self, address: usize) -> E {
-        M::dyn_region_read(&self.source, address)
+    ///
+    /// # Safety
+    ///
+    /// See [`ManagerRead::dyn_region_read`] for safety requirements.
+    pub unsafe fn inner_dyn_region_read<E: Elem>(&self, address: usize) -> E {
+        unsafe { M::dyn_region_read(&self.source, address) }
     }
 
     /// Version of [`ManagerRead::dyn_region_read`] which does not record
@@ -555,10 +559,10 @@ mod tests {
             let value_before = u64::from_le_bytes([byte_before; ELEM_SIZE]);
             let value_after = u64::from_le_bytes(bytes_after);
 
-            let value: u64 = dyn_cells.read(write_address);
+            let value: u64 = unsafe { dyn_cells.read(write_address) };
             assert_eq!(value, value_before);
-            dyn_cells.write(write_address, value_after);
-            let value: u64 = dyn_cells.read(write_address);
+            unsafe { dyn_cells.write(write_address, value_after); }
+            let value: u64 = unsafe { dyn_cells.read(write_address) };
             assert_eq!(value, value_after);
 
             let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);

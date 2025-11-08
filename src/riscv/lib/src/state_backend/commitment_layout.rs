@@ -58,7 +58,9 @@ impl CommitmentLayout for DynArray {
 
         let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
         chunks_to_writer::<_, _>(&mut writer, length, |address| {
-            state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address)
+            // SAFETY: The chunk writer will only request data within the bounds that we specified.
+            // Given we provided the correct length, this is safe.
+            unsafe { state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) }
         })?;
         let hashes = writer.finalise();
         let pages_node = hash::build_custom_merkle_hash(MERKLE_ARITY, hashes)?;
