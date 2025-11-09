@@ -22,6 +22,7 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -58,6 +59,14 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
             .iter()
             .map(|item| item.struct_ref::<F>())
             .collect()
+    }
+
+    /// TODO
+    pub fn clone_allocated(&self) -> AllocatedOf<PagePermissionsLayout<PAGES>, M>
+    where
+        M: ManagerClone,
+    {
+        self.pages.as_ref().to_vec()
     }
 
     /// Check if the memory at `address..address+length` can be accessed.

@@ -182,6 +182,24 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         }
     }
 
+    /// TODO
+    pub(crate) fn clone_allocated(&self) -> state_backend::AllocatedOf<PvmLayout<MC>, M>
+    where
+        M: state_backend::ManagerClone,
+    {
+        PvmLayoutF {
+            machine_state: self.machine_state.clone_allocated(),
+            reveal_request: self.reveal_request.clone_allocated(),
+            system_state: self.system_state.clone_allocated(),
+            version: self.version.clone(),
+            tick: self.tick.clone(),
+            message_counter: self.message_counter.clone(),
+            level: self.level.clone(),
+            level_is_set: self.level_is_set.clone(),
+            status: self.status.clone(),
+        }
+    }
+
     /// Generate a proof-generating version of this PVM.
     pub(crate) fn start_proof(&self) -> PvmProofGen<'_, MC, M>
     where

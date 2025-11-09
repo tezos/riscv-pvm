@@ -19,7 +19,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -76,15 +75,6 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
     }
 }
 
-impl<const PAGES: u64> CloneLayout for BuddyLeafLayout<PAGES> {
-    fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
-        let region = space.set.into_region();
-        let region = M::clone_region(region);
-        let set = Cell::bind(region);
-        BuddyLeaf { set }
-    }
-}
-
 impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
     type Buddy<M: ManagerBase> = BuddyLeaf<PAGES, M>;
 
@@ -99,6 +89,10 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
         BuddyLeaf {
             set: space.set.struct_ref::<F>(),
         }
+    }
+
+    fn clone_allocated<M: ManagerClone>(space: &Self::Allocated<M>) -> Self::Allocated<M> {
+        space.clone()
     }
 }
 

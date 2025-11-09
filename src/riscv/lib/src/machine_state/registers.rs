@@ -214,6 +214,14 @@ impl<M: backend::ManagerBase> XRegisters<M> {
         self.registers.struct_ref::<F>()
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<XRegistersLayout, M>
+    where
+        M: backend::ManagerClone,
+    {
+        self.registers.clone()
+    }
+
     /// Try to read a 64-bit value from the registers and coerce it to another type.
     #[inline]
     pub fn try_read<T: TryFrom<XValue>>(&self, reg: XRegister) -> Result<T, T::Error>
@@ -627,6 +635,14 @@ impl<M: backend::ManagerBase> FRegisters<M> {
         &'a self,
     ) -> backend::AllocatedOf<FRegistersLayout, F::Output> {
         self.registers.struct_ref::<F>()
+    }
+
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<FRegistersLayout, M>
+    where
+        M: backend::ManagerClone,
+    {
+        self.registers.clone()
     }
 
     /// Reset the floating-point registers.

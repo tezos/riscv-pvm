@@ -62,6 +62,14 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
         self.start_addr.struct_ref::<F>()
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<ReservationSetLayout, M>
+    where
+        M: backend::ManagerClone,
+    {
+        self.start_addr.clone()
+    }
+
     /// Unset any reservation
     pub fn reset(&mut self)
     where

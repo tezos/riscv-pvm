@@ -351,6 +351,17 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         }
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<CSRegistersLayout, M>
+    where
+        M: backend::ManagerClone,
+    {
+        CSRegistersLayoutF {
+            fflags: self.fflags.clone(),
+            frm: self.frm.clone(),
+        }
+    }
+
     /// Reset the control and state registers.
     pub fn reset(&mut self)
     where

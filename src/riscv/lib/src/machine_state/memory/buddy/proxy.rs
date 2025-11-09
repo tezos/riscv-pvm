@@ -14,7 +14,6 @@ use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -73,17 +72,6 @@ where
     }
 }
 
-impl<const PAGES: usize> CloneLayout for BuddyLayoutProxy<PAGES>
-where
-    (): BuddyLayoutMatch<PAGES>,
-{
-    fn clone_allocated<M: crate::state_backend::ManagerClone>(
-        space: Self::Allocated<Ref<'_, M>>,
-    ) -> Self::Allocated<M> {
-        <PickLayout<PAGES> as CloneLayout>::clone_allocated(space)
-    }
-}
-
 impl<const PAGES: usize> BuddyLayout for BuddyLayoutProxy<PAGES>
 where
     (): BuddyLayoutMatch<PAGES>,
@@ -99,6 +87,12 @@ where
         F: FnManager<Ref<'a, M>>,
     {
         <PickLayout<PAGES> as BuddyLayout>::struct_ref::<F, M>(space)
+    }
+
+    fn clone_allocated<M: crate::state_backend::ManagerClone>(
+        space: &Self::Buddy<M>,
+    ) -> Self::Allocated<M> {
+        <PickLayout<PAGES> as BuddyLayout>::clone_allocated(space)
     }
 }
 

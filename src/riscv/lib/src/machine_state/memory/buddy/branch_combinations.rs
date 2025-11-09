@@ -20,7 +20,6 @@ use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -116,13 +115,6 @@ macro_rules! combined_buddy_branch {
                 }
             }
 
-            impl<B: CloneLayout> CloneLayout for [<$name Layout>]<B> {
-                fn clone_allocated<M: ManagerClone>(space: Self::Allocated<Ref<'_, M>>) -> Self::Allocated<M> {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::clone_allocated(space.0);
-                    [<$name Alloc>](inner)
-                }
-            }
-
             impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B>
                 where [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: 'static,
             {
@@ -138,6 +130,11 @@ macro_rules! combined_buddy_branch {
                     F: FnManager<Ref<'a, M>>,
                 {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::struct_ref::<F, M>(&space.0);
+                    [<$name Alloc>](inner)
+                }
+
+                fn clone_allocated<M: ManagerClone>(space: &Self::Buddy<M>) -> Self::Allocated<M> {
+                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::clone_allocated(&space.0);
                     [<$name Alloc>](inner)
                 }
             }

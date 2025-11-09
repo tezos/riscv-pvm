@@ -14,6 +14,7 @@ use crate::state_backend::DynCells;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::Ref;
 
@@ -45,6 +46,14 @@ impl<M: ManagerBase> RevealRequest<M> {
         &'a self,
     ) -> AllocatedOf<RevealRequestLayout, F::Output> {
         (self.bytes.struct_ref::<F>(), self.size.struct_ref::<F>())
+    }
+
+    /// TODO
+    pub fn clone_allocated(&self) -> AllocatedOf<RevealRequestLayout, M>
+    where
+        M: ManagerClone,
+    {
+        (self.bytes.clone(), self.size.clone())
     }
 
     pub fn to_vec(&self) -> Vec<u8>

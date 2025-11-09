@@ -406,6 +406,20 @@ impl<M: ManagerBase> SignalActions<M> {
         }
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> AllocatedOf<SignalActionsLayout, M>
+    where
+        M: ManagerClone,
+    {
+        SignalActionsLayoutF {
+            actions: self.actions.clone(),
+            flags: self.flags.clone(),
+            restorer: self.restorer.clone(),
+            masks: self.masks.clone(),
+            thread_mask: self.thread_mask.clone(),
+        }
+    }
+
     /// Reset to the default state
     pub fn reset(&mut self)
     where

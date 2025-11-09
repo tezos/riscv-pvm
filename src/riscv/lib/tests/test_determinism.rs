@@ -10,7 +10,6 @@ use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::CloneLayout;
 use octez_riscv::state_backend::RefOwnedAlloc;
 use octez_riscv::state_backend::hash;
 use octez_riscv::stepper::Stepper;
@@ -61,7 +60,6 @@ fn run_steps_ladder<MC, F>(
     expected_hash: hash::Hash,
 ) where
     MC: MemoryConfig,
-    PvmLayout<MC>: CloneLayout,
     for<'a> RefOwnedAlloc<'a, PvmLayout<MC>>: PartialEq,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {

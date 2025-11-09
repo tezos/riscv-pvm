@@ -79,6 +79,14 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
             right: Box::new(B::struct_ref::<F, M>(&space.right)),
         }
     }
+
+    fn clone_allocated<M: ManagerClone>(space: &Self::Buddy<M>) -> Self::Allocated<M> {
+        BuddyBranch2LayoutF {
+            free_info: space.free_info.clone(),
+            left: Box::new(<B as BuddyLayout>::clone_allocated(&space.left)),
+            right: Box::new(<B as BuddyLayout>::clone_allocated(&space.right)),
+        }
+    }
 }
 
 /// Branch in a Buddy-style memory manager tree

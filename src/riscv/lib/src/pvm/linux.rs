@@ -47,6 +47,7 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
@@ -491,6 +492,19 @@ impl<M: ManagerBase> SupervisorState<M> {
             program: self.program.struct_ref::<F>(),
             stack_guard: self.stack_guard.struct_ref::<F>(),
             heap: self.heap.struct_ref::<F>(),
+        }
+    }
+
+    /// TODO
+    pub fn clone_allocated(&self) -> AllocatedOf<SupervisorStateLayout, M>
+    where
+        M: ManagerClone,
+    {
+        SupervisorStateLayoutF {
+            tid_address: self.tid_address.clone(),
+            program: self.program.clone(),
+            stack_guard: self.stack_guard.clone(),
+            heap: self.heap.clone(),
         }
     }
 

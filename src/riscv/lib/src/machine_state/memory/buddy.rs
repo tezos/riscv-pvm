@@ -25,7 +25,6 @@ mod proxy;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
@@ -36,7 +35,7 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::Ref;
 
 /// Layout for a Buddy-style memory manager
-pub trait BuddyLayout: CommitmentLayout + ProofLayout + CloneLayout {
+pub trait BuddyLayout: CommitmentLayout + ProofLayout {
     /// Buddy-style memory manager implementation
     type Buddy<M: ManagerBase>: Buddy<M>;
 
@@ -48,6 +47,9 @@ pub trait BuddyLayout: CommitmentLayout + ProofLayout + CloneLayout {
     fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
     where
         F: FnManager<Ref<'a, M>>;
+
+    /// TODO
+    fn clone_allocated<M: ManagerClone>(space: &Self::Buddy<M>) -> Self::Allocated<M>;
 }
 
 /// Buddy-style memory manager

@@ -17,6 +17,7 @@ use crate::state_backend::DynCells;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::Ref;
 
 /// State layout for the memory component
@@ -99,6 +100,16 @@ where
             instance.writable_pages.struct_ref::<F>(),
             instance.executable_pages.struct_ref::<F>(),
             <BuddyLayoutProxy<PAGES> as BuddyLayout>::struct_ref::<F, M>(&instance.allocated_pages),
+        )
+    }
+
+    fn clone_allocated<M: ManagerClone>(instance: &Self::State<M>) -> AllocatedOf<Self::Layout, M> {
+        (
+            instance.data.clone(),
+            instance.readable_pages.clone_allocated(),
+            instance.writable_pages.clone_allocated(),
+            instance.executable_pages.clone_allocated(),
+            <BuddyLayoutProxy<PAGES> as BuddyLayout>::clone_allocated(&instance.allocated_pages),
         )
     }
 }

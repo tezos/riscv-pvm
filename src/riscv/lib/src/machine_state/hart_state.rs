@@ -74,6 +74,20 @@ impl<M: backend::ManagerBase> HartState<M> {
         )
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<HartStateLayout, M>
+    where
+        M: backend::ManagerClone,
+    {
+        (
+            self.xregisters.clone_allocated(),
+            self.fregisters.clone_allocated(),
+            self.csregisters.clone_allocated(),
+            self.pc.clone(),
+            self.reservation_set.clone_allocated(),
+        )
+    }
+
     /// Reset the hart state.
     pub fn reset(&mut self, pc: Address)
     where

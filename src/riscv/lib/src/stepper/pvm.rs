@@ -38,7 +38,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::clone_layout::CloneLayout;
 use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
@@ -223,12 +222,9 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerReadWri
     /// Re-bind the PVM type by cloning the underlying regions.
     pub fn rebind_via_clone(&mut self, compiler: CPE::Compiler)
     where
-        PvmLayout<MC>: CloneLayout,
         M: ManagerClone,
     {
-        let refs = self.pvm.struct_ref::<FnManagerIdent>();
-        let space = PvmLayout::<MC>::clone_allocated(refs);
-        self.pvm = Pvm::bind(space, compiler);
+        self.pvm = Pvm::bind(self.pvm.clone_allocated(), compiler);
     }
 }
 

@@ -105,6 +105,18 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         )
     }
 
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<MachineCoreStateLayout<MC>, M>
+    where
+        M: backend::ManagerClone,
+    {
+        (
+            self.hart.clone_allocated(),
+            MC::clone_allocated(&self.main_memory),
+            self.signal_actions.clone_allocated(),
+        )
+    }
+
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
@@ -313,6 +325,14 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         &'a self,
     ) -> backend::AllocatedOf<MachineStateLayout<MC>, F::Output> {
         self.core.struct_ref::<F>()
+    }
+
+    /// TODO
+    pub fn clone_allocated(&self) -> backend::AllocatedOf<MachineStateLayout<MC>, M>
+    where
+        M: backend::ManagerClone,
+    {
+        self.core.clone_allocated()
     }
 
     /// Reset the machine state.
@@ -815,12 +835,10 @@ mod tests {
     use crate::parser::parse_uncompressed_instruction;
     use crate::program::Program;
     use crate::pvm::Pvm;
-    use crate::pvm::PvmLayout;
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::signals::Signal;
     use crate::pvm::linux::signals::SignalError;
-    use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
@@ -965,9 +983,10 @@ mod tests {
 
         let alt_state = {
             // Clone the base state to get rid of any ephemeral state that was created.
-            let refs = base_state.struct_ref::<FnManagerIdent>();
-            let refs = PvmLayout::<M64M>::clone_allocated(refs);
-            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedCompiler);
+            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::bind(
+                base_state.clone_allocated(),
+                InterpretedCompiler,
+            );
 
             // We want to run the kernel until it exits as that is a good point to compare.
             loop {

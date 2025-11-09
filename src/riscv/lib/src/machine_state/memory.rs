@@ -336,6 +336,9 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     where
         M: ManagerBase,
         F: FnManager<Ref<'a, M>>;
+
+    /// TODO
+    fn clone_allocated<M: ManagerClone>(instance: &Self::State<M>) -> AllocatedOf<Self::Layout, M>;
 }
 
 // Re-export memory configurations
