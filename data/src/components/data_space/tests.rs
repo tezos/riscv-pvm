@@ -20,6 +20,7 @@ use super::PageId;
 use crate::components::data_space::DataSpace;
 use crate::hash::Hash;
 use crate::merkle_tree::MerkleTree;
+use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Normal;
 use crate::mode::Prove;
 use crate::mode::utils::assert_eq_found;
@@ -261,7 +262,7 @@ fn generate_proof() {
         let mut queue = VecDeque::with_capacity(LEAVES + 1);
 
         let pages_tree = match merkle_tree {
-            MerkleTree::Leaf(_, _, _) => panic!("Did not expect leaf"),
+            MerkleTree::Leaf(_) => panic!("Did not expect leaf"),
             MerkleTree::Node(_, mut children) => {
                 // The node for the pages is the second child.
                 children.remove(1)
@@ -273,7 +274,10 @@ fn generate_proof() {
         while let Some(node) = queue.pop_front() {
             match node {
                 MerkleTree::Node(_, children) => queue.extend(children),
-                MerkleTree::Leaf(_, access_info, _) => {
+                MerkleTree::Leaf(MerkleTreeLeafData {
+                    access_info,
+                    ..
+                }) => {
                     prop_assert_eq!(
                         access_info,
                         read_leaves.contains(&leaf) ||

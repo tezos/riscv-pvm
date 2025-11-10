@@ -152,7 +152,8 @@ mod tests {
     use proptest::proptest;
 
     use super::*;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
+    use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const ATOMS_SIZE: usize = 32;
@@ -179,7 +180,7 @@ mod tests {
 
             let proof_state = (proof_atoms1, proof_atoms2);
 
-            let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
+            let merkle_proof = merkle_tree_to_compressed_merkle_tree(MerkleTree::from_foldable(&proof_state)).to_proof();
 
             let verifier_state =
                 deserialise_owned::deserialise::<TestState<Verify>>(
@@ -239,7 +240,9 @@ mod tests {
         let post_hash = Hash::from_foldable(&proof_cell);
 
         let tree = MerkleTree::from_foldable(&proof_cell);
-        let proof_tree = merkle_tree_to_merkle_proof(tree);
+        let compressed_merkle_tree: CompressedMerkleTree =
+            merkle_tree_to_compressed_merkle_tree(tree);
+        let proof_tree = compressed_merkle_tree.to_proof();
         assert_eq!(proof_tree.root_hash(), init_hash);
 
         // Instantiating the verifier state allows us to replay the computation and verify it does

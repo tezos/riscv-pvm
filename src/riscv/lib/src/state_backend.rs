@@ -48,7 +48,7 @@ mod tests {
     use rand::RngCore;
 
     use super::*;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
 
     /// Data structure whose [`Elem`] implementation only writes to part of the given space
@@ -106,7 +106,7 @@ mod tests {
 
         // The Verify mode needs a proof, so we generate it from the Prove mode
         let merkle_tree = MerkleTree::from_foldable(&mem_prove);
-        let proof_tree = merkle_tree_to_merkle_proof(merkle_tree);
+        let proof_tree = merkle_tree_to_compressed_merkle_tree(merkle_tree).to_proof();
         let proof_deser = ProofTreeDeserialiser::from(ProofTree::Present(&proof_tree));
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 

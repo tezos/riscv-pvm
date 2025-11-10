@@ -12,6 +12,7 @@ use crate::components::atom::Atom;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_tree::MerkleTree;
+use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Prove;
@@ -219,7 +220,11 @@ fn proof_gen() {
         let merkle_tree = MerkleTree::from_foldable(&proof_atoms);
         merkle_tree.check_root_hash();
         match merkle_tree {
-            MerkleTree::Leaf(hash, access_info, _) => {
+            MerkleTree::Leaf(MerkleTreeLeafData {
+                hash,
+                access_info,
+                ..
+            }) => {
                 prop_assert_eq!(hash, initial_root_hash);
                 prop_assert!(access_info);
             }

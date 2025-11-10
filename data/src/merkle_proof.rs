@@ -7,7 +7,6 @@
 
 pub mod proof_tree;
 pub mod tag;
-pub mod transform;
 
 use std::error;
 

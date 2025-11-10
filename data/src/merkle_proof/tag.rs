@@ -138,16 +138,13 @@ impl TryFrom<u8> for Tag {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn get_bincode_config() -> bincode::config::Configuration {
-        bincode::config::standard()
-    }
+    use crate::serialisation::bincode_default_config;
 
     fn tag_encode_cycle_checker(tag: &Tag) {
-        let mut encoded =
-            bincode::encode_to_vec(tag, get_bincode_config()).expect("Failed to encode the tag");
+        let mut encoded = bincode::encode_to_vec(tag, bincode_default_config())
+            .expect("Failed to encode the tag");
         let (decoded, _): (Tag, usize) =
-            bincode::decode_from_slice(encoded.as_mut_slice(), get_bincode_config())
+            bincode::decode_from_slice(encoded.as_mut_slice(), bincode_default_config())
                 .expect("Failed to decode the tag");
         assert_eq!(*tag, decoded);
     }
