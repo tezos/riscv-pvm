@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: MIT
 
 use std::array;
-use std::mem;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 
@@ -118,15 +117,7 @@ impl ManagerWrite for Owned {
     }
 }
 
-impl ManagerReadWrite for Owned {
-    fn region_replace<E: StaticCopy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) -> E {
-        mem::replace(&mut region[index], value)
-    }
-}
+impl ManagerReadWrite for Owned {}
 
 impl ManagerSerialise for Owned {
     fn serialise_region<T: Encode + 'static, const LEN: usize, E: Encoder>(

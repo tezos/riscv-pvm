@@ -20,7 +20,6 @@ use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerDeserialise;
 use super::ManagerRead;
-use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
@@ -94,16 +93,6 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
         M: ManagerWrite,
     {
         self.region.write(0, value)
-    }
-
-    /// Replace the value managed by the cell, returning the old value.
-    #[inline(always)]
-    pub fn replace(&mut self, value: E) -> E
-    where
-        E: Copy,
-        M: ManagerReadWrite,
-    {
-        self.region.replace(0, value)
     }
 }
 
@@ -288,16 +277,6 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         M: ManagerWrite,
     {
         M::region_write_all(&mut self.region, value)
-    }
-
-    /// Update the element in the region and return the previous value.
-    #[inline]
-    pub fn replace(&mut self, index: usize, value: E) -> E
-    where
-        E: Copy,
-        M: ManagerReadWrite,
-    {
-        M::region_replace(&mut self.region, index, value)
     }
 }
 
