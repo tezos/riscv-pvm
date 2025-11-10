@@ -14,7 +14,6 @@ use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::machine_state::page_cache::Interpreted;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::hash;
 use octez_riscv::state_backend::owned_backend::Owned;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
@@ -23,6 +22,7 @@ use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::hash;
 use octez_riscv_test_utils::*;
 use rand::Rng;
 
@@ -236,10 +236,10 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig>(
 }
 
 mod proof_helpers {
-    use octez_riscv::state_backend::hash::Hash;
     use octez_riscv::state_backend::proof_backend::proof::MerkleProofLeaf;
     use octez_riscv::state_backend::proof_backend::proof::Proof;
     use octez_riscv::state_backend::proof_backend::tree::Tree;
+    use octez_riscv_data::hash::Hash;
 
     pub fn fully_blinded(hash: Hash) -> Proof {
         Proof::new(Tree::Leaf(MerkleProofLeaf::Blind(hash)), hash)

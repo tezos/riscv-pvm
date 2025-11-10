@@ -9,6 +9,9 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
+use octez_riscv_data::serialisation;
 use perfect_derive::perfect_derive;
 
 use super::AllocatedOf;
@@ -20,8 +23,6 @@ use super::Many;
 use super::Ref;
 use super::RefProofGenOwnedAlloc;
 use super::RefVerifierAlloc;
-use super::hash::Hash;
-use super::hash::HashError;
 use super::owned_backend::Owned;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
@@ -44,7 +45,6 @@ use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser::Partial;
 use crate::state_backend::verify_backend::PageId;
-use crate::storage::binary;
 
 /// Errors occurring when parsing the tag structure of a Merkle proof.
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -358,7 +358,7 @@ where
         let region = state.into_region();
         let access_info = region.get_access_info();
         let cell = super::Cell::<T, Ref<'_, Owned>>::bind(region.inner_region_ref());
-        let serialised = binary::serialise(&cell)?;
+        let serialised = serialisation::serialise(&cell)?;
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
@@ -396,7 +396,7 @@ where
         let region = state.into_region();
         let access_info = region.get_access_info();
         let cells = super::Cells::<T, LEN, Ref<'_, Owned>>::bind(region.inner_region_ref());
-        let serialised = binary::serialise(&cells)?;
+        let serialised = serialisation::serialise(&cells)?;
         Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
     }
 
@@ -454,7 +454,7 @@ impl ProofLayout for DynArray {
         let pages_node = writer.finalise()?;
 
         let length_node = MerkleTree::make_merkle_leaf(
-            binary::serialise(len as u64)?,
+            serialisation::serialise(len as u64)?,
             region.need_length_in_proof(),
         );
 
@@ -618,7 +618,7 @@ impl ProofLayout for DynArray {
             // pages data to be dealt with we require the length. Or if there is no pages data,
             // then the only reason the parent node would be present is if the length was to be
             // read during verification.
-            binary::deserialise::<u64>(data).map_err(ProofError::Deserialise)? as usize
+            serialisation::deserialise::<u64>(data).map_err(ProofError::Deserialise)? as usize
         } else {
             return Err(PartialHashError::Fatal);
         };

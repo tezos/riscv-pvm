@@ -19,6 +19,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::Linkage;
 use cranelift_module::Module;
 use cranelift_module::ModuleError;
+use octez_riscv_data::hash::Hash;
 use thiserror::Error;
 
 use crate::jit::builder::sequence::SequenceBuilder;
@@ -28,7 +29,6 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 
 /// Alias for the function signature produced by the JIT compilation.

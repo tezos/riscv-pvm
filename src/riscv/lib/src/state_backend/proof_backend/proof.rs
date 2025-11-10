@@ -16,6 +16,9 @@
 
 use bincode::Encode;
 use bincode::enc::write::Writer;
+use octez_riscv_data::hash::DIGEST_SIZE;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::serialisation::serialise;
 
 use super::tree::ModifyResult;
 use super::tree::Tree;
@@ -25,10 +28,7 @@ use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::hash::Hash;
 use crate::state_backend::verify_backend::Verifier;
-use crate::storage::DIGEST_SIZE;
-use crate::storage::binary;
 
 pub mod deserialise_owned;
 pub mod deserialise_stream;
@@ -314,14 +314,14 @@ impl Tag {
 /// In the encoding, lengths are not necessary, but tags are,
 /// since the tags depend on runtime information and events
 pub fn serialise_proof(proof: &Proof) -> Vec<u8> {
-    binary::serialise(proof).expect("Serialisation of Merkle proof should not fail")
+    serialise(proof).expect("Serialisation of Merkle proof should not fail")
 }
 
 /// Serialise just the proof tree part of a general [`Proof`] object.
 ///
 /// Useful for testing
 pub fn serialise_merkle_tree(tree: &MerkleProof) -> Vec<u8> {
-    binary::serialise(tree).expect("Serialisation of Merkle tree should not fail")
+    serialise(tree).expect("Serialisation of Merkle tree should not fail")
 }
 
 /// The tag is invalid.
@@ -369,6 +369,8 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
 }
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::hash::DIGEST_SIZE;
+    use octez_riscv_data::hash::Hash;
     use proptest::proptest;
     use rand::Fill;
 
@@ -379,8 +381,6 @@ mod tests {
     use super::TAG_READ;
     use super::serialise_proof;
     use crate::state_backend::proof_backend::proof::Proof;
-    use crate::storage::DIGEST_SIZE;
-    use crate::storage::Hash;
 
     /// Utility struct that computes the bounds of a [`MerkleProof`] serialisation
     /// based on total number of nodes in the tree and total size of raw data in the leaves.

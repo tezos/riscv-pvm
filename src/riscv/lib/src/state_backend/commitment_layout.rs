@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: MIT
 
 use bincode::Encode;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
+use octez_riscv_data::hash::HashWriter;
+use octez_riscv_data::hash::build_custom_merkle_hash;
 
 use super::AllocatedOf;
 use super::Array;
@@ -11,14 +15,9 @@ use super::DynArray;
 use super::Layout;
 use super::ManagerSerialise;
 use super::Many;
-use super::hash;
-use super::hash::Hash;
-use super::hash::HashError;
-use super::hash::HashWriter;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::merkle::chunks_to_writer;
-use crate::state_backend::hash::build_custom_merkle_hash;
 
 /// [`Layouts`] which may be used for commitments
 ///
@@ -63,7 +62,7 @@ impl CommitmentLayout for DynArray {
             unsafe { state.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) }
         })?;
         let hashes = writer.finalise();
-        let pages_node = hash::build_custom_merkle_hash(MERKLE_ARITY, hashes)?;
+        let pages_node = build_custom_merkle_hash(MERKLE_ARITY, hashes)?;
 
         let length_node = Hash::blake3_hash(length as u64)?;
         let root_node = Hash::combine([length_node, pages_node]);

@@ -183,6 +183,9 @@ impl ManagerClone for Owned {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::serialise;
+
     use super::*;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
@@ -191,7 +194,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofGen;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::storage::binary;
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
     #[test]
@@ -199,18 +201,18 @@ pub(crate) mod test_helpers {
         proptest::proptest!(|(value: u64)|{
             let region = [value; 1];
             let cell: Cell<u64, Owned> = Cell::bind(region);
-            let bytes = binary::serialise(&cell).unwrap();
+            let bytes = serialise(&cell).unwrap();
 
-            let cell_after: Cell<u64, Owned> = binary::deserialise(&bytes).unwrap();
+            let cell_after: Cell<u64, Owned> = deserialise(&bytes).unwrap();
             assert_eq!(cell.read(), cell_after.read());
 
-            let bytes_after = binary::serialise(&cell_after).unwrap();
+            let bytes_after = serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
             let proof_cell: Cell<u64, ProofGen<Ref<'_, Owned>>> =
                 Cell::bind(ProofRegion::bind(&region));
-            let proof_bytes = binary::serialise(&proof_cell).unwrap();
+            let proof_bytes = serialise(&proof_cell).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
     }
@@ -220,9 +222,9 @@ pub(crate) mod test_helpers {
     fn cells_serialise() {
         proptest::proptest!(|(a: u64, b: u64, c: u64)|{
             let cell: Cells<u64, 3, Owned> = Cells::bind([a, b, c]);
-            let bytes = binary::serialise(&cell).unwrap();
+            let bytes = serialise(&cell).unwrap();
 
-            let cell_after: Cells<u64, 3, Owned> = binary::deserialise(&bytes).unwrap();
+            let cell_after: Cells<u64, 3, Owned> = deserialise(&bytes).unwrap();
 
             assert_eq!(cell.read_all(), cell_after.read_all());
 
@@ -230,13 +232,13 @@ pub(crate) mod test_helpers {
                 assert_eq!(cell.read(i), cell_after.read(i));
             }
 
-            let bytes_after = binary::serialise(&cell_after).unwrap();
+            let bytes_after = serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
             let proof_cells: Cells<u64, 3, ProofGen<Ref<'_, Owned>>> =
                 Cells::bind(ProofRegion::bind(cell.region_ref()));
-            let proof_bytes = binary::serialise(&proof_cells).unwrap();
+            let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
     }
@@ -252,22 +254,22 @@ pub(crate) mod test_helpers {
                 cells.write(address, value);
             }
 
-            let bytes = binary::serialise(&cells).unwrap();
+            let bytes = serialise(&cells).unwrap();
 
-            let cells_after: DynCells<Owned> = binary::deserialise(&bytes).unwrap();
+            let cells_after: DynCells<Owned> = deserialise(&bytes).unwrap();
             for i in 0..128 {
                 unsafe {
                     assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
                 }
             }
 
-            let bytes_after = binary::serialise(&cells_after).unwrap();
+            let bytes_after = serialise(&cells_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `ProofGen` backend.
             let proof_cells: DynCells<ProofGen<Ref<'_, Owned>>> =
                 DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
-            let proof_bytes = binary::serialise(&proof_cells).unwrap();
+            let proof_bytes = serialise(&proof_cells).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
     }
@@ -277,8 +279,8 @@ pub(crate) mod test_helpers {
     #[test]
     fn cell_direct_serialise() {
         let cell: Cell<u64, Owned> = Cell::bind([42]);
-        let binary_value = binary::serialise(cell).unwrap();
-        let expected_binary_value = binary::serialise(42u64).unwrap();
+        let binary_value = serialise(cell).unwrap();
+        let expected_binary_value = serialise(42u64).unwrap();
         assert_eq!(binary_value, expected_binary_value);
     }
 

@@ -93,7 +93,6 @@ pub use clone_layout::*;
 pub use commitment_layout::*;
 pub use elems::*;
 pub use layout::*;
-pub use octez_riscv_data::hash;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
@@ -462,13 +461,14 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::serialisation::serialise;
+
     use super::*;
     use crate::state::NewState;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::owned_backend::Owned;
-    use crate::storage::binary;
 
     #[test]
     fn test_example_owned() {
@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(instance.second.read_all(), second_value);
 
         let first_value_read = u64::from_le_bytes(
-            binary::serialise(instance.first.struct_ref::<FnManagerIdent>())
+            serialise(instance.first.struct_ref::<FnManagerIdent>())
                 .unwrap()
                 .try_into()
                 .unwrap(),
@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(first_value_read, first_value);
 
         let second_value_read = unsafe {
-            let data = binary::serialise(instance.second.struct_ref::<FnManagerIdent>()).unwrap();
+            let data = serialise(instance.second.struct_ref::<FnManagerIdent>()).unwrap();
             data.as_ptr().cast::<[u32; 4]>().read().map(u32::from_le)
         };
         assert_eq!(second_value_read, second_value);

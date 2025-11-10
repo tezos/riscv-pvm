@@ -9,6 +9,8 @@ use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -43,8 +45,6 @@ use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::Verifier;
-use crate::storage::Hash;
-use crate::storage::HashError;
 use crate::struct_layout;
 
 /// Type of input that can be passed to the PVM

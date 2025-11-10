@@ -6,11 +6,12 @@
 
 use std::num::NonZeroUsize;
 
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
+
 use super::DynAccess;
 use super::proof::MerkleProof;
 use super::proof::MerkleProofLeaf;
-use crate::state_backend::hash::Hash;
-use crate::state_backend::hash::HashError;
 use crate::state_backend::proof_backend::tree::ModifyResult;
 use crate::state_backend::proof_backend::tree::impl_modify_map_collect;
 
@@ -383,6 +384,8 @@ pub(crate) fn build_custom_merkle_tree(
 mod tests {
     use std::io::Cursor;
 
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::HashError;
     use proptest::prelude::*;
 
     use super::CompressedAccessInfo;
@@ -390,8 +393,6 @@ mod tests {
     use super::MERKLE_LEAF_SIZE;
     use super::MerkleTree;
     use super::chunks_to_writer;
-    use crate::state_backend::hash::Hash;
-    use crate::state_backend::hash::HashError;
     use crate::state_backend::proof_backend::proof::MerkleProof;
     use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 
