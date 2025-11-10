@@ -153,27 +153,6 @@ macro_rules! struct_layout {
 
             impl <
                 $(
-                    [<$field_name:camel>]: $crate::state_backend::CommitmentLayout
-                ),+
-            > $crate::state_backend::CommitmentLayout for [<$layout_t F>]<
-                $(
-                    [<$field_name:camel>]
-                ),+
-            > {
-                #[inline]
-                fn state_hash<M: $crate::state_backend::ManagerRead + $crate::state_backend::ManagerSerialise>(
-                    state: $crate::state_backend::AllocatedOf<Self, M>
-                ) -> std::result::Result<octez_riscv_data::hash::Hash, octez_riscv_data::hash::HashError> {
-                    Ok(octez_riscv_data::hash::Hash::combine([
-                        $(
-                            [<$field_name:camel>]::state_hash(state.$field_name)?
-                        ),+
-                    ]))
-                }
-            }
-
-            impl <
-                $(
                     [<$field_name:camel>]: $crate::state_backend::ProofLayout
                 ),+
             > $crate::state_backend::ProofLayout for [<$layout_t F>]<

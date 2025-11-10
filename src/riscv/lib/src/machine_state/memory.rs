@@ -21,7 +21,6 @@ use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::Elem;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
@@ -323,7 +322,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     const TOTAL_BYTES: NonZeroUsize;
 
     /// Layout for memory instance's state
-    type Layout: CommitmentLayout + ProofLayout;
+    type Layout: ProofLayout;
 
     /// Memory instance
     type State<M: ManagerBase>: Memory<M>;

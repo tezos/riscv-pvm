@@ -26,7 +26,6 @@ use octez_riscv_data::hash::Hash;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -36,7 +35,7 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 
 /// Layout for a Buddy-style memory manager
-pub trait BuddyLayout: CommitmentLayout + ProofLayout {
+pub trait BuddyLayout: ProofLayout {
     /// Buddy-style memory manager implementation
     type Buddy<M: ManagerBase>: Buddy<M>;
 

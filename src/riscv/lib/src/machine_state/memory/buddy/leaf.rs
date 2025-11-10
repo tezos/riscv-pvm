@@ -19,10 +19,8 @@ use super::Buddy;
 use super::BuddyLayout;
 use crate::bits::ones;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
@@ -45,12 +43,6 @@ pub struct BuddyLeafLayout<const PAGES: u64>;
 
 impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
     type Allocated<M: ManagerBase> = BuddyLeaf<PAGES, M>;
-}
-
-impl<const PAGES: u64> CommitmentLayout for BuddyLeafLayout<PAGES> {
-    fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        Atom::state_hash(state.set)
-    }
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
