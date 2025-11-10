@@ -28,7 +28,6 @@ use bincode::error::EncodeError;
 use super::FnManager;
 use super::ManagerBase;
 use super::ManagerRead;
-use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use crate::state_backend::Elem;
@@ -118,10 +117,6 @@ impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
         }
     }
 }
-
-/// Implementation of [`ManagerReadWrite`] which wraps another manager and
-/// additionally records read and written locations.
-impl<M: ManagerRead> ManagerReadWrite for ProofGen<M> {}
 
 /// Implementation of [`ManagerSerialise`] which wraps another manager and
 /// serialises data as recorded by the `ProofGen` backend, reconstructed

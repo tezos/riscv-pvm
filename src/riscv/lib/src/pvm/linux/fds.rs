@@ -16,7 +16,7 @@ use crate::pvm::linux::parameters;
 use crate::pvm::linux::parameters::FileDescriptorWriteable;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `ioctl` system call.
@@ -78,7 +78,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // `write` takes an unsigned int as the first parameter, which is then converted to a FileDescriptorWriteable
         self.write_to_fd(core, hooks, fd, addr, length)
@@ -97,7 +97,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         len: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // `writev` takes an unsigned long as the first parameter
 
@@ -165,7 +165,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         num_fds: parameters::FileDescriptorCount,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // The file descriptors are passed as `struct pollfd[]`.
         //

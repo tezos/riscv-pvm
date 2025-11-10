@@ -32,7 +32,8 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
@@ -128,7 +129,7 @@ impl<H, MC: MemoryConfig> PvmStepper<H, MC, Owned> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerReadWrite>
+impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + ManagerWrite>
     PvmStepper<H, MC, M, CPE>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
@@ -232,7 +233,7 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerReadWri
     }
 }
 
-impl<H, MC: MemoryConfig, M: ManagerReadWrite> PvmStepper<H, MC, M> {
+impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Create a new stepper in which the existing PVM is managed by
     /// the proof-generating backend.
     pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, ProofGen<Ref<'_, M>>> {
@@ -323,7 +324,7 @@ impl<H, MC: MemoryConfig, M: ManagerReadWrite> PvmStepper<H, MC, M> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, M: ManagerReadWrite> PvmStepper<H, MC, M> {
+impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Perform one evaluation step.
     pub fn eval_one(&mut self) {
         self.pvm.eval_one(&mut self.hooks)

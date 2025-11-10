@@ -47,7 +47,7 @@ pub trait FloatExt: Float + Into<FValue> + Copy + Neg + From<FValue> {
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerReadWrite,
+    M: backend::ManagerRead + backend::ManagerWrite,
 {
     /// `FCLASS.*` instruction.
     ///
@@ -644,7 +644,7 @@ impl ConstDefault for FloatExceptionFlags {
     };
 }
 
-impl<M: backend::ManagerReadWrite> CSRegisters<M> {
+impl<M: backend::ManagerRead + backend::ManagerWrite> CSRegisters<M> {
     /// Set the `invalid_operation` exception flag for floating-point operations.
     fn set_invalid_float_operation(&mut self) {
         let mut fflags = self.fflags.read();

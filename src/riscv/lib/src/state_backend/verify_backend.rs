@@ -17,7 +17,6 @@ use super::Cell;
 use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
-use super::ManagerReadWrite;
 use super::ManagerWrite;
 use super::PartialHashError;
 use super::Ref;
@@ -189,8 +188,6 @@ impl ManagerWrite for Verifier {
         region.write_bytes(address, &raw_data);
     }
 }
-
-impl ManagerReadWrite for Verifier {}
 
 impl ManagerClone for Verifier {
     fn clone_region<E: Clone + 'static, const LEN: usize>(

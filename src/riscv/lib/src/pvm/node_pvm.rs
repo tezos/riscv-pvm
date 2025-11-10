@@ -54,7 +54,7 @@ pub struct NodePvm<M: state_backend::ManagerBase = Owned> {
 impl<M: state_backend::ManagerBase> NodePvm<M> {
     pub fn bind(space: AllocatedOf<NodePvmLayout, M>) -> Self
     where
-        M::ManagerRoot: state_backend::ManagerReadWrite,
+        M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         let state = NodePvmState::<M>::bind(space, InterpretedCompiler);
         Self {
@@ -120,7 +120,7 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
 
     pub fn install_boot_sector(&mut self, kernel: &[u8])
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.with_backend_mut(|pvm| {
             let program = Program::from_elf(kernel).expect("Failed to parse boot sector ELF");
@@ -131,21 +131,21 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
 
     pub fn compute_step(&mut self, pvm_hooks: impl PvmHooks)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.with_backend_mut(|pvm| pvm.eval_one(pvm_hooks))
     }
 
     pub fn compute_step_many(&mut self, pvm_hooks: impl PvmHooks, max_steps: usize) -> i64
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.with_backend_mut(|pvm| pvm.eval_max(pvm_hooks, Bound::Included(max_steps))) as i64
     }
 
     pub fn set_input(&mut self, input: PvmInput) -> bool
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.with_backend_mut(|pvm| pvm.provide_input(input))
     }
@@ -157,7 +157,7 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
     /// those of an honest operator.
     pub fn insert_failure(&mut self)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.with_backend_mut(|pvm| {
             pvm.insert_failure();

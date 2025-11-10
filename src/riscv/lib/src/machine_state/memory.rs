@@ -26,7 +26,6 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 
@@ -236,13 +235,13 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Update multiple elements in the region. `address` is in bytes.
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Clone all memory.
     fn clone(&self) -> Self
@@ -273,7 +272,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Allocate pages for the given address range.
     fn deallocate_pages(
@@ -282,7 +281,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         length: NonZeroUsize,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Allocate pages for the given address range and amend the protections for them.
     fn allocate_and_protect_pages(
@@ -294,7 +293,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, MemoryGovernanceError>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Free the pages in that address range and make sure the range is no longer accessible.
     fn deallocate_and_protect_pages(
@@ -304,7 +303,7 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         self.deallocate_pages(address, length)?;
         self.protect_pages(address, length, Permissions::NONE, listener)

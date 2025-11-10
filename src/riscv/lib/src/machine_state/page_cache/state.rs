@@ -34,7 +34,7 @@ use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerWrite;
 
 /// Offset from the start of the page, to the last halfword contained within.
 const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
@@ -196,7 +196,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     /// This will only populate the page iff the memory is R+X and *not writeable*.
     fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Unlike with `Box<[T; LEN]>` - we cannot initialise with a Vec and do an in-place
         // conversion. To avoid copying, we're forced to allocate with `Arc` directly.

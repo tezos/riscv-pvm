@@ -17,7 +17,8 @@ pub(crate) mod projection;
 use crate::jit::builder::typed::Typed;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 use crate::state_context::projection::MachineCoreProjection;
 
 /// Context for accessing parts of the PVM state
@@ -37,7 +38,7 @@ pub trait StateContext {
         P: MachineCoreProjection;
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> StateContext for MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCoreState<MC, M> {
     type Value<R> = R;
 
     #[inline]

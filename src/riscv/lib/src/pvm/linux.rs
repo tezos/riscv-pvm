@@ -48,7 +48,6 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -175,7 +174,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> MachineState<M
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let data = data.as_ref();
 
@@ -201,7 +200,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> MachineState<M
         auxv: &[(AuxVectorKey, u64)],
     ) -> Result<(), MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // First we push all constants so that they are at the top of the stack
         let arg_ptrs = args
@@ -255,7 +254,7 @@ where
     /// Load the program into memory and set the PC to its entrypoint.
     fn load_program(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Reset hart state & set pc to entrypoint
         self.machine_state.core.hart.reset(program.entrypoint);
@@ -276,7 +275,7 @@ where
     /// Configure the stack for a new process.
     fn prepare_stack(&mut self) -> Result<(), MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let stack_top = VirtAddr::new(MC::TOTAL_BYTES.get() as u64);
 
@@ -340,7 +339,7 @@ where
     /// Install a Linux program and configure the Hart to start it.
     pub fn setup_linux_process(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         self.load_program(program)?;
 
@@ -503,7 +502,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     where
         MC: MemoryConfig,
         CPE: CodePageEntry<MC, M>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let pc = machine.core.hart.pc.read();
 
@@ -829,7 +828,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         status: parameters::ExitStatus,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         self.exit_code = status.exit_code();
         self.exited = true;
@@ -849,7 +848,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         signal: signals::TkillSignal,
     ) -> Result<parameters::SystemCallResultExecution, Infallible>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Indicate that we have exited
         self.exited = true;
@@ -880,7 +879,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         tp: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Size of struct timespec (8 bytes for tv_sec + 8 bytes for tv_nsec)
         const TIMESPEC_SIZE: usize = 16;
@@ -907,7 +906,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         mask: VirtAddr,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         const SINGLE_PROCESS_PID_AFFINITY: u8 = 0b1_u8;
 
@@ -937,7 +936,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         tz: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Size of struct timeval (8 bytes for tv_sec + 8 bytes for tv_usec)
         const TIMEVAL_SIZE: usize = 16;
@@ -971,7 +970,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         old_limit: VirtAddr,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // In jstz this is only used to set the maximum size of the process stack to infinity. In
         // other programs, it can be used to set limits for system resources. Allowing programs to

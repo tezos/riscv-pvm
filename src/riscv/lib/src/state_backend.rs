@@ -44,7 +44,6 @@
 //! - [ManagerAlloc]
 //! - [ManagerRead]
 //! - [ManagerWrite]
-//! - [ManagerReadWrite]
 //!
 //! # Backends
 //!
@@ -127,7 +126,7 @@ pub trait ManagerBase: Sized {
 ///
 /// Any `ManagerAlloc` inherently has read & write capabilities,
 /// since the manager creates the values on the first allocation.
-pub trait ManagerAlloc: ManagerReadWrite {
+pub trait ManagerAlloc: ManagerRead + ManagerWrite {
     /// Allocate a region in the state storage.
     fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN>;
 
@@ -253,9 +252,6 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
         }
     }
 }
-
-/// Manager with capabilities that require both read and write
-pub trait ManagerReadWrite: ManagerRead + ManagerWrite {}
 
 /// Manager with the ability to serialise regions
 pub trait ManagerSerialise: ManagerRead {
@@ -424,7 +420,8 @@ pub(crate) mod test_helpers {
 
     use super::ManagerAlloc;
     use super::ManagerClone;
-    use super::ManagerReadWrite;
+    use super::ManagerRead;
+    use super::ManagerWrite;
     use crate::machine_state::test_helpers::ManagerTestInit;
 
     /// Generate a test against all test backends.
@@ -454,7 +451,8 @@ pub(crate) mod test_helpers {
         /// This lets you construct backends for any layout.
         ///
         /// Used for testing.
-        pub trait TestBackendFactory = ManagerReadWrite
+        pub trait TestBackendFactory = ManagerRead
+            + ManagerWrite
             + ManagerClone
             + ManagerAlloc
             + ManagerTestInit

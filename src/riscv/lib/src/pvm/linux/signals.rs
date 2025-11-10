@@ -50,7 +50,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -213,7 +212,7 @@ struct_layout! {
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
     /// Set the hart state to a signal handler
     pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
         let handler = self.signal_actions.read_action(signal);
@@ -408,7 +407,7 @@ impl<M: ManagerBase> SignalActions<M> {
     /// Reset to the default state
     pub fn reset(&mut self)
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         self.actions
             .iter_mut()
@@ -633,7 +632,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         old: SignalActionPtr,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         /// `sizeof(struct sigaltstack)` on the Kernel side
         const SIZE_SIGALTSTACK: usize = 24;
@@ -658,7 +657,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if let Some(old) = old.address() {
             let old_action = core.signal_action(signal);
@@ -687,7 +686,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let old_mask = core.signal_actions.thread_mask.read();
 
@@ -720,7 +719,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
     ) -> Result<SystemCallResultExecution, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let pc = core.pop_signal_context().map_err(|_| Error::Fault)?;
         Ok(SystemCallResultExecution {
@@ -747,7 +746,7 @@ where
     /// functions that are dynamically written to memory by the kernel when a process is loaded.
     pub fn write_restorer(&mut self, address: VirtAddr) -> Result<VirtAddr, MachineError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Encoding to write RT_SIGRETURN to a7
         // ADDI imm=RT_SIGRETURN, rs1=x0, funct3=0, rd=a7

@@ -23,8 +23,8 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerSerialise;
+use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
 /// Information about what is free in each buddy
@@ -91,7 +91,7 @@ pub struct BuddyBranch2<B, M: ManagerBase> {
 impl<B: Buddy<M>, M: ManagerBase> BuddyBranch2<B, M> {
     fn refresh(&mut self)
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         self.free_info.write(FreeInfo {
             left_longest_free_sequence: self.left.longest_free_sequence(),
@@ -137,7 +137,7 @@ where
 
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if !(1..=Self::PAGES).contains(&pages) {
             return None;
@@ -187,7 +187,7 @@ where
 
     fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if pages == 0 || pages > Self::PAGES.saturating_sub(idx) {
             return None;
@@ -224,7 +224,7 @@ where
 
     fn deallocate(&mut self, idx: u64, mut pages: u64)
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Defer to only the right buddy if the range does not cover the left side
         if idx >= B::PAGES {

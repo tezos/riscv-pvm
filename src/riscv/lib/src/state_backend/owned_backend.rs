@@ -22,7 +22,6 @@ use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerDeserialise;
 use super::ManagerRead;
-use super::ManagerReadWrite;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::StaticCopy;
@@ -116,8 +115,6 @@ impl ManagerWrite for Owned {
         unsafe { value.write_unaligned(region.as_mut_ptr().add(address)) }
     }
 }
-
-impl ManagerReadWrite for Owned {}
 
 impl ManagerSerialise for Owned {
     fn serialise_region<T: Encode + 'static, const LEN: usize, E: Encoder>(

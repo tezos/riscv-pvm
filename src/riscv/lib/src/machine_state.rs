@@ -45,7 +45,8 @@ use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
 /// instructions.
@@ -108,7 +109,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         self.hart.reset(memory::FIRST_ADDRESS);
         self.main_memory.reset(listener);
@@ -135,7 +136,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     #[inline]
     fn fetch_instr(&self, addr: Address) -> Result<memory::InstructionData<Instruction>, Exception>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let lower = self.fetch_instr_halfword(addr)?;
 
@@ -298,7 +299,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         compiler: CPE::Compiler,
     ) -> Self
     where
-        M::ManagerRoot: ManagerReadWrite,
+        M::ManagerRoot: ManagerRead + ManagerWrite,
     {
         Self {
             core: MachineCoreState::bind(space),
@@ -318,7 +319,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     /// Reset the machine state.
     pub fn reset(&mut self)
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let listener = &mut self.page_cache;
         self.core.reset(listener);
@@ -341,7 +342,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     /// *not* writable.
     fn run_instr_at(&mut self, addr: Address) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let memory::InstructionData {
             data: instr,
@@ -366,7 +367,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     #[inline]
     pub fn step(&mut self) -> Result<(), Exception>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         match self.step_max_inner(1).error {
             Some(error) => Err(error),
@@ -376,7 +377,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
 
     pub(super) fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -426,7 +427,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     #[inline]
     pub fn step_max(&mut self, max_steps: Bound<usize>) -> StepManyResult<Exception>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -457,7 +458,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let mut steps = 0usize;
 
@@ -495,7 +496,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         match cause {
             Exception::EnvCall => return handle(self),
@@ -544,7 +545,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let instr_pc = self.core.hart.pc.read();
         let result = self
@@ -583,7 +584,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
         program: &Program<MC>,
     ) -> Result<(Address, Address), MachineError>
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let program_start = program.segments.keys().min().copied().unwrap_or(0);
         let program_end = program
@@ -640,7 +641,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
 
     fn dispatch_signal_or_trap(&mut self, signal: Signal)
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if self.core.dispatch_signal(signal).is_err() {
             self.core.hart.pc.write(0);
@@ -653,7 +654,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     ) where
         MB: memory::buddy::Buddy<M>,
         MC: MemoryConfig<State<M> = memory::state::MemoryImpl<PAGES, TOTAL_BYTES, MB, M>>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let (main_memory, listener) = self.memory_with_listener();
         main_memory.set_all_readable_writeable(listener);

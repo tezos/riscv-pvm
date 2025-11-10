@@ -19,7 +19,8 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Interpreted entrypoints are built automatically, and require no additional context.
 #[derive(Debug, Default)]
@@ -49,7 +50,7 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         super::run_code_page_interpreted(page, core, instr_pc, max_steps)
     }

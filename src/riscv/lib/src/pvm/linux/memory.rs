@@ -35,7 +35,8 @@ use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::page_cache::CodePageEntry;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Number of pages that make up the stack
 const STACK_PAGES: u64 = 0x2000;
@@ -56,7 +57,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See: <https://man7.org/linux/man-pages/man2/brk.2.html>
     pub(super) fn handle_brk(&self) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // The program break may not be moved
         Ok(self.program.end.to_machine_address())
@@ -85,7 +86,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     where
         MC: MemoryConfig,
         CPE: CodePageEntry<MC, M>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
             let (main_memory, listener) = state.memory_with_listener();
@@ -117,7 +118,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     where
         MC: MemoryConfig,
         CPE: CodePageEntry<MC, M>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // We don't allow shared mappings
         match flags.visibility {
@@ -175,7 +176,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     where
         MC: MemoryConfig,
         CPE: CodePageEntry<MC, M>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // TODO: RV-561: use u64 everywhere in the PVM
         let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");

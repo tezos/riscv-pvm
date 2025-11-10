@@ -74,7 +74,8 @@ use crate::parser::instruction::RTypeArgs;
 use crate::parser::instruction::UJTypeArgs;
 use crate::parser::instruction::XRegToFRegArgs;
 use crate::parser::instruction::XRegToFRegArgsWithRounding;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// An instruction formed of an opcode and flat arguments.
 ///
@@ -352,7 +353,7 @@ pub enum OpCode {
 impl OpCode {
     /// Dispatch an opcode to the function that will run over the machine state.
     #[inline(always)]
-    pub(super) fn to_run<MC: MemoryConfig, M: ManagerReadWrite>(self) -> RunInstr<MC, M> {
+    pub(super) fn to_run<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(self) -> RunInstr<MC, M> {
         match self {
             Self::X64Add => Args::run_x64_add,
             Self::X64Sub => Args::run_x64_sub,
@@ -686,7 +687,7 @@ impl OpCode {
 
 impl Instruction {
     /// Run an instruction over the machine core state.
-    pub(super) fn run<MC: MemoryConfig, M: ManagerReadWrite>(
+    pub(super) fn run<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
         &self,
         core: &mut MachineCoreState<MC, M>,
     ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -765,7 +766,7 @@ impl ConstDefault for Args {
 
 macro_rules! impl_r_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -775,7 +776,7 @@ macro_rules! impl_r_type {
     };
 
     ($fn: ident, non_zero) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -787,7 +788,7 @@ macro_rules! impl_r_type {
     };
 
     ($fn: ident, non_zero_rd) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -859,7 +860,7 @@ macro_rules! impl_x64_mul_high_type {
 
 macro_rules! impl_i_type {
     ($fn: ident, non_zero) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -871,7 +872,7 @@ macro_rules! impl_i_type {
     };
 
     ($fn: ident, non_zero_rd) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -904,7 +905,7 @@ macro_rules! impl_i_type {
 
 macro_rules! impl_fload_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -915,7 +916,7 @@ macro_rules! impl_fload_type {
 }
 macro_rules! impl_load_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -934,7 +935,7 @@ macro_rules! impl_load_type {
 
 macro_rules! impl_cfload_sp_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -945,7 +946,7 @@ macro_rules! impl_cfload_sp_type {
 
 macro_rules! impl_store_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -963,7 +964,7 @@ macro_rules! impl_store_type {
 }
 macro_rules! impl_fstore_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1015,7 +1016,7 @@ macro_rules! impl_amo_type {
 
 macro_rules! impl_ci_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1025,7 +1026,7 @@ macro_rules! impl_ci_type {
     };
 
     ($fn: ident, non_zero) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1055,7 +1056,7 @@ macro_rules! impl_cr_nz_type {
 
 macro_rules! impl_fcss_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1084,7 +1085,7 @@ macro_rules! impl_csr_imm_type {
 
 macro_rules! impl_f_x_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1094,7 +1095,7 @@ macro_rules! impl_f_x_type {
     };
 
     ($fn:ident, rm) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1113,7 +1114,7 @@ macro_rules! impl_f_x_type {
 
 macro_rules! impl_x_f_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1123,7 +1124,7 @@ macro_rules! impl_x_f_type {
     };
 
     ($fn:ident, rm) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1135,7 +1136,7 @@ macro_rules! impl_x_f_type {
 
 macro_rules! impl_f_r_type {
     ($fn: ident) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1145,7 +1146,7 @@ macro_rules! impl_f_r_type {
     };
 
     ($fn: ident, (rd, x)) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1155,7 +1156,7 @@ macro_rules! impl_f_r_type {
     };
 
     ($fn: ident, rm) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {
@@ -1165,7 +1166,7 @@ macro_rules! impl_f_r_type {
     };
 
     ($fn: ident, (rs2, f), $($field: ident),+) => {
-        fn $fn<MC: MemoryConfig, M: ManagerReadWrite>(
+        fn $fn<MC: MemoryConfig, M: ManagerRead + ManagerWrite>(
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception> {

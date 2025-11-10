@@ -18,7 +18,7 @@ use crate::state_backend as backend;
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: backend::ManagerReadWrite,
+    M: backend::ManagerRead + backend::ManagerWrite,
 {
     /// `C.FLD` CL-type compressed instruction
     ///
