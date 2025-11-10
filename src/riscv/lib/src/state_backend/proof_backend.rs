@@ -547,7 +547,11 @@ mod tests {
             let merkle_tree = MerkleTree::from_foldable(&proof_cells);
             merkle_tree.check_root_hash();
             match merkle_tree {
-                MerkleTree::Leaf(hash, access_info, _) => {
+                MerkleTree::Leaf{
+                    hash,
+                    access_info,
+                    ..
+                } => {
                     prop_assert_eq!(hash, initial_root_hash);
                     prop_assert!(access_info);
                 }
@@ -678,7 +682,7 @@ mod tests {
             let mut queue = VecDeque::with_capacity(LEAVES + 1);
 
             let pages_tree = match merkle_tree {
-                MerkleTree::Leaf(_, _, _) => panic!("Did not expect leaf"),
+                MerkleTree::Leaf{ .. } => panic!("Did not expect leaf"),
                 MerkleTree::Node(_, mut children) => {
                     // The node for the pages is the second child.
                     children.remove(1)
@@ -690,7 +694,10 @@ mod tests {
             while let Some(node) = queue.pop_front() {
                 match node {
                     MerkleTree::Node(_, children) => queue.extend(children),
-                    MerkleTree::Leaf(_, access_info, _) => {
+                    MerkleTree::Leaf{
+                        access_info,
+                        ..
+                    } => {
                         prop_assert_eq!(
                             access_info,
                             read_leaves.contains(&leaf) ||

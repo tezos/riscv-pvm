@@ -52,10 +52,14 @@ pub const DIGEST_SIZE: usize = 32;
 )]
 #[debug("{}", self)]
 pub struct Hash {
-    digest: [u8; DIGEST_SIZE],
+    pub digest: [u8; DIGEST_SIZE],
 }
 
 impl Hash {
+    pub fn new(digest: [u8; 32]) -> Self {
+        Hash { digest }
+    }
+
     /// Hash a slice of bytes
     pub fn blake3_hash_bytes(bytes: &[u8]) -> Self {
         let digest = blake3::hash(bytes).into();

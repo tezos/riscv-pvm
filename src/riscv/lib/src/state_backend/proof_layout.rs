@@ -1078,6 +1078,8 @@ mod tests {
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
+    use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
@@ -1167,7 +1169,9 @@ mod tests {
         let post_hash = Hash::from_foldable(&proof_cell);
 
         let tree = MerkleTree::from_foldable(&proof_cell);
-        let proof_tree = merkle_tree_to_merkle_proof(tree);
+        let compressed_merkle_tree: CompressedMerkleTree =
+            merkle_tree_to_compressed_merkle_tree(tree).expect("This conversion should not fail");
+        let proof_tree = compressed_merkle_tree.to_proof();
         assert_eq!(proof_tree.root_hash(), init_hash);
 
         // Instantiating the verifier state allows us to replay the computation and verify it does

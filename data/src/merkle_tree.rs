@@ -15,7 +15,11 @@ use crate::hash::Hash;
 /// which hold data that was used in a particular evaluation step.
 #[derive(Debug, Clone)]
 pub enum MerkleTree {
-    Leaf(Hash, bool, Vec<u8>),
+    Leaf {
+        hash: Hash,
+        access_info: bool,
+        data: Vec<u8>,
+    },
     Node(Hash, Vec<Self>),
 }
 
@@ -38,14 +42,18 @@ impl MerkleTree {
     pub fn root_hash(&self) -> Hash {
         match self {
             Self::Node(hash, _) => *hash,
-            Self::Leaf(hash, _, _) => *hash,
+            Self::Leaf { hash, .. } => *hash,
         }
     }
 
     /// Creates a merkle tree which is a single leaf
     pub fn make_merkle_leaf(data: Vec<u8>, access_info: bool) -> Self {
         let hash = Hash::blake3_hash_bytes(&data);
-        MerkleTree::Leaf(hash, access_info, data)
+        MerkleTree::Leaf {
+            hash,
+            access_info,
+            data,
+        }
     }
 
     /// Takes a list of children nodes and creates a
@@ -65,7 +73,7 @@ impl MerkleTree {
 
         while let Some(node) = deque.pop_front() {
             let is_valid_hash = match node {
-                Self::Leaf(hash, _, data) => &Hash::blake3_hash_bytes(data) == hash,
+                Self::Leaf { hash, data, .. } => &Hash::blake3_hash_bytes(data) == hash,
                 Self::Node(hash, children) => {
                     let children_hashes: Vec<Hash> = children
                         .iter()

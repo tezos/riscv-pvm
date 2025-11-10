@@ -309,7 +309,8 @@ mod tests {
     use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::ProofWrapper;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
+    use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
 
@@ -387,7 +388,10 @@ mod tests {
             assert_eq!(hash, tree_root_hash);
 
             // Produce a proof
-            let proof = merkle_tree_to_merkle_proof(tree);
+            let compressed_merkle_tree: CompressedMerkleTree =
+                merkle_tree_to_compressed_merkle_tree(tree)
+                    .expect("This conversion should not fail");
+            let proof = compressed_merkle_tree.to_proof();
             let proof_hash = proof.root_hash();
             assert_eq!(hash, proof_hash);
 
