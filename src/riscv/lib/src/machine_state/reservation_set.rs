@@ -10,6 +10,8 @@
 use std::ops::BitAnd;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::backend;
@@ -25,6 +27,7 @@ use crate::machine_state::backend;
 /// order."
 use crate::machine_state::backend::Cell;
 use crate::state::NewState;
+use crate::state_backend::ManagerSerialise;
 
 #[perfect_derive(Clone)]
 pub struct ReservationSet<M: backend::ManagerBase> {
@@ -125,5 +128,11 @@ impl<M: backend::ManagerClone> CloneState for ReservationSet<M> {
         Self {
             start_addr: self.start_addr.clone_state(),
         }
+    }
+}
+
+impl<M: ManagerSerialise> HashState for ReservationSet<M> {
+    fn hash_state(&self) -> Hash {
+        self.start_addr.hash_state()
     }
 }

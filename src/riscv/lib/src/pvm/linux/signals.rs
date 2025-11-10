@@ -10,6 +10,8 @@ use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use strum::EnumCount;
 use strum::FromRepr;
 use zerocopy::FromBytes;
@@ -51,6 +53,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -199,6 +202,18 @@ impl<M: ManagerWrite> SignalActions<M> {
     pub(crate) fn write_mask<T: Into<SignalIndex>>(&mut self, signal: T, mask: u64) {
         let signal_index: SignalIndex = signal.into();
         self.masks[signal_index as usize].write(mask);
+    }
+}
+
+impl<M: ManagerSerialise> HashState for SignalActions<M> {
+    fn hash_state(&self) -> Hash {
+        Hash::combine([
+            self.actions.hash_state(),
+            self.flags.hash_state(),
+            self.masks.hash_state(),
+            self.restorer.hash_state(),
+            self.thread_mask.hash_state(),
+        ])
     }
 }
 

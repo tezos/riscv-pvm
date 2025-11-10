@@ -13,6 +13,8 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -160,6 +162,12 @@ impl<E, M: ManagerRead> Deref for Cell<E, M> {
 impl<E: Clone, M: ManagerClone> CloneState for Cell<E, M> {
     fn clone_state(&self) -> Self {
         self.clone()
+    }
+}
+
+impl<E: Encode, M: ManagerSerialise> HashState for Cell<E, M> {
+    fn hash_state(&self) -> Hash {
+        Hash::blake3_hash(self).expect("Cell hashing should not fail")
     }
 }
 
@@ -344,6 +352,12 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
 impl<E: Clone, const LEN: usize, M: ManagerClone> CloneState for Cells<E, LEN, M> {
     fn clone_state(&self) -> Self {
         self.clone()
+    }
+}
+
+impl<E: Encode, const LEN: usize, M: ManagerSerialise> HashState for Cells<E, LEN, M> {
+    fn hash_state(&self) -> Hash {
+        Hash::blake3_hash(self).expect("Cells hashing should not fail")
     }
 }
 
@@ -535,6 +549,12 @@ impl<M: ManagerClone> Clone for DynCells<M> {
 impl<M: ManagerClone> CloneState for DynCells<M> {
     fn clone_state(&self) -> Self {
         self.clone()
+    }
+}
+
+impl<M: ManagerSerialise> HashState for DynCells<M> {
+    fn hash_state(&self) -> Hash {
+        Hash::blake3_hash(self).expect("TODO")
     }
 }
 

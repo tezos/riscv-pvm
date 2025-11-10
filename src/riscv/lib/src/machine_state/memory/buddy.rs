@@ -22,6 +22,7 @@ mod branch_combinations;
 mod leaf;
 mod proxy;
 
+use octez_riscv_data::hash::Hash;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
@@ -30,6 +31,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 
@@ -89,6 +91,11 @@ pub trait Buddy<M: ManagerBase>: NewState<M> {
     fn clone_state(&self) -> Self
     where
         M: ManagerClone;
+
+    /// Obtain the hash of the persistent state.
+    fn hash_state(&self) -> Hash
+    where
+        M: ManagerSerialise;
 }
 
 #[cfg(test)]

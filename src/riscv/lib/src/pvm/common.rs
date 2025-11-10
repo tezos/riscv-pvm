@@ -12,6 +12,7 @@ use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -37,6 +38,7 @@ use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
@@ -427,6 +429,24 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState fo
             level_is_set: self.level_is_set.clone_state(),
             status: self.status.clone_state(),
         }
+    }
+}
+
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerSerialise> HashState
+    for Pvm<MC, CPE, M>
+{
+    fn hash_state(&self) -> Hash {
+        Hash::combine([
+            self.machine_state.hash_state(),
+            self.reveal_request.hash_state(),
+            self.system_state.hash_state(),
+            self.version.hash_state(),
+            self.tick.hash_state(),
+            self.message_counter.hash_state(),
+            self.level.hash_state(),
+            self.level_is_set.hash_state(),
+            self.status.hash_state(),
+        ])
     }
 }
 
