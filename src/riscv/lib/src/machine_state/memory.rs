@@ -243,8 +243,8 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         E: Elem + Copy,
         M: ManagerRead + ManagerWrite;
 
-    /// Clone all memory.
-    fn clone(&self) -> Self
+    /// Clone the persistent memory state.
+    fn clone_state(&self) -> Self
     where
         M: ManagerClone;
 

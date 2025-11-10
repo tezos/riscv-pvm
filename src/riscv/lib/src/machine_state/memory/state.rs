@@ -225,7 +225,7 @@ where
         Ok(())
     }
 
-    fn clone(&self) -> Self
+    fn clone_state(&self) -> Self
     where
         M: ManagerClone,
     {

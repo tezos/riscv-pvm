@@ -192,16 +192,13 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
     fn clone(&self) -> Self {
         Self {
             hart: self.hart.clone(),
-            main_memory: self.main_memory.clone(),
+            main_memory: self.main_memory.clone_state(),
             signal_actions: self.signal_actions.clone(),
         }
     }
 }
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineCoreState<MC, M>
-where
-    MC::State<M>: CloneState,
-{
+impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineCoreState<MC, M> {
     fn clone_state(&self) -> Self {
         Self {
             hart: self.hart.clone_state(),
@@ -243,8 +240,6 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
 
 impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClone> CloneState
     for MachineState<MC, CPE, M>
-where
-    MC::State<M>: CloneState,
 {
     fn clone_state(&self) -> Self {
         Self {
@@ -811,6 +806,7 @@ mod tests {
     use std::ops::Bound;
     use std::ops::ControlFlow;
 
+    use octez_riscv_data::clone::CloneState;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
@@ -844,12 +840,10 @@ mod tests {
     use crate::parser::parse_uncompressed_instruction;
     use crate::program::Program;
     use crate::pvm::Pvm;
-    use crate::pvm::PvmLayout;
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::signals::Signal;
     use crate::pvm::linux::signals::SignalError;
-    use crate::state_backend::CloneLayout;
     use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
@@ -994,9 +988,7 @@ mod tests {
 
         let alt_state = {
             // Clone the base state to get rid of any ephemeral state that was created.
-            let refs = base_state.struct_ref::<FnManagerIdent>();
-            let refs = PvmLayout::<M64M>::clone_allocated(refs);
-            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::bind(refs, InterpretedCompiler);
+            let mut state = base_state.clone_state();
 
             // We want to run the kernel until it exits as that is a good point to compare.
             loop {

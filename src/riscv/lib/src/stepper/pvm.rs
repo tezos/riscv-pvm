@@ -8,6 +8,7 @@ mod reveals;
 use std::ops::Bound;
 use std::path::Path;
 
+use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
@@ -40,7 +41,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::clone_layout::CloneLayout;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -222,14 +222,11 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + 
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.
-    pub fn rebind_via_clone(&mut self, compiler: CPE::Compiler)
+    pub fn rebind_via_clone(&mut self)
     where
-        PvmLayout<MC>: CloneLayout,
         M: ManagerClone,
     {
-        let refs = self.pvm.struct_ref::<FnManagerIdent>();
-        let space = PvmLayout::<MC>::clone_allocated(refs);
-        self.pvm = Pvm::bind(space, compiler);
+        self.pvm = self.pvm.clone_state();
     }
 }
 
