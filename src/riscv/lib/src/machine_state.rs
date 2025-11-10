@@ -266,21 +266,16 @@ pub struct MachineState<
 > {
     pub core: MachineCoreState<MC, M>,
     pub page_cache: MC::PageCache<CPE, M>,
-
-    /// The compiler is used to optimise page entrypoint execution. For example,
-    /// just-in-time compiling them to the host architecture.
-    pub compiler: CPE::Compiler,
 }
 
 impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClone> Clone
     for MachineState<MC, CPE, M>
 {
-    // TODO: RV-806: implement Clone on PageCache/Compiler
+    // TODO: RV-806: implement Clone on PageCache
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
             page_cache: MC::PageCache::new(),
-            compiler: CPE::Compiler::default(),
         }
     }
 }
@@ -292,25 +287,23 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
         Self {
             core: self.core.clone_state(),
             page_cache: MC::PageCache::new(),
-            compiler: CPE::Compiler::default(),
         }
     }
 }
 
-impl<MC, CPE> FromProof<CPE::Compiler> for MachineState<MC, CPE, Verify>
+impl<MC, CPE> FromProof<()> for MachineState<MC, CPE, Verify>
 where
     MC: MemoryConfig,
     CPE: CodePageEntry<MC, Verify>,
 {
     fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
-        compiler: CPE::Compiler,
+        _arg: (),
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
         let result = MachineCoreState::from_proof(proof, ())?;
         let result = result.map(|core| Self {
             core,
             page_cache: MC::PageCache::new(),
-            compiler,
         });
         Ok(result)
     }
@@ -364,36 +357,40 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
+impl<
+    MC: memory::MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerBase + backend::ManagerAlloc,
+> Default for MachineState<MC, CPE, M>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBase>
     MachineState<MC, CPE, M>
 {
     /// Allocate a new machine state.
-    pub fn new(compiler: CPE::Compiler) -> Self
+    pub fn new() -> Self
     where
         M: backend::ManagerAlloc,
     {
         Self {
             core: MachineCoreState::new(),
             page_cache: MC::PageCache::new(),
-            compiler,
         }
     }
 
     /// Bind the machine state to the given allocated state and initialise the
-    /// page cache with the given [compiler].
-    ///
-    /// [compiler]: CodePageEntry::Compiler
-    pub fn bind(
-        space: backend::AllocatedOf<MachineStateLayout<MC>, M>,
-        compiler: CPE::Compiler,
-    ) -> Self
+    /// page cache.
+    pub fn bind(space: backend::AllocatedOf<MachineStateLayout<MC>, M>) -> Self
     where
         M::ManagerRoot: ManagerRead + ManagerWrite,
     {
         Self {
             core: MachineCoreState::bind(space),
             page_cache: MC::PageCache::new(),
-            compiler,
         }
     }
 
@@ -478,15 +475,8 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
                 Some(mut code_page) => {
                     let steps_remaining = max_steps - result.steps;
 
-                    // Safety: the compiler is the same each time.
-                    let entrypoint_result = unsafe {
-                        code_page.run(
-                            &mut self.core,
-                            &mut self.compiler,
-                            instr_pc,
-                            steps_remaining,
-                        )
-                    };
+                    let entrypoint_result =
+                        code_page.run(&mut self.core, instr_pc, steps_remaining);
 
                     // Short-circuit if the entrypoint call failed
                     if result.merge_and_return(entrypoint_result) {
@@ -792,7 +782,6 @@ pub(crate) mod test_helpers {
     use super::MachineState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::Interpreted;
-    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::state_backend::ManagerBase;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
@@ -867,7 +856,7 @@ pub(crate) mod test_helpers {
 
     impl<'normal> ReinitMachine<Prove<'normal>> for TestMachineOf<Prove<'normal>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
-            let new_state = MachineState::new(InterpretedCompiler);
+            let new_state = MachineState::new();
             RefMutOrOwned::Owned(new_state)
         }
     }
@@ -894,7 +883,6 @@ mod tests {
     use super::instruction::Instruction;
     use super::memory::Address;
     use super::page_cache::Interpreted;
-    use super::page_cache::InterpretedCompiler;
     use super::page_cache::state::PageEntry;
     use crate::backend_test;
     use crate::default::ConstDefault;
@@ -927,7 +915,7 @@ mod tests {
     use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
-        let state = TestMachineOf::<F>::new(InterpretedCompiler);
+        let state = TestMachineOf::<F>::new();
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -977,7 +965,7 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = TestMachineOf::<F>::new(InterpretedCompiler);
+        let state = TestMachineOf::<F>::new();
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -1003,7 +991,7 @@ mod tests {
     });
 
     backend_test!(test_step_access_exception, F, {
-        let state = TestMachineOf::<F>::new(InterpretedCompiler);
+        let state = TestMachineOf::<F>::new();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -1027,7 +1015,7 @@ mod tests {
     // `page-cache-tester` kernel's source that is used to test this.
     backend_test!(test_page_cache_state, F, {
         let base_state = {
-            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new(InterpretedCompiler);
+            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new();
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
@@ -1112,7 +1100,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, Interpreted<M1M, F>, F>::new(InterpretedCompiler);
+        let state = MachineState::<M1M, Interpreted<M1M, F>, F>::new();
 
         let second = state.clone();
 
@@ -1144,7 +1132,7 @@ mod tests {
                         write_upper: bool,
                         expected_pc: Address,
                         succeeds: bool| {
-            let mut state = MachineState::<M8K, Interpreted<M8K, F>, F>::new(InterpretedCompiler);
+            let mut state = MachineState::<M8K, Interpreted<M8K, F>, F>::new();
 
             state.core.hart.pc.write(initial_pc);
 
@@ -1216,7 +1204,7 @@ mod tests {
     });
 
     backend_test!(test_signal_context, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedCompiler);
+        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();
@@ -1235,7 +1223,7 @@ mod tests {
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
     backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new(InterpretedCompiler);
+        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();

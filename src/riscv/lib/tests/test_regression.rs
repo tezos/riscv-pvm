@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::page_cache::CodePageEntry;
 use octez_riscv::machine_state::page_cache::Interpreted;
-use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::machine_state::page_cache::Jitted;
 use octez_riscv::machine_state::page_cache::OutlineCompiler;
 use octez_riscv::pvm::hooks::PvmHooks;
@@ -67,23 +66,17 @@ fn regression_frozen_etherlink() {
 }
 
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
-    test_regression_for_block::<Interpreted<M64M, Normal>>(
-        InterpretedCompiler,
-        &inputs,
-        capture_volatile_properties,
-    );
+    test_regression_for_block::<Interpreted<M64M, Normal>>(&inputs, capture_volatile_properties);
 
     // This needs to run *after* the previous *interpreted* test. Otherwise, we run into trouble when
     // checking and updating the golden files.
-    test_regression_for_block::<Jitted<_, _>>(
-        OutlineCompiler::<M64M>::default(),
+    test_regression_for_block::<Jitted<OutlineCompiler<M64M>, M64M>>(
         &inputs,
         capture_volatile_properties,
     );
 }
 
 fn test_regression_for_block<CPE: CodePageEntry<M64M, Normal>>(
-    compiler: CPE::Compiler,
     inputs: &TestConfig,
     capture_volatile_properties: bool,
 ) {
@@ -115,7 +108,6 @@ fn test_regression_for_block<CPE: CodePageEntry<M64M, Normal>>(
             ROLLUP_ADDRESS,
             ORIGINATION_LEVEL,
             Some(PathBuf::from("../../../assets/preimages").into_boxed_path()),
-            compiler,
         )
         .unwrap();
 

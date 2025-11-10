@@ -47,11 +47,7 @@ pub fn run_with_memory_config<MC: memory::MemoryConfig>(
 ) -> Result<(), Box<dyn Error>> {
     let program = fs::read(&opts.input)?;
 
-    let stepper = make_pvm_stepper::<MC, CodePageEntryImpl<MC>>(
-        program.as_slice(),
-        &opts.common,
-        Default::default(),
-    )?;
+    let stepper = make_pvm_stepper::<MC, CodePageEntryImpl<MC>>(program.as_slice(), &opts.common)?;
 
     // Run the profiler if a sampling interval is set
     let steps = match opts.sample_interval_us {
@@ -91,7 +87,6 @@ type PvmStepperRunner<MC, CPE> = PvmStepper<Console<'static>, MC, Normal, CPE>;
 pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Normal>>(
     program: &[u8],
     common: &CommonOptions,
-    compiler: CPE::Compiler,
 ) -> Result<PvmStepperRunner<MC, CPE>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
@@ -113,7 +108,6 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, 
         rollup_address.into_hash().as_ref().try_into()?,
         common.inbox.origination_level,
         common.preimage.preimages_dir.clone(),
-        compiler,
     )?;
 
     Ok(stepper)

@@ -26,7 +26,6 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::InterpretedCompiler;
 use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
@@ -91,9 +90,8 @@ impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Norm
         rollup_address: [u8; 20],
         origination_level: u32,
         preimages_dir: Option<Box<Path>>,
-        compiler: CPE::Compiler,
     ) -> Result<Self, PvmStepperError> {
-        let mut pvm = Pvm::empty(compiler);
+        let mut pvm = Pvm::new();
 
         let program = Program::<MC>::from_elf(program)?;
 
@@ -267,9 +265,8 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
         proof: Proof,
     ) -> Result<(), ProofVerificationFailure> {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
-        let (pvm, merkle_tree) =
-            deserialise_stream::deserialise(&tree_serialisation, InterpretedCompiler)
-                .map_err(ProofVerificationFailure::BadDeserialisation)?;
+        let (pvm, merkle_tree) = deserialise_stream::deserialise(&tree_serialisation, ())
+            .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
             OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
@@ -289,9 +286,8 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let (pvm, deserialised_proof_tree) =
-            deserialise_owned::deserialise(proof_tree, InterpretedCompiler)
-                .map_err(ProofVerificationFailure::BadDeserialisation)?;
+        let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree, ())
+            .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
             OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),

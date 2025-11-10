@@ -92,8 +92,8 @@ pub struct TestStepper<
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
     /// Initialise an interpreter with a given `program`.
     #[inline]
-    pub fn new(program: &[u8], compiler: CPE::Compiler) -> Result<Self, TestStepperError> {
-        Ok(Self::new_with_parsed_program(program, compiler)?.0)
+    pub fn new(program: &[u8]) -> Result<Self, TestStepperError> {
+        Ok(Self::new_with_parsed_program(program)?.0)
     }
 
     /// Initialise an interpreter with a given `program`. Returns both the interpreter and the fully
@@ -101,11 +101,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
     #[inline]
     pub fn new_with_parsed_program(
         program: &[u8],
-        compiler: CPE::Compiler,
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
             posix_state: PosixState::<Normal>::new(),
-            machine_state: MachineState::new(compiler),
+            machine_state: MachineState::new(),
         };
 
         // The interpreter needs a program to run.

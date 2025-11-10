@@ -141,11 +141,8 @@ fn bench_simple<S: Stepper>(interpreter: &mut S, opts: &BenchRunOptions) -> Benc
 fn bench_iteration(path: &Path, opts: &BenchRunOptions) -> Result<BenchData, Box<dyn Error>> {
     let program = std::fs::read(path)?;
 
-    let mut stepper = make_pvm_stepper::<M1G, CodePageEntryImpl<M1G>>(
-        program.as_slice(),
-        &opts.common,
-        Default::default(),
-    )?;
+    let mut stepper =
+        make_pvm_stepper::<M1G, CodePageEntryImpl<M1G>>(program.as_slice(), &opts.common)?;
 
     Ok(match opts.mode {
         BenchMode::Simple => bench_simple(&mut stepper, opts),

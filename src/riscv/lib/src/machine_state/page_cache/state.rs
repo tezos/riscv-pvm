@@ -11,7 +11,6 @@
 //!
 //! [PageCache]: super::PageCache
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use super::INSTRUCTION_ENTRIES;
@@ -181,9 +180,14 @@ where
 /// connection with the concrete types that implement these traits.
 ///
 /// [`PageCache`]: super::PageCache
-pub struct PageCacheImpl<const PAGES: usize, CPE, MC, M> {
+pub struct PageCacheImpl<
+    const PAGES: usize,
+    CPE: CodePageEntry<MC, M>,
+    MC: MemoryConfig,
+    M: ManagerBase,
+> {
     pages: Box<[Option<Arc<PageEntry<CPE>>>; PAGES]>,
-    _pd: PhantomData<(MC, M)>,
+    compiler: CPE::Compiler,
 }
 
 #[cfg(test)]
@@ -226,12 +230,12 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     fn new() -> Self {
         Self {
             pages: boxed_from_fn(|| None),
-            _pd: PhantomData,
+            compiler: CPE::Compiler::default(),
         }
     }
 
     /// Fetch a dispatch call, if the address corresponds to a populated page in the PageCache.
-    fn get_code_page(&mut self, address: Address) -> Option<super::CodePage<'_, CPE>>
+    fn get_code_page(&mut self, address: Address) -> Option<super::CodePage<'_, MC, M, CPE>>
     where
         M: ManagerRead,
     {
@@ -240,7 +244,10 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
         self.pages
             .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
-            .map(|page| super::CodePage { page })
+            .map(|page| super::CodePage {
+                page,
+                compiler: &mut self.compiler,
+            })
     }
 
     /// Populates the entry in the page cache, that the given address points to.
@@ -359,6 +366,7 @@ mod tests {
     use super::PageCacheImpl;
     use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::machine_state::CodePageEntry;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory::M1M;
@@ -367,14 +375,19 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
-    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::interpreted::Interpreted;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
+    use crate::state_backend::ManagerBase;
 
-    fn count_active_pages<const PAGES: usize, CPE, MC, M>(
+    fn count_active_pages<
+        const PAGES: usize,
+        CPE: CodePageEntry<MC, M>,
+        MC: MemoryConfig,
+        M: ManagerBase,
+    >(
         cache: &PageCacheImpl<PAGES, CPE, MC, M>,
     ) -> usize {
         cache.pages.iter().fold(
@@ -540,8 +553,7 @@ mod tests {
             let pc_last_halfword = page_start + (PAGE_SIZE.get() - InstrWidth::Compressed as u64);
             let last_halfword = state.fetch_instr_halfword(pc_last_halfword).unwrap();
             if !crate::parser::is_compressed(last_halfword.data) {
-                // SAFETY: interpreted is always safe to call
-                let step_res = unsafe { code_page.run(&mut state, &mut InterpretedCompiler, pc_last_halfword, 1) };
+                let step_res = code_page.run(&mut state, pc_last_halfword, 1);
                 assert_eq!(step_res.error, Some(crate::exceptions::Exception::ForceFetchRun));
                 assert_eq!(step_res.steps, 0, "raising an exception does not complete a step");
             }

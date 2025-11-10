@@ -21,7 +21,6 @@ use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 
-use crate::machine_state::page_cache::InterpretedCompiler;
 use crate::pvm::node_pvm::NodePvm;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
@@ -116,10 +115,8 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
     let final_state_hash =
         deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
 
-    let (pvm, proof_tree) = deserialise_stream::deserialise(
-        bytes.collect::<Vec<u8>>().as_slice(),
-        InterpretedCompiler,
-    )?;
+    let (pvm, proof_tree) =
+        deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice(), ())?;
 
     let merkle_tree = match proof_tree {
         OwnedProofPart::Absent => return Err(ProofError::AbsentProof),

@@ -82,7 +82,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
     /// Retrieve code page that is dispatchable against the [`MachineCoreState`]. If found, such a
     /// page will contain the code for `addr`.
-    fn get_code_page(&mut self, addr: Address) -> Option<CodePage<'_, CPE>>
+    fn get_code_page(&mut self, addr: Address) -> Option<CodePage<'_, MC, M, CPE>>
     where
         M: ManagerRead;
 
@@ -97,35 +97,30 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
+///
+/// This also contains a reference to the `compiler` owned by the page cache. This allows the `run`
+/// method to access it and ensures that the `compiler` lives as long as any pages are being run.
 #[derive(Debug)]
-pub struct CodePage<'a, CPE> {
+pub struct CodePage<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
     page: &'a Arc<state::PageEntry<CPE>>,
+    compiler: &'a mut CPE::Compiler,
 }
 
-impl<CPE> CodePage<'_, CPE> {
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, MC, M, CPE> {
     /// Run a code page against the machine state.
-    ///
-    /// # SAFETY
-    ///
-    /// The `compiler` must always be the same compiler when dispatching a given page (for the
-    /// lifetime of that page).
-    ///
-    /// This ensures dispatching can ensure the compiler's state is kept alive.
-    pub(crate) unsafe fn run<MC, M>(
+    pub(crate) fn run(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
-        compiler: &mut CPE::Compiler,
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        CPE: CodePageEntry<MC, M>,
         MC: MemoryConfig,
         M: ManagerRead + ManagerWrite,
     {
         // SAFETY: the compiler remains the same for the lifetime of the page this code-page
         // references
-        unsafe { CPE::run_entrypoint(self.page, core, compiler, instr_pc, max_steps) }
+        unsafe { CPE::run_entrypoint(self.page, core, self.compiler, instr_pc, max_steps) }
     }
 }
 
@@ -192,6 +187,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::CodePage;
     use super::INSTRUCTION_ENTRIES;
     use super::interpreted::Interpreted;
@@ -210,8 +207,8 @@ mod tests {
     use crate::state_backend::test_helpers::TestBackendFactory;
 
     struct DispatchTest<'a, F: TestBackendFactory> {
-        state: &'a std::cell::RefCell<MachineCoreState<M4K, F>>,
-        dispatch: &'a std::cell::RefCell<CodePage<'a, Interpreted<M4K, F>>>,
+        state: &'a RefCell<MachineCoreState<M4K, F>>,
+        dispatch: &'a RefCell<CodePage<'a, M4K, F, Interpreted<M4K, F>>>,
         pc_addr: u64,
         max_steps: usize,
         expected_steps: usize,
@@ -225,14 +222,10 @@ mod tests {
         state.reset(NoopMemoryGovernanceListener);
 
         // SAFETY: interpreted mode is always safe to call
-        let res = unsafe {
-            test.dispatch.borrow_mut().run(
-                &mut state,
-                &mut InterpretedCompiler,
-                test.pc_addr,
-                test.max_steps,
-            )
-        };
+        let res = test
+            .dispatch
+            .borrow_mut()
+            .run(&mut state, test.pc_addr, test.max_steps);
 
         assert_eq!(res.steps, test.expected_steps);
         assert_eq!(res.error, test.expected_exception);
@@ -252,12 +245,15 @@ mod tests {
                 ))
             });
 
-        let dispatch = &std::cell::RefCell::new(CodePage {
+        let mut compiler = InterpretedCompiler;
+
+        let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
+            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();
-        let state = &std::cell::RefCell::new(state);
+        let state = &RefCell::new(state);
 
         let page_size = memory::PAGE_SIZE.get();
 
@@ -311,12 +307,15 @@ mod tests {
                 Ok(instr)
             });
 
-        let dispatch = &std::cell::RefCell::new(CodePage {
+        let mut compiler = InterpretedCompiler;
+
+        let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
+            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();
-        let state = &std::cell::RefCell::new(state);
+        let state = &RefCell::new(state);
 
         let page_size = memory::PAGE_SIZE.get();
 
@@ -411,12 +410,15 @@ mod tests {
                 Ok(instructions[offset])
             });
 
-        let dispatch = &std::cell::RefCell::new(CodePage {
+        let mut compiler = InterpretedCompiler;
+
+        let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
+            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();
-        let state = &std::cell::RefCell::new(state);
+        let state = &RefCell::new(state);
 
         // run, exits on PcUpdate::Set
         run_test(DispatchTest {

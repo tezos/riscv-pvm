@@ -15,7 +15,6 @@ use thiserror::Error;
 
 use super::Pvm;
 use super::PvmLayout;
-use crate::machine_state::page_cache::InterpretedCompiler;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
@@ -63,7 +62,7 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
     where
         M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
-        let state = NodePvmState::<M>::bind(space, InterpretedCompiler);
+        let state = NodePvmState::<M>::bind(space);
         Self {
             state: Box::new(state),
         }
@@ -255,7 +254,7 @@ impl<M: state_backend::ManagerBase> NewState<M> for NodePvm<M> {
         M: state_backend::ManagerAlloc,
     {
         Self {
-            state: Box::new(NodePvmState::<M>::new(InterpretedCompiler)),
+            state: Box::new(NodePvmState::<M>::new()),
         }
     }
 }
