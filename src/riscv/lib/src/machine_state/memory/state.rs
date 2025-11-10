@@ -5,6 +5,8 @@
 use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
+use octez_riscv_data::clone::CloneState;
+
 use super::Address;
 use super::BadMemoryAccess;
 use super::Memory;
@@ -228,11 +230,11 @@ where
         M: ManagerClone,
     {
         Self {
-            data: self.data.clone(),
-            readable_pages: self.readable_pages.clone(),
-            writable_pages: self.writable_pages.clone(),
-            executable_pages: self.executable_pages.clone(),
-            allocated_pages: self.allocated_pages.clone(),
+            data: self.data.clone_state(),
+            readable_pages: self.readable_pages.clone_state(),
+            writable_pages: self.writable_pages.clone_state(),
+            executable_pages: self.executable_pages.clone_state(),
+            allocated_pages: self.allocated_pages.clone_state(),
         }
     }
 

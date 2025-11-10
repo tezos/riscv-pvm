@@ -9,6 +9,7 @@ use std::slice::from_raw_parts;
 use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
+use octez_riscv_data::clone::CloneState;
 use strum::EnumCount;
 use strum::FromRepr;
 use zerocopy::FromBytes;
@@ -439,6 +440,18 @@ impl<M: ManagerClone> Clone for SignalActions<M> {
             restorer: self.restorer.clone(),
             masks: self.masks.clone(),
             thread_mask: self.thread_mask.clone(),
+        }
+    }
+}
+
+impl<M: ManagerClone> CloneState for SignalActions<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            actions: self.actions.clone_state(),
+            flags: self.flags.clone_state(),
+            masks: self.masks.clone_state(),
+            restorer: self.restorer.clone_state(),
+            thread_mask: self.thread_mask.clone_state(),
         }
     }
 }

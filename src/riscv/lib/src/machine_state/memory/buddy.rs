@@ -86,8 +86,8 @@ pub trait Buddy<M: ManagerBase>: NewState<M> {
     where
         M: ManagerRead;
 
-    /// Clone the memory manager state.
-    fn clone(&self) -> Self
+    /// Clone the persistent state of the memory manager.
+    fn clone_state(&self) -> Self
     where
         M: ManagerClone;
 }

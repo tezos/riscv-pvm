@@ -3,6 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::csregisters;
@@ -98,6 +99,18 @@ impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
             csregisters: csregisters::CSRegisters::new(),
             pc: Cell::new(),
             reservation_set: ReservationSet::new(),
+        }
+    }
+}
+
+impl<M: backend::ManagerClone> CloneState for HartState<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            xregisters: self.xregisters.clone_state(),
+            fregisters: self.fregisters.clone_state(),
+            csregisters: self.csregisters.clone_state(),
+            pc: self.pc.clone_state(),
+            reservation_set: self.reservation_set.clone_state(),
         }
     }
 }

@@ -9,6 +9,7 @@
 
 use std::ops::BitAnd;
 
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::backend;
@@ -115,6 +116,14 @@ impl<M: backend::ManagerBase> NewState<M> for ReservationSet<M> {
     {
         ReservationSet {
             start_addr: Cell::new(),
+        }
+    }
+}
+
+impl<M: backend::ManagerClone> CloneState for ReservationSet<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            start_addr: self.start_addr.clone_state(),
         }
     }
 }

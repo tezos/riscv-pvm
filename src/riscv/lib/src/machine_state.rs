@@ -26,6 +26,7 @@ use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
+use octez_riscv_data::clone::CloneState;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
 
@@ -197,6 +198,19 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
     }
 }
 
+impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineCoreState<MC, M>
+where
+    MC::State<M>: CloneState,
+{
+    fn clone_state(&self) -> Self {
+        Self {
+            hart: self.hart.clone_state(),
+            main_memory: self.main_memory.clone_state(),
+            signal_actions: self.signal_actions.clone_state(),
+        }
+    }
+}
+
 /// Layout for the machine state - everything required to fetch & run instructions.
 pub type MachineStateLayout<MC> = MachineCoreStateLayout<MC>;
 
@@ -221,6 +235,20 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
+            page_cache: MC::PageCache::new(),
+            compiler: CPE::Compiler::default(),
+        }
+    }
+}
+
+impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClone> CloneState
+    for MachineState<MC, CPE, M>
+where
+    MC::State<M>: CloneState,
+{
+    fn clone_state(&self) -> Self {
+        Self {
+            core: self.core.clone_state(),
             page_cache: MC::PageCache::new(),
             compiler: CPE::Compiler::default(),
         }

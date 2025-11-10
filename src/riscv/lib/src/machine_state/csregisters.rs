@@ -10,6 +10,7 @@ use std::ops::Shr;
 use bincode::Decode;
 use bincode::Encode;
 use num_enum::TryFromPrimitive;
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -372,6 +373,15 @@ impl<M: backend::ManagerBase> NewState<M> for CSRegisters<M> {
         Self {
             fflags: Cell::new(),
             frm: Cell::new(),
+        }
+    }
+}
+
+impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            fflags: self.fflags.clone_state(),
+            frm: self.frm.clone_state(),
         }
     }
 }

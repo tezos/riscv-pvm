@@ -20,6 +20,7 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -294,6 +295,14 @@ impl<M: backend::ManagerBase> NewState<M> for XRegisters<M> {
     {
         XRegisters {
             registers: backend::Cells::new(),
+        }
+    }
+}
+
+impl<M: backend::ManagerClone> CloneState for XRegisters<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            registers: self.registers.clone_state(),
         }
     }
 }
@@ -665,6 +674,14 @@ impl<M: backend::ManagerBase> NewState<M> for FRegisters<M> {
     {
         Self {
             registers: backend::Cells::new(),
+        }
+    }
+}
+
+impl<M: backend::ManagerClone> CloneState for FRegisters<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            registers: self.registers.clone_state(),
         }
     }
 }

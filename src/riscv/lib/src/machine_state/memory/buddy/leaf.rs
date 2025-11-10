@@ -238,7 +238,7 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
         (self.set.read().leading_zeros() as u64).saturating_sub(leading_unused_bits)
     }
 
-    fn clone(&self) -> Self
+    fn clone_state(&self) -> Self
     where
         M: ManagerClone,
     {

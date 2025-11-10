@@ -12,6 +12,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -153,6 +154,12 @@ impl<E, M: ManagerRead> Deref for Cell<E, M> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.as_ref()
+    }
+}
+
+impl<E: Clone, M: ManagerClone> CloneState for Cell<E, M> {
+    fn clone_state(&self) -> Self {
+        self.clone()
     }
 }
 
@@ -331,6 +338,12 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
         Self {
             region: M::clone_region(&self.region),
         }
+    }
+}
+
+impl<E: Clone, const LEN: usize, M: ManagerClone> CloneState for Cells<E, LEN, M> {
+    fn clone_state(&self) -> Self {
+        self.clone()
     }
 }
 
@@ -516,6 +529,12 @@ impl<M: ManagerClone> Clone for DynCells<M> {
         Self {
             region: M::clone_dyn_region(&self.region),
         }
+    }
+}
+
+impl<M: ManagerClone> CloneState for DynCells<M> {
+    fn clone_state(&self) -> Self {
+        self.clone()
     }
 }
 
