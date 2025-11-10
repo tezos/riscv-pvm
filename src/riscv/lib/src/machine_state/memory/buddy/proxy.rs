@@ -17,7 +17,6 @@ use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -26,7 +25,6 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::VerifierAllocResult;
@@ -73,17 +71,6 @@ where
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         <PickLayout<PAGES> as ProofLayout>::partial_state_hash(state, proof)
-    }
-}
-
-impl<const PAGES: usize> CloneLayout for BuddyLayoutProxy<PAGES>
-where
-    (): BuddyLayoutMatch<PAGES>,
-{
-    fn clone_allocated<'a, M: crate::state_backend::ManagerClone + 'a>(
-        space: Self::Allocated<Ref<'a, M>>,
-    ) -> Self::Allocated<M> {
-        <PickLayout<PAGES> as CloneLayout>::clone_allocated(space)
     }
 }
 

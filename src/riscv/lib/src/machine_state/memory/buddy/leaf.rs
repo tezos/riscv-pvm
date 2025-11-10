@@ -21,7 +21,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::CloneLayout;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -35,7 +34,6 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::Ref;
 use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
@@ -75,17 +73,6 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         proof: ProofTree,
     ) -> Result<Hash, PartialHashError> {
         Atom::partial_state_hash(state.set, proof)
-    }
-}
-
-impl<const PAGES: u64> CloneLayout for BuddyLeafLayout<PAGES> {
-    fn clone_allocated<'a, M: ManagerClone + 'a>(
-        space: Self::Allocated<Ref<'a, M>>,
-    ) -> Self::Allocated<M> {
-        let region = space.set.into_region();
-        let region = M::clone_region(region);
-        let set = Cell::bind(region);
-        BuddyLeaf { set }
     }
 }
 
