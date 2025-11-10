@@ -412,6 +412,7 @@ impl<'normal, M: ManagerBase + 'normal> FnManager<'normal, M> for ProofWrapper {
 mod tests {
     use std::collections::VecDeque;
 
+    use octez_riscv_data::hash::HashState;
     use proptest::array;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -421,7 +422,6 @@ mod tests {
     use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
     use crate::state_backend::Cells;
-    use crate::state_backend::CommitmentLayout;
     use crate::state_backend::DynArray;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerAlloc;
@@ -486,8 +486,7 @@ mod tests {
             // Check correct Merkleisation
             let cells = [value_before; CELLS_SIZE];
             let cells_owned: Cells<u64, CELLS_SIZE, Ref<'_, Owned>> = Cells::bind(&cells);
-            let initial_root_hash =
-                <Array<u64, CELLS_SIZE> as CommitmentLayout>::state_hash(cells_owned).unwrap();
+            let initial_root_hash = cells_owned.hash_state();
 
             let mut proof_region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> =
                 ProofRegion::bind(&cells);
@@ -586,8 +585,7 @@ mod tests {
             let mut cells = Owned::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
             let owned_dyn_cells: DynCells<Ref<'_, Owned>> = DynCells::bind(&cells);
-            let initial_root_hash =
-                <DynArray as CommitmentLayout>::state_hash(owned_dyn_cells).unwrap();
+            let initial_root_hash = owned_dyn_cells.hash_state();
 
             let mut proof_dyn_region: ProofDynRegion<Ref<'_, Owned>> = ProofDynRegion::bind(&cells);
 

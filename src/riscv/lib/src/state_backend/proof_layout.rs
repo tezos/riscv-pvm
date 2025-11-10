@@ -1212,6 +1212,7 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::hash::HashState;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -1219,7 +1220,6 @@ mod tests {
 
     use super::*;
     use crate::state_backend::Cells;
-    use crate::state_backend::CommitmentLayout;
     use crate::state_backend::DynCells;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerWrite;
@@ -1307,10 +1307,7 @@ mod tests {
 
         // We require the initial hash to ensure that the generated proof, but also the
         // instantiated state from the proof match the "before" state.
-        let init_hash = {
-            let state_ref = owned_cell.struct_ref::<FnManagerIdent>();
-            DynArray::state_hash(state_ref).unwrap()
-        };
+        let init_hash = owned_cell.hash_state();
 
         // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
         // setup for proof generation. You can think of this as starting the recording for a proof.
@@ -1320,7 +1317,7 @@ mod tests {
 
         // The post-hash is required to ensure that the verifier's final state matches the prover's
         // final state.
-        let post_hash = DynArray::state_hash(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
+        let post_hash = proof_cell.hash_state();
 
         let tree = DynArray::to_merkle_tree(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
         let proof_tree = tree.to_merkle_proof();

@@ -90,6 +90,24 @@ macro_rules! struct_layout {
                 ),+
             }
 
+            impl <
+                $(
+                    [<$field_name:camel>]: octez_riscv_data::hash::HashState
+                ),+
+            > octez_riscv_data::hash::HashState for [<$layout_t F>]<
+                $(
+                    [<$field_name:camel>]
+                ),+
+            > {
+                fn hash_state(&self) -> octez_riscv_data::hash::Hash {
+                    octez_riscv_data::hash::Hash::combine([
+                        $(
+                            self.$field_name.hash_state()
+                        ),+
+                    ])
+                }
+            }
+
             $vis type $layout_t $(< $($param),+ >)? = [<$layout_t F>]<
                 $(
                     $cell_repr
@@ -306,13 +324,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::hash::HashState;
+
     use super::*;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::state::NewState;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
-    use crate::state_backend::CommitmentLayout;
     use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
@@ -361,10 +380,10 @@ mod tests {
 
             // Obtain the state hash
             let refs = FooF {
-                bar: foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &foo.bar,
+                qux: &foo.qux,
             };
-            let hash = Foo::state_hash(refs).unwrap();
+            let hash = refs.hash_state();
 
             // Obtain the Merkle tree via the `ProofGen` backend
             let mut proof_foo = FooF {
@@ -404,10 +423,10 @@ mod tests {
             foo.bar.write(bar.wrapping_add(1));
             foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
             let refs = FooF {
-                bar: foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &foo.bar,
+                qux: &foo.qux,
             };
-            let final_hash = Foo::state_hash(refs).unwrap();
+            let final_hash = refs.hash_state();
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {

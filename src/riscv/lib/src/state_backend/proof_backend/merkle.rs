@@ -194,10 +194,10 @@ impl AccessInfoAggregatable for () {
 
 /// Helper function which allows iterating over chunks of a dynamic array
 /// and writing them to a writer. The last chunk may be smaller than the
-/// Merkle leaf size. The implementations of [`CommitmentLayout`] and
+/// Merkle leaf size. The implementations of [`HashState`] and
 /// [`ProofLayout`] for both use it, ensuring consistency between the two.
 ///
-/// [`CommitmentLayout`]: crate::state_backend::commitment_layout::CommitmentLayout
+/// [`HashState`]: octez_riscv_data::hash::HashState
 /// [`ProofLayout`]: crate::state_backend::proof_layout::ProofLayout
 pub(crate) fn chunks_to_writer<T: std::io::Write, F: Fn(usize) -> [u8; MERKLE_LEAF_SIZE.get()]>(
     writer: &mut T,
