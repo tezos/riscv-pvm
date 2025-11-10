@@ -258,15 +258,6 @@ impl JIT {
     }
 }
 
-// TODO: https://linear.app/tezos/issue/RV-496
-//       `CodePageEntry::Compiler` should not require Default, as it
-//         does not allow for potential fallilibility
-impl Default for JIT {
-    fn default() -> Self {
-        Self::new().expect("JIT is supported on all octez-riscv supported platforms")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::ops::BitAnd;
@@ -292,7 +283,6 @@ mod tests {
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::Interpreted;
-    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::jitted::MAX_INSTR_COMPILED;
@@ -429,15 +419,13 @@ mod tests {
             self.check_compilable();
 
             // Create the states for the interpreted and jitted runs.
-            let mut interpreted_state: TestMachineState<Interpreted<_, _>> =
-                MachineState::new(InterpretedCompiler);
+            let mut interpreted_state: TestMachineState<Interpreted<_, _>> = MachineState::new();
             interpreted_state
                 .core
                 .main_memory
                 .set_all_readable_writeable(NoopMemoryGovernanceListener);
 
-            let mut jitted_state: TestMachineState<Jitted<InlineCompiler, _>> =
-                MachineState::new(InlineCompiler::default());
+            let mut jitted_state: TestMachineState<Jitted<InlineCompiler, _>> = MachineState::new();
             jitted_state
                 .core
                 .main_memory

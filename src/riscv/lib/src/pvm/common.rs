@@ -36,7 +36,6 @@ use crate::default::ConstDefault;
 use crate::machine_state;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache;
 use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::machine_state::registers::a0;
@@ -126,14 +125,25 @@ pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
     pub(crate) status: Cell<PvmStatus, M>,
 }
 
+impl<MC, CPE, M> Default for Pvm<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: state_backend::ManagerBase + state_backend::ManagerAlloc,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
     /// Allocate a new PVM.
-    pub fn new(compiler: CPE::Compiler) -> Self
+    pub fn new() -> Self
     where
         M: state_backend::ManagerAlloc,
     {
         Self {
-            machine_state: machine_state::MachineState::new(compiler),
+            machine_state: machine_state::MachineState::new(),
             reveal_request: RevealRequest::new(),
             system_state: linux::SupervisorState::new(),
             version: Cell::new_with(INITIAL_VERSION),
@@ -145,19 +155,13 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         }
     }
 
-    /// Bind the machine core state to the given allocated state and initialise the page cache with
-    /// the given [compiler].
-    ///
-    /// [compiler]: CodePageEntry::Compiler
-    pub(crate) fn bind(
-        space: state_backend::AllocatedOf<PvmLayout<MC>, M>,
-        compiler: CPE::Compiler,
-    ) -> Self
+    /// Bind the machine core state to the given allocated state and initialise the page cache.
+    pub(crate) fn bind(space: state_backend::AllocatedOf<PvmLayout<MC>, M>) -> Self
     where
         M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         Self {
-            machine_state: machine_state::MachineState::bind(space.machine_state, compiler),
+            machine_state: machine_state::MachineState::bind(space.machine_state),
             reveal_request: RevealRequest::bind(space.reveal_request),
             system_state: linux::SupervisorState::bind(space.system_state),
             version: space.version,
@@ -382,11 +386,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     /// Generate a proof-generating version of this PVM.
     pub(crate) fn start_proof(&self) -> PvmProve<'_, MC> {
         let space = self.struct_ref::<ProofWrapper>();
-        Pvm::bind(space, page_cache::InterpretedCompiler)
-    }
-
-    pub(crate) fn empty(compiler: CPE::Compiler) -> Self {
-        Self::new(compiler)
+        Pvm::bind(space)
     }
 }
 
@@ -454,13 +454,11 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<CPE::Compiler>
-    for Pvm<MC, CPE, Verify>
-{
-    fn from_proof<D: Deserialiser>(proof: D, compiler: CPE::Compiler) -> SuspendedResult<D, Self> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<()> for Pvm<MC, CPE, Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: ()) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, machine_state) = proof.next_branch(compiler)?;
+        let (proof, machine_state) = proof.next_branch(())?;
         let (proof, reveal_request) = proof.next_branch(())?;
         let (proof, system_state) = proof.next_branch(())?;
         let (proof, version) = proof.next_branch(())?;
@@ -486,8 +484,8 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<CPE::Compiler>
 
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
     /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
-        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof), compiler).ok()?;
+    pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
+        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof), ()).ok()?;
         Some(pvm)
     }
 }
@@ -546,7 +544,6 @@ mod tests {
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::page_cache;
-    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
@@ -582,7 +579,7 @@ mod tests {
         type Cpe = page_cache::Interpreted<MC, Normal>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe, Normal>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -688,7 +685,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, Cpe, Normal>::new(InterpretedCompiler);
+            let mut pvm = Pvm::<MC, Cpe, Normal>::new();
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -733,7 +730,7 @@ mod tests {
         type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -803,7 +800,7 @@ mod tests {
         type Cpe<F> = page_cache::Interpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new(InterpretedCompiler);
+        let mut pvm = Pvm::<MC, Cpe<F>, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

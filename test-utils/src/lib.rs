@@ -9,7 +9,6 @@ use std::fs;
 
 use const_format::concatcp;
 use octez_riscv::machine_state::memory::MemoryConfig;
-use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::stepper::pvm::PvmStepper;
 use rand::Rng;
@@ -76,9 +75,7 @@ pub fn make_stepper_factory<MC: MemoryConfig>(
     let address = [0; 20];
 
     move || {
-        let compiler = InterpretedCompiler;
-
-        PvmStepper::<NoHooks, MC>::new(&program, inbox.clone(), NoHooks, address, 1, None, compiler)
+        PvmStepper::<NoHooks, MC>::new(&program, inbox.clone(), NoHooks, address, 1, None)
             .expect("PvmStepper initialisation arguments should be valid")
     }
 }

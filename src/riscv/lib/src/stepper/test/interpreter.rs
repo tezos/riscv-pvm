@@ -38,9 +38,7 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permiss
 
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
-    let compiler = Default::default();
-    let mut interpreter: TestStepper<M1M, CPE> =
-        TestStepper::new(&contents, compiler).expect("Boot failed");
+    let mut interpreter: TestStepper<M1M, CPE> = TestStepper::new(&contents).expect("Boot failed");
 
     if required_perms == Permissions::Rwx {
         interpreter.set_all_read_write_exec();

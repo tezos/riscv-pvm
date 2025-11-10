@@ -149,9 +149,16 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
 }
 
 /// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
-#[derive(Default)]
 pub struct InlineCompiler {
     jit: JIT,
+}
+
+impl Default for InlineCompiler {
+    fn default() -> Self {
+        Self {
+            jit: JIT::new().expect("InlineCompiler should instantiate its `JIT`"),
+        }
+    }
 }
 
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
@@ -184,13 +191,17 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
 /// Unsafe Rust escape hatches
 mod internal_corro {
     /// A wrapper to make a value `Send`
-    #[derive(Default)]
     pub(super) struct SendWrapper<T> {
         /// Do not use directly! Use [`Self::as_mut`] instead.
         _no_please_no: T,
     }
 
     impl<T> SendWrapper<T> {
+        /// Wrap a `T` to make it [`Send`]
+        pub(super) fn new(t: T) -> Self {
+            Self { _no_please_no: t }
+        }
+
         /// Obtain a mutable reference to the inner value.
         ///
         /// # Safety
@@ -217,10 +228,12 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     sender: Sender<CompilationRequest<Self, MC>>,
 }
 
-impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
-    fn new() -> Self {
+impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
+    fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
-        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT>>> = Default::default();
+
+        let jit_internal = JIT::new().expect("OutlineCompiler should instantiate its `JIT`");
+        let jit = Arc::new(Mutex::new(internal_corro::SendWrapper::new(jit_internal)));
 
         let compiler = Self {
             _do_not_use_this_is_for_drop_only: jit.clone(),
@@ -257,16 +270,6 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                             "Unexpected function pointer in dispatch target"
                         );
 
-                        // Safety: this function will be retrieved as a DispatchFn, rather than a
-                        // JitFn. The two function signatures are identical, apart from the first and
-                        // last parameters. These are both thin-pointers, and ignored by the JitFn.
-                        //
-                        // It's therefore safe to cast this function pointer to an identical ABI, where
-                        // this first and last parameter are thin-references to any value. This is the
-                        // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
-                        //
-                        // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                        // information on ABI compatibility.
                         dispatch.fun.store(jitfn as usize, Ordering::Release);
                     };
                 }
@@ -274,17 +277,11 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
             // because we used blocking recv with an asynchronous channel, this only fails when the
             // other end of the channel has been dropped.
             //
-            // This means the BlockBuilder has been dropped - and thus execution has stopped.
+            // This means the Compiler has been dropped - and thus execution has stopped.
             // We are therefore safe to drop the JIT.
         });
 
         compiler
-    }
-}
-
-impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
