@@ -283,14 +283,14 @@ where
         self.free_info.left_free_end.saturating_add(B::PAGES)
     }
 
-    fn clone(&self) -> Self
+    fn clone_state(&self) -> Self
     where
         M: ManagerClone,
     {
         Self {
             free_info: self.free_info.clone(),
-            left: Box::new(self.left.clone()),
-            right: Box::new(self.right.clone()),
+            left: Box::new(self.left.clone_state()),
+            right: Box::new(self.right.clone_state()),
         }
     }
 }

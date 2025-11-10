@@ -9,6 +9,7 @@ use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use perfect_derive::perfect_derive;
@@ -35,6 +36,7 @@ use crate::state_backend::Cell;
 use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
@@ -409,6 +411,25 @@ impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
+    }
+}
+
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState for Pvm<MC, CPE, M>
+where
+    MC::State<M>: CloneState,
+{
+    fn clone_state(&self) -> Self {
+        Self {
+            machine_state: self.machine_state.clone_state(),
+            reveal_request: self.reveal_request.clone_state(),
+            system_state: self.system_state.clone_state(),
+            version: self.version.clone_state(),
+            tick: self.tick.clone_state(),
+            message_counter: self.message_counter.clone_state(),
+            level: self.level.clone_state(),
+            level_is_set: self.level_is_set.clone_state(),
+            status: self.status.clone_state(),
+        }
     }
 }
 

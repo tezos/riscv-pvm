@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
@@ -14,6 +15,7 @@ use crate::state_backend::DynCells;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 
 /// Reveal request layout
@@ -67,6 +69,15 @@ impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
         Self {
             bytes: DynCells::new(REVEAL_REQUEST_MAX_SIZE),
             size: Cell::new(),
+        }
+    }
+}
+
+impl<M: ManagerClone> CloneState for RevealRequest<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            bytes: self.bytes.clone_state(),
+            size: self.size.clone_state(),
         }
     }
 }

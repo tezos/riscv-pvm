@@ -225,11 +225,11 @@ macro_rules! combined_buddy_branch {
                 self.0.count_free_end()
             }
 
-            fn clone(&self) -> Self
+            fn clone_state(&self) -> Self
             where
                 M: ManagerClone,
             {
-                $name(self.0.clone())
+                $name(self.0.clone_state())
             }
         }
     };

@@ -17,6 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
+use octez_riscv_data::clone::CloneState;
 use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
@@ -47,6 +48,7 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
@@ -1040,6 +1042,19 @@ impl<M: ManagerBase> SupervisorState<M> {
 impl<M: ManagerAlloc> Default for SupervisorState<M> {
     fn default() -> Self {
         SupervisorState::new()
+    }
+}
+
+impl<M: ManagerClone> CloneState for SupervisorState<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            tid_address: self.tid_address.clone_state(),
+            exited: self.exited,
+            exit_code: self.exit_code,
+            program: self.program.clone_state(),
+            heap: self.heap.clone_state(),
+            stack_guard: self.stack_guard.clone_state(),
+        }
     }
 }
 

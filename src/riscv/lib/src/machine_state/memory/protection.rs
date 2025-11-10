@@ -10,6 +10,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::clone::CloneState;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -22,6 +23,7 @@ use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
+use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -132,6 +134,14 @@ impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, 
     {
         PagePermissions {
             pages: boxed_from_fn(|| Cell::new()),
+        }
+    }
+}
+
+impl<const PAGES: usize, M: ManagerClone> CloneState for PagePermissions<PAGES, M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            pages: self.pages.clone_state(),
         }
     }
 }
