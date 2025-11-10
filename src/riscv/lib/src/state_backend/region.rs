@@ -18,7 +18,7 @@ pub(crate) mod tests {
 
     use crate::default::ConstDefault;
     use crate::state_backend::ProofPart;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
+    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,7 +86,7 @@ pub(crate) mod tests {
             assert_eq!(hash, tree_root_hash);
 
             // Produce a proof
-            let proof = merkle_tree_to_merkle_proof(tree);
+            let proof = merkle_tree_to_compressed_merkle_tree(tree).to_proof();
             let proof_hash = proof.root_hash();
             assert_eq!(hash, proof_hash);
 

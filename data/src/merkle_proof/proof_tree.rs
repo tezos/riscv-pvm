@@ -5,8 +5,6 @@ use bincode::enc::write::Writer;
 
 use super::tag::LeafTag;
 use super::tag::Tag;
-use super::transform::ModifyResult;
-use super::transform::impl_modify_map_collect;
 use crate::hash::Hash;
 use crate::tree::Tree;
 
@@ -77,6 +75,61 @@ pub enum MerkleProofLeaf {
     Read(Vec<u8>),
 }
 
+/// [`enum@HashState`] is associated with the state of hashing a [`MerkleProof`].
+/// We record whether the node is a leaf or an internal node, the index of its parent(
+/// see [`MerkleProof::root_hash`] for more details) and the hashes of its children
+/// if it's a node and its own hash if its a leaf.
+enum HashState {
+    Node {
+        parent_index: usize,
+        hashes: Vec<Hash>,
+    },
+    Leaf {
+        parent_index: usize,
+        hash: Hash,
+    },
+}
+
+impl HashState {
+    fn new_leaf(parent_index: usize, hash: Hash) -> Self {
+        HashState::Leaf { parent_index, hash }
+    }
+
+    fn new_node(parent_index: usize) -> Self {
+        HashState::Node {
+            parent_index,
+            hashes: vec![],
+        }
+    }
+
+    /// Push a hash to node's hash list.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the hash state is a Leaf.
+    fn push(&mut self, hash: Hash) {
+        match self {
+            HashState::Node { hashes, .. } => hashes.push(hash),
+            _ => unreachable!("A leaf node must not have children"),
+        }
+    }
+
+    fn hash(&self) -> Hash {
+        match self {
+            HashState::Node { hashes, .. } => Hash::combine_hashes(hashes),
+            HashState::Leaf { hash, .. } => *hash,
+        }
+    }
+
+    fn parent_index(&self) -> usize {
+        match self {
+            HashState::Node { parent_index, .. } | HashState::Leaf { parent_index, .. } => {
+                *parent_index
+            }
+        }
+    }
+}
+
 impl MerkleProof {
     /// Create a new Merkle proof as a read leaf.
     pub fn leaf_read(data: Vec<u8>) -> Self {
@@ -90,18 +143,42 @@ impl MerkleProof {
 
     /// Compute the root hash of the Merkle proof.
     pub fn root_hash(&self) -> Hash {
-        impl_modify_map_collect(
-            self,
-            |subtree| match subtree {
-                Tree::Node(vec) => ModifyResult::NodeContinue((), vec.iter().collect()),
-                Tree::Leaf(data) => ModifyResult::LeafStop(data),
-            },
-            |leaf| match leaf {
-                MerkleProofLeaf::Blind(hash) => *hash,
-                MerkleProofLeaf::Read(data) => Hash::hash_bytes(data.as_slice()),
-            },
-            |(), leaves| Hash::combine_hashes(leaves),
-        )
+        // Child nodes are stored in normal order in `nodes`.
+        let mut nodes: Vec<(&MerkleProof, usize)> = vec![(self, 0)];
+        // Child nodes are stored in reverse order in `hash_states`.
+        let mut hash_states: Vec<HashState> = vec![];
+
+        while let Some((node, parent_index)) = nodes.pop() {
+            match node {
+                Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
+                    hash_states.push(HashState::new_leaf(parent_index, *hash));
+                }
+                Tree::Leaf(MerkleProofLeaf::Read(data)) => {
+                    hash_states.push(HashState::new_leaf(
+                        parent_index,
+                        Hash::hash_bytes(data.as_slice()),
+                    ));
+                }
+                Tree::Node(children) => {
+                    hash_states.push(HashState::new_node(parent_index));
+                    let new_parent_index = hash_states.len() - 1;
+                    for child in children.iter() {
+                        nodes.push((child, new_parent_index));
+                    }
+                }
+            }
+        }
+
+        while hash_states.len() > 1 {
+            let hash_state = hash_states
+                .pop()
+                .expect("hash_states can't be empty at this point");
+            // Note that child hashes are added in normal order to `hash_states`.
+            hash_states[hash_state.parent_index()].push(hash_state.hash());
+        }
+
+        // Hash states is not empty at this point.
+        hash_states[0].hash()
     }
 }
 
@@ -118,10 +195,7 @@ impl From<&MerkleProof> for Tag {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn get_bincode_config() -> bincode::config::Configuration {
-        bincode::config::standard()
-    }
+    use crate::serialisation::bincode_default_config;
 
     #[test]
     fn merkle_proofs_can_be_encoded() {
@@ -137,7 +211,7 @@ mod tests {
             ),
         ];
         for merkle_proof in merkle_proofs.iter() {
-            bincode::encode_to_vec(merkle_proof, get_bincode_config())
+            bincode::encode_to_vec(merkle_proof, bincode_default_config())
                 .expect("Failed to encode the merkle proof");
         }
     }
@@ -152,5 +226,34 @@ mod tests {
             .to_vec(),
         );
         let _ = node.root_hash();
+    }
+
+    #[test]
+    fn child_node_hashes_are_pushed_back_in_normal_order() {
+        let merkle_proof = Tree::Node(
+            [
+                Tree::Node(
+                    [
+                        MerkleProof::leaf_read([1, 2, 3].to_vec()),
+                        MerkleProof::leaf_blind(Hash::hash_bytes(&[4, 5, 6])),
+                    ]
+                    .to_vec(),
+                ),
+                MerkleProof::leaf_blind(Hash::hash_bytes(&[7, 8, 9])),
+            ]
+            .to_vec(),
+        );
+
+        let calculated_root_hash = merkle_proof.root_hash();
+
+        let mut first_child_node = HashState::new_node(0);
+        first_child_node.push(Hash::hash_bytes(&[1, 2, 3]));
+        first_child_node.push(Hash::hash_bytes(&[4, 5, 6]));
+
+        let mut root_node = HashState::new_node(0);
+        root_node.push(first_child_node.hash());
+        root_node.push(Hash::hash_bytes(&[7, 8, 9]));
+
+        assert_eq!(root_node.hash(), calculated_root_hash);
     }
 }

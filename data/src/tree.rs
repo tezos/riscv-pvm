@@ -8,10 +8,3 @@ pub enum Tree<A> {
     Node(Vec<Self>),
     Leaf(A),
 }
-
-/// Used in [`crate::merkle_proof::transform::impl_modify_map_collect`]
-impl<D> From<D> for Tree<D> {
-    fn from(value: D) -> Self {
-        Tree::Leaf(value)
-    }
-}

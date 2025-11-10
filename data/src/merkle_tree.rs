@@ -8,6 +8,19 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
 
+/// Struct which holds data for the leafs of a [`MerkleTree`].
+#[derive(Debug, Clone)]
+pub struct MerkleTreeLeafData {
+    /// The hash of the leaf.
+    pub hash: Hash,
+
+    /// Whether the leaf was accessed.
+    pub access_info: bool,
+
+    /// The data associated with the leaf node.
+    pub data: Vec<u8>,
+}
+
 /// A variable-width Merkle tree with access metadata for leaves.
 ///
 /// Values of this type are produced by the proof-generating backend to capture
@@ -15,7 +28,7 @@ use crate::hash::Hash;
 /// which hold data that was used in a particular evaluation step.
 #[derive(Debug, Clone)]
 pub enum MerkleTree {
-    Leaf(Hash, bool, Vec<u8>),
+    Leaf(MerkleTreeLeafData),
     Node(Hash, Vec<Self>),
 }
 
@@ -38,14 +51,18 @@ impl MerkleTree {
     pub fn root_hash(&self) -> Hash {
         match self {
             Self::Node(hash, _) => *hash,
-            Self::Leaf(hash, _, _) => *hash,
+            Self::Leaf(MerkleTreeLeafData { hash, .. }) => *hash,
         }
     }
 
     /// Creates a merkle tree which is a single leaf
     pub fn make_merkle_leaf(data: Vec<u8>, access_info: bool) -> Self {
         let hash = Hash::hash_bytes(&data);
-        MerkleTree::Leaf(hash, access_info, data)
+        MerkleTree::Leaf(MerkleTreeLeafData {
+            hash,
+            access_info,
+            data,
+        })
     }
 
     /// Takes a list of children nodes and creates a
@@ -65,7 +82,9 @@ impl MerkleTree {
 
         while let Some(node) = deque.pop_front() {
             let is_valid_hash = match node {
-                Self::Leaf(hash, _, data) => &Hash::hash_bytes(data) == hash,
+                Self::Leaf(MerkleTreeLeafData { hash, data, .. }) => {
+                    &Hash::hash_bytes(data) == hash
+                }
                 Self::Node(hash, children) => {
                     let children_hashes: Vec<Hash> = children
                         .iter()
