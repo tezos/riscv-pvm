@@ -69,7 +69,6 @@
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
-pub mod clone_layout;
 mod commitment_layout;
 mod elems;
 mod layout;
@@ -89,7 +88,6 @@ use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-pub use clone_layout::*;
 pub use commitment_layout::*;
 pub use elems::*;
 pub use layout::*;
