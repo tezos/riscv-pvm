@@ -34,7 +34,6 @@ use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -390,11 +389,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> Pvm<MC, CPE, Owned> {
     pub(crate) fn empty(compiler: CPE::Compiler) -> Self {
         Self::new(compiler)
     }
-
-    pub(crate) fn hash(&self) -> Result<Hash, HashError> {
-        let refs = self.struct_ref::<FnManagerIdent>();
-        PvmLayout::<MC>::state_hash(refs)
-    }
 }
 
 impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
@@ -408,8 +402,7 @@ impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
         let refs = self.struct_ref::<FnManagerIdent>();
         let merkle_proof = PvmLayout::<MC>::to_merkle_tree(refs)?.to_merkle_proof();
 
-        let refs = self.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC>::state_hash(refs)?;
+        let final_hash = self.hash_state();
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)

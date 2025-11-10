@@ -15,6 +15,8 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
+use octez_riscv_data::hash::HashWriter;
+use octez_riscv_data::hash::build_custom_merkle_hash;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -34,6 +36,9 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
 use crate::state_backend::RegionProj;
+use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
+use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
+use crate::state_backend::proof_backend::merkle::chunks_to_writer;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
@@ -554,7 +559,22 @@ impl<M: ManagerClone> CloneState for DynCells<M> {
 
 impl<M: ManagerSerialise> HashState for DynCells<M> {
     fn hash_state(&self) -> Hash {
-        Hash::blake3_hash(self).expect("TODO")
+        let length = self.len();
+
+        let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
+        chunks_to_writer::<_, _>(&mut writer, length, |address| {
+            // SAFETY: The chunk writer will only request data within the bounds that we specified.
+            // Given we provided the correct length, this is safe.
+            unsafe { self.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) }
+        })
+        .expect("Hashing elements should not fail");
+        let hashes = writer.finalise();
+        let pages_node = build_custom_merkle_hash(MERKLE_ARITY, hashes)
+            .expect("Building merkle hash should not fail");
+
+        let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
+
+        Hash::combine([length_node, pages_node])
     }
 }
 

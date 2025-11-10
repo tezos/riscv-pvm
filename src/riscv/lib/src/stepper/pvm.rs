@@ -10,6 +10,7 @@ use std::path::Path;
 
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -111,7 +112,7 @@ impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Owned>> PvmStepper<H, MC, Owned
 
     /// Obtain the root hash for the PVM state.
     pub fn hash(&self) -> Hash {
-        self.pvm.hash().expect("PVM state hash computation failed")
+        self.pvm.hash_state()
     }
 }
 
