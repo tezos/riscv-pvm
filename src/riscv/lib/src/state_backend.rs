@@ -255,14 +255,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
 }
 
 /// Manager with capabilities that require both read and write
-pub trait ManagerReadWrite: ManagerRead + ManagerWrite {
-    /// Update the element in the region and return the previous value.
-    fn region_replace<E: Copy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) -> E;
-}
+pub trait ManagerReadWrite: ManagerRead + ManagerWrite {}
 
 /// Manager with the ability to serialise regions
 pub trait ManagerSerialise: ManagerRead {

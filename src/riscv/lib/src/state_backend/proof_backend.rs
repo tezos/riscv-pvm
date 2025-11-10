@@ -121,17 +121,7 @@ impl<M: ManagerRead> ManagerWrite for ProofGen<M> {
 
 /// Implementation of [`ManagerReadWrite`] which wraps another manager and
 /// additionally records read and written locations.
-impl<M: ManagerRead> ManagerReadWrite for ProofGen<M> {
-    fn region_replace<E: Copy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) -> E {
-        let old = Self::region_read(region, index);
-        Self::region_write(region, index, value);
-        old
-    }
-}
+impl<M: ManagerRead> ManagerReadWrite for ProofGen<M> {}
 
 /// Implementation of [`ManagerSerialise`] which wraps another manager and
 /// serialises data as recorded by the `ProofGen` backend, reconstructed
@@ -473,15 +463,6 @@ mod tests {
             prop_assert_eq!(value, value_after);
             prop_assert!(region.region_ref().get_access_info());
 
-            // Replace
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<u64, CELLS_SIZE, Ref<'_, Owned>> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, ProofGen<Ref<'_, Owned>>> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            let value = region.replace(i, value_after);
-            prop_assert_eq!(value, value_before);
-            prop_assert!(region.region_ref().get_access_info());
-
             let data_before = [value_before; CELLS_SIZE];
             let data_after = [value_after; CELLS_SIZE];
 
@@ -680,19 +661,5 @@ mod tests {
                 }
             }
         });
-    }
-
-    #[test]
-    fn test_proof_gen_region_replace() {
-        let region: ProofRegion<u64, 1, Owned> = ProofRegion::bind([0u64; 1]);
-        let mut cells: Cells<u64, 1, ProofGen<Owned>> = Cells::bind(region);
-
-        cells.write(0, 13);
-
-        let old = cells.replace(0, 37);
-        assert_eq!(old, 13);
-
-        let value = cells.read(0);
-        assert_eq!(value, 37);
     }
 }

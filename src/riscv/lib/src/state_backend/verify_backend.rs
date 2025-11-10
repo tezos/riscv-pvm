@@ -190,17 +190,7 @@ impl ManagerWrite for Verifier {
     }
 }
 
-impl ManagerReadWrite for Verifier {
-    fn region_replace<E: Copy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) -> E {
-        let old = Self::region_read(region, index);
-        Self::region_write(region, index, value);
-        old
-    }
-}
+impl ManagerReadWrite for Verifier {}
 
 impl ManagerClone for Verifier {
     fn clone_region<E: Clone + 'static, const LEN: usize>(
