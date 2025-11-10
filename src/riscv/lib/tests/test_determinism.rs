@@ -7,10 +7,8 @@ use std::ops::Bound;
 
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
-use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::CloneLayout;
 use octez_riscv::state_backend::RefOwnedAlloc;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -61,7 +59,6 @@ fn run_steps_ladder<MC, F>(
     expected_hash: hash::Hash,
 ) where
     MC: MemoryConfig,
-    PvmLayout<MC>: CloneLayout,
     for<'a> RefOwnedAlloc<'a, PvmLayout<MC>>: PartialEq,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {
@@ -99,8 +96,7 @@ fn run_steps_ladder<MC, F>(
             "Stepper states have diverged after running {steps} steps"
         );
 
-        let compiler = InterpretedCompiler;
-        stepper_lhs.rebind_via_clone(compiler);
+        stepper_lhs.rebind_via_clone();
     }
 
     assert_eq_struct_wrapper::<MC>(stepper_lhs.struct_ref(), expected_refs);

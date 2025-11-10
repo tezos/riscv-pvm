@@ -414,10 +414,7 @@ impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, ProofGen<Ref<'a, Owned>>>>
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState for Pvm<MC, CPE, M>
-where
-    MC::State<M>: CloneState,
-{
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState for Pvm<MC, CPE, M> {
     fn clone_state(&self) -> Self {
         Self {
             machine_state: self.machine_state.clone_state(),
