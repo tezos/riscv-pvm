@@ -22,7 +22,6 @@ use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
@@ -83,12 +82,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: Layout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-            }
-
-            impl<B: CommitmentLayout> CommitmentLayout for [<$name Layout>]<B> {
-                fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-                    <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::state_hash(state.0)
-                }
             }
 
             impl<B: ProofLayout> ProofLayout for [<$name Layout>]<B>

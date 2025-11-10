@@ -69,7 +69,6 @@
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
-mod commitment_layout;
 mod elems;
 mod layout;
 pub mod owned_backend;
@@ -88,7 +87,6 @@ use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-pub use commitment_layout::*;
 pub use elems::*;
 pub use layout::*;
 pub use proof_layout::*;

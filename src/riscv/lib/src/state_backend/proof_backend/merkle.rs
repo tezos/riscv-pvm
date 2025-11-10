@@ -195,7 +195,7 @@ impl AccessInfoAggregatable for () {
 /// Helper function which allows iterating over chunks of a dynamic array
 /// and writing them to a writer. The last chunk may be smaller than the
 /// Merkle leaf size. The implementations of [`HashState`] and
-/// [`ProofLayout`] for both use it, ensuring consistency between the two.
+/// [`ProofLayout`] both use it, ensuring consistency between the two.
 ///
 /// [`HashState`]: octez_riscv_data::hash::HashState
 /// [`ProofLayout`]: crate::state_backend::proof_layout::ProofLayout

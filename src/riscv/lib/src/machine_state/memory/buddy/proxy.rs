@@ -16,12 +16,9 @@ use super::leaf::BuddyLeafLayout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::CommitmentLayout;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
@@ -39,15 +36,6 @@ where
     (): BuddyLayoutMatch<PAGES>,
 {
     type Allocated<M: ManagerBase> = <PickLayout<PAGES> as Layout>::Allocated<M>;
-}
-
-impl<const PAGES: usize> CommitmentLayout for BuddyLayoutProxy<PAGES>
-where
-    (): BuddyLayoutMatch<PAGES>,
-{
-    fn state_hash<M: ManagerSerialise>(state: AllocatedOf<Self, M>) -> Result<Hash, HashError> {
-        <PickLayout<PAGES> as CommitmentLayout>::state_hash(state)
-    }
 }
 
 impl<const PAGES: usize> ProofLayout for BuddyLayoutProxy<PAGES>
