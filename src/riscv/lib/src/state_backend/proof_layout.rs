@@ -861,9 +861,8 @@ mod tests {
             let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
             let verifier_state =
-                deserialise_owned::deserialise::<AllocatedOf<TestLayout, Verify>, _>(
+                deserialise_owned::deserialise::<AllocatedOf<TestLayout, Verify>>(
                     ProofTree::Present(&merkle_proof),
-                    (),
                 ).unwrap();
 
             // The first component of the state was present in the proof, can be
@@ -928,8 +927,7 @@ mod tests {
         // the right things.
         let (mut verify_cell, out_proof) = deserialise_owned::deserialise::<
             AllocatedOf<DynArray, Verify>,
-            _,
-        >(ProofTree::Present(&proof_tree), ())
+        >(ProofTree::Present(&proof_tree))
         .unwrap();
 
         let OwnedProofPart::Present(out_proof) = out_proof else {

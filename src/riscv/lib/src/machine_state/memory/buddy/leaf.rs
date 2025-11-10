@@ -73,7 +73,7 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
     }
 
     fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
-        let result = Cell::from_proof(proof, ())?;
+        let result = Cell::from_proof(proof)?;
         let result = result.map(|set| BuddyLeaf { set });
         Ok(result)
     }

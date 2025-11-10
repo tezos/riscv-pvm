@@ -229,15 +229,15 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for SignalActions<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+impl FromProof for SignalActions<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, actions) = proof.next_branch(())?;
-        let (proof, flags) = proof.next_branch(())?;
-        let (proof, masks) = proof.next_branch(())?;
-        let (proof, restorer) = proof.next_branch(())?;
-        let (proof, thread_mask) = proof.next_branch(())?;
+        let (proof, actions) = proof.next_branch()?;
+        let (proof, flags) = proof.next_branch()?;
+        let (proof, masks) = proof.next_branch()?;
+        let (proof, restorer) = proof.next_branch()?;
+        let (proof, thread_mask) = proof.next_branch()?;
 
         proof.done(SignalActions::<Verify> {
             actions,

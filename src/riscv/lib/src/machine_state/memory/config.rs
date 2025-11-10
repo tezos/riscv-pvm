@@ -110,10 +110,10 @@ where
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>> {
         let proof = proof.into_node()?;
 
-        let (proof, data) = proof.next_branch(())?;
-        let (proof, readable_pages) = proof.next_branch(())?;
-        let (proof, writable_pages) = proof.next_branch(())?;
-        let (proof, executable_pages) = proof.next_branch(())?;
+        let (proof, data) = proof.next_branch()?;
+        let (proof, readable_pages) = proof.next_branch()?;
+        let (proof, writable_pages) = proof.next_branch()?;
+        let (proof, executable_pages) = proof.next_branch()?;
         let (proof, allocated_pages) =
             proof.next_branch_with(<BuddyLayoutProxy<PAGES>>::buddy_from_proof)?;
 

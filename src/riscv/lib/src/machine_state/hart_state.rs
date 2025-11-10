@@ -142,15 +142,15 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for HartState<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+impl FromProof for HartState<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, xregisters) = proof.next_branch(())?;
-        let (proof, fregisters) = proof.next_branch(())?;
-        let (proof, csregisters) = proof.next_branch(())?;
-        let (proof, pc) = proof.next_branch(())?;
-        let (proof, reservation_set) = proof.next_branch(())?;
+        let (proof, xregisters) = proof.next_branch()?;
+        let (proof, fregisters) = proof.next_branch()?;
+        let (proof, csregisters) = proof.next_branch()?;
+        let (proof, pc) = proof.next_branch()?;
+        let (proof, reservation_set) = proof.next_branch()?;
 
         proof.done(HartState {
             xregisters,

@@ -1083,14 +1083,14 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for SupervisorState<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+impl FromProof for SupervisorState<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, tid_address) = proof.next_branch(())?;
-        let (proof, program) = proof.next_branch(())?;
-        let (proof, heap) = proof.next_branch(())?;
-        let (proof, stack_guard) = proof.next_branch(())?;
+        let (proof, tid_address) = proof.next_branch()?;
+        let (proof, program) = proof.next_branch()?;
+        let (proof, heap) = proof.next_branch()?;
+        let (proof, stack_guard) = proof.next_branch()?;
 
         proof.done(Self {
             tid_address,

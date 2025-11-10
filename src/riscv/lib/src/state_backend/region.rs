@@ -194,12 +194,11 @@ where
     }
 }
 
-impl<E: Decode<()>, Arg> FromProof<Arg> for Cell<E, Verify> {
+impl<E: Decode<()>> FromProof for Cell<E, Verify> {
     fn from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
-        arg: Arg,
     ) -> merkle_proof::SuspendedResult<D, Self> {
-        let result = Cells::from_proof(proof, arg)?;
+        let result = Cells::from_proof(proof)?;
         let result = result.map(|region| Cell { region });
         Ok(result)
     }
@@ -409,10 +408,9 @@ impl<T: Encode, const LEN: usize> Foldable<MerkleTreeFold> for Cells<T, LEN, Pro
     }
 }
 
-impl<E: Decode<()>, const LEN: usize, Arg> FromProof<Arg> for Cells<E, LEN, Verify> {
+impl<E: Decode<()>, const LEN: usize> FromProof for Cells<E, LEN, Verify> {
     fn from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
-        _arg: Arg,
     ) -> merkle_proof::SuspendedResult<D, Self> {
         let result = proof.into_leaf::<[E; LEN]>()?;
         let result = result.map(|region| {
@@ -641,10 +639,9 @@ impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
     }
 }
 
-impl<Arg> FromProof<Arg> for DynCells<Verify> {
+impl FromProof for DynCells<Verify> {
     fn from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
-        _arg: Arg,
     ) -> merkle_proof::SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 

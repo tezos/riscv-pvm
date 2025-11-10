@@ -146,9 +146,9 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for ReservationSet<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
-        let result = Cell::from_proof(proof, ())?;
+impl FromProof for ReservationSet<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+        let result = Cell::from_proof(proof)?;
         let result = result.map(|start_addr| Self { start_addr });
         Ok(result)
     }
