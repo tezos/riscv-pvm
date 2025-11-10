@@ -4,6 +4,9 @@
 
 //! Simplified [`BuddyLayout`] selection using const-generics
 
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
+
 use super::BuddyLayout;
 use super::branch_combinations::BuddyBranch1KiLayout;
 use super::branch_combinations::BuddyBranch4Layout;
@@ -29,8 +32,6 @@ use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::VerifierAllocResult;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser;
-use crate::storage::Hash;
-use crate::storage::HashError;
 
 /// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
 pub struct BuddyLayoutProxy<const PAGES: usize>;

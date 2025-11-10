@@ -14,12 +14,11 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-pub use octez_riscv_data::serialisation as binary;
+use octez_riscv_data::hash::DIGEST_SIZE;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
+use octez_riscv_data::serialisation;
 use thiserror::Error;
-
-pub use crate::state_backend::hash::DIGEST_SIZE;
-pub use crate::state_backend::hash::Hash;
-pub use crate::state_backend::hash::HashError;
 
 const CHUNK_SIZE: usize = 4096;
 
@@ -144,7 +143,7 @@ impl Repo {
         }
 
         // A commit contains the list of all chunks needed to reconstruct `data`.
-        let commit_bytes = binary::serialise(&commit)?;
+        let commit_bytes = serialisation::serialise(&commit)?;
         self.backend.store(&commit_bytes)
     }
 
@@ -152,19 +151,19 @@ impl Repo {
     pub fn commit_serialised(&mut self, subject: &impl Encode) -> Result<Hash, StorageError> {
         let chunk_hashes = {
             let mut writer = chunked_io::ChunkWriter::new(&mut self.backend);
-            binary::serialise_into(subject, &mut writer)?;
+            serialisation::serialise_into(subject, &mut writer)?;
             writer.finalise()?
         };
 
         // A commit contains the list of all chunks needed to reconstruct the underlying data.
-        let commit_bytes = binary::serialise(&chunk_hashes)?;
+        let commit_bytes = serialisation::serialise(&chunk_hashes)?;
         self.backend.store(&commit_bytes)
     }
 
     /// Checkout the bytes committed under `id`, if the commit exists.
     pub fn checkout(&self, id: &Hash) -> Result<Vec<u8>, StorageError> {
         let bytes = self.backend.load(id)?;
-        let commit: Vec<Hash> = binary::deserialise(&bytes)?;
+        let commit: Vec<Hash> = serialisation::deserialise(&bytes)?;
         let mut bytes = Vec::new();
         for hash in commit {
             let mut chunk = self.backend.load(&hash).map_err(|e| {
@@ -182,7 +181,7 @@ impl Repo {
     /// Checkout something deserialisable from the store.
     pub fn checkout_serialised<S: Decode<()>>(&self, id: &Hash) -> Result<S, StorageError> {
         let mut reader = chunked_io::ChunkedReader::new(&self.backend, id)?;
-        Ok(binary::deserialise_from(&mut reader)?)
+        Ok(serialisation::deserialise_from(&mut reader)?)
     }
 
     /// A snapshot is a new repo to which only `id` has been committed.
@@ -195,7 +194,7 @@ impl Repo {
             return Err(StorageError::InvalidRepo);
         };
         let bytes = self.backend.load(id)?;
-        let commit: Vec<Hash> = binary::deserialise(&bytes)?;
+        let commit: Vec<Hash> = serialisation::deserialise(&bytes)?;
         for chunk in commit {
             self.backend.copy(&chunk, path)?;
         }

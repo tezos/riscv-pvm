@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use bincode::Decode;
+use octez_riscv_data::serialisation;
 
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
@@ -22,7 +23,6 @@ use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::state_backend::proof_backend::tree::Tree;
 use crate::state_backend::verify_backend::Verifier;
-use crate::storage::binary;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
@@ -50,7 +50,7 @@ impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
     fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>> {
         let result = self
             .deserialise_as_leaf()?
-            .map_present_fallible(|data| binary::deserialise::<T>(data.as_ref()))?;
+            .map_present_fallible(|data| serialisation::deserialise::<T>(data.as_ref()))?;
         Ok(OwnedParserComb::new(result))
     }
 

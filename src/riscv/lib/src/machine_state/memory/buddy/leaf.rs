@@ -10,6 +10,8 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -38,8 +40,6 @@ use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
-use crate::storage::Hash;
-use crate::storage::HashError;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafLayout<const PAGES: u64>;

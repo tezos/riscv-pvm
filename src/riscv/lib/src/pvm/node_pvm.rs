@@ -6,6 +6,7 @@
 use std::ops::Bound;
 use std::path::Path;
 
+use octez_riscv_data::hash::Hash;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
 
@@ -29,7 +30,6 @@ use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::Verifier;
 use crate::storage;
-use crate::storage::Hash;
 use crate::storage::Repo;
 
 #[derive(Error, Debug)]

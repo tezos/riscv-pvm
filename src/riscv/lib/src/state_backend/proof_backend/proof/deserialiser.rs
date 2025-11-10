@@ -14,10 +14,10 @@
 //! [`ProofTree`]: crate::state_backend::ProofTree
 
 use bincode::Decode;
+use octez_riscv_data::hash::Hash;
 
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::hash::Hash;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Result type used when deserialising a proof - including both the layout and contents of the
@@ -157,6 +157,8 @@ pub trait Suspended {
 #[cfg(test)]
 mod tests {
     use bincode::Decode;
+    use octez_riscv_data::hash::DIGEST_SIZE;
+    use octez_riscv_data::hash::Hash;
 
     use super::Deserialiser;
     use super::DeserialiserNode;
@@ -174,8 +176,6 @@ mod tests {
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamInput;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamParserComb;
-    use crate::storage::DIGEST_SIZE;
-    use crate::storage::Hash;
 
     fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
         proof: D,

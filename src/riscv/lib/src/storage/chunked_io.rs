@@ -7,11 +7,12 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::Cursor;
 
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::serialisation::deserialise;
+
 use super::CHUNK_SIZE;
-use super::Hash;
 use super::StorageError;
 use super::Store;
-use super::binary;
 
 /// Simple writer that stores data in chunks of size [`CHUNK_SIZE`]
 pub struct ChunkWriter<'a> {
@@ -87,7 +88,7 @@ impl<'a> ChunkedReader<'a> {
     /// Create a new reader that pulls the chunks from the given [`Store`].
     pub fn new(store: &'a Store, hash: &Hash) -> Result<Self, StorageError> {
         let raw_hashes = store.load(hash)?;
-        let hashes = binary::deserialise(raw_hashes.as_slice())?;
+        let hashes = deserialise(raw_hashes.as_slice())?;
         Ok(Self {
             store,
             hashes,

@@ -12,10 +12,10 @@ use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::CloneLayout;
 use octez_riscv::state_backend::RefOwnedAlloc;
-use octez_riscv::state_backend::hash;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::hash;
 use octez_riscv_test_utils::*;
 
 #[test]

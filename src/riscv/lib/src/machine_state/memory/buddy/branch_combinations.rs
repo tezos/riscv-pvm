@@ -13,6 +13,8 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashError;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -39,8 +41,6 @@ use crate::state_backend::RefProofGenOwnedAlloc;
 use crate::state_backend::RefVerifierAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
 use crate::state_backend::proof_backend::proof::deserialiser::Deserialiser;
-use crate::storage::Hash;
-use crate::storage::HashError;
 
 /// Generate a new combined Buddy branch.
 macro_rules! combined_buddy_branch {

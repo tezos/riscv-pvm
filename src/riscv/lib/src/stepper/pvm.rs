@@ -8,6 +8,7 @@ mod reveals;
 use std::ops::Bound;
 use std::path::Path;
 
+use octez_riscv_data::hash::Hash;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -39,7 +40,6 @@ use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
 use crate::state_backend::clone_layout::CloneLayout;
-use crate::state_backend::hash::Hash;
 use crate::state_backend::owned_backend::Owned;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::proof::Proof;
