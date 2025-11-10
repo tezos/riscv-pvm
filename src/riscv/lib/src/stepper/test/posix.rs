@@ -12,7 +12,8 @@ use crate::machine_state::registers::a7;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Reason for interrupting execution
 pub enum BreakReason {
@@ -35,7 +36,7 @@ impl<M: ManagerBase> PosixState<M> {
         machine: &mut MachineState<MC, CPE, M>,
     ) -> ControlFlow<BreakReason>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let handle_exit = |code| ControlFlow::Break(BreakReason::Exit(code));
 

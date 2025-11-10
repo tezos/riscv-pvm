@@ -10,7 +10,8 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Trait for comparison operations on **XValues** used in the instruction builder context `I`.
 pub trait Comparable<I: ?Sized> {
@@ -21,7 +22,9 @@ pub trait Comparable<I: ?Sized> {
     fn compare(self, other: Self, predicate: Predicate, icb: &mut I) -> Self::Result;
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>> for XValue {
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> Comparable<MachineCoreState<MC, M>>
+    for XValue
+{
     type Result = bool;
 
     #[inline(always)]
@@ -39,7 +42,9 @@ impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>> 
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> Comparable<MachineCoreState<MC, M>> for XValue32 {
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> Comparable<MachineCoreState<MC, M>>
+    for XValue32
+{
     type Result = bool;
 
     #[inline(always)]

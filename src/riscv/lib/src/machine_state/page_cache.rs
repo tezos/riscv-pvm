@@ -45,7 +45,7 @@ use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerWrite;
 
 /// Per page, we store exactly the number of instruction halfwords we could fetch from that page's
 /// memory.
@@ -89,7 +89,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
     /// Populate a page with instruction and dispatch information, if the page has R+X permissions only.
     fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Invalidate a range of pages, usually due to the corresponding memory becoming write-able,
     /// or no longer executable.
@@ -121,7 +121,7 @@ impl<CPE> CodePage<'_, CPE> {
     where
         CPE: CodePageEntry<MC, M>,
         MC: MemoryConfig,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // SAFETY: the compiler remains the same for the lifetime of the page this code-page
         // references
@@ -138,7 +138,7 @@ fn run_code_page_interpreted<I, MC, M>(
 where
     I: AsRef<Instruction>,
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let mut result = StepManyResult::ZERO;
 

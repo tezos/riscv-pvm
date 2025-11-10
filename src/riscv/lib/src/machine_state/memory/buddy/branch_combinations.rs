@@ -29,8 +29,8 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerSerialise;
+use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
@@ -185,21 +185,21 @@ macro_rules! combined_buddy_branch {
 
             fn allocate(&mut self, pages: u64) -> Option<u64>
             where
-                M: ManagerReadWrite,
+                M: ManagerRead + ManagerWrite,
             {
                 self.0.allocate(pages)
             }
 
             fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
             where
-                M: ManagerReadWrite,
+                M: ManagerRead + ManagerWrite,
             {
                 self.0.allocate_fixed(idx, pages, replace)
             }
 
             fn deallocate(&mut self, idx: u64, pages: u64)
             where
-                M: ManagerReadWrite,
+                M: ManagerRead + ManagerWrite,
             {
                 self.0.deallocate(idx, pages)
             }

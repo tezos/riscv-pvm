@@ -13,7 +13,7 @@ use crate::state_backend as backend;
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerReadWrite,
+    M: backend::ManagerRead + backend::ManagerWrite,
 {
     /// `C.EBREAK` compressed instruction
     ///

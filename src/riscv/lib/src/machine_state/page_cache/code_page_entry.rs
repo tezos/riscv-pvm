@@ -17,7 +17,8 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 /// Functionality required to dispatch entrypoints in a code page.
 ///
@@ -51,5 +52,5 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 }

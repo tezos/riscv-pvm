@@ -301,7 +301,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
     #[inline]
     pub fn replace(&mut self, reg: CSRegister, value: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let old = self.read(reg);
         self.write(reg, value);
@@ -312,7 +312,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
     #[inline]
     pub fn set_bits(&mut self, reg: CSRegister, bits: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let old_value = self.read(reg);
         let new_value = old_value | bits;
@@ -324,7 +324,7 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
     #[inline]
     pub fn clear_bits(&mut self, reg: CSRegister, bits: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let old_value = self.read(reg);
         let new_value = old_value & !bits;

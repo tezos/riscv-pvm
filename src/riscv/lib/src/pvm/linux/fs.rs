@@ -10,7 +10,8 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
     /// Handle the `fstatat` system call. All access to the file system is denied.
@@ -39,7 +40,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See: <https://www.man7.org/linux/man-pages/man3/openat.3p.html>
     pub(super) fn handle_openat(&mut self) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         Err(Error::Access)
     }
@@ -49,7 +50,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See <https://man7.org/linux/man-pages/man2/close.2.html>
     pub(super) fn handle_close(&self) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // None of the file descriptors we allow (stdout/stderr) can sensibly be closed.
         Err(Error::Access)
@@ -60,7 +61,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See <https://man7.org/linux/man-pages/man2/read.2.html>
     pub(super) fn handle_read(&self, length: u64) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         if length == 0 {
             // If the length is zero then POSIX allows returning zero without reading or checking
@@ -76,7 +77,7 @@ impl<M: ManagerBase> SupervisorState<M> {
     /// See: <https://man7.org/linux/man-pages/man2/readlink.2.html>
     pub(super) fn handle_readlinkat(&mut self) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         Err(Error::Access)
     }
@@ -92,7 +93,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         const CWD: &[u8] = c"/".to_bytes_with_nul();
 

@@ -149,7 +149,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         compiler: CPE::Compiler,
     ) -> Self
     where
-        M::ManagerRoot: state_backend::ManagerReadWrite,
+        M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         Self {
             machine_state: machine_state::MachineState::bind(space.machine_state, compiler),
@@ -194,7 +194,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Reset the PVM.
     pub fn reset(&mut self)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.machine_state.reset();
         self.version.write(INITIAL_VERSION);
@@ -208,7 +208,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Used for testing, corrupt the state so the following proofs will be incorrect.
     pub fn insert_failure(&mut self)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         // We want to just slightly modify the state without interfering with normal execution.
         let csregs = &mut self.machine_state.core.hart.csregisters;
@@ -221,7 +221,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Perform one evaluation step.
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.eval_max(hooks, Bound::Included(1));
     }
@@ -242,7 +242,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// but a page fault is not)
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         // Do nothing if step_bounds is less than 1
         if !less_than_bound(0, step_bounds) {
@@ -276,7 +276,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Provide input. Returns `false` if the machine state is not expecting input.
     pub(crate) fn provide_input(&mut self, input: PvmInput) -> bool
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         // TODO RV-615: Remove `as u32` conversion
         match input {
@@ -293,7 +293,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// expecting a message.
     pub(crate) fn provide_inbox_message(&mut self, level: u32, counter: u32, payload: &[u8]) -> bool
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         if !tezos::provide_input(
             &mut self.status,
@@ -315,7 +315,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Returns `false` if the machine is not expecting a reveal.
     pub(crate) fn provide_reveal_response(&mut self, reveal_data: &[u8]) -> bool
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         if !tezos::provide_reveal_response(
             &mut self.status,
@@ -339,7 +339,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     /// Provide a reveal error response to the PVM
     pub fn provide_reveal_error_response(&mut self)
     where
-        M: state_backend::ManagerReadWrite,
+        M: state_backend::ManagerRead + state_backend::ManagerWrite,
     {
         self.machine_state
             .core
@@ -446,7 +446,7 @@ pub(crate) fn handle_system_call<MC, CPE, M>(
 where
     MC: MemoryConfig,
     CPE: CodePageEntry<MC, M>,
-    M: state_backend::ManagerReadWrite,
+    M: state_backend::ManagerRead + state_backend::ManagerWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
@@ -493,7 +493,7 @@ mod tests {
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
         where
-            M: state_backend::ManagerReadWrite,
+            M: state_backend::ManagerRead + state_backend::ManagerWrite,
         {
             handle_system_call(
                 &mut self.machine_state,

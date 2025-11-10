@@ -98,7 +98,7 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
     /// Check wether the `addr` is within the reservation set
     pub fn test_and_unset(&mut self, addr: u64) -> bool
     where
-        M: backend::ManagerReadWrite,
+        M: backend::ManagerRead + backend::ManagerWrite,
     {
         let start_addr = self.read();
         // Regardless of success or failure, executing an SC.x instruction

@@ -19,7 +19,6 @@ use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
 use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
@@ -58,7 +57,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     pub(crate) fn set_all_readable_writeable(&mut self, listener: impl MemoryGovernanceListener)
     where
         B: Buddy<M>,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let length =
             NonZeroUsize::new(TOTAL_BYTES).expect("`TOTAL_BYTES` must be greater than zero");
@@ -179,7 +178,7 @@ where
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -201,7 +200,7 @@ where
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let Some(values_len) = NonZeroUsize::new(values.len()) else {
             // zero-sized writes always valid
@@ -307,7 +306,7 @@ where
         length: NonZeroUsize,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
@@ -328,7 +327,7 @@ where
         allow_replace: bool,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // The interface works on usize at the moment, however, going forward we'll convert all
         // length types to u64 to avoid machine-specific behavior for lengths.
@@ -365,7 +364,7 @@ where
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         // Mark the page range as occupied
         let address = self.allocate_pages(address_hint, length, allow_replace)?;

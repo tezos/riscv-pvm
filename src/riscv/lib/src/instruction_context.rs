@@ -33,7 +33,8 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 use crate::state_context::StateContext;
 
 /// Type of function that may be used to lower [`Instructions`] to IR.
@@ -221,7 +222,7 @@ where
     fn csr_write(&mut self, reg: CSRegister, value: Self::XValue);
 }
 
-impl<MC: MemoryConfig, M: ManagerReadWrite> ICB for MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<MC, M> {
     type XValue = XValue;
 
     type FValue = FValue;

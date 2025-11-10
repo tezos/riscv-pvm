@@ -44,7 +44,7 @@ use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
 use crate::state_backend::Cell;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
 /// Write the SBI error code as the return value.
@@ -90,7 +90,7 @@ pub fn provide_input<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     // This method should only do something when we're waiting for input.
     match status.read() {
@@ -139,7 +139,7 @@ pub fn provide_reveal_response<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     // This method should only do something when we're waiting for reveal.
     if status.read() != PvmStatus::WaitingForReveal {
@@ -184,7 +184,7 @@ where
 fn handle_tezos_ed25519_sign<MC, M>(machine: &mut MachineCoreState<MC, M>) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let arg_sk_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -213,7 +213,7 @@ fn handle_tezos_ed25519_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -243,7 +243,7 @@ fn handle_tezos_blake2b_hash256<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -267,7 +267,7 @@ fn handle_tezos_secp256k1_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -292,7 +292,7 @@ fn handle_tezos_keccak256_hash<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -318,7 +318,7 @@ fn handle_tezos_reveal<MC, M>(
     status: &mut Cell<PvmStatus, M>,
 ) where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     let request_address = machine.hart.xregisters.read(a0);
     let request_size = machine.hart.xregisters.read(a1);
@@ -357,7 +357,7 @@ pub(super) fn handle_tezos<MC, M>(
     reveal_request: &mut RevealRequest<M>,
 ) where
     MC: MemoryConfig,
-    M: ManagerReadWrite,
+    M: ManagerRead + ManagerWrite,
 {
     // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
     let pc = machine.hart.pc.read().wrapping_add(4);

@@ -8,7 +8,8 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::error::Error;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerWrite;
 
 impl<M: ManagerBase> SupervisorState<M> {
     /// Handle `getrandom` system call. We don't support non-determinism, so we return a fixed
@@ -24,7 +25,7 @@ impl<M: ManagerBase> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerReadWrite,
+        M: ManagerRead + ManagerWrite,
     {
         let actual_length = length.min(RANDOM.len() as u64);
         let data = &RANDOM[..actual_length as usize];

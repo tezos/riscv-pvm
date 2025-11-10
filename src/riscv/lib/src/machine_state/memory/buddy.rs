@@ -31,7 +31,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerReadWrite;
+use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 
 /// Layout for a Buddy-style memory manager
@@ -58,18 +58,18 @@ pub trait Buddy<M: ManagerBase>: NewState<M> {
     /// Allocate a number of pages. Returns the index of the first page in the allocated range.
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Allocate a fixed range of pages. If `replace` is `true`, the range is allocated even if it
     /// overlaps an existing allocation.
     fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Deallocate a range of pages.
     fn deallocate(&mut self, idx: u64, pages: u64)
     where
-        M: ManagerReadWrite;
+        M: ManagerRead + ManagerWrite;
 
     /// Count the largest sequence of free pages.
     fn longest_free_sequence(&self) -> u64
