@@ -105,12 +105,12 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for RevealRequest<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+impl FromProof for RevealRequest<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, bytes) = proof.next_branch(())?;
-        let (proof, size) = proof.next_branch(())?;
+        let (proof, bytes) = proof.next_branch()?;
+        let (proof, size) = proof.next_branch()?;
 
         proof.done(RevealRequest { bytes, size })
     }

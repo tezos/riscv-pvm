@@ -454,19 +454,19 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<()> for Pvm<MC, CPE, Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: ()) -> SuspendedResult<D, Self> {
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof for Pvm<MC, CPE, Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, machine_state) = proof.next_branch(())?;
-        let (proof, reveal_request) = proof.next_branch(())?;
-        let (proof, system_state) = proof.next_branch(())?;
-        let (proof, version) = proof.next_branch(())?;
-        let (proof, tick) = proof.next_branch(())?;
-        let (proof, message_counter) = proof.next_branch(())?;
-        let (proof, level) = proof.next_branch(())?;
-        let (proof, level_is_set) = proof.next_branch(())?;
-        let (proof, status) = proof.next_branch(())?;
+        let (proof, machine_state) = proof.next_branch()?;
+        let (proof, reveal_request) = proof.next_branch()?;
+        let (proof, system_state) = proof.next_branch()?;
+        let (proof, version) = proof.next_branch()?;
+        let (proof, tick) = proof.next_branch()?;
+        let (proof, message_counter) = proof.next_branch()?;
+        let (proof, level) = proof.next_branch()?;
+        let (proof, level_is_set) = proof.next_branch()?;
+        let (proof, status) = proof.next_branch()?;
 
         proof.done(Self {
             machine_state,
@@ -485,7 +485,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<()> for Pvm<MC,
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
-        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof), ()).ok()?;
+        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
         Some(pvm)
     }
 }

@@ -348,14 +348,13 @@ impl<R> StreamParserComb<'_, R> {
 /// Deserialise raw bytes as `T` and the partial state hash helper [`OwnedProofPart`].
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
-pub fn deserialise<T: FromProof<Arg>, Arg>(
+pub fn deserialise<T: FromProof>(
     proof_tree_raw_bytes: &[u8],
-    arg: Arg,
 ) -> deserialiser::Result<(T, OwnedProofPart)> {
     let input = StreamInput::new(proof_tree_raw_bytes);
     let context = StreamDeserialiser::new_present(input);
 
-    let result = T::from_proof(context, arg)?;
+    let result = T::from_proof(context)?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation

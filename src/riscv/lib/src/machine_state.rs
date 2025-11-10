@@ -195,19 +195,18 @@ where
     }
 }
 
-impl<Arg, MC> FromProof<Arg> for MachineCoreState<MC, Verify>
+impl<MC> FromProof for MachineCoreState<MC, Verify>
 where
     MC: MemoryConfig,
 {
     fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
-        _arg: Arg,
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, hart) = proof.next_branch(())?;
+        let (proof, hart) = proof.next_branch()?;
         let (proof, main_memory) = proof.next_branch_with(MC::state_from_proof)?;
-        let (proof, signal_actions) = proof.next_branch(())?;
+        let (proof, signal_actions) = proof.next_branch()?;
 
         proof.done(Self {
             hart,
@@ -291,16 +290,15 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
     }
 }
 
-impl<MC, CPE> FromProof<()> for MachineState<MC, CPE, Verify>
+impl<MC, CPE> FromProof for MachineState<MC, CPE, Verify>
 where
     MC: MemoryConfig,
     CPE: CodePageEntry<MC, Verify>,
 {
     fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
-        _arg: (),
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
-        let result = MachineCoreState::from_proof(proof, ())?;
+        let result = MachineCoreState::from_proof(proof)?;
         let result = result.map(|core| Self {
             core,
             page_cache: MC::PageCache::new(),

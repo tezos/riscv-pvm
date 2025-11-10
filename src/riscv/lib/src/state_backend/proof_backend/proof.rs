@@ -115,8 +115,7 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
     let final_state_hash =
         deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
 
-    let (pvm, proof_tree) =
-        deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice(), ())?;
+    let (pvm, proof_tree) = deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
         OwnedProofPart::Absent => return Err(ProofError::AbsentProof),

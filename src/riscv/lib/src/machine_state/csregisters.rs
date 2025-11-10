@@ -409,12 +409,12 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for CSRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+impl FromProof for CSRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, fflags) = proof.next_branch(())?;
-        let (proof, frm) = proof.next_branch(())?;
+        let (proof, fflags) = proof.next_branch()?;
+        let (proof, frm) = proof.next_branch()?;
 
         proof.done(Self { fflags, frm })
     }

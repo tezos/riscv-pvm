@@ -325,9 +325,9 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for XRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, arg: Arg) -> SuspendedResult<D, Self> {
-        let result = backend::Cells::from_proof(proof, arg)?;
+impl FromProof for XRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+        let result = backend::Cells::from_proof(proof)?;
         let result = result.map(|registers| Self { registers });
         Ok(result)
     }
@@ -723,9 +723,9 @@ where
     }
 }
 
-impl<Arg> FromProof<Arg> for FRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, arg: Arg) -> SuspendedResult<D, Self> {
-        let result = backend::Cells::from_proof(proof, arg)?;
+impl FromProof for FRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+        let result = backend::Cells::from_proof(proof)?;
         let result = result.map(|registers| Self { registers });
         Ok(result)
     }

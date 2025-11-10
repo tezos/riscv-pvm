@@ -207,17 +207,14 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 }
 
 /// Given a [`ProofTree`] deserialise it as `T`.
-pub fn deserialise<T: FromProof<Arg>, Arg>(
-    proof: ProofTree,
-    arg: Arg,
-) -> deserialiser::Result<(T, OwnedProofPart)> {
+pub fn deserialise<T: FromProof>(proof: ProofTree) -> deserialiser::Result<(T, OwnedProofPart)> {
     let owned_proof = match proof {
         ProofPart::Absent => OwnedProofPart::Absent,
         ProofPart::Present(proof) => OwnedProofPart::Present(proof.clone()),
     };
 
     let context = ProofTreeDeserialiser::from(proof);
-    let parser = T::from_proof(context, arg)?;
+    let parser = T::from_proof(context)?;
     let result = parser.into_result();
 
     Ok((result, owned_proof))

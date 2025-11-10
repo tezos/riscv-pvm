@@ -119,11 +119,8 @@ pub trait DeserialiserNode: Sized {
 
     /// The next branch of the current node is deserialised using the [`FromProof`] implementation
     /// of type `T`.
-    fn next_branch<T: FromProof<Arg>, Arg>(
-        self,
-        arg: Arg,
-    ) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error> {
-        self.next_branch_with(|deser| T::from_proof(deser, arg))
+    fn next_branch<T: FromProof>(self) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error> {
+        self.next_branch_with(|deser| T::from_proof(deser))
     }
 
     /// Signal the end of deserialisation of the node's branches.
@@ -146,32 +143,29 @@ pub trait Suspended {
 }
 
 /// Trait for types that can be constructed from a Merkle proof
-///
-/// The parameter `Arg` is an argument that is passed to the construction function and can be used
-/// to provide additional context for the construction.
-pub trait FromProof<Arg>: Sized {
+pub trait FromProof: Sized {
     /// Parse the given proof to construct an instance of `Self`.
-    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: Arg) -> SuspendedResult<Proof, Self>;
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self>;
 }
 
-impl<A: FromProof<()>, B: FromProof<()>> FromProof<()> for (A, B) {
-    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+impl<A: FromProof, B: FromProof> FromProof for (A, B) {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let proof = proof.into_node()?;
 
-        let (proof, a) = proof.next_branch(arg)?;
-        let (proof, b) = proof.next_branch(arg)?;
+        let (proof, a) = proof.next_branch()?;
+        let (proof, b) = proof.next_branch()?;
 
         proof.done((a, b))
     }
 }
 
-impl<Item: FromProof<()>, const LEN: usize> FromProof<()> for [Item; LEN] {
-    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+impl<Item: FromProof, const LEN: usize> FromProof for [Item; LEN] {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let proof = proof.into_node()?;
 
         let mut items: [Option<Item>; LEN] = std::array::from_fn(|_| None);
         let proof = (0..LEN).try_fold(proof, |proof, index| {
-            let (proof, item) = proof.next_branch(arg)?;
+            let (proof, item) = proof.next_branch()?;
             items[index] = Some(item);
             Ok(proof)
         })?;
@@ -191,14 +185,12 @@ impl<T, const ARITY: usize, const LEN: usize> Many<T, ARITY, LEN> {
     }
 }
 
-impl<Item: FromProof<()>, const ARITY: usize, const LEN: usize> FromProof<()>
-    for Many<Item, ARITY, LEN>
-{
-    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<Item, ARITY, LEN> {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let mut leaves = Vec::with_capacity(LEN);
 
         let result = descend_tree(proof, ARITY, 0, LEN, &mut |_idx, proof| {
-            let result = Item::from_proof(proof, arg)?;
+            let result = Item::from_proof(proof)?;
             let result = result.map(|leaf| {
                 leaves.push(leaf);
             });

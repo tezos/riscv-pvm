@@ -199,9 +199,9 @@ where
             .expect("Building Merkle tree should not fail")
     }
 }
-impl<Arg, const PAGES: usize> FromProof<Arg> for PagePermissions<PAGES, Verify> {
-    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
-        let result = merkle_proof::Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof, ())?;
+impl<const PAGES: usize> FromProof for PagePermissions<PAGES, Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+        let result = merkle_proof::Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof)?;
         let result = result.map(|pages| Self {
             pages: pages.into_boxed_array(),
         });

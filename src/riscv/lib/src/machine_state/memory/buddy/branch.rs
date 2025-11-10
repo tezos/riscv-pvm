@@ -89,7 +89,7 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
     fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
         let proof = proof.into_node()?;
 
-        let (proof, free_info) = proof.next_branch(())?;
+        let (proof, free_info) = proof.next_branch()?;
         let (proof, left) = proof.next_branch_with(B::buddy_from_proof)?;
         let (proof, right) = proof.next_branch_with(B::buddy_from_proof)?;
 

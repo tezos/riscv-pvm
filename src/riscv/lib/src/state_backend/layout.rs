@@ -382,7 +382,7 @@ mod tests {
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
                 let mut verify_foo = {
-                    let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof), ())
+                    let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof))
                         .unwrap()
                         .0;
                     AllocatedOf::<Foo, Verify> { bar, qux }

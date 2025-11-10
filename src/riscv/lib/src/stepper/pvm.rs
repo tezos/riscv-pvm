@@ -265,7 +265,7 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
         proof: Proof,
     ) -> Result<(), ProofVerificationFailure> {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
-        let (pvm, merkle_tree) = deserialise_stream::deserialise(&tree_serialisation, ())
+        let (pvm, merkle_tree) = deserialise_stream::deserialise(&tree_serialisation)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
@@ -286,7 +286,7 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree, ())
+        let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
