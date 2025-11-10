@@ -12,6 +12,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -232,6 +233,13 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
         Self {
             set: self.set.clone(),
         }
+    }
+
+    fn hash_state(&self) -> Hash
+    where
+        M: ManagerSerialise,
+    {
+        self.set.hash_state()
     }
 }
 

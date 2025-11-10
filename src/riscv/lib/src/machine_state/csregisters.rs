@@ -11,6 +11,8 @@ use bincode::Decode;
 use bincode::Encode;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -21,6 +23,7 @@ use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
+use crate::state_backend::ManagerSerialise;
 use crate::struct_layout;
 
 /// CSR index
@@ -383,6 +386,12 @@ impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
             fflags: self.fflags.clone_state(),
             frm: self.frm.clone_state(),
         }
+    }
+}
+
+impl<M: ManagerSerialise> HashState for CSRegisters<M> {
+    fn hash_state(&self) -> Hash {
+        Hash::combine([self.fflags.hash_state(), self.frm.hash_state()])
     }
 }
 

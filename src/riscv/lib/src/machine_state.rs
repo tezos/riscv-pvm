@@ -27,6 +27,8 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
 
@@ -47,6 +49,7 @@ use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
@@ -167,6 +170,20 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         };
 
         Ok(instruction_data)
+    }
+}
+
+impl<MC, M> HashState for MachineCoreState<MC, M>
+where
+    MC: MemoryConfig,
+    M: ManagerSerialise,
+{
+    fn hash_state(&self) -> Hash {
+        Hash::combine([
+            self.hart.hash_state(),
+            self.main_memory.hash_state(),
+            self.signal_actions.hash_state(),
+        ])
     }
 }
 
@@ -681,6 +698,17 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     {
         let (main_memory, listener) = self.memory_with_listener();
         main_memory.set_all_readable_writeable(listener);
+    }
+}
+
+impl<MC, CPE, M> HashState for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: ManagerSerialise,
+{
+    fn hash_state(&self) -> Hash {
+        self.core.hash_state()
     }
 }
 

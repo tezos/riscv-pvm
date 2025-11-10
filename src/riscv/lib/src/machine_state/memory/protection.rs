@@ -11,6 +11,9 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashState;
+use octez_riscv_data::hash::build_custom_merkle_hash;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -30,6 +33,7 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::Many;
 use crate::state_backend::NarrowlySized;
+use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
 /// State layout for page permissions
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
@@ -156,5 +160,16 @@ impl<const PAGES: usize, M: ManagerDeserialise> Decode<()> for PagePermissions<P
 impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.pages.encode(encoder)
+    }
+}
+
+impl<const PAGES: usize, M: ManagerSerialise> HashState for PagePermissions<PAGES, M> {
+    fn hash_state(&self) -> Hash {
+        let nodes: Vec<Hash> = self
+            .pages
+            .iter()
+            .map(HashState::hash_state)
+            .collect::<Vec<_>>();
+        build_custom_merkle_hash(MERKLE_ARITY, nodes).expect("Hashing should not fail")
     }
 }

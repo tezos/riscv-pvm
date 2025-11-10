@@ -222,6 +222,13 @@ macro_rules! combined_buddy_branch {
             {
                 $name(self.0.clone_state())
             }
+
+            fn hash_state(&self) -> Hash
+            where
+                M: ManagerSerialise,
+            {
+                self.0.hash_state()
+            }
         }
     };
 }
