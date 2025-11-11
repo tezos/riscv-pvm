@@ -22,8 +22,10 @@ pub trait Comparable<I: ?Sized> {
     fn compare(self, other: Self, predicate: Predicate, icb: &mut I) -> Self::Result;
 }
 
-impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> Comparable<MachineCoreState<MC, M>>
-    for XValue
+impl<MC, M> Comparable<MachineCoreState<MC, M>> for XValue
+where
+    MC: MemoryConfig,
+    M: ManagerRead + ManagerWrite,
 {
     type Result = bool;
 
@@ -42,8 +44,10 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> Comparable<MachineCoreStat
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> Comparable<MachineCoreState<MC, M>>
-    for XValue32
+impl<MC, M> Comparable<MachineCoreState<MC, M>> for XValue32
+where
+    MC: MemoryConfig,
+    M: ManagerRead + ManagerWrite,
 {
     type Result = bool;
 

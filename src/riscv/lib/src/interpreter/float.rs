@@ -644,7 +644,10 @@ impl ConstDefault for FloatExceptionFlags {
     };
 }
 
-impl<M: backend::ManagerRead + backend::ManagerWrite> CSRegisters<M> {
+impl<M> CSRegisters<M>
+where
+    M: backend::ManagerRead + backend::ManagerWrite,
+{
     /// Set the `invalid_operation` exception flag for floating-point operations.
     fn set_invalid_float_operation(&mut self) {
         let mut fflags = self.fflags.read();
