@@ -68,9 +68,8 @@ impl MerkleLayer {
     }
 
     /// Delete the data associated with a given [Key].
-    #[expect(dead_code, reason = "Not yet implemented")]
-    pub fn delete(&mut self, _key: &Key) {
-        todo!()
+    pub fn delete(&mut self, key: &Key) {
+        self.tree.delete(key)
     }
 
     /// Creates an empty [MerkleLayer].
@@ -482,6 +481,262 @@ mod tests {
             }
 
             ml.tree.check(line!());
+        }
+    }
+
+    #[test]
+    fn test_mavl_delete() {
+        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
+        let data = Bytes::from("delete");
+        let mut ml = new_merkle_layer();
+        ml.set(&key, data.clone());
+
+        ml.delete(&key);
+
+        let get_node = ml.get(&key);
+
+        assert_eq!(get_node, None);
+        ml.tree.check(line!());
+    }
+
+    proptest! {
+        #[test]
+        fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+            let data = Bytes::from("delete_prop");
+            let mut ml = new_merkle_layer();
+
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml.set(&key, data.clone());
+            }
+
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml.delete(&key);
+                prop_assert_eq!(ml.get(&key), None);
+            }
+
+            ml.tree.check(line!());
+        }
+    }
+
+    // Requires replacing a node with its successor while rebalancing a node on the return path.
+    #[test]
+    fn test_mavl_delete_rebalance_needed() {
+        let keys = [
+            Key::new(&[2]),
+            Key::new(&[0]),
+            Key::new(&[3]),
+            Key::new(&[4]),
+            Key::new(&[5]),
+            Key::new(&[1]),
+            Key::new(&[6]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("rebalance_needed");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            ml.delete(key);
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires replacing a deleted node with a successor that is its right child.
+    #[test]
+    fn test_mavl_delete_right_successor() {
+        let keys = [
+            Key::new(&[1]),
+            Key::new(&[2]),
+            Key::new(&[0]),
+            Key::new(&[3]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("delete_right_successor");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires replacing a deleted node with a successor that causes the subtree to shrink.
+    #[test]
+    fn test_mavl_delete_shrank_successor() {
+        let keys = [
+            Key::new(&[4]),
+            Key::new(&[0]),
+            Key::new(&[2]),
+            Key::new(&[3]),
+            Key::new(&[1]),
+            Key::new(&[5]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("shrank_successor");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires replacing a deleted node with a successor that is its right child and has a right
+    // child of its own.
+    #[test]
+    fn test_mavl_delete_successor_right_child() {
+        let keys = [
+            Key::new(&[2]),
+            Key::new(&[0]),
+            Key::new(&[5]),
+            Key::new(&[3]),
+            Key::new(&[6]),
+            Key::new(&[1]),
+            Key::new(&[4]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("delete_successor_right_child");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires replacing a deleted node with a successor that isn't its right child.
+    #[test]
+    fn test_mavl_delete_take_min() {
+        let keys = [
+            Key::new(&[1]),
+            Key::new(&[3]),
+            Key::new(&[0]),
+            Key::new(&[2]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("take_min");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires replacing a deleted node with a successor that isn't its right child and isn't the
+    // right child's left child.
+    #[test]
+    fn test_mavl_delete_take_min_recursive() {
+        let keys = [
+            Key::new(&[2]),
+            Key::new(&[4]),
+            Key::new(&[0]),
+            Key::new(&[6]),
+            Key::new(&[5]),
+            Key::new(&[1]),
+            Key::new(&[3]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("delete_recursive");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
+        }
+    }
+
+    // Requires rebalancing a node where the balance factor is -2 and the left child's balance
+    // factor is 0:
+    //
+    //        5
+    //       / \
+    //      1   X
+    //     / \
+    //    0   3
+    //
+    // (X is deleted)
+    #[test]
+    fn test_mavl_delete_zero_double_rotation_balance_factor() {
+        let keys = [
+            Key::new(&[4]),
+            Key::new(&[0]),
+            Key::new(&[5]),
+            Key::new(&[1]),
+            Key::new(&[3]),
+        ]
+        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+
+        let data = Bytes::from("delete_unknown");
+
+        let mut ml = new_merkle_layer();
+
+        for key in keys.iter() {
+            ml.set(key, data.clone());
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        for key in keys.iter() {
+            ml.delete(key);
+            ml.tree.check(line!());
+            assert_eq!(ml.get(key), None);
         }
     }
 }

@@ -9,6 +9,7 @@ use bytes::Bytes;
 
 use super::Key;
 use super::node::MavlNode;
+use super::node::delete;
 use super::node::get;
 use super::node::set;
 
@@ -19,6 +20,11 @@ pub(super) struct Avl {
 }
 
 impl Avl {
+    /// Delete the node in the tree with a given key.
+    pub(super) fn delete(&mut self, key: &Key) {
+        delete(&mut self.root, key);
+    }
+
     /// The data stored in a node in the tree with a given key.
     pub(super) fn get(&self, key: &Key) -> Option<&Bytes> {
         get(&self.root, key)
