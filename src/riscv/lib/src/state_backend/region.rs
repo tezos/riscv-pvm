@@ -17,6 +17,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::hash::HashWriter;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::mode::Normal;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -28,7 +29,6 @@ use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
-use super::normal_backend::Normal;
 use super::proof_backend::ProofGen;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
@@ -36,6 +36,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
 use crate::state_backend::RegionProj;
+use crate::state_backend::normal_backend::region_elem_offset;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::proof_backend::merkle::chunks_to_writer;
@@ -304,7 +305,7 @@ impl<E: 'static, const LEN: usize> Cells<E, LEN, Normal> {
     /// Obtain the byte offset from a pointer to `Cells<E, LEN, M>` to the memory of the elem at
     /// `index`.
     pub(crate) const fn region_elem_offset(index: usize) -> usize {
-        std::mem::offset_of!(Self, region) + Normal::region_elem_offset::<E, LEN>(index)
+        std::mem::offset_of!(Self, region) + region_elem_offset::<E, LEN>(index)
     }
 }
 

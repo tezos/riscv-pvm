@@ -14,7 +14,6 @@ use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::machine_state::page_cache::Interpreted;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
 use octez_riscv::state_backend::verify_backend::NotFound;
@@ -23,6 +22,7 @@ use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv_data::hash;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_test_utils::*;
 use rand::Rng;
 

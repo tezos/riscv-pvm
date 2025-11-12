@@ -15,6 +15,7 @@ use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::mode::Normal;
 
 use super::Elem;
 use super::ManagerAlloc;
@@ -27,16 +28,11 @@ use super::ManagerWrite;
 use super::StaticCopy;
 use crate::machine_state::memory::PAGE_SIZE;
 
-/// Manager that allows state binders to own the state storage
-pub enum Normal {}
+/// Get the byte offset from a pointer to `Normal::Region` to the start of the element at `index`.
+pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
+    assert!(index < LEN, "Out of bounds access for region");
 
-impl Normal {
-    /// Get the byte offset from a pointer to `Normal::Region` to the start of the element at `index`.
-    pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
-        assert!(index < LEN, "Out of bounds access for region");
-
-        index * std::mem::size_of::<E>()
-    }
+    index * std::mem::size_of::<E>()
 }
 
 impl ManagerBase for Normal {

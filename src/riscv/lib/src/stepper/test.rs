@@ -10,6 +10,7 @@ use std::ops::Bound;
 
 use derive_more::Error;
 use derive_more::From;
+use octez_riscv_data::mode::Normal;
 use posix::PosixState;
 
 use super::StepResult;
@@ -30,7 +31,6 @@ use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::state::NewState;
-use crate::state_backend::normal_backend::Normal;
 
 #[derive(Clone, Debug)]
 pub enum TestStepperResult {

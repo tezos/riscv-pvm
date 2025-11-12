@@ -18,10 +18,10 @@ use octez_riscv::machine_state::page_cache::InterpretedCompiler;
 use octez_riscv::machine_state::page_cache::Jitted;
 use octez_riscv::machine_state::page_cache::OutlineCompiler;
 use octez_riscv::pvm::hooks::PvmHooks;
-use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_test_utils::*;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 

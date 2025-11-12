@@ -2226,6 +2226,7 @@ dependencies = [
  "numfmt",
  "object",
  "octez-riscv",
+ "octez-riscv-data",
  "quanta",
  "rustc-demangle",
  "serde",

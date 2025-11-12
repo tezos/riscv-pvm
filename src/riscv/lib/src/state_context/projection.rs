@@ -19,6 +19,7 @@ use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
 use cranelift::prelude::isa::TargetFrontendConfig;
+use octez_riscv_data::mode::Normal;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
@@ -27,7 +28,6 @@ use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::normal_backend::Normal;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -227,7 +227,7 @@ pub trait Projection {
 
     /// Get the offset of the target value within the subject value. In other words, it is the
     /// offset to an address of the subject value that would give you the address of the target
-    /// value. This is exclusive to the [`crate::state_backend::normal_backend::Normal`] mode.
+    /// value. This is exclusive to the [`octez_riscv_data::mode::Normal`] mode.
     fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset;
 }
 
@@ -414,7 +414,7 @@ macro_rules! impl_projection {
                     $crate::state_context::projection::ApplyCons<
                         $subject,
                         MC,
-                        $crate::state_backend::normal_backend::Normal
+                        octez_riscv_data::mode::Normal
                     >,
                     $($field).+
                 );

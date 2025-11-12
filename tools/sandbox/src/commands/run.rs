@@ -16,11 +16,11 @@ use std::time::Duration;
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::machine_state::page_cache::CodePageEntry;
-use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::mode::Normal;
 use tezos_smart_rollup::utils::console::Console;
 use tezos_smart_rollup::utils::inbox::InboxBuilder;
 use tezos_smart_rollup_encoding::smart_rollup::SmartRollupAddress;
@@ -32,7 +32,7 @@ use crate::memory_config::MemoryConfigValue;
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
         /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, octez_riscv::state_backend::normal_backend::Normal>;
+        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, Normal>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Execution strategy for entrypoints.
         pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler<MC>, MC>;

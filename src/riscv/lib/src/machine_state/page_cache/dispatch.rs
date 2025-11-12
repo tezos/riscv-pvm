@@ -13,6 +13,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
+use octez_riscv_data::mode::Normal;
+
 use super::INSTRUCTION_ENTRIES;
 use crate::jit::JIT;
 use crate::jit::JitFn;
@@ -23,7 +25,6 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::jitted::Jitted;
 use crate::machine_state::page_cache::jitted::JittedPage;
-use crate::state_backend::normal_backend::Normal;
 
 /// The function signature for dispatching an entrypoint run.
 ///
@@ -360,6 +361,8 @@ struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode::Normal;
+
     use super::DispatchTarget;
     use super::InlineCompiler;
     use crate::jit::state_access::ExceptionCode;
@@ -369,7 +372,6 @@ mod tests {
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::jitted::Jitted;
     use crate::machine_state::page_cache::jitted::JittedPage;
-    use crate::state_backend::normal_backend::Normal;
 
     #[test]
     fn test_dispatch_debug_classification() {

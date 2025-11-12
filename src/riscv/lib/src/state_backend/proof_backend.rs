@@ -413,6 +413,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::mode::Normal;
     use proptest::array;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -428,7 +429,6 @@ mod tests {
     use crate::state_backend::ProofLayout;
     use crate::state_backend::Ref;
     use crate::state_backend::layout::Array;
-    use crate::state_backend::normal_backend::Normal;
 
     const CELLS_SIZE: usize = 32;
 

@@ -11,6 +11,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation;
 use perfect_derive::perfect_derive;
 
@@ -23,7 +24,6 @@ use super::Many;
 use super::Ref;
 use super::RefProofGenAlloc;
 use super::RefVerifierAlloc;
-use super::normal_backend::Normal;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::merkle::MerkleTree;

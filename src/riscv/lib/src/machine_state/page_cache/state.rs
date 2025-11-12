@@ -115,7 +115,7 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
 
 #[cfg(test)]
 impl<const PAGES: usize, D, MC>
-    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, crate::state_backend::normal_backend::Normal>
+    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, octez_riscv_data::mode::Normal>
 where
     MC: MemoryConfig,
     D: super::dispatch::DispatchCompiler<MC>,
@@ -307,6 +307,7 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::sync::Arc;
 
+    use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
 
     use super::PageCacheImpl;
@@ -328,7 +329,6 @@ mod tests {
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
-    use crate::state_backend::normal_backend::Normal;
 
     fn count_active_pages<const PAGES: usize, CPE, MC, M>(
         cache: &PageCacheImpl<PAGES, CPE, MC, M>,

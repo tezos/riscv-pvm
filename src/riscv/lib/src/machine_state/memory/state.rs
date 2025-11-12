@@ -441,6 +441,8 @@ fn page_range(address: Address, length: NonZeroUsize) -> RangeInclusive<u64> {
 
 #[cfg(test)]
 pub mod tests {
+    use octez_riscv_data::mode::Normal;
+
     use super::*;
     use crate::backend_test;
     use crate::machine_state::memory::M4K;
@@ -448,7 +450,6 @@ pub mod tests {
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::state::NewState;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::normal_backend::Normal;
 
     #[test]
     fn bounds_check() {

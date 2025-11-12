@@ -23,13 +23,13 @@ use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
 use cranelift::prelude::isa::TargetFrontendConfig;
+use octez_riscv_data::mode::Normal;
 
 use crate::instruction_context::Predicate;
 use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::normal_backend::Normal;
 use crate::state_context::projection::MachineCoreProjection;
 
 impl From<Predicate> for IntCC {
