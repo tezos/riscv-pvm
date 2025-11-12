@@ -13,6 +13,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -49,7 +50,6 @@ use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
-use crate::state_backend::verify_backend::Verify;
 use crate::state_backend::verify_backend::handle_stepper_panics;
 
 /// Error during PVM stepping

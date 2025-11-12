@@ -736,13 +736,13 @@ pub(crate) mod test_helpers {
 
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Prove;
+    use octez_riscv_data::mode::Verify;
 
     use super::MachineState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::state_backend::ManagerBase;
-    use crate::state_backend::verify_backend::Verify;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
     pub enum RefMutOrOwned<'a, T> {

@@ -66,7 +66,7 @@
 //!
 //! [Layouts]: layout::Layout
 //! [Normal]: octez_riscv_data::mode::Normal
-//! [Verify]: verify_backend::Verify
+//! [Verify]: octez_riscv_data::mode::Verify
 //! [Prove]: octez_riscv_data::mode::Prove
 
 mod elems;
@@ -91,6 +91,7 @@ pub use elems::*;
 pub use layout::*;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
@@ -351,8 +352,8 @@ pub type RefProveAlloc<'outer, 'inner, L> = AllocatedOf<L, Ref<'outer, Prove<'in
 
 /// Alias for the allocated structure with references to regions in [Verify] mode
 ///
-/// [Verify]: verify_backend::Verify
-pub type RefVerifyAlloc<'a, L> = AllocatedOf<L, Ref<'a, verify_backend::Verify>>;
+/// [Verify]: Verify
+pub type RefVerifyAlloc<'a, L> = AllocatedOf<L, Ref<'a, Verify>>;
 
 /// Projection from [`ManagerBase::Region`] to the element type `E`
 pub struct RegionProj<E, const LEN: usize>(PhantomData<E>);
@@ -428,7 +429,7 @@ pub(crate) mod test_helpers {
             fn $name() {
                 use octez_riscv_data::mode::Normal;
                 use octez_riscv_data::mode::Prove;
-                use $crate::state_backend::verify_backend::Verify;
+                use octez_riscv_data::mode::Verify;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
 
                 fn inner<$fac_name: TestBackendFactory>() {

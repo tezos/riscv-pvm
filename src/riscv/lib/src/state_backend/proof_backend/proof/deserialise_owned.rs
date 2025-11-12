@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use bincode::Decode;
+use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
 
 use super::deserialiser::Deserialiser;
@@ -22,7 +23,6 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::proof::deserialiser;
 use crate::state_backend::proof_backend::tree::Tree;
-use crate::state_backend::verify_backend::Verify;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
