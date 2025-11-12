@@ -16,9 +16,7 @@
 use bincode::Decode;
 use octez_riscv_data::hash::Hash;
 
-use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Result type used when deserialising a proof - including both the layout and contents of the
 /// proof.
@@ -63,31 +61,6 @@ impl<T> Partial<T> {
         match self {
             Partial::Present(data) => Some(data),
             Partial::Absent | Partial::Blinded(_) => None,
-        }
-    }
-}
-
-impl Partial<Vec<u8>> {
-    /// Convert a [`Partial<Vec<u8>>`] into an owned proof part.
-    pub fn into_leaf_proof_tree(self) -> OwnedProofPart {
-        OwnedProofPart::leaf_from_partial(self, |data| data)
-    }
-}
-
-impl Partial<Box<[u8; MERKLE_LEAF_SIZE.get()]>> {
-    /// Convert a [`Partial<Box<[u8; MERKLE_LEAF_SIZE]>>`] into an owned proof part.
-    pub fn into_leaf_proof_tree(self) -> OwnedProofPart {
-        OwnedProofPart::leaf_from_partial(self, |data| data.to_vec())
-    }
-}
-
-impl<A, B> Partial<(A, B)> {
-    /// Split a [`Partial<(A, B)>`] into [`Partial<A>`] and [`Partial<B>`].
-    pub fn split(self) -> (Partial<A>, Partial<B>) {
-        match self {
-            Partial::Absent => (Partial::Absent, Partial::Absent),
-            Partial::Blinded(hash) => (Partial::Blinded(hash), Partial::Blinded(hash)),
-            Partial::Present((a, b)) => (Partial::Present(a), Partial::Present(b)),
         }
     }
 }
