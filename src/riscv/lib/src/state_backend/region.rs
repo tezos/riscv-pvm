@@ -18,6 +18,7 @@ use octez_riscv_data::hash::HashState;
 use octez_riscv_data::hash::HashWriter;
 use octez_riscv_data::hash::build_custom_merkle_hash;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -29,7 +30,6 @@ use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
 use super::Ref;
-use super::proof_backend::Prove;
 use super::proof_backend::merkle::AccessInfoAggregatable;
 use crate::default::ConstDefault;
 use crate::machine_state::memory::MemoryConfig;

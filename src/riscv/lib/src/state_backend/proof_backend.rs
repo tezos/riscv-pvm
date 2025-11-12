@@ -19,8 +19,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::convert::Infallible;
-use std::marker::PhantomData;
 use std::ops::Deref;
 
 use bincode::enc::Encode;
@@ -28,6 +26,7 @@ use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 
 use super::FnManager;
 use super::ManagerBase;
@@ -42,9 +41,6 @@ use crate::state_backend::elem_bytes;
 pub mod merkle;
 pub mod proof;
 pub mod tree;
-
-/// Proof-generating mode
-pub struct Prove<'normal>(PhantomData<&'normal Normal>, Infallible);
 
 impl<'normal> ManagerBase for Prove<'normal> {
     type Region<E: 'static, const LEN: usize> = ProofRegion<'normal, E, LEN>;
