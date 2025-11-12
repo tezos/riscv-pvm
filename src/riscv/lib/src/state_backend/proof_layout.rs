@@ -1211,6 +1211,7 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::mode::Prove;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -1223,7 +1224,6 @@ mod tests {
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
-    use crate::state_backend::proof_backend::Prove;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const CELLS_SIZE: usize = 32;

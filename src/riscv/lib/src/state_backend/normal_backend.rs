@@ -178,6 +178,7 @@ impl ManagerClone for Normal {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::mode::Prove;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
@@ -187,7 +188,6 @@ pub(crate) mod test_helpers {
     use crate::state_backend::DynCells;
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::state_backend::proof_backend::Prove;
 
     /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
     #[test]

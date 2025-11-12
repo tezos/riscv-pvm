@@ -67,7 +67,7 @@
 //! [Layouts]: layout::Layout
 //! [Normal]: octez_riscv_data::mode::Normal
 //! [Verify]: verify_backend::Verify
-//! [Prove]: proof_backend::Prove
+//! [Prove]: octez_riscv_data::mode::Prove
 
 mod elems;
 mod layout;
@@ -90,6 +90,7 @@ use bincode::error::EncodeError;
 pub use elems::*;
 pub use layout::*;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
@@ -346,8 +347,7 @@ impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
 pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProveAlloc<'outer, 'inner, L> =
-    AllocatedOf<L, Ref<'outer, proof_backend::Prove<'inner>>>;
+pub type RefProveAlloc<'outer, 'inner, L> = AllocatedOf<L, Ref<'outer, Prove<'inner>>>;
 
 /// Alias for the allocated structure with references to regions in [Verify] mode
 ///
@@ -427,7 +427,7 @@ pub(crate) mod test_helpers {
             #[test]
             fn $name() {
                 use octez_riscv_data::mode::Normal;
-                use $crate::state_backend::proof_backend::Prove;
+                use octez_riscv_data::mode::Prove;
                 use $crate::state_backend::verify_backend::Verify;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
 

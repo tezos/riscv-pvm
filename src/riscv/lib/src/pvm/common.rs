@@ -14,6 +14,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -42,7 +43,6 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::ProofWrapper;
-use crate::state_backend::proof_backend::Prove;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;

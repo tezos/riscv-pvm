@@ -12,6 +12,7 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -43,7 +44,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::proof_backend::Prove;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
