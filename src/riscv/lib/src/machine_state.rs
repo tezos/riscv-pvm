@@ -594,10 +594,12 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             .max()
             .unwrap_or(0);
 
-        let (main_memory, mut listener) = self.memory_with_listener();
+        let mut data_segments = range_collections::RangeSet2::<u64>::empty();
 
         let program_length = program_end.saturating_sub(program_start) as usize;
         if let Some(program_length) = NonZeroUsize::new(program_length) {
+            let (main_memory, mut listener) = self.memory_with_listener();
+
             // Allow the program to be written to main memory
             main_memory.protect_pages(
                 program_start,
@@ -609,6 +611,10 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             // Write program to main memory
             for (&addr, data) in program.segments.iter() {
                 main_memory.write_all(addr, data)?;
+                data_segments |= range_collections::RangeSet2::<u64>::from(
+                    memory::address_to_page_index(addr) as u64
+                        ..memory::address_to_page_index(addr + data.len() as u64) as u64,
+                );
             }
 
             // Remove access to the program that has just been placed into memory
@@ -620,8 +626,12 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             )?;
         };
 
+        let mut exec_segments = range_collections::RangeSet2::<u64>::empty();
+
         // Configure memory permissions using the ELF program headers, if present
         if let Some(program_headers) = &program.program_headers {
+            let (main_memory, mut listener) = self.memory_with_listener();
+
             for mem_perms in program_headers.permissions.iter() {
                 let Some(length) = NonZeroUsize::new(mem_perms.length as usize) else {
                     continue;
@@ -633,7 +643,30 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
                     mem_perms.permissions,
                     &mut listener,
                 )?;
+
+                if mem_perms.permissions.exec && !mem_perms.permissions.write {
+                    exec_segments |= range_collections::RangeSet2::<u64>::from(
+                        memory::address_to_page_index(mem_perms.start_address) as u64
+                            ..memory::address_to_page_index(
+                                mem_perms.start_address + length.get() as u64,
+                            ) as u64,
+                    );
+                }
             }
+        }
+
+        let populate_pages = data_segments & exec_segments;
+
+        for range in populate_pages.iter() {
+            let range_collections::range_set::RangeSetRange::Range(range) = range.cloned() else {
+                // We have dealt with bounded ranges only
+                continue;
+            };
+
+            for page in range {
+                self.page_cache.populate_page(page << memory::OFFSET_BITS.get(), &mut self.core);
+            };
+
         }
 
         Ok((program_start, program_end))
