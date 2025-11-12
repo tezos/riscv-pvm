@@ -9,6 +9,7 @@ use std::path::Path;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
 
@@ -29,7 +30,6 @@ use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::verify_backend::Verify;
 use crate::storage;
 use crate::storage::Repo;
 

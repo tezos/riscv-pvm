@@ -12,6 +12,7 @@ use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
 use perfect_derive::perfect_derive;
 
@@ -39,7 +40,6 @@ use super::proof_backend::proof::deserialiser::Suspended;
 use super::proof_backend::tree::Tree;
 use super::verify_backend;
 use super::verify_backend::PartialState;
-use super::verify_backend::Verify;
 use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
@@ -94,9 +94,9 @@ pub enum ProofError {
 pub(crate) type VerifyAllocResult<D, L> = Result<<D as Deserialiser>::Suspended<VerifyAlloc<L>>>;
 
 /// Regions for the verifier backend for a specific layout.
-pub type VerifyAlloc<L> = <L as Layout>::Allocated<verify_backend::Verify>;
+pub type VerifyAlloc<L> = <L as Layout>::Allocated<Verify>;
 
-/// Errors that may occur when hashing a state in [`verify_backend::Verify`] mode
+/// Errors that may occur when hashing a state in [`Verify`] mode
 #[derive(Debug, thiserror::Error)]
 pub enum PartialHashError {
     /// The hash could not be computed because encoding a value to bytes failed. The byte

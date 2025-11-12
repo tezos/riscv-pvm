@@ -13,6 +13,7 @@ use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use range_collections::RangeSet2;
 
 use super::Cell;
@@ -73,9 +74,6 @@ pub enum ProofVerificationFailure {
     #[error("Final state hash mismatch (expected {expected}, computed {computed})")]
     FinalHashMismatch { expected: Hash, computed: Hash },
 }
-
-/// Proof verification backend
-pub enum Verify {}
 
 impl ManagerBase for Verify {
     type Region<E: 'static, const LEN: usize> = Region<E, LEN>;

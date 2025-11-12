@@ -18,6 +18,7 @@ use bincode::Encode;
 use bincode::enc::write::Writer;
 use octez_riscv_data::hash::DIGEST_SIZE;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 
 use super::tree::ModifyResult;
@@ -28,7 +29,6 @@ use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::verify_backend::Verify;
 
 pub mod deserialise_owned;
 pub mod deserialise_stream;

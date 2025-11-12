@@ -15,6 +15,7 @@ use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -46,7 +47,6 @@ use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
-use crate::state_backend::verify_backend::Verify;
 use crate::struct_layout;
 
 /// Type of input that can be passed to the PVM
