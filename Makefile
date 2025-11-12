@@ -31,6 +31,14 @@ check-format: taplo-check-format
 taplo-check-format:
 	@taplo format --check
 
+codecov.json: riscv/test-deps
+	@cargo llvm-cov \
+		--package octez-riscv \
+		--package octez-riscv-data \
+		--codecov \
+		--output-path $@ \
+		nextest
+
 ### Target proxies
 
 riscv/%: 
@@ -55,4 +63,4 @@ assets/%:
 	@make -C assets ${@:assets/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix audit build test clean 
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format codecov.json audit build test clean

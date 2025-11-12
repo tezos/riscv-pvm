@@ -45,10 +45,6 @@ test-deps:
 	@make -C ../.. dummy/build
 	@make -C ../.. page-cache-tester/build
 
-.PHONY: codecov.json
-codecov.json: test-deps
-	@cargo llvm-cov --package octez-riscv --codecov --output-path $@ nextest
-
 .PHONY: coverage-report
 coverage-report: test-deps
 	@cargo llvm-cov --package octez-riscv --html --open nextest

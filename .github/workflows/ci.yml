@@ -45,7 +45,7 @@ jobs:
             disk-cleanup: true
             title: Linux Tests
           - runs-on: ubuntu-latest
-            make-target: riscv/codecov.json
+            make-target: codecov.json
             code-coverage: true
             title: Code Coverage
           - runs-on: macos-latest
@@ -150,7 +150,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: src/riscv/codecov.json
+          files: codecov.json
           fail_ci_if_error: true
 
       - name: Save Rustup and Cargo cache
