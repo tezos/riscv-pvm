@@ -27,10 +27,10 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use octez_riscv::state_backend::normal_backend::Normal;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
+use octez_riscv_data::mode::Normal;
 
 use super::sample::Sampler;
 use super::sample::Symbols;

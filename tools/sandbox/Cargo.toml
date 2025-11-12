@@ -29,9 +29,8 @@ serde.workspace = true
 serde_json.workspace = true
 tezos-smart-rollup-encoding.workspace = true
 tezos-smart-rollup.workspace = true
-
-[dependencies.octez-riscv]
-path = "../../src/riscv/lib"
+octez-riscv.workspace = true
+octez-riscv-data.workspace = true
 
 [dependencies.tracing-subscriber]
 workspace = true

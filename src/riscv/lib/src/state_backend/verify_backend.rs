@@ -12,6 +12,7 @@ use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Normal;
 use range_collections::RangeSet2;
 
 use super::Cell;
@@ -24,7 +25,6 @@ use super::Ref;
 use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
-use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Panic payload that is raised when a value isn't present in a part of the Verifier backend.

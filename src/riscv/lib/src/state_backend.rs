@@ -65,7 +65,7 @@
 //!   Helper backend to wrap another backend through a reference to it.
 //!
 //! [Layouts]: layout::Layout
-//! [Normal]: normal_backend::Normal
+//! [Normal]: octez_riscv_data::mode::Normal
 //! [Verifier]: verify_backend::Verifier
 //! [ProofGen]: proof_backend::ProofGen
 
@@ -89,6 +89,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use elems::*;
 pub use layout::*;
+use octez_riscv_data::mode::Normal;
 pub use proof_layout::*;
 pub use region::*;
 pub use trans::*;
@@ -113,7 +114,7 @@ pub trait ManagerBase: Sized {
     /// For example, the [`Ref`] backend is often use to wrap the [`Normal`] mode to gain access
     /// to its regions. In this case, the root state would be in [`Normal`] mode.
     ///
-    /// [`Normal`]: normal_backend::Normal
+    /// [`Normal`]: octez_riscv_data::mode::Normal
     type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 }
 
@@ -341,12 +342,12 @@ impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
 /// Alias for the allocated structure with references to regions in
 /// the [Normal] mode
 ///
-/// [Normal]: normal_backend::Normal
-pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, normal_backend::Normal>>;
+/// [Normal]: octez_riscv_data::mode::Normal
+pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
 
 /// Alias for the allocated structure with references to a proof-generating backend
 pub type RefProofGenAlloc<'outer, 'inner, L> =
-    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, normal_backend::Normal>>>>;
+    AllocatedOf<L, Ref<'outer, proof_backend::ProofGen<Ref<'inner, Normal>>>>;
 
 /// Alias for the allocated structure with references to regions of
 /// the [Verifier] backend
@@ -426,7 +427,7 @@ pub(crate) mod test_helpers {
             $(#[$m])*
             #[test]
             fn $name() {
-                use $crate::state_backend::normal_backend::Normal;
+                use octez_riscv_data::mode::Normal;
                 use $crate::state_backend::proof_backend::ProofGen;
                 use $crate::state_backend::verify_backend::Verifier;
                 use $crate::state_backend::test_helpers::TestBackendFactory;
@@ -457,6 +458,7 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
@@ -464,7 +466,6 @@ mod tests {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::normal_backend::Normal;
 
     #[test]
     fn test_example_normal() {

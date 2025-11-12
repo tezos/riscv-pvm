@@ -13,6 +13,7 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
+use octez_riscv_data::mode::Normal;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -41,7 +42,6 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
-use crate::state_backend::normal_backend::Normal;
 use crate::state_backend::proof_backend::ProofGen;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::proof::MerkleProof;
@@ -492,6 +492,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode::Normal;
     use proptest::proptest;
     use rand::Fill;
     use rand::rng;
@@ -517,7 +518,6 @@ mod tests {
     use crate::pvm::common::tests::memory::Address;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
-    use crate::state_backend::normal_backend::Normal;
 
     impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
         /// Handle an exception using the defined Execution Environment.

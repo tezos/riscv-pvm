@@ -30,6 +30,7 @@ use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::types::I128;
+use octez_riscv_data::mode::Normal;
 
 use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
@@ -51,7 +52,6 @@ use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::normal_backend::Normal;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 

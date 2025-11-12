@@ -25,6 +25,7 @@ use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
+use octez_riscv_data::mode::Normal;
 
 use super::instruction::Outcome;
 use crate::jit::builder::instruction::InstructionBuilder;
@@ -39,7 +40,6 @@ use crate::machine_state::hart_state::write_pc;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
-use crate::state_backend::normal_backend::Normal;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
 

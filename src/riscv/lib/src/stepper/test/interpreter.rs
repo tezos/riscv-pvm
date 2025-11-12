@@ -8,6 +8,7 @@ use std::io::Write;
 use std::ops::Bound;
 
 use goldenfile::Mint;
+use octez_riscv_data::mode::Normal;
 use paste::paste;
 
 use crate::machine_state::memory::M1M;
@@ -15,7 +16,6 @@ use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
-use crate::state_backend::normal_backend::Normal;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
 use crate::stepper::test::TestStepperResult::*;

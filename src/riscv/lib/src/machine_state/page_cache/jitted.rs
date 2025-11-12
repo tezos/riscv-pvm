@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use octez_riscv_data::mode::Normal;
+
 use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
 use super::dispatch::DispatchCompiler;
@@ -19,7 +21,6 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
 use crate::machine_state::page_cache::DispatchTarget;
-use crate::state_backend::normal_backend::Normal;
 
 /// Maximum number of instructions we pass to a compilation request
 ///
