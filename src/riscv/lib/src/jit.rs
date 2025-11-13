@@ -438,14 +438,22 @@ mod tests {
 
             // Push the given instructions to the correct page
             let mut interpreted_page = PageEntry::<Interpreted<M4K, Normal>>::zeroed();
-            interpreted_page.push_instructions(initial_pc, self.instructions.iter().cloned());
+            PageEntry::push_instructions(
+                &mut interpreted_page,
+                initial_pc,
+                self.instructions.iter().cloned(),
+            );
 
             interpreted_state
                 .page_cache
                 .overwrite_page(initial_pc, interpreted_page);
 
             let mut jitted_page = PageEntry::<Jitted<InlineCompiler<_>, M4K>>::zeroed();
-            jitted_page.push_instructions(initial_pc, self.instructions.iter().cloned());
+            PageEntry::push_instructions(
+                &mut jitted_page,
+                initial_pc,
+                self.instructions.iter().cloned(),
+            );
 
             jitted_state
                 .page_cache
