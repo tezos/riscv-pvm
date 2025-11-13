@@ -17,7 +17,7 @@
 //! - checkout a specific commit
 //!
 //! The folder structure of the [`DirectoryManager`] is:
-//! ```
+//! ```text
 //! <repo_path>:
 //!    temporary/
 //!        db_<random>/checkpoint/

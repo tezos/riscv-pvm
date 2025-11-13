@@ -153,7 +153,7 @@ pub trait ManagerRead: ManagerBase {
     ///
     /// The caller must ensure the access is within bounds.
     ///
-    /// ```
+    /// ```text
     /// address + E:STORED <= region.len()
     /// ```
     unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
@@ -208,7 +208,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
     ///
     /// The caller must ensure the access is within bounds.
     ///
-    /// ```
+    /// ```text
     /// address + E:STORED <= region.len()
     /// ```
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
