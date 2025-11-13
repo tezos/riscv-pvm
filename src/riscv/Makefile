@@ -38,6 +38,7 @@ build-deps: build-deps-slim
 .PHONY: test
 test: test-deps
 	@cargo nextest run --workspace
+	@cargo test --workspace --doc
 
 .PHONY: test-deps
 test-deps:
