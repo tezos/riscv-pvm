@@ -51,10 +51,9 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
 /// aligned.
 ///
 /// [page cache]: super::PageCache
-pub(crate) struct PageEntry<CPE> {
-    // TODO: RV-790: consider raising this pointer (Arc) out of `PageEntry` to exploit the
-    // `Option<Arc<_>>` optimisation.
-    entries: Arc<[CPE; INSTRUCTION_ENTRIES]>,
+#[derive(Debug)]
+pub struct PageEntry<CPE> {
+    pub(super) entries: [CPE; INSTRUCTION_ENTRIES],
 }
 
 impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
@@ -65,32 +64,43 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
     ///
     /// This must be able to return an instruction for offsets from zero to [`INSTRUCTION_ENTRIES`].
     /// *NB* the offsets refer to the _halfwords_ of the page, rather than each byte themselves.
-    fn new<E>(fetch_instr: impl Fn(usize) -> Result<Instruction, E>) -> Result<Self, E> {
-        // Unlike with `Box<[T; LEN]>` - we cannot initialise with a Vec and do an in-place
-        // conversion. To avoid copying, we're forced to allocate with `Arc` directly.
-        let mut entries = Arc::new_uninit_slice(INSTRUCTION_ENTRIES);
-        let page_entries =
-            Arc::get_mut(&mut entries).expect("We just created this arc, there's only one");
+    pub(super) fn new<E>(
+        fetch_instr: impl Fn(usize) -> Result<Instruction, E>,
+    ) -> Result<Arc<Self>, E> {
+        let mut page = Arc::<Self>::new_uninit();
+        let page_ptr = Arc::get_mut(&mut page)
+            .expect("We just created this arc, there's only one")
+            .as_mut_ptr();
 
-        for (offset, entrypoint) in page_entries.iter_mut().enumerate() {
+        // SAFETY: it's safe to construct a pointer to an uninitialised field of an
+        // uninitialised struct.
+        let entries_ptr: *mut [CPE; INSTRUCTION_ENTRIES] =
+            unsafe { std::ptr::addr_of_mut!((*page_ptr).entries) };
+
+        let start_ptr: *mut CPE = entries_ptr as *mut CPE;
+
+        for offset in 0..INSTRUCTION_ENTRIES {
             let instruction = fetch_instr(offset)?;
-            entrypoint.write(CPE::from(instruction));
+            let entrypoint = CPE::from(instruction);
+
+            // SAFETY: we are writing exactly `INSTRUCTION_ENTRIES` into an array of length
+            // `INSTRUCTION_ENTRIES`. Additionally, we use `write` rather than `=` to avoid
+            // calling `drop` on the old value - which would be UB as it is undefined.
+            unsafe {
+                start_ptr.add(offset).write(entrypoint);
+            }
         }
 
         // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. It is therefore
         // safe to no longer treat these as unitialised.
-        let entries = unsafe { entries.assume_init() };
+        let page = unsafe { page.assume_init() };
 
-        Ok(Self {
-            entries: entries
-                .try_into()
-                .expect("entries contains exactly `INSTRUCTION_ENTRIES` entries"),
-        })
+        Ok(page)
     }
 
     /// Construct a new page entry as if it were populated from a memory of entirely zeroes.
     #[cfg(test)]
-    pub(crate) fn zeroed() -> Self {
+    pub(crate) fn zeroed() -> Arc<Self> {
         use crate::machine_state::instruction::Instruction;
         use crate::parser::parse_compressed_instruction;
 
@@ -111,14 +121,14 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
     /// The page in question must not have been cloned.
     #[cfg(test)]
     pub(crate) fn push_instructions(
-        &mut self,
+        page: &mut Arc<Self>,
         address: Address,
         instructions: impl Iterator<Item = Instruction>,
     ) {
         use crate::machine_state::memory::address_to_page_offset;
 
-        let entries = Arc::get_mut(&mut self.entries)
-            .expect("push_instructions can only be called on an uncloned page");
+        let page =
+            Arc::get_mut(page).expect("push_instructions can only be called on an uncloned page");
 
         // we only store entries for halfword-aligned addresses, since pc is always halfword
         // aligned
@@ -131,7 +141,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
                 );
             }
 
-            entries[offset] = CPE::from(instr);
+            page.entries[offset] = CPE::from(instr);
 
             // we update the offset by half the width, as the offset is halfword aligned
             offset += (instr.width() as usize) >> 1;
@@ -172,7 +182,7 @@ where
 ///
 /// [`PageCache`]: super::PageCache
 pub struct PageCacheImpl<const PAGES: usize, CPE, MC, M> {
-    pages: Box<[Option<PageEntry<CPE>>; PAGES]>,
+    pages: Box<[Option<Arc<PageEntry<CPE>>>; PAGES]>,
     _pd: PhantomData<(MC, M)>,
 }
 
@@ -184,7 +194,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     ///
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
     /// the given address.
-    pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: PageEntry<CPE>) {
+    pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: Arc<PageEntry<CPE>>) {
         let page_index = crate::machine_state::memory::address_to_page_index(address);
 
         self.pages[page_index] = Some(page_entry);
@@ -212,9 +222,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
         self.pages
             .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
-            .map(|page| super::CodePage {
-                page: &mut page.entries,
-            })
+            .map(|page| super::CodePage { page })
     }
 
     /// Populates the entry in the page cache, that the given address points to.
@@ -230,7 +238,10 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
             .pages
             .get_mut(memory::address_to_page_index(page_start))
         else {
-            // address is out of the range of the page cache
+            #[cfg(feature = "log")]
+            crate::log::warning!(
+                "Failed to populated page at {page_start:x}: address {address:x} out of bounds of page cache"
+            );
             return;
         };
 
@@ -275,8 +286,8 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
             // FetchRunParse here.
             Ok(Instruction::DEFAULT)
         }).map_err(|_err| {
-           #[cfg(feature = "log")]
-            log::warning!("Failed to populated page at {page_start:x}: {_err:?}");
+            #[cfg(feature = "log")]
+            crate::log::warning!("Failed to populated page at {page_start:x}: {_err:?}");
         }).ok()
     }
 
@@ -326,13 +337,11 @@ enum PopulationError {
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
-    use std::sync::Arc;
 
     use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
 
     use super::PageCacheImpl;
-    use crate::array_utils::boxed_array;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::machine_state::MachineCoreState;
@@ -343,7 +352,6 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
-    use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::interpreted::Interpreted;
@@ -366,14 +374,11 @@ mod tests {
 
         let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Normal>::new();
 
-        let make_page = || PageEntry {
-            entries: Arc::from(
-                boxed_array![Interpreted::<_, _>::from(Instruction::DEFAULT); INSTRUCTION_ENTRIES],
-            ),
-        };
-
         for page in cache.pages.iter_mut().take(16) {
-            *page = Some(make_page());
+            *page = PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|_| {
+                Ok(Instruction::DEFAULT)
+            })
+            .ok()
         }
         assert_eq!(count_active_pages(&cache), 16);
 
@@ -513,7 +518,7 @@ mod tests {
             };
 
             let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
-            let instr_from_code_page = code_page.page[pc_offset as usize / 2];
+            let instr_from_code_page = code_page.page.entries[pc_offset as usize / 2];
             assert_eq!(&expected_instr, instr_from_code_page.as_ref());
 
             // double check last halfword

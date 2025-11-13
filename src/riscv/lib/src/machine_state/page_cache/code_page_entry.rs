@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use super::INSTRUCTION_ENTRIES;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
@@ -45,7 +44,7 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     /// that the compiler in question is guaranteed to be alive, for as long as this entrypoint may
     /// be run.
     unsafe fn run_entrypoint(
-        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
+        page: &Arc<super::state::PageEntry<Self>>,
         core: &mut MachineCoreState<MC, M>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,

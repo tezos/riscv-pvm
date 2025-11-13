@@ -15,7 +15,6 @@ use std::sync::mpsc::Sender;
 
 use octez_riscv_data::mode::Normal;
 
-use super::INSTRUCTION_ENTRIES;
 use crate::jit::JIT;
 use crate::jit::JitFn;
 use crate::jit::state_access::ExceptionCode;
@@ -184,7 +183,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         target: &JittedPage<Self, MC>,
         program_counter: Address,
     ) -> DispatchFn<Self, MC> {
-        let instr = Jitted::compilation_request_instructions(target.as_ref(), program_counter);
+        let instr = Jitted::compilation_request_instructions(&target.entries, program_counter);
 
         let fun = match self.jit.compile(&instr, program_counter) {
             Some(jitfn) => {
@@ -203,7 +202,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
         };
 
         let offset = memory::address_to_page_offset(program_counter) >> 1;
-        target[offset].dispatch.set(fun);
+        target.entries[offset].dispatch.set(fun);
 
         fun
     }
@@ -271,13 +270,13 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                     }
 
                     let instr = Jitted::compilation_request_instructions(
-                        msg.page.as_ref(),
+                        &msg.page.entries,
                         msg.program_counter,
                     );
 
                     if let Some(jitfn) = jit.compile(&instr, msg.program_counter) {
                         let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
-                        let dispatch = &msg.page[offset].dispatch;
+                        let dispatch = &msg.page.entries[offset].dispatch;
 
                         debug_assert_eq!(
                             dispatch.fun.load(Ordering::Acquire),
@@ -329,7 +328,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let fun = Jitted::run_entrypoint_not_compiled;
 
         let offset = memory::address_to_page_offset(program_counter) >> 1;
-        target[offset].dispatch.set(fun);
+        target.entries[offset].dispatch.set(fun);
 
         let request = CompilationRequest {
             page: target.clone(),
@@ -354,7 +353,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 /// Compilation request sent to the background JIT-thread of the [`OutlineCompiler`].
 struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// Reference to the page containing the entrypoint to compile.
-    page: Arc<[Jitted<D, MC>; INSTRUCTION_ENTRIES]>,
+    page: Arc<super::state::PageEntry<Jitted<D, MC>>>,
     /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,
 }

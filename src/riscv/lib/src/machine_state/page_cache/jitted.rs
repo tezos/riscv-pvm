@@ -29,7 +29,7 @@ use crate::machine_state::page_cache::DispatchTarget;
 pub(crate) const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
-pub type JittedPage<D, MC> = Arc<[Jitted<D, MC>; INSTRUCTION_ENTRIES]>;
+pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>>>;
 
 /// Entrypoints that are compiled to native code for execution, when possible & desirable.
 ///
@@ -61,7 +61,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_interpreted(
-        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
+        page: &Arc<super::state::PageEntry<Self>>,
         core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
@@ -73,7 +73,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         // instr_pc is always halfword aligned
         let offset = page_offset >> 1;
 
-        if !compiler.should_compile(&page[offset].dispatch) {
+        if !compiler.should_compile(&page.entries[offset].dispatch) {
             // Safety: the compiler passed to this function is always the same for the
             // lifetime of the entrypoint
             return unsafe {
@@ -97,14 +97,15 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_not_compiled(
-        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
+        page: &Arc<super::state::PageEntry<Self>>,
         core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
         result: &mut ExceptionCode,
         _compiler: &mut D,
     ) -> usize {
-        let block_result = super::run_code_page_interpreted(page, core, instr_pc, max_steps);
+        let block_result =
+            super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
 
         *result = block_result
             .error
@@ -161,14 +162,14 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     unsafe fn run_entrypoint(
-        page: &Arc<[Self; INSTRUCTION_ENTRIES]>,
+        page: &Arc<super::state::PageEntry<Self>>,
         core: &mut MachineCoreState<MC, Normal>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception> {
         if max_steps < MAX_INSTR_COMPILED {
-            return super::run_code_page_interpreted(page, core, instr_pc, max_steps);
+            return super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
         }
 
         let page_offset = address_to_page_offset(instr_pc);
@@ -177,7 +178,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
         // as many entries as the page size.
         let instr_offset = page_offset >> 1;
 
-        let entrypoint = &page[instr_offset];
+        let entrypoint = &page.entries[instr_offset];
 
         let fun = entrypoint.dispatch.get();
 
@@ -201,23 +202,21 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
 mod tests {
     use super::Jitted;
     use super::MAX_INSTR_COMPILED;
-    use crate::array_utils::boxed_from_fn;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::CodePageEntry;
-    use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::InlineCompiler;
+    use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
 
     #[test]
     fn test_jitted_entrypoint_called() {
-        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
-            Jitted::<_, M4K>::from(Instruction::new_nop(InstrWidth::Compressed))
-        })
-        .into();
+        let Ok(page) = PageEntry::<Jitted<_, M4K>>::new::<std::convert::Infallible>(|_| {
+            Ok(Instruction::new_nop(InstrWidth::Compressed))
+        });
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -235,15 +234,14 @@ mod tests {
             100 + (MAX_INSTR_COMPILED as u64) * InstrWidth::Compressed as u64
         );
 
-        assert_eq!(page[100 >> 1].dispatch.called_times(), 1);
+        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
     }
 
     #[test]
     fn test_interpreted_fallback_on_insufficient_steps() {
-        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
-            Jitted::<_, M4K>::from(Instruction::new_nop(InstrWidth::Compressed))
-        })
-        .into();
+        let Ok(page) = PageEntry::<Jitted<_, M4K>>::new::<std::convert::Infallible>(|_| {
+            Ok(Instruction::new_nop(InstrWidth::Compressed))
+        });
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -262,15 +260,14 @@ mod tests {
             100 + max_steps as u64 * InstrWidth::Compressed as u64
         );
 
-        assert_eq!(page[100 >> 1].dispatch.called_times(), 0);
+        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 0);
     }
 
     #[test]
     fn test_not_compiled_fallback_on_compilation_failure() {
-        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>(|| {
-            Jitted::<_, M4K>::from(Instruction::new_fence_i())
-        })
-        .into();
+        let Ok(page) = PageEntry::<Jitted<_, M4K>>::new::<std::convert::Infallible>(|_| {
+            Ok(Instruction::new_fence_i())
+        });
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -285,9 +282,9 @@ mod tests {
         assert_eq!(result.steps, 0);
 
         // we have attempted compilation
-        assert_eq!(page[100 >> 1].dispatch.called_times(), 1);
+        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
 
-        let info = format!("{:?}", page[100 >> 1].dispatch);
+        let info = format!("{:?}", page.entries[100 >> 1].dispatch);
         assert!(
             info.contains("status: NotCompiled"),
             "unexpected status: \"{info}\""
@@ -304,19 +301,14 @@ mod tests {
     /// request.
     #[test]
     fn test_compilation_request_respects_instruction_width() {
-        let page = boxed_from_fn::<_, INSTRUCTION_ENTRIES>({
-            let mut index = 0;
-            move || {
-                let instruction = if index % 2 == 0 {
-                    Instruction::new_nop(InstrWidth::Uncompressed)
-                } else {
-                    Instruction::new_unknown(InstrWidth::Compressed)
-                };
-                index += 1;
-                Jitted::<_, M4K>::from(instruction)
-            }
-        })
-        .into();
+        let Ok(page) = PageEntry::<Jitted<_, M4K>>::new::<std::convert::Infallible>(|index| {
+            let instruction = if index % 2 == 0 {
+                Instruction::new_nop(InstrWidth::Uncompressed)
+            } else {
+                Instruction::new_unknown(InstrWidth::Compressed)
+            };
+            Ok(instruction)
+        });
 
         let mut jit = InlineCompiler::default();
         let mut core = MachineCoreState::new();
@@ -336,7 +328,7 @@ mod tests {
             (MAX_INSTR_COMPILED as u64) * InstrWidth::Uncompressed as u64
         );
 
-        assert_eq!(page[0].dispatch.called_times(), 1);
+        assert_eq!(page.entries[0].dispatch.called_times(), 1);
 
         // This time, start with a `Unknown` instruction
 
@@ -350,6 +342,6 @@ mod tests {
 
         assert_eq!(core.hart.pc.read(), 2);
 
-        assert_eq!(page[2 >> 1].dispatch.called_times(), 1);
+        assert_eq!(page.entries[2 >> 1].dispatch.called_times(), 1);
     }
 }

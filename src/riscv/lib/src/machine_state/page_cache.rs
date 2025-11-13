@@ -99,7 +99,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 /// A page containing code that may then be run against the [`MachineCoreState`].
 #[derive(Debug)]
 pub struct CodePage<'a, CPE> {
-    page: &'a Arc<[CPE; INSTRUCTION_ENTRIES]>,
+    page: &'a Arc<state::PageEntry<CPE>>,
 }
 
 impl<CPE> CodePage<'_, CPE> {
@@ -192,12 +192,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::CodePage;
     use super::INSTRUCTION_ENTRIES;
     use super::interpreted::Interpreted;
-    use crate::array_utils::boxed_from_fn;
     use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
@@ -206,6 +203,7 @@ mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InterpretedCompiler;
+    use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
@@ -244,15 +242,15 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let mut page_entry: Arc<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn(|| {
-            Interpreted::from(Instruction::new_addi(
-                nz::a0,
-                nz::a0,
-                5,
-                InstrWidth::Compressed,
-            ))
-        })
-        .into();
+        let Ok(mut page_entry) =
+            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|_| {
+                Ok(Instruction::new_addi(
+                    nz::a0,
+                    nz::a0,
+                    5,
+                    InstrWidth::Compressed,
+                ))
+            });
 
         let dispatch = &std::cell::RefCell::new(CodePage {
             page: &mut page_entry,
@@ -301,9 +299,8 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let mut page_entry: Arc<[Interpreted<_, _>; INSTRUCTION_ENTRIES]> = boxed_from_fn({
-            let mut idx = 0;
-            move || {
+        let Ok(mut page_entry) =
+            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|idx| {
                 // we put uncompressed instructions on 4-byte aligned addresses
                 let instr = if idx % 2 == 0 {
                     Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
@@ -311,12 +308,8 @@ mod tests {
                     Instruction::new_nop(InstrWidth::Compressed)
                 };
 
-                idx += 1;
-
-                Interpreted::from(instr)
-            }
-        })
-        .into();
+                Ok(instr)
+            });
 
         let dispatch = &std::cell::RefCell::new(CodePage {
             page: &mut page_entry,
@@ -371,62 +364,56 @@ mod tests {
     });
 
     backend_test!(page_dispatch_exits_on_non_next_pc_update, F, {
-        let mut page_entry = Vec::with_capacity(INSTRUCTION_ENTRIES);
+        let mut instructions = Vec::with_capacity(INSTRUCTION_ENTRIES);
 
         let pc_j_absolute_start = 0;
         let pc_j_absolute = 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Interpreted::from(Instruction::new_addi(
+            instructions.push(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 5,
                 InstrWidth::Compressed,
-            )));
+            ));
         }
-        page_entry.push(Interpreted::from(Instruction::new_j_absolute(
-            0,
-            InstrWidth::Uncompressed,
-        )));
+        instructions.push(Instruction::new_j_absolute(0, InstrWidth::Uncompressed));
 
         let pc_jump_pc_start = pc_j_absolute + InstrWidth::Compressed as u64;
         let pc_jump_pc = pc_jump_pc_start + 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Interpreted::from(Instruction::new_addi(
+            instructions.push(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 4,
                 InstrWidth::Compressed,
-            )));
+            ));
         }
-        page_entry.push(Interpreted::from(Instruction::new_jump_pc(
-            0,
-            InstrWidth::Uncompressed,
-        )));
+        instructions.push(Instruction::new_jump_pc(0, InstrWidth::Uncompressed));
 
         let pc_ecall_start = pc_jump_pc + InstrWidth::Compressed as u64;
         let pc_ecall = pc_ecall_start + 10 * InstrWidth::Compressed as u64;
         for _ in 0..10 {
-            page_entry.push(Interpreted::from(Instruction::new_addi(
+            instructions.push(Instruction::new_addi(
                 nz::a0,
                 nz::a0,
                 3,
                 InstrWidth::Compressed,
-            )));
+            ));
         }
-        page_entry.push(Interpreted::from(Instruction::new_ecall()));
+        instructions.push(Instruction::new_ecall());
 
-        while page_entry.len() < page_entry.capacity() {
-            page_entry.push(Interpreted::from(Instruction::new_nop(
-                InstrWidth::Compressed,
-            )));
+        while instructions.len() < instructions.capacity() {
+            instructions.push(Instruction::new_nop(InstrWidth::Compressed));
         }
 
-        let page_entry: Box<[_; INSTRUCTION_ENTRIES]> = page_entry
-            .try_into()
-            .expect("page_entry has INSTRUCTION_ENTRIES entries");
-        let page_entry = Arc::from(page_entry);
+        let Ok(mut page_entry) =
+            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|offset| {
+                Ok(instructions[offset])
+            });
 
-        let dispatch = &std::cell::RefCell::new(CodePage { page: &page_entry });
+        let dispatch = &std::cell::RefCell::new(CodePage {
+            page: &mut page_entry,
+        });
 
         let state = MachineCoreState::<M4K, F>::new();
         let state = &std::cell::RefCell::new(state);

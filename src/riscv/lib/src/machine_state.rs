@@ -1114,7 +1114,7 @@ mod tests {
             }
 
             let mut page = PageEntry::zeroed();
-            page.push_instructions(initial_pc, [Instruction::DEFAULT].into_iter());
+            PageEntry::push_instructions(&mut page, initial_pc, [Instruction::DEFAULT].into_iter());
 
             state.page_cache.overwrite_page(initial_pc, page);
 
