@@ -20,7 +20,7 @@ jobs:
       - name: Cleanup
         run: |
           # Retrieve the caches associated with the PR merge branch
-          keys=$(gh cache list --ref 'refs/pull/${{ github.event.pull_request.number }}/merge' --limit 100 --json id --jq '.[].id')
+          keys=$(gh cache list --ref 'refs/pull/${{ github.event.pull_request.number }}/merge' --limit 10000 --sort size_in_bytes --order desc --json id --jq '.[].id')
 
           # Make sure that failing to delete one cache does not impact the attempt to delete all
           set +e
