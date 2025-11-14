@@ -7,11 +7,11 @@ use std::marker::PhantomData;
 
 use bincode::Decode;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::serialisation;
 
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
-use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
