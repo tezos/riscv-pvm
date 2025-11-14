@@ -173,6 +173,9 @@ pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a 
 ///
 /// The node must already have balance factor in the range of -2..=2, or it is an invalid AVL
 /// node.
+///
+/// Returns the rebalanced subtree.
+#[must_use]
 fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     match node.balance_factor {
         2 => {
@@ -219,6 +222,9 @@ fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 /// ```
 ///
 /// Assumes the balance factor is 2 and the right node's balance factor is -1 or 0.
+///
+/// Returns the rotated subtree.
+#[must_use]
 fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let node_mut = Arc::make_mut(node);
     let mut right = node_mut
@@ -277,6 +283,9 @@ fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 /// ```
 ///
 /// Assumes the balance factor is -2 and the left node's balance factor is -1 or 0.
+///
+/// Returns the rotated subtree.
+#[must_use]
 fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let node_mut = Arc::make_mut(node);
     let mut left = node_mut
@@ -337,6 +346,9 @@ fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 /// ```
 ///
 /// Assumes the balance factor is -2 and the left node's balance factor is +1.
+///
+/// Returns the rotated subtree.
+#[must_use]
 fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let node_mut = Arc::make_mut(node);
 
@@ -397,6 +409,9 @@ fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 /// ```
 ///
 /// Assumes the balance factor is +2 and the left node's balance factor is -1.
+///
+/// Returns the rotated subtree.
+#[must_use]
 fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let node_mut = Arc::make_mut(node);
 
@@ -446,6 +461,7 @@ fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 /// Returns:
 ///  - The new subtree.
 ///  - True if the subtree has shrank in size.
+#[must_use]
 fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
     let node_balance_factor = node.balance_factor;
     let node_mut = Arc::make_mut(node);
@@ -554,6 +570,7 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
 ///  - The minimum node.
 ///  - The minimum node's right child, if it hasn't been moved to its new position.
 ///  - True if the subtree has shrank in size.
+#[must_use]
 fn take_min(
     node: &mut Option<Arc<MavlNode>>,
 ) -> (Option<Arc<MavlNode>>, Option<Arc<MavlNode>>, bool) {
