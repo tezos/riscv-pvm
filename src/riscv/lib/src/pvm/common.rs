@@ -16,6 +16,10 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
@@ -450,6 +454,46 @@ where
     }
 }
 
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<CPE::Compiler>
+    for Pvm<MC, CPE, Verify>
+{
+    fn from_proof<D: Deserialiser>(proof: D, compiler: CPE::Compiler) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, machine_state) = proof.next_branch(compiler)?;
+        let (proof, reveal_request) = proof.next_branch(())?;
+        let (proof, system_state) = proof.next_branch(())?;
+        let (proof, version) = proof.next_branch(())?;
+        let (proof, tick) = proof.next_branch(())?;
+        let (proof, message_counter) = proof.next_branch(())?;
+        let (proof, level) = proof.next_branch(())?;
+        let (proof, level_is_set) = proof.next_branch(())?;
+        let (proof, status) = proof.next_branch(())?;
+
+        proof.done(Self {
+            machine_state,
+            reveal_request,
+            system_state,
+            version,
+            tick,
+            message_counter,
+            level,
+            level_is_set,
+            status,
+        })
+    }
+}
+
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
+    /// Construct a PVM state from a Merkle proof.
+    pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
+        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))
+            .ok()?
+            .0;
+        Some(Self::bind(space, compiler))
+    }
+}
+
 /// An [`InputRequest`] is what the PVM expects as input for a specific tick.
 pub enum InputRequest {
     /// No input is required at the moment, normal execution can continue.
@@ -461,16 +505,6 @@ pub enum InputRequest {
     FirstAfter { level: u32, counter: u64 },
     /// The PVM is asking for a reveal response. The arguments are encoded by the payload bytes.
     NeedsReveal(Box<[u8]>),
-}
-
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
-    /// Construct a PVM state from a Merkle proof.
-    pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
-        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))
-            .ok()?
-            .0;
-        Some(Self::bind(space, compiler))
-    }
 }
 
 /// Handle a system call in the PVM.

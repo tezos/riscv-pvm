@@ -153,3 +153,108 @@ pub trait FromProof<Arg>: Sized {
     /// Parse the given proof to construct an instance of `Self`.
     fn from_proof<Proof: Deserialiser>(proof: Proof, arg: Arg) -> SuspendedResult<Proof, Self>;
 }
+
+impl<A: FromProof<()>, B: FromProof<()>> FromProof<()> for (A, B) {
+    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, a) = proof.next_branch(arg)?;
+        let (proof, b) = proof.next_branch(arg)?;
+
+        proof.done((a, b))
+    }
+}
+
+impl<Item: FromProof<()>, const LEN: usize> FromProof<()> for [Item; LEN] {
+    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+        let proof = proof.into_node()?;
+
+        let mut items: [Option<Item>; LEN] = std::array::from_fn(|_| None);
+        let proof = (0..LEN).try_fold(proof, |proof, index| {
+            let (proof, item) = proof.next_branch(arg)?;
+            items[index] = Some(item);
+            Ok(proof)
+        })?;
+
+        let items = items.map(|opt| opt.expect("All items should have been filled"));
+        proof.done(items)
+    }
+}
+
+/// Many items in a Merkle tree with given arity and length
+pub struct Many<T, const ARITY: usize, const LEN: usize>(Box<[T; LEN]>);
+
+impl<T, const ARITY: usize, const LEN: usize> Many<T, ARITY, LEN> {
+    /// Turn this into the underlying boxed array.
+    pub fn into_boxed_array(self) -> Box<[T; LEN]> {
+        self.0
+    }
+}
+
+impl<Item: FromProof<()>, const ARITY: usize, const LEN: usize> FromProof<()>
+    for Many<Item, ARITY, LEN>
+{
+    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: ()) -> SuspendedResult<Proof, Self> {
+        let mut leaves = Vec::with_capacity(LEN);
+
+        let result = descend_tree(proof, ARITY, 0, LEN, &mut |_idx, proof| {
+            let result = Item::from_proof(proof, arg)?;
+            let result = result.map(|leaf| {
+                leaves.push(leaf);
+            });
+            Ok(result)
+        })?;
+
+        let Ok(boxed_array) = leaves.into_boxed_slice().try_into() else {
+            panic!("Unexpected number of leaves collected")
+        };
+
+        let result = result.map(|_| Many(boxed_array));
+        Ok(result)
+    }
+}
+
+/// Descend a Merkle proof tree, calling `for_leaf` on each leaf encountered. The tree is described
+/// to have a number of leaves equal to the given `leaves`. The node arity is given by `arity`.
+/// Leaves are encountered in depth-first order left-to-right.
+pub fn descend_tree<Proof, LeafHandler>(
+    proof: Proof,
+    arity: usize,
+    start_leaf: usize,
+    leaves: usize,
+    for_leaf: &mut LeafHandler,
+) -> SuspendedResult<Proof, ()>
+where
+    LeafHandler: FnMut(usize, Proof) -> SuspendedResult<Proof, ()>,
+    Proof: Deserialiser,
+{
+    if leaves == 1 {
+        return for_leaf(start_leaf, proof);
+    }
+
+    let ctx = proof.into_node()?;
+
+    let mut child_start = start_leaf;
+    let ctx = node_child_length(arity, leaves).try_fold(ctx, |ctx, child_leaves| {
+        let (ctx, ()) = ctx.next_branch_with(|proof| {
+            descend_tree(proof, arity, child_start, child_leaves, for_leaf)
+        })?;
+
+        child_start += child_leaves;
+
+        Ok(ctx)
+    })?;
+
+    ctx.done(())
+}
+
+/// Compute the lengths covered by each child of a node.
+fn node_child_length(arity: usize, length: usize) -> impl Iterator<Item = usize> {
+    let child_max_length = length.div_ceil(arity);
+
+    (0..arity).map(move |idx| {
+        let start = idx * child_max_length;
+        let end = ((idx + 1) * child_max_length).min(length);
+        end.saturating_sub(start)
+    })
+}

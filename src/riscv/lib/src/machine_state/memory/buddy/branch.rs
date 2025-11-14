@@ -13,6 +13,10 @@ use bincode::error::EncodeError;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -80,6 +84,20 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
             left: Box::new(B::struct_ref::<F, M>(&space.left)),
             right: Box::new(B::struct_ref::<F, M>(&space.right)),
         }
+    }
+
+    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+        let proof = proof.into_node()?;
+
+        let (proof, free_info) = proof.next_branch(())?;
+        let (proof, left) = proof.next_branch_with(B::buddy_from_proof)?;
+        let (proof, right) = proof.next_branch_with(B::buddy_from_proof)?;
+
+        proof.done(Self::Buddy {
+            free_info,
+            left: Box::new(left),
+            right: Box::new(right),
+        })
     }
 }
 

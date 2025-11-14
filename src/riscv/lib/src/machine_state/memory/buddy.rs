@@ -21,7 +21,9 @@ mod branch;
 mod branch_combinations;
 mod leaf;
 mod proxy;
-
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
@@ -46,6 +48,9 @@ pub trait BuddyLayout: ProofLayout {
     where
         M: ManagerBase + 'a,
         F: FnManager<'a, M>;
+
+    /// Parse a proof to obtain the Buddy memory manager state.
+    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>>;
 }
 
 /// Buddy-style memory manager

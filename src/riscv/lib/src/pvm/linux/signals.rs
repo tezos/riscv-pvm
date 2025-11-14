@@ -13,6 +13,11 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use strum::EnumCount;
 use strum::FromRepr;
 use zerocopy::FromBytes;
@@ -221,6 +226,26 @@ where
         builder.add(&self.restorer);
         builder.add(&self.thread_mask);
         builder.done()
+    }
+}
+
+impl<Arg> FromProof<Arg> for SignalActions<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, actions) = proof.next_branch(())?;
+        let (proof, flags) = proof.next_branch(())?;
+        let (proof, masks) = proof.next_branch(())?;
+        let (proof, restorer) = proof.next_branch(())?;
+        let (proof, thread_mask) = proof.next_branch(())?;
+
+        proof.done(SignalActions::<Verify> {
+            actions,
+            flags,
+            masks,
+            restorer,
+            thread_mask,
+        })
     }
 }
 

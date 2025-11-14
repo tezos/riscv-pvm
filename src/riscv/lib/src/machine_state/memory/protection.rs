@@ -15,8 +15,14 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::merkle_proof;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -191,5 +197,14 @@ where
             .collect::<Vec<_>>();
         build_custom_merkle_tree(MERKLE_ARITY, leaves)
             .expect("Building Merkle tree should not fail")
+    }
+}
+impl<Arg, const PAGES: usize> FromProof<Arg> for PagePermissions<PAGES, Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let result = merkle_proof::Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof, ())?;
+        let result = result.map(|pages| Self {
+            pages: pages.into_boxed_array(),
+        });
+        Ok(result)
     }
 }

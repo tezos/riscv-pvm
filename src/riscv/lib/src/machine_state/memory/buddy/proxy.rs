@@ -6,6 +6,7 @@
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Verify;
 
 use super::BuddyLayout;
 use super::branch_combinations::BuddyBranch1KiLayout;
@@ -68,6 +69,12 @@ where
         F: FnManager<'a, M>,
     {
         <PickLayout<PAGES> as BuddyLayout>::struct_ref::<F, M>(space)
+    }
+
+    fn buddy_from_proof<D: merkle_proof::Deserialiser>(
+        proof: D,
+    ) -> merkle_proof::SuspendedResult<D, Self::Buddy<Verify>> {
+        <PickLayout<PAGES> as BuddyLayout>::buddy_from_proof(proof)
     }
 }
 
