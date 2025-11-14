@@ -13,6 +13,7 @@ use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
+use octez_riscv_data::merkle_proof::Suspended;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -36,7 +37,6 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
-use crate::state_backend::proof_backend::proof::deserialiser::Suspended;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafLayout<const PAGES: u64>;
@@ -52,9 +52,7 @@ impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
         Atom::to_merkle_tree(state.set)
     }
 
-    fn into_verify_alloc<
-        D: crate::state_backend::proof_backend::proof::deserialiser::Deserialiser,
-    >(
+    fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
     ) -> crate::state_backend::VerifyAllocResult<D, Self> {
         let parser = Atom::into_verify_alloc(proof)?;

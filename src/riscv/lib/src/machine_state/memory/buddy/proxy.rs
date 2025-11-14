@@ -6,6 +6,7 @@
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::merkle_proof;
 
 use super::BuddyLayout;
 use super::branch_combinations::BuddyBranch1KiLayout;
@@ -26,7 +27,6 @@ use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
 use crate::state_backend::VerifyAllocResult;
 use crate::state_backend::proof_backend::merkle::MerkleTree;
-use crate::state_backend::proof_backend::proof::deserialiser;
 
 /// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
 pub struct BuddyLayoutProxy<const PAGES: usize>;
@@ -48,7 +48,7 @@ where
         <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
     }
 
-    fn into_verify_alloc<D: deserialiser::Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
+    fn into_verify_alloc<D: merkle_proof::Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         <PickLayout<PAGES> as ProofLayout>::into_verify_alloc(proof)
     }
 

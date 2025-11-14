@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::VecDeque;
+use std::error;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -11,7 +12,11 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserError;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
@@ -34,17 +39,13 @@ use super::proof_backend::merkle::build_custom_merkle_tree;
 use super::proof_backend::merkle::chunks_to_writer;
 use super::proof_backend::proof::MerkleProof;
 use super::proof_backend::proof::MerkleProofLeaf;
-use super::proof_backend::proof::deserialiser::Deserialiser;
-use super::proof_backend::proof::deserialiser::DeserialiserNode;
 use super::proof_backend::proof::deserialiser::Result;
-use super::proof_backend::proof::deserialiser::Suspended;
 use super::proof_backend::tree::Tree;
 use super::verify_backend;
 use super::verify_backend::PartialState;
 use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
-use crate::state_backend::proof_backend::proof::deserialiser::DeserialiserError;
 use crate::state_backend::verify_backend::PageId;
 
 /// Errors occurring when parsing the tag structure of a Merkle proof.
@@ -92,6 +93,16 @@ pub enum ProofError {
 
     #[error("Custom error: {0}")]
     Custom(Box<dyn std::error::Error>),
+}
+
+impl DeserialiserError for ProofError {
+    fn custom<E: error::Error + 'static>(error: E) -> Self {
+        // SAFETY: `ProofError` does not contain lifetimes, so unty-ing is safe.
+        match unsafe { unty::unty(error) } {
+            Ok(this) => this,
+            Err(error) => Self::Custom(Box::new(error)),
+        }
+    }
 }
 
 /// Common result type for parsing a Merkle proof.
