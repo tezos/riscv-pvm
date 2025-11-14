@@ -80,13 +80,6 @@ pub enum Outcome {
         hook: Block,
     },
 
-    /// An exception has been raised
-    Exception {
-        /// The block that the instruction will jump to after an exception in order to exit the
-        /// instruction sequence
-        hook: Block,
-    },
-
     /// Branch to a known location
     KnownBranch {
         /// Instruction destination relative to the instruction's program counter
@@ -117,6 +110,9 @@ pub struct LoweredInstruction {
     /// Execution outcomes of the instruction
     outcomes: Vec<Outcome>,
 
+    /// Exception block, if any
+    exception_block: Option<Block>,
+
     /// Width of the instruction
     width: InstrWidth,
 }
@@ -140,6 +136,11 @@ impl LoweredInstruction {
     /// Build a jump that effectively runs the instruction.
     pub fn build_run(&self, builder: &mut FunctionBuilder) {
         builder.ins().jump(self.run_block, []);
+    }
+
+    /// Access the exception block, if any.
+    pub fn exception_block(&self) -> Option<Block> {
+        self.exception_block
     }
 }
 
@@ -180,6 +181,9 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
 
     /// Width of the instruction being built
     width: InstrWidth,
+
+    /// Block that all exception paths jump to
+    exception_block: Option<Block>,
 }
 
 impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
@@ -207,6 +211,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
             core_param,
             result_param,
             outcomes: Vec::new(),
+            exception_block: None,
             width,
         }
     }
@@ -214,13 +219,6 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Obtain an instruction inserter.
     pub(super) fn ins(&mut self) -> impl InstBuilder {
         self.builder.ins()
-    }
-
-    /// Allocate an outcome block for an exception.
-    fn create_exception_outcome(&mut self) -> Block {
-        let hook = self.builder.create_block();
-        self.outcomes.push(Outcome::Exception { hook });
-        hook
     }
 
     /// Allocate an outcome block for a known branch.
@@ -234,8 +232,10 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     fn handle_exception<Any>(&mut self, exception: Value<ExceptionCode>) -> InstructionResult<Any> {
         self.result_param.write(self.builder, exception);
 
-        let exception_block = self.create_exception_outcome();
-        self.builder.ins().jump(exception_block, []);
+        let exception_block = self
+            .exception_block
+            .get_or_insert_with(|| self.builder.create_block());
+        self.builder.ins().jump(*exception_block, []);
 
         InstructionResult::NoNext
     }
@@ -250,6 +250,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
             run_block: self.entry_block,
             outcomes: self.outcomes,
             width: self.width,
+            exception_block: self.exception_block,
         };
 
         // Hook up the end of the instruction.
