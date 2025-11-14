@@ -88,23 +88,6 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
         // The key does not exist so nothing will happen.
         return false;
     };
-    // SAFETY: The default recursion limit in Rust is 128
-    // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
-    //
-    // This function recurses once for every node it traverses, meaning that the number
-    // of recursions are equal to or less than the height of the node.
-    //
-    // The lower bound on the number of nodes in a valid AVL tree is:
-    // fibonacci(height + 3) - 1
-    // see: <https://www.cs.cornell.edu/courses/cs2112/2020fa/lectures/avl/>
-    //
-    // with height = 128:
-    // fibonacci(128 + 3) - 1 > 1x10^27
-    //
-    // This would require:
-    //  - more nodes than 64-bit systems can address.
-    //  - more disk space than has ever been produced.
-    //  - inserting 2 billion nodes every second since the dawn of the universe.
     match node.key.cmp(key) {
         Ordering::Equal => {
             let node_mut = Arc::make_mut(node);
@@ -467,7 +450,7 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
     let node_mut = Arc::make_mut(node);
     let node_bf = node_mut.balance_factor;
 
-    // If the right child A has a left child B, the successor is the min of B's subtree.
+    // If the right child has a left child, the successor is the min of the left child's subtree.
     let (mut successor, shrank) = if node_mut
         .right_ref()
         .as_ref()
@@ -481,7 +464,7 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
             min.expect("A node with a successor must have a right child"),
             shrank,
         )
-    // If there is no left child B, the successor is the right child A.
+    // If there is no left child of the right child, the successor is the right child.
     } else {
         let mut successor = node_mut
             .right_mut()
@@ -489,7 +472,7 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
             .expect("A node with a successor must have a right child");
         let successor_mut = Arc::make_mut(&mut successor);
 
-        // Bump up the A's (optional) right child, causing the subtree to shrink.
+        // Bump up the (optional) right child of the right child, causing the subtree to shrink.
         node_mut.right = successor_mut.right.take();
         (successor, true)
     };

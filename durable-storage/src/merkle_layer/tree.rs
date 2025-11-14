@@ -21,8 +21,8 @@ pub(super) struct Avl {
 
 impl Avl {
     /// Delete the node in the tree with a given key.
-    pub(super) fn delete(&mut self, key: &Key) {
-        delete(&mut self.root, key);
+    pub(super) fn delete(&mut self, key: &Key) -> bool {
+        delete(&mut self.root, key)
     }
 
     /// The data stored in a node in the tree with a given key.
