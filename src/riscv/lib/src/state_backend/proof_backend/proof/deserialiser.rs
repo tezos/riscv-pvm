@@ -55,10 +55,10 @@ mod tests {
         // Computation: return the value of the nested leaf
 
         let ctx = proof.into_node()?;
-        let (ctx, _left) = ctx.next_branch(|br_proof| br_proof.into_leaf::<Hash>())?;
-        let (ctx, right) = ctx.next_branch(|br_ctx| {
+        let (ctx, _left) = ctx.next_branch_with(|br_proof| br_proof.into_leaf::<Hash>())?;
+        let (ctx, right) = ctx.next_branch_with(|br_ctx| {
             let ctx = br_ctx.into_node()?;
-            let (ctx, result) = ctx.next_branch(|pr| pr.into_leaf::<T>())?;
+            let (ctx, result) = ctx.next_branch_with(|pr| pr.into_leaf::<T>())?;
             ctx.done(result)
         })?;
 
@@ -104,7 +104,7 @@ mod tests {
         let mut data = Vec::new();
 
         let ctx = (0..4).try_fold(ctx, |ctx, _| -> Result<_, D::Error> {
-            let (ctx, val) = ctx.next_branch(|br_proof| br_proof.into_leaf::<i32>())?;
+            let (ctx, val) = ctx.next_branch_with(|br_proof| br_proof.into_leaf::<i32>())?;
 
             if let Partial::Present(val) = val {
                 data.push(val);

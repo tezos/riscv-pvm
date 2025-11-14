@@ -112,10 +112,19 @@ pub trait DeserialiserNode: Sized {
 
     /// The next branch of the current node is deserialised using the provided deserialiser
     /// `branch_deserialiser`.
-    fn next_branch<T>(
+    fn next_branch_with<T>(
         self,
         branch_deserialiser: impl FnOnce(Self::Parent) -> SuspendedResult<Self::Parent, T>,
     ) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error>;
+
+    /// The next branch of the current node is deserialised using the [`FromProof`] implementation
+    /// of type `T`.
+    fn next_branch<T: FromProof<Arg>, Arg>(
+        self,
+        arg: Arg,
+    ) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error> {
+        self.next_branch_with(|deser| T::from_proof(deser, arg))
+    }
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.

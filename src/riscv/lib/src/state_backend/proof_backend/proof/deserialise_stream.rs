@@ -298,7 +298,7 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
         self.deser.presence()
     }
 
-    fn next_branch<T>(
+    fn next_branch_with<T>(
         self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
