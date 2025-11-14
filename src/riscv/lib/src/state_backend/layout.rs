@@ -175,12 +175,12 @@ macro_rules! struct_layout {
                 }
 
                 #[inline]
-                fn into_verify_alloc<D: $crate::state_backend::proof_backend::proof::deserialiser::Deserialiser>(
+                fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
                     proof: D,
                 ) -> $crate::state_backend::VerifyAllocResult<D, Self> {
                     use $crate::state_backend::proof_layout::tuple_branches_proof_layout;
-                    use $crate::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
-                    use $crate::state_backend::proof_backend::proof::deserialiser::Suspended;
+                    use octez_riscv_data::merkle_proof::DeserialiserNode;
+                    use octez_riscv_data::merkle_proof::Suspended;
 
                     let result = tuple_branches_proof_layout!(proof $(, [<$field_name:camel>])+)?;
 

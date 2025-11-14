@@ -6,14 +6,14 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use bincode::Decode;
-use octez_riscv_data::mode::Verify;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
 
-use super::deserialiser::Deserialiser;
-use super::deserialiser::DeserialiserNode;
 use super::deserialiser::Result;
-use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
