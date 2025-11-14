@@ -16,56 +16,13 @@
 use std::error;
 
 use bincode::Decode;
-use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::Partial;
 
 use crate::state_backend::ProofError;
 
 /// Result type used when deserialising a proof - including both the layout and contents of the
 /// proof.
 pub type Result<T, E = ProofError> = std::result::Result<T, E>;
-
-/// Possible outcomes when parsing a node or a leaf from a Merkle proof
-/// where the leaf is assumed to have type `T`.
-#[derive(Clone)]
-pub enum Partial<T> {
-    /// The leaf / node is altogether absent from the proof.
-    Absent,
-    /// A blinded subtree and its [`struct@Hash`] is provided.
-    Blinded(Hash),
-    /// Data successfully parsed and its type is `T`.
-    Present(T),
-}
-
-impl<T> Partial<T> {
-    /// Map the present result of a [`Partial<T>`] into [`Partial<R>`].
-    pub fn map_present<R>(self, f: impl FnOnce(T) -> R) -> Partial<R> {
-        match self {
-            Partial::Absent => Partial::Absent,
-            Partial::Blinded(hash) => Partial::Blinded(hash),
-            Partial::Present(data) => Partial::Present(f(data)),
-        }
-    }
-
-    /// Same as [`Partial::map_present`] but can fail.
-    pub fn map_present_fallible<R, E>(
-        self,
-        f: impl FnOnce(T) -> Result<R, E>,
-    ) -> Result<Partial<R>, E> {
-        match self {
-            Partial::Absent => Ok(Partial::Absent),
-            Partial::Blinded(hash) => Ok(Partial::Blinded(hash)),
-            Partial::Present(data) => Ok(Partial::Present(f(data)?)),
-        }
-    }
-
-    /// Convert a [`Partial<T>`] into an [`Option<T>`], discarding blinded and absent cases.
-    pub fn to_present(self) -> Option<T> {
-        match self {
-            Partial::Present(data) => Some(data),
-            Partial::Absent | Partial::Blinded(_) => None,
-        }
-    }
-}
 
 /// Error type that can occur during proof deserialisation
 pub trait DeserialiserError: error::Error {

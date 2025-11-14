@@ -7,13 +7,13 @@ use std::io::Read;
 use bincode::Decode;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::serialisation::deserialise_from;
 
 use super::LeafTag;
 use super::Tag;
 use super::deserialiser::Deserialiser;
 use super::deserialiser::DeserialiserNode;
-use super::deserialiser::Partial;
 use super::deserialiser::Result;
 use super::deserialiser::Suspended;
 use crate::state_backend::AllocatedOf;

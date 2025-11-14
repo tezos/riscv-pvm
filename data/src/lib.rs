@@ -5,5 +5,6 @@
 
 pub mod clone;
 pub mod hash;
+pub mod merkle_proof;
 pub mod mode;
 pub mod serialisation;

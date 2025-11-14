@@ -11,6 +11,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
@@ -44,7 +45,6 @@ use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser::DeserialiserError;
-use crate::state_backend::proof_backend::proof::deserialiser::Partial;
 use crate::state_backend::verify_backend::PageId;
 
 /// Errors occurring when parsing the tag structure of a Merkle proof.
@@ -405,8 +405,6 @@ where
     }
 
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        use super::proof_backend::proof::deserialiser::Partial;
-
         Ok(proof
             .into_leaf::<super::Cells<T, LEN, Normal>>()?
             .map(|region| {
