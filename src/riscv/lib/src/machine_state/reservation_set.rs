@@ -12,6 +12,11 @@ use std::ops::BitAnd;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::backend;
@@ -138,5 +143,13 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.start_addr.fold(builder)
+    }
+}
+
+impl<Arg> FromProof<Arg> for ReservationSet<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let result = Cell::from_proof(proof, ())?;
+        let result = result.map(|start_addr| Self { start_addr });
+        Ok(result)
     }
 }

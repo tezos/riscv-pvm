@@ -30,6 +30,10 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::mode::Verify;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
 
@@ -191,6 +195,28 @@ where
     }
 }
 
+impl<Arg, MC> FromProof<Arg> for MachineCoreState<MC, Verify>
+where
+    MC: MemoryConfig,
+{
+    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
+        proof: D,
+        _arg: Arg,
+    ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, hart) = proof.next_branch(())?;
+        let (proof, main_memory) = proof.next_branch_with(MC::state_from_proof)?;
+        let (proof, signal_actions) = proof.next_branch(())?;
+
+        proof.done(Self {
+            hart,
+            main_memory,
+            signal_actions,
+        })
+    }
+}
+
 /// The alignment of a stack pointer in RISC-V's ABI
 /// See RISC-V ABIs Specification Chapter 2.1
 pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
@@ -268,6 +294,25 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
             page_cache: MC::PageCache::new(),
             compiler: CPE::Compiler::default(),
         }
+    }
+}
+
+impl<MC, CPE> FromProof<CPE::Compiler> for MachineState<MC, CPE, Verify>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, Verify>,
+{
+    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
+        proof: D,
+        compiler: CPE::Compiler,
+    ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
+        let result = MachineCoreState::from_proof(proof, ())?;
+        let result = result.map(|core| Self {
+            core,
+            page_cache: MC::PageCache::new(),
+            compiler,
+        });
+        Ok(result)
     }
 }
 

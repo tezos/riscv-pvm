@@ -13,7 +13,11 @@ use bincode::error::EncodeError;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -44,7 +48,7 @@ impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
+    fn into_verify_alloc<D: Deserialiser>(
         proof: D,
     ) -> crate::state_backend::VerifyAllocResult<D, Self> {
         let parser = Atom::into_verify_alloc(proof)?;
@@ -73,6 +77,12 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
         BuddyLeaf {
             set: space.set.struct_ref::<F>(),
         }
+    }
+
+    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+        let result = Cell::from_proof(proof, ())?;
+        let result = result.map(|set| BuddyLeaf { set });
+        Ok(result)
     }
 }
 

@@ -6,6 +6,11 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
@@ -97,5 +102,16 @@ where
         builder.add(&self.bytes);
         builder.add(&self.size);
         builder.done()
+    }
+}
+
+impl<Arg> FromProof<Arg> for RevealRequest<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, bytes) = proof.next_branch(())?;
+        let (proof, size) = proof.next_branch(())?;
+
+        proof.done(RevealRequest { bytes, size })
     }
 }

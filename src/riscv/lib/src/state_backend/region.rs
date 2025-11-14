@@ -19,10 +19,16 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::HashWriter;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::merkle_proof;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
@@ -40,12 +46,14 @@ use crate::default::ConstDefault;
 use crate::machine_state::memory::MemoryConfig;
 use crate::state::NewState;
 use crate::state_backend::Elem;
+use crate::state_backend::ProofError;
 use crate::state_backend::RegionProj;
 use crate::state_backend::normal_backend::region_elem_offset;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::proof_backend::merkle::MerkleWriter;
 use crate::state_backend::proof_backend::merkle::chunks_to_writer;
+use crate::state_backend::verify_backend;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
@@ -183,6 +191,17 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.region.fold(builder)
+    }
+}
+
+impl<E: Decode<()>, Arg> FromProof<Arg> for Cell<E, Verify> {
+    fn from_proof<D: merkle_proof::Deserialiser>(
+        proof: D,
+        arg: Arg,
+    ) -> merkle_proof::SuspendedResult<D, Self> {
+        let result = Cells::from_proof(proof, arg)?;
+        let result = result.map(|region| Cell { region });
+        Ok(result)
     }
 }
 
@@ -387,6 +406,26 @@ impl<T: Encode, const LEN: usize> Foldable<MerkleTreeFold> for Cells<T, LEN, Pro
 
         let was_accessed = self.region.get_access_info();
         MerkleTree::make_merkle_leaf(leaf_data, was_accessed)
+    }
+}
+
+impl<E: Decode<()>, const LEN: usize, Arg> FromProof<Arg> for Cells<E, LEN, Verify> {
+    fn from_proof<D: merkle_proof::Deserialiser>(
+        proof: D,
+        _arg: Arg,
+    ) -> merkle_proof::SuspendedResult<D, Self> {
+        let result = proof.into_leaf::<[E; LEN]>()?;
+        let result = result.map(|region| {
+            let region = match region {
+                Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
+                Partial::Present(values) => {
+                    let values: Box<[Option<E>; LEN]> = Box::new(values.map(Some));
+                    verify_backend::Region::Partial(values)
+                }
+            };
+            super::Cells::bind(region)
+        });
+        Ok(result)
     }
 }
 
@@ -599,6 +638,73 @@ impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
         let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
 
         Hash::combine([length_node, pages_node])
+    }
+}
+
+impl<Arg> FromProof<Arg> for DynCells<Verify> {
+    fn from_proof<D: merkle_proof::Deserialiser>(
+        proof: D,
+        _arg: Arg,
+    ) -> merkle_proof::SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf::<u64>())?;
+        let length = length.to_present().map(|len| len as usize);
+
+        let (proof, pages) = proof.next_branch_with(|proof| {
+            // When the length node is present, we can properly parse all pages.
+            // But when the length node is not present, we cannot parse any pages. This needs to be
+            // validated. In other words, the node for the pages must be blinded or absent.
+            let Some(len) = length else {
+                // XXX: We can't pick whether this is a node or leaf given we don't know the
+                // length. However, absent or blinded leaves are encoded the same way as nodes.
+                // In the case where the node is present (which is an error in here), we would
+                // trigger an unexpected leaf error instead of the more appropriate error below.
+                let proof = proof.into_node()?;
+
+                // When the node for the pages is present, that's a problem. There may be pages and
+                // we don't know how to extract them because we don't know how many there are.
+                if let Partial::Present(_) = proof.presence() {
+                    return Err(merkle_proof::DeserialiserError::custom(
+                        ProofError::AbsentProof,
+                    ));
+                }
+
+                return proof.done(Vec::new());
+            };
+
+            let mut pages = Vec::new();
+            let mut for_leaf = |idx, proof: D| {
+                // The index is the page number, but the page ID is the starting address.
+                let Some(address) = MERKLE_LEAF_SIZE.get().checked_mul(idx) else {
+                    return Err(merkle_proof::DeserialiserError::custom(
+                        verify_backend::PageIdOverflow,
+                    ));
+                };
+                let page_id = verify_backend::PageId::from_address(address);
+
+                let result = proof.into_leaf_raw()?;
+                let result = result.map(|data| {
+                    if let Partial::Present(data) = data {
+                        pages.push((page_id, data));
+                    }
+                });
+
+                Ok(result)
+            };
+
+            let num_leaves = len.div_ceil(MERKLE_LEAF_SIZE.get());
+            let result =
+                merkle_proof::descend_tree(proof, MERKLE_ARITY, 0, num_leaves, &mut for_leaf)?;
+
+            Ok(result.map(|()| pages))
+        })?;
+
+        // After the parsing, convert all pages into cells.
+        let region = verify_backend::DynRegion::from_pages(length, pages);
+        let pages = super::DynCells::bind(region);
+
+        proof.done(pages)
     }
 }
 

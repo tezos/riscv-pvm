@@ -12,6 +12,8 @@ use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
 use listener::MemoryGovernanceListener;
+use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Verify;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::page_cache::PageCache;
@@ -333,6 +335,11 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     where
         M: ManagerBase + 'a,
         F: FnManager<'a, M>;
+
+    /// Parse the proof to obtain a memory instance.
+    fn state_from_proof<D: merkle_proof::Deserialiser>(
+        proof: D,
+    ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>>;
 }
 
 // Re-export memory configurations

@@ -301,6 +301,11 @@ impl<const LEAF_SIZE: usize> PageId<LEAF_SIZE> {
     }
 }
 
+/// Error indicating that a page ID cannot be represented
+#[derive(Debug, thiserror::Error)]
+#[error("Page ID overflow")]
+pub struct PageIdOverflow;
+
 /// Page of a dynamic region where sub-ranges may not be present
 #[derive(Clone, Debug)]
 pub struct Page<const LEAF_SIZE: usize> {

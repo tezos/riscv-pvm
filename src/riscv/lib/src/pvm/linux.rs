@@ -21,6 +21,11 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
@@ -1075,6 +1080,26 @@ where
         builder.add(&self.heap);
         builder.add(&self.stack_guard);
         builder.done()
+    }
+}
+
+impl<Arg> FromProof<Arg> for SupervisorState<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, tid_address) = proof.next_branch(())?;
+        let (proof, program) = proof.next_branch(())?;
+        let (proof, heap) = proof.next_branch(())?;
+        let (proof, stack_guard) = proof.next_branch(())?;
+
+        proof.done(Self {
+            tid_address,
+            exited: false,
+            exit_code: 0,
+            program,
+            heap,
+            stack_guard,
+        })
     }
 }
 

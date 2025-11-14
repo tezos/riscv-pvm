@@ -23,7 +23,12 @@ use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -317,6 +322,14 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
+    }
+}
+
+impl<Arg> FromProof<Arg> for XRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, arg: Arg) -> SuspendedResult<D, Self> {
+        let result = backend::Cells::from_proof(proof, arg)?;
+        let result = result.map(|registers| Self { registers });
+        Ok(result)
     }
 }
 
@@ -707,6 +720,14 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
+    }
+}
+
+impl<Arg> FromProof<Arg> for FRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, arg: Arg) -> SuspendedResult<D, Self> {
+        let result = backend::Cells::from_proof(proof, arg)?;
+        let result = result.map(|registers| Self { registers });
+        Ok(result)
     }
 }
 

@@ -14,6 +14,11 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -401,6 +406,17 @@ where
         builder.add(&self.fflags);
         builder.add(&self.frm);
         builder.done()
+    }
+}
+
+impl<Arg> FromProof<Arg> for CSRegisters<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, fflags) = proof.next_branch(())?;
+        let (proof, frm) = proof.next_branch(())?;
+
+        proof.done(Self { fflags, frm })
     }
 }
 

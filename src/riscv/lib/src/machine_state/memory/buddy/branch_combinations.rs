@@ -18,6 +18,8 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -117,6 +119,12 @@ macro_rules! combined_buddy_branch {
                 {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::struct_ref::<F, M>(&space.0);
                     [<$name Alloc>](inner)
+                }
+
+                fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+                    let result = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::buddy_from_proof(proof)?;
+                    let result = result.map(|inner| $name(inner));
+                    Ok(result)
                 }
             }
         }

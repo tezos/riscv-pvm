@@ -7,6 +7,11 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::csregisters;
@@ -134,6 +139,26 @@ where
         builder.add(&self.pc);
         builder.add(&self.reservation_set);
         builder.done()
+    }
+}
+
+impl<Arg> FromProof<Arg> for HartState<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D, _arg: Arg) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, xregisters) = proof.next_branch(())?;
+        let (proof, fregisters) = proof.next_branch(())?;
+        let (proof, csregisters) = proof.next_branch(())?;
+        let (proof, pc) = proof.next_branch(())?;
+        let (proof, reservation_set) = proof.next_branch(())?;
+
+        proof.done(HartState {
+            xregisters,
+            fregisters,
+            csregisters,
+            pc,
+            reservation_set,
+        })
     }
 }
 
