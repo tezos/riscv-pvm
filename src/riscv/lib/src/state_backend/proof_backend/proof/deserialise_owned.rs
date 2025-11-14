@@ -28,6 +28,8 @@ use crate::state_backend::proof_backend::tree::Tree;
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);
 
 impl<'t> Deserialiser for ProofTreeDeserialiser<'t> {
+    type Error = ProofError;
+
     type Suspended<R> = OwnedParserComb<'t, R>;
 
     type DeserialiserNode = OwnedBranchComb<Self>;
