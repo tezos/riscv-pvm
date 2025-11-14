@@ -135,3 +135,12 @@ pub trait Suspended {
         f: impl FnOnce(Self::Output) -> T,
     ) -> <Self::Parent as Deserialiser>::Suspended<T>;
 }
+
+/// Trait for types that can be constructed from a Merkle proof
+///
+/// The parameter `Arg` is an argument that is passed to the construction function and can be used
+/// to provide additional context for the construction.
+pub trait FromProof<Arg>: Sized {
+    /// Parse the given proof to construct an instance of `Self`.
+    fn from_proof<Proof: Deserialiser>(proof: Proof, arg: Arg) -> SuspendedResult<Proof, Self>;
+}
