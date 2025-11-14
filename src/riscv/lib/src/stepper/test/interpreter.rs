@@ -30,7 +30,7 @@ enum Permissions {
     Rwx,
 }
 
-fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permissions) {
+fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permissions, label: &str) {
     // Create a Mint instance: when it goes out of scope (at the end of interpret_test),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
@@ -66,6 +66,13 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permiss
             None => panic!("Unexpected exception after {steps} steps: {cause:?}"),
         },
     };
+
+    let mut cache_golden = mint.new_goldenfile(format!("{path}_{label}.out")).unwrap();
+
+    interpreter
+        .machine_state
+        .page_cache
+        .write_summary(&mut cache_golden);
 }
 
 macro_rules! test_case {
@@ -79,13 +86,13 @@ macro_rules! test_case {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                run_test::<Interpreted<M1M, Normal>>($path, $required_perms)
+                run_test::<Interpreted<M1M, Normal>>($path, $required_perms, "interpreted")
             }
 
             #[test]
             $(#[$m])*
             fn [< $name _inline_jit >]() {
-                run_test::<Jitted<InlineCompiler, M1M>>($path, $required_perms)
+                run_test::<Jitted<InlineCompiler, M1M>>($path, $required_perms, "inline_jit")
             }
         }
     }

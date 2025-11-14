@@ -29,6 +29,8 @@ pub struct InterpretedCompiler;
 #[derive(derive_more::Debug)]
 pub struct Interpreted<MC, M> {
     instruction: Instruction,
+    #[cfg(test)]
+    call_count: std::cell::Cell<usize>,
     #[debug(skip)]
     _pd: PhantomData<(MC, M)>,
 }
@@ -51,7 +53,20 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
     where
         M: ManagerRead + ManagerWrite,
     {
+        #[cfg(test)]
+        {
+            let instr_offset = super::address_to_page_offset(instr_pc) >> 1;
+            page.entries[instr_offset]
+                .call_count
+                .update(|x| x.saturating_add(1));
+        }
+
         super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps)
+    }
+
+    #[cfg(test)]
+    fn called_times(&self) -> usize {
+        self.call_count.get()
     }
 }
 
@@ -59,6 +74,8 @@ impl<MC, M> From<Instruction> for Interpreted<MC, M> {
     fn from(instruction: Instruction) -> Self {
         Self {
             instruction,
+            #[cfg(test)]
+            call_count: std::cell::Cell::new(0),
             _pd: PhantomData,
         }
     }
@@ -70,10 +87,13 @@ impl<MC, M> AsRef<Instruction> for Interpreted<MC, M> {
     }
 }
 
-impl<MC, M> Copy for Interpreted<MC, M> {}
-
 impl<MC, M> Clone for Interpreted<MC, M> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            instruction: self.instruction,
+            #[cfg(test)]
+            call_count: self.call_count.clone(),
+            _pd: self._pd,
+        }
     }
 }
