@@ -43,6 +43,7 @@ use super::verify_backend::PartialState;
 use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
+use crate::state_backend::proof_backend::proof::deserialiser::DeserialiserError;
 use crate::state_backend::proof_backend::proof::deserialiser::Partial;
 use crate::state_backend::verify_backend::PageId;
 
@@ -88,10 +89,14 @@ pub enum ProofError {
 
     #[error("Encountered a node where a leaf was expected")]
     UnexpectedNode,
+
+    #[error("Custom error: {0}")]
+    Custom(Box<dyn std::error::Error>),
 }
 
 /// Common result type for parsing a Merkle proof.
-pub(crate) type VerifyAllocResult<D, L> = Result<<D as Deserialiser>::Suspended<VerifyAlloc<L>>>;
+pub(crate) type VerifyAllocResult<D, L> =
+    Result<<D as Deserialiser>::Suspended<VerifyAlloc<L>>, <D as Deserialiser>::Error>;
 
 /// Regions for the verifier backend for a specific layout.
 pub type VerifyAlloc<L> = <L as Layout>::Allocated<Verify>;
@@ -474,7 +479,7 @@ impl ProofLayout for DynArray {
             start: usize,
             left_length: usize,
             proof: D,
-        ) -> Result<D::Suspended<Vec<PageData>>> {
+        ) -> Result<D::Suspended<Vec<PageData>>, D::Error> {
             let page = verify_backend::PageId::from_address(start);
 
             if left_length <= MERKLE_LEAF_SIZE.get() {
@@ -491,17 +496,15 @@ impl ProofLayout for DynArray {
                 let mut pages_acc = Vec::new();
 
                 let mut work_brackets = work_merkle_params::<MERKLE_ARITY>(start, left_length);
-                let ctx = work_brackets.try_fold(
-                    ctx,
-                    |ctx, (start, length)| -> Result<_, ProofError> {
+                let ctx =
+                    work_brackets.try_fold(ctx, |ctx, (start, length)| -> Result<_, D::Error> {
                         let (ctx, pages) =
                             ctx.next_branch(|proof| parse_pages_fn_getter(start, length, proof))?;
 
                         pages_acc.extend(pages);
 
                         Ok(ctx)
-                    },
-                )?;
+                    })?;
 
                 ctx.done(pages_acc)
             }
@@ -533,7 +536,7 @@ impl ProofLayout for DynArray {
 
                         Partial::Present(_) => {
                             // Not fine, there may be pages and we don't know how to extract them.
-                            return Err(ProofError::DependentNodeIsAbsent);
+                            return Err(DeserialiserError::custom(ProofError::AbsentProof));
                         }
                     }
 
@@ -961,7 +964,7 @@ where
 
         let mut children_acc = Vec::with_capacity(LEN);
 
-        let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, ProofError> {
+        let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, D::Error> {
             let (ctx, child) = ctx.next_branch(|child_proof| T::into_verify_alloc(child_proof))?;
 
             children_acc.push(child);
@@ -1018,7 +1021,7 @@ where
         fn parametrised_deserialiser<T: ProofLayout, D: Deserialiser>(
             length: usize,
             proof: D,
-        ) -> Result<D::Suspended<NestedSuspendedResult<T>>> {
+        ) -> Result<D::Suspended<NestedSuspendedResult<T>>, D::Error> {
             if length == 1 {
                 Ok(T::into_verify_alloc(proof)?.map(|data| vec![data]))
             } else {
@@ -1029,7 +1032,7 @@ where
                 let mut child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
                 let ctx = child_length_iter.try_fold(
                     ctx,
-                    |ctx, (_, child_length)| -> Result<_, ProofError> {
+                    |ctx, (_, child_length)| -> Result<_, D::Error> {
                         let (ctx, children) = ctx.next_branch(|child_proof| {
                             parametrised_deserialiser::<T, D>(child_length, child_proof)
                         })?;

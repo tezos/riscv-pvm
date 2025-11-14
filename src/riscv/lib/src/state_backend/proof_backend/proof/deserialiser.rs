@@ -13,6 +13,8 @@
 //!
 //! [`ProofTree`]: crate::state_backend::ProofTree
 
+use std::error;
+
 use bincode::Decode;
 use octez_riscv_data::hash::Hash;
 
@@ -65,6 +67,29 @@ impl<T> Partial<T> {
     }
 }
 
+/// Error type that can occur during proof deserialisation
+pub trait DeserialiserError: error::Error {
+    /// Create a custom deserialiser error from any error type.
+    fn custom<E: error::Error + 'static>(error: E) -> Self;
+}
+
+impl DeserialiserError for ProofError {
+    fn custom<E: error::Error + 'static>(error: E) -> Self {
+        // SAFETY: `ProofError` does not contain lifetimes, so unty-ing is safe.
+        match unsafe { unty::unty(error) } {
+            Ok(this) => this,
+            Err(error) => Self::Custom(Box::new(error)),
+        }
+    }
+}
+
+/// [`D::Suspended<T>`] wrapped in a [`Result`].
+///
+/// Clippy yells at us for making the type signatures in [`Deserialiser`] too complex, so we
+/// provide some aliases to simplify them on the surface level.
+pub type SuspendedResult<D, T> =
+    Result<<D as Deserialiser>::Suspended<T>, <D as Deserialiser>::Error>;
+
 /// The main trait used for deserialising a proof.
 ///
 /// Having an object of this trait is equivalent to having a proof and being able to deserialise it.
@@ -74,6 +99,9 @@ impl<T> Partial<T> {
 /// 2. [`Deserialiser::into_leaf<T>`] The proof is a leaf and the type `T` is parsed.
 /// 3. [`Deserialiser::into_node`] The proof is a node in the tree.
 pub trait Deserialiser {
+    /// Error type
+    type Error: DeserialiserError;
+
     /// After deserialising a proof, a [`Suspended<R>`] computation is obtained.
     type Suspended<R>: Suspended<Output = R, Parent = Self>;
 
@@ -81,13 +109,13 @@ pub trait Deserialiser {
     type DeserialiserNode: DeserialiserNode<Parent = Self>;
 
     /// It is expected for the proof to be a leaf. Obtain the raw bytes from that leaf.
-    fn into_leaf_raw<const LEN: usize>(self) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>>;
+    fn into_leaf_raw<const LEN: usize>(self) -> SuspendedResult<Self, Partial<Box<[u8; LEN]>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>>;
+    fn into_leaf<T: Decode<()>>(self) -> SuspendedResult<Self, Partial<T>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
-    fn into_node(self) -> Result<Self::DeserialiserNode>;
+    fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error>;
 }
 
 /// The trait used for deserialising a proof's node.
@@ -104,13 +132,18 @@ pub trait DeserialiserNode: Sized {
         self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
-        )
-            -> Result<<Self::Parent as Deserialiser>::Suspended<T>>,
-    ) -> Result<(Self, T)>;
+        ) -> Result<
+            <Self::Parent as Deserialiser>::Suspended<T>,
+            <Self::Parent as Deserialiser>::Error,
+        >,
+    ) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error>;
 
     /// Signal the end of deserialisation of the node's branches.
     /// Call this method after all calls to [`DeserialiserNode::next_branch`] have been made.
-    fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>>;
+    fn done<T>(
+        self,
+        value: T,
+    ) -> Result<<Self::Parent as Deserialiser>::Suspended<T>, <Self::Parent as Deserialiser>::Error>;
 }
 
 /// The trait represents a computation function obtained after deserialising a proof.
@@ -152,7 +185,7 @@ mod tests {
 
     fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
         // The tree structure:
         // Node (root)
         // ├── Leaf (type: Hash)
@@ -176,17 +209,21 @@ mod tests {
         })
     }
 
-    fn computation_i16<D: Deserialiser>(proof: D) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    fn computation_i16<D: Deserialiser>(
+        proof: D,
+    ) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
         generic_computation::<i16, D>(proof)
     }
 
-    fn computation_bool<D: Deserialiser>(proof: D) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    fn computation_bool<D: Deserialiser>(
+        proof: D,
+    ) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
         generic_computation::<bool, D>(proof)
     }
 
     fn computation_leaves<D: Deserialiser>(
         proof: D,
-    ) -> Result<<D as Deserialiser>::Suspended<i32>> {
+    ) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
         // The tree structure
         // Node (root)
         // ├── Leaf 1 (type: i32)
@@ -206,7 +243,7 @@ mod tests {
 
         let mut data = Vec::new();
 
-        let ctx = (0..4).try_fold(ctx, |ctx, _| -> Result<_> {
+        let ctx = (0..4).try_fold(ctx, |ctx, _| -> Result<_, D::Error> {
             let (ctx, val) = ctx.next_branch(|br_proof| br_proof.into_leaf::<i32>())?;
 
             if let Partial::Present(val) = val {

@@ -128,6 +128,8 @@ impl<'t> StreamDeserialiser<'t> {
 }
 
 impl<'t> Deserialiser for StreamDeserialiser<'t> {
+    type Error = ProofError;
+
     type Suspended<R> = StreamParserComb<'t, R>;
 
     type DeserialiserNode = StreamBranchComb<'t>;
