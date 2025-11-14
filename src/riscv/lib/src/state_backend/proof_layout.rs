@@ -427,8 +427,9 @@ impl ProofLayout for DynArray {
                 let mut work_brackets = work_merkle_params::<MERKLE_ARITY>(start, left_length);
                 let ctx =
                     work_brackets.try_fold(ctx, |ctx, (start, length)| -> Result<_, D::Error> {
-                        let (ctx, pages) =
-                            ctx.next_branch(|proof| parse_pages_fn_getter(start, length, proof))?;
+                        let (ctx, pages) = ctx.next_branch_with(|proof| {
+                            parse_pages_fn_getter(start, length, proof)
+                        })?;
 
                         pages_acc.extend(pages);
 
@@ -440,9 +441,9 @@ impl ProofLayout for DynArray {
         }
 
         let proof = proof.into_node()?;
-        let (proof, length) = proof.next_branch(|proof| proof.into_leaf::<u64>())?;
+        let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf::<u64>())?;
 
-        let (proof, pages) = proof.next_branch(|proof| {
+        let (proof, pages) = proof.next_branch_with(|proof| {
             let length = length.to_present().map(|len| len as usize);
 
             let pages_handler = match length {
@@ -661,7 +662,7 @@ macro_rules! tuple_branches_proof_layout {
 
         paste::paste! {
             $(
-                let (ctx, [<$branches:lower>]) = ctx.next_branch(|child_proof| [<$branches>]::into_verify_alloc(child_proof))?;
+                let (ctx, [<$branches:lower>]) = ctx.next_branch_with(|child_proof| [<$branches>]::into_verify_alloc(child_proof))?;
             )+
 
             let value = (
@@ -827,7 +828,8 @@ where
         let mut children_acc = Vec::with_capacity(LEN);
 
         let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, D::Error> {
-            let (ctx, child) = ctx.next_branch(|child_proof| T::into_verify_alloc(child_proof))?;
+            let (ctx, child) =
+                ctx.next_branch_with(|child_proof| T::into_verify_alloc(child_proof))?;
 
             children_acc.push(child);
 
@@ -884,7 +886,7 @@ where
                 let ctx = child_length_iter.try_fold(
                     ctx,
                     |ctx, (_, child_length)| -> Result<_, D::Error> {
-                        let (ctx, children) = ctx.next_branch(|child_proof| {
+                        let (ctx, children) = ctx.next_branch_with(|child_proof| {
                             parametrised_deserialiser::<T, D>(child_length, child_proof)
                         })?;
 

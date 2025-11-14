@@ -150,7 +150,7 @@ impl<'t> DeserialiserNode for OwnedBranchComb<ProofTreeDeserialiser<'t>> {
         }
     }
 
-    fn next_branch<T>(
+    fn next_branch_with<T>(
         mut self,
         branch_deserialiser: impl FnOnce(
             Self::Parent,
