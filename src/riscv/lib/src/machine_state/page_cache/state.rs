@@ -195,9 +195,27 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
     /// the given address.
     pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: Arc<PageEntry<CPE>>) {
-        let page_index = crate::machine_state::memory::address_to_page_index(address);
+        let page_index = address_to_page_index(address);
 
         self.pages[page_index] = Some(page_entry);
+    }
+
+    /// In the stepper tests we wish to include a summary of the page cache in the goldenfile, so
+    /// that changes to the compilation and caching behaviour are tracked.
+    pub(crate) fn write_summary(&self, w: &mut impl std::io::Write) {
+        for (page_ix, page) in self.pages.iter().enumerate() {
+            let Some(page) = page else {
+                continue;
+            };
+            let call_summary = page
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, entrypoint)| (i, entrypoint.called_times()))
+                .filter(|(_i, calls)| *calls != 0)
+                .collect::<Vec<_>>();
+            writeln!(w, "page {page_ix}:\n entrypoint calls: {call_summary:?}").unwrap();
+        }
     }
 }
 
@@ -234,10 +252,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     {
         let page_start = address & PAGE_MASK;
 
-        let Some(page_entry) = self
-            .pages
-            .get_mut(memory::address_to_page_index(page_start))
-        else {
+        let Some(page_entry) = self.pages.get_mut(address_to_page_index(page_start)) else {
             #[cfg(feature = "log")]
             crate::log::warning!(
                 "Failed to populated page at {page_start:x}: address {address:x} out of bounds of page cache"
@@ -518,7 +533,7 @@ mod tests {
             };
 
             let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
-            let instr_from_code_page = code_page.page.entries[pc_offset as usize / 2];
+            let instr_from_code_page = &code_page.page.entries[pc_offset as usize / 2];
             assert_eq!(&expected_instr, instr_from_code_page.as_ref());
 
             // double check last halfword

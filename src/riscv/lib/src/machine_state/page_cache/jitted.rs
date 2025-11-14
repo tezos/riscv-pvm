@@ -203,6 +203,11 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
             error: result.to_exception(),
         }
     }
+
+    #[cfg(test)]
+    fn called_times(&self) -> usize {
+        self.dispatch.called_times()
+    }
 }
 
 #[cfg(test)]

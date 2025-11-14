@@ -52,4 +52,9 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ) -> StepManyResult<Exception>
     where
         M: ManagerRead + ManagerWrite;
+
+    /// For analysis in tests, the entrypoint keeps track of the number of times it has been
+    /// called.
+    #[cfg(test)]
+    fn called_times(&self) -> usize;
 }
