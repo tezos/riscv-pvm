@@ -289,6 +289,50 @@ mod tests {
         ml2.tree.check(line!());
     }
 
+    proptest! {
+        #[test]
+        fn test_mavl_cow_prop(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+            let data1 = Bytes::from("property");
+            let data2 = Bytes::from("cow");
+            let mut ml = new_merkle_layer();
+
+            // Set all the keys in the tree
+            for bytes in &keys1 {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml.set(&key, data1.clone());
+            }
+
+            // Create a cheap copy
+            let mut ml2 = ml.clone();
+
+            // Delete all the keys in the copy
+            for bytes in &keys1 {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml2.delete(&key);
+                prop_assert_eq!(ml2.get(&key), None);
+            }
+
+            // Set new keys in the copy
+            for bytes in &keys2 {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml2.set(&key, data2.clone());
+            }
+
+            // Check both trees are still correct
+            for bytes in &keys1 {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                prop_assert_eq!(ml.get(&key), Some(&data1));
+            }
+            for bytes in &keys2 {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                prop_assert_eq!(ml2.get(&key), Some(&data2));
+            }
+
+            ml.tree.check(line!());
+            ml2.tree.check(line!());
+        }
+    }
+
     #[test]
     fn test_mavl_create() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
