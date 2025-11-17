@@ -11,21 +11,16 @@ use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserError;
-use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
 use octez_riscv_data::merkle_proof::tag::InvalidTagError;
-use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
 use octez_riscv_data::tree::Tree;
 use perfect_derive::perfect_derive;
 
-use super::AllocatedOf;
 use super::Array;
 use super::Atom;
 use super::DynArray;
@@ -35,7 +30,6 @@ use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::proof::deserialiser::Result;
-use super::verify_backend;
 use super::verify_backend::PartialState;
 use crate::array_utils::boxed_array;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
@@ -97,10 +91,6 @@ impl DeserialiserError for ProofError {
         }
     }
 }
-
-/// Common result type for parsing a Merkle proof.
-pub(crate) type VerifyAllocResult<D, L> =
-    Result<<D as Deserialiser>::Suspended<VerifyAlloc<L>>, <D as Deserialiser>::Error>;
 
 /// Regions for the verifier backend for a specific layout.
 pub type VerifyAlloc<L> = <L as Layout>::Allocated<Verify>;
@@ -317,9 +307,6 @@ impl OwnedProofPart {
 ///
 /// [`Layouts`]: crate::state_backend::Layout
 pub trait ProofLayout: Layout {
-    /// Parse a Merkle proof into the allocated form of this layout.
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self>;
-
     /// Compute the state hash of a partial state in `Verify` mode using its
     /// corresponding proof tree where data is missing.
     fn partial_state_hash(
@@ -329,10 +316,6 @@ pub trait ProofLayout: Layout {
 }
 
 impl<T: ProofLayout> ProofLayout for Box<T> {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        Ok(T::into_verify_alloc(proof)?.map(Box::new))
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -345,11 +328,6 @@ impl<T> ProofLayout for Atom<T>
 where
     T: Encode + Decode<()> + 'static,
 {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        let f = Array::<T, 1>::into_verify_alloc(proof)?;
-        Ok(f.map(super::Cell::from))
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -367,21 +345,6 @@ impl<T, const LEN: usize> ProofLayout for Array<T, LEN>
 where
     T: Encode + Decode<()> + 'static,
 {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        Ok(proof
-            .into_leaf::<super::Cells<T, LEN, Normal>>()?
-            .map(|region| {
-                let region = match region {
-                    Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
-                    Partial::Present(cells) => {
-                        let arr: Box<[Option<T>; LEN]> = Box::new(cells.into_region().map(Some));
-                        verify_backend::Region::Partial(arr)
-                    }
-                };
-                super::Cells::bind(region)
-            }))
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -396,94 +359,6 @@ where
 }
 
 impl ProofLayout for DynArray {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        type PageData = (
-            PageId<{ MERKLE_LEAF_SIZE.get() }>,
-            Box<[u8; MERKLE_LEAF_SIZE.get()]>,
-        );
-
-        // Obtain a deserialiser for a given start and length.
-        // We parse only for PageData, since this is the raw data in the Merkle proof.
-        fn parse_pages_fn_getter<D: Deserialiser>(
-            start: usize,
-            left_length: usize,
-            proof: D,
-        ) -> Result<D::Suspended<Vec<PageData>>, D::Error> {
-            let page = verify_backend::PageId::from_address(start);
-
-            if left_length <= MERKLE_LEAF_SIZE.get() {
-                let ctx = proof.into_leaf_raw()?;
-                let ctx = ctx.map(move |data| match data {
-                    Partial::Absent => vec![],
-                    Partial::Blinded(_hash) => vec![],
-                    Partial::Present(data) => vec![(page, data.clone())],
-                });
-                Ok(ctx)
-            } else {
-                let ctx = proof.into_node()?;
-
-                let mut pages_acc = Vec::new();
-
-                let mut work_brackets = work_merkle_params::<MERKLE_ARITY>(start, left_length);
-                let ctx =
-                    work_brackets.try_fold(ctx, |ctx, (start, length)| -> Result<_, D::Error> {
-                        let (ctx, pages) = ctx.next_branch_with(|proof| {
-                            parse_pages_fn_getter(start, length, proof)
-                        })?;
-
-                        pages_acc.extend(pages);
-
-                        Ok(ctx)
-                    })?;
-
-                ctx.done(pages_acc)
-            }
-        }
-
-        let proof = proof.into_node()?;
-        let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf::<u64>())?;
-
-        let (proof, pages) = proof.next_branch_with(|proof| {
-            let length = length.to_present().map(|len| len as usize);
-
-            let pages_handler = match length {
-                // When the length node is present, we can properly parse all pages.
-                Some(len) => parse_pages_fn_getter::<D>(0, len, proof)?,
-
-                // When the length node is not present, we cannot parse any pages. This needs to be
-                // validated. In other words, the node for the pages must be blinded or absent.
-                None => {
-                    // XXX: We can't pick whether this is a node or leaf given we don't know the
-                    // length. However, absent or blinded leaves are encoded the same way as nodes.
-                    // In the case where the node is present (which is an error in here), we would
-                    // trigger an unexpected leaf error instead of the more appropriate error below.
-                    let proof = proof.into_node()?;
-
-                    match proof.presence() {
-                        Partial::Absent | Partial::Blinded(_) => {
-                            // Fine, hence we extract no pages.
-                        }
-
-                        Partial::Present(_) => {
-                            // Not fine, there may be pages and we don't know how to extract them.
-                            return Err(DeserialiserError::custom(ProofError::AbsentProof));
-                        }
-                    }
-
-                    proof.done(Vec::new())?
-                }
-            };
-
-            // After the recursive parsing, convert all pages into cells.
-            Ok(pages_handler.map(|pages| {
-                let region = verify_backend::DynRegion::from_pages(length, pages);
-                super::DynCells::bind(region)
-            }))
-        })?;
-
-        proof.done(pages)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -637,56 +512,11 @@ impl ProofLayout for DynArray {
     }
 }
 
-// This doctest is ignored because the macro is not part of the public API.
-/// Given a [`DeserialiserNode`] and a list of types implementing [`ProofLayout`],
-/// obtain a deserialiser which parses all the branches and places them in a tuple.
-///
-/// Usage:
-/// ```ignore
-/// use octez_riscv::state_backend::proof_backend::proof::deserialiser::Deserialiser;
-/// use octez_riscv::state_backend::proof_backend::proof::deserialiser::DeserialiserNode;
-/// use octez_riscv::state_backend::ProofLayout;
-/// use octez_riscv::state_backend::VerifyAlloc;
-/// use octez_riscv::state_backend::FromProofError;
-///
-/// fn compute_branch_case<A: ProofLayout, B: ProofLayout, D: Deserialiser>(
-///     de: D,
-/// ) -> VerifyAllocResult<D, (A, B)>
-/// {
-///     tuple_branches_proof_layout!(de, A, B)
-/// }
-/// ```
-macro_rules! tuple_branches_proof_layout {
-    ($proof:expr, $($branches:ident),+) => {{
-        let ctx = $proof.into_node()?;
-
-        paste::paste! {
-            $(
-                let (ctx, [<$branches:lower>]) = ctx.next_branch_with(|child_proof| [<$branches>]::into_verify_alloc(child_proof))?;
-            )+
-
-            let value = (
-                $(
-                    [<$branches:lower>]
-                ),+
-            );
-        }
-
-        ctx.done(value)
-    }};
-}
-
-pub(crate) use tuple_branches_proof_layout;
-
 impl<A, B> ProofLayout for (A, B)
 where
     A: ProofLayout,
     B: ProofLayout,
 {
-    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
-        tuple_branches_proof_layout!(proof, A, B)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -708,10 +538,6 @@ where
     B: ProofLayout,
     C: ProofLayout,
 {
-    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
-        tuple_branches_proof_layout!(proof, A, B, C)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -735,10 +561,6 @@ where
     C: ProofLayout,
     D: ProofLayout,
 {
-    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
-        tuple_branches_proof_layout!(proof, A, B, C, D)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -764,10 +586,6 @@ where
     D: ProofLayout,
     E: ProofLayout,
 {
-    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
-        tuple_branches_proof_layout!(proof, A, B, C, D, E)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -795,10 +613,6 @@ where
     E: ProofLayout,
     F: ProofLayout,
 {
-    fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
-        tuple_branches_proof_layout!(proof, A, B, C, D, E, F)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -822,28 +636,6 @@ impl<T, const LEN: usize> ProofLayout for [T; LEN]
 where
     T: ProofLayout,
 {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        let ctx = proof.into_node()?;
-
-        let mut children_acc = Vec::with_capacity(LEN);
-
-        let ctx = (0..LEN).try_fold(ctx, |ctx, _| -> Result<_, D::Error> {
-            let (ctx, child) =
-                ctx.next_branch_with(|child_proof| T::into_verify_alloc(child_proof))?;
-
-            children_acc.push(child);
-
-            Ok(ctx)
-        })?;
-
-        let Ok(children) = children_acc.try_into() else {
-            // We can't use expected because the error can't be displayed
-            unreachable!("Conversion to array of fixed length doesn't fail")
-        };
-
-        ctx.done(children)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -862,49 +654,6 @@ impl<T, const LEN: usize> ProofLayout for Many<T, LEN>
 where
     T: ProofLayout,
 {
-    fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        // Avoids clippy warnings about the type being too complex.
-        type NestedSuspendedResult<T> = Vec<AllocatedOf<T, Verify>>;
-
-        // Obtain a deserialiser for a given length, i.e. Many<T, length>
-        // We know that AllocatedOf<Many<T, LEN>, Verify> = Vec<AllocatedOf<T, Verify>>.
-
-        // Ideally, this function should return Many<T, LEN> (wrapped in suspended + result)
-        // but the function is recursive & dynamic in LEN
-        fn parametrised_deserialiser<T: ProofLayout, D: Deserialiser>(
-            length: usize,
-            proof: D,
-        ) -> Result<D::Suspended<NestedSuspendedResult<T>>, D::Error> {
-            if length == 1 {
-                Ok(T::into_verify_alloc(proof)?.map(|data| vec![data]))
-            } else {
-                let ctx = proof.into_node()?;
-
-                let mut children_acc = Vec::with_capacity(MERKLE_ARITY);
-
-                let mut child_length_iter = work_merkle_params::<MERKLE_ARITY>(0, length);
-                let ctx = child_length_iter.try_fold(
-                    ctx,
-                    |ctx, (_, child_length)| -> Result<_, D::Error> {
-                        let (ctx, children) = ctx.next_branch_with(|child_proof| {
-                            parametrised_deserialiser::<T, D>(child_length, child_proof)
-                        })?;
-
-                        children_acc.extend(children);
-
-                        Ok(ctx)
-                    },
-                )?;
-
-                ctx.done(children_acc)
-            }
-        }
-
-        // The below function's result type Result<D::Suspended<Vec<AllocatedOf<T, Verify>>>> is precisely
-        // this functions's Result<D::Suspended<VerifyAlloc<Self>>> type, so we can directly return it.
-        parametrised_deserialiser::<T, D>(LEN, proof)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -1071,9 +820,9 @@ mod tests {
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
-    use tests::verify_backend::handle_stepper_panics;
 
     use super::*;
+    use crate::state_backend::AllocatedOf;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::FnManagerIdent;
@@ -1082,6 +831,7 @@ mod tests {
     use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
+    use crate::state_backend::verify_backend::handle_stepper_panics;
 
     const CELLS_SIZE: usize = 32;
 

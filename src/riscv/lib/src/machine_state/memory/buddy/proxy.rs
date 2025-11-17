@@ -24,7 +24,6 @@ use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::RefVerifyAlloc;
-use crate::state_backend::VerifyAllocResult;
 
 /// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
 pub struct BuddyLayoutProxy<const PAGES: usize>;
@@ -40,10 +39,6 @@ impl<const PAGES: usize> ProofLayout for BuddyLayoutProxy<PAGES>
 where
     (): BuddyLayoutMatch<PAGES>,
 {
-    fn into_verify_alloc<D: merkle_proof::Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
-        <PickLayout<PAGES> as ProofLayout>::into_verify_alloc(proof)
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
