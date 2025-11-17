@@ -52,6 +52,13 @@ pub struct NodePvm<M: state_backend::ManagerBase = Normal> {
 }
 
 impl<M: state_backend::ManagerBase> NodePvm<M> {
+    /// Wrap the given PVM state.
+    pub fn wrap(state: NodePvmState<M>) -> Self {
+        Self {
+            state: Box::new(state),
+        }
+    }
+
     pub fn bind(space: AllocatedOf<NodePvmLayout, M>) -> Self
     where
         M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,

@@ -298,6 +298,7 @@ mod tests {
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Verify;
 
     use super::*;
     use crate::backend_test;
@@ -403,10 +404,13 @@ mod tests {
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
-                let mut verify_foo =
-                    deserialise_owned::deserialise::<Foo>(ProofPart::Present(&proof))
+                let mut verify_foo = {
+                    let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof), ())
                         .unwrap()
                         .0;
+                    AllocatedOf::<Foo, Verify> { bar, qux }
+                };
+
                 assert_eq!(bar, verify_foo.bar.read());
                 assert_eq!(qux, verify_foo.qux.read_all().as_slice());
 

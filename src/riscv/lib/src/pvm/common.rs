@@ -487,10 +487,8 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof<CPE::Compiler>
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof, compiler: CPE::Compiler) -> Option<Self> {
-        let space = deserialise_owned::deserialise::<PvmLayout<MC>>(ProofTree::Present(proof))
-            .ok()?
-            .0;
-        Some(Self::bind(space, compiler))
+        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof), compiler).ok()?;
+        Some(pvm)
     }
 }
 

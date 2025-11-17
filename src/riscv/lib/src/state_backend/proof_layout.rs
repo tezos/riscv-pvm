@@ -1110,9 +1110,11 @@ mod tests {
 
             let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
-            let verifier_state = deserialise_owned::deserialise::<TestLayout>(
-                ProofTree::Present(&merkle_proof)
-            ).unwrap();
+            let verifier_state =
+                deserialise_owned::deserialise::<AllocatedOf<TestLayout, Verify>, _>(
+                    ProofTree::Present(&merkle_proof),
+                    (),
+                ).unwrap();
 
             // The first component of the state was present in the proof, can be
             // fully read, and contains the initial state.
@@ -1174,8 +1176,11 @@ mod tests {
 
         // Instantiating the verifier state allows us to replay the computation and verify it does
         // the right things.
-        let (mut verify_cell, out_proof) =
-            deserialise_owned::deserialise::<DynArray>(ProofTree::Present(&proof_tree)).unwrap();
+        let (mut verify_cell, out_proof) = deserialise_owned::deserialise::<
+            AllocatedOf<DynArray, Verify>,
+            _,
+        >(ProofTree::Present(&proof_tree), ())
+        .unwrap();
 
         let OwnedProofPart::Present(out_proof) = out_proof else {
             panic!("Expected present proof");
