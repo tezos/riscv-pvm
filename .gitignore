@@ -10,7 +10,7 @@ target
 
 # Direnv
 .direnv
-.envrc
+.envrc.local
 
 # Profiling outputs
 riscv-sandbox-profile.json

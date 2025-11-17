@@ -124,10 +124,6 @@ jobs:
 
       - name: Pre-build Nix development shell
         run: |
-          # Direnv is configured through `.envrc`. We create it, or override it in case one already
-          # exists.
-          echo "use flake" > .envrc
-
           # Subsequent steps will have their environment configured using the $GITHUB_ENV variable.
           nix run .#direnv -- allow .
           nix run .#direnv -- export gha > "$GITHUB_ENV"

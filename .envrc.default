@@ -1,0 +1,9 @@
+# Load the Nix development environment
+if has nix; then
+  use flake
+fi
+
+# Setup Sccache if it is available
+if has sccache; then
+  export RUSTC_WRAPPER=sccache
+fi
