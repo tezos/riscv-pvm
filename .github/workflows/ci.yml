@@ -122,16 +122,13 @@ jobs:
 
       - name: Pre-build Nix development shell
         run: |
-          # Direnv is not installed out of the box unfortunately.
-          nix profile install nixpkgs#direnv nixpkgs#nix-direnv
-
           # Direnv is configured through `.envrc`. We create it, or override it in case one already
           # exists.
           echo "use flake" > .envrc
 
           # Subsequent steps will have their environment configured using the $GITHUB_ENV variable.
-          direnv allow .
-          direnv export gha > "$GITHUB_ENV"
+          nix run .#direnv -- allow .
+          nix run .#direnv -- export gha > "$GITHUB_ENV"
 
       # All downloads should be cached. If there is a cache miss, we should ensure that the cache
       # contains all downloads.

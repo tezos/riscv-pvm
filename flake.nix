@@ -19,6 +19,8 @@
       {
         devShells.default = pkgs.callPackage ./nix/env.nix { };
 
+        apps.direnv = flake-utils.lib.mkApp { drv = pkgs.direnv; };
+
         formatter = pkgs.nixfmt-tree;
       }
     );
