@@ -44,16 +44,8 @@ use crate::interpreter::float;
 use crate::interpreter::integer;
 use crate::interpreter::load_store;
 use crate::machine_state::ProgramCounterUpdate::Next;
-use crate::parser::instruction::AmoArgs;
 use crate::parser::instruction::CIBDTypeArgs;
-use crate::parser::instruction::CIBNZTypeArgs;
-use crate::parser::instruction::CIBTypeArgs;
-use crate::parser::instruction::CJTypeArgs;
-use crate::parser::instruction::CNZRTypeArgs;
-use crate::parser::instruction::CRJTypeArgs;
-use crate::parser::instruction::CRTypeArgs;
 use crate::parser::instruction::CSSDTypeArgs;
-use crate::parser::instruction::CSSTypeArgs;
 use crate::parser::instruction::CsrArgs;
 use crate::parser::instruction::CsriArgs;
 use crate::parser::instruction::FCmpArgs;
@@ -68,10 +60,6 @@ use crate::parser::instruction::FStoreArgs;
 use crate::parser::instruction::Instr;
 use crate::parser::instruction::InstrRoundingMode;
 use crate::parser::instruction::InstrWidth;
-use crate::parser::instruction::NonZeroRdRTypeArgs;
-use crate::parser::instruction::NonZeroRdUJTypeArgs;
-use crate::parser::instruction::RTypeArgs;
-use crate::parser::instruction::UJTypeArgs;
 use crate::parser::instruction::XRegToFRegArgs;
 use crate::parser::instruction::XRegToFRegArgsWithRounding;
 use crate::state_backend::ManagerRead;
@@ -773,52 +761,6 @@ impl ConstDefault for Args {
 }
 
 macro_rules! impl_r_type {
-    ($fn: ident) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart.xregisters.$fn(self.rs1.x, self.rs2.x, self.rd.x);
-            Ok(Next(self.width))
-        }
-    };
-
-    ($fn: ident, non_zero) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart
-                .xregisters
-                .$fn(self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
-            Ok(Next(self.width))
-        }
-    };
-
-    ($fn: ident, non_zero_rd) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart
-                .xregisters
-                .$fn(self.rs1.x, self.rs2.x, self.rd.nzx);
-            Ok(Next(self.width))
-        }
-    };
-
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
@@ -879,36 +821,6 @@ macro_rules! impl_x64_mul_high_type {
 }
 
 macro_rules! impl_i_type {
-    ($fn: ident, non_zero) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart
-                .xregisters
-                .$fn(self.imm, self.rs1.nzx, self.rd.nzx);
-            Ok(Next(self.width))
-        }
-    };
-
-    ($fn: ident, non_zero_rd) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart.xregisters.$fn(self.imm, self.rs1.x, self.rd.nzx);
-            Ok(Next(self.width))
-        }
-    };
-
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.imm, self.rs1.nzx, self.rd.nzx);
@@ -946,21 +858,8 @@ macro_rules! impl_fload_type {
         }
     };
 }
-macro_rules! impl_load_type {
-    ($fn: ident) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.$fn(self.imm, self.rs1.x, self.rd.x)
-                .map(|_| Next(self.width))
-        }
-    };
 
+macro_rules! impl_load_type {
     ($fn: ident, $value: ty) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = load_store::run_load::<$value, I>(icb, self.imm, self.rs1.x, self.rd.x);
@@ -985,20 +884,6 @@ macro_rules! impl_cfload_sp_type {
 }
 
 macro_rules! impl_store_type {
-    ($fn: ident) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.$fn(self.imm, self.rs1.x, self.rs2.x)
-                .map(|_| Next(self.width))
-        }
-    };
-
     ($fn: ident, $value: ty) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = load_store::run_store::<$value, I>(icb, self.imm, self.rs1.x, self.rs2.x);
@@ -1006,6 +891,7 @@ macro_rules! impl_store_type {
         }
     };
 }
+
 macro_rules! impl_fstore_type {
     ($fn: ident) => {
         fn $fn<MC, M>(
@@ -1063,34 +949,6 @@ macro_rules! impl_amo_type {
 }
 
 macro_rules! impl_ci_type {
-    ($fn: ident) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart.xregisters.$fn(self.imm, self.rd.x);
-            Ok(ProgramCounterUpdate::Next(self.width))
-        }
-    };
-
-    ($fn: ident, non_zero) => {
-        fn $fn<MC, M>(
-            &self,
-            core: &mut MachineCoreState<MC, M>,
-        ) -> Result<ProgramCounterUpdate<Address>, Exception>
-        where
-            MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
-        {
-            core.hart.xregisters.$fn(self.imm, self.rd.nzx);
-            Ok(ProgramCounterUpdate::Next(self.width))
-        }
-    };
-
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.imm, self.rd.nzx);
@@ -2371,142 +2229,6 @@ impl From<&Instr> for Instruction {
             Instr::Fence(_args) => Instruction::new_nop(InstrWidth::Uncompressed),
             Instr::FenceTso => Instruction::new_nop(InstrWidth::Uncompressed),
             Instr::FenceI => Instruction::new_fence_i(),
-        }
-    }
-}
-
-impl From<&RTypeArgs> for Args {
-    fn from(value: &RTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&NonZeroRdRTypeArgs> for Args {
-    fn from(value: &NonZeroRdRTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&UJTypeArgs> for Args {
-    fn from(value: &UJTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            imm: value.imm,
-            width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&NonZeroRdUJTypeArgs> for Args {
-    fn from(value: &NonZeroRdUJTypeArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            imm: value.imm,
-            width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&AmoArgs> for Args {
-    fn from(value: &AmoArgs) -> Self {
-        Self {
-            rd: value.rd.into(),
-            rs1: value.rs1.into(),
-            rs2: value.rs2.into(),
-            aq: value.aq,
-            rl: value.rl,
-            width: InstrWidth::Uncompressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CIBTypeArgs> for Args {
-    fn from(value: &CIBTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            imm: value.imm,
-            rs1: value.rd_rs1.into(),
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CIBNZTypeArgs> for Args {
-    fn from(value: &CIBNZTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            imm: value.imm,
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CRTypeArgs> for Args {
-    fn from(value: &CRTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            rs2: value.rs2.into(),
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CNZRTypeArgs> for Args {
-    fn from(value: &CNZRTypeArgs) -> Self {
-        Self {
-            rd: value.rd_rs1.into(),
-            rs2: value.rs2.into(),
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CJTypeArgs> for Args {
-    fn from(value: &CJTypeArgs) -> Self {
-        Self {
-            imm: value.imm,
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CRJTypeArgs> for Args {
-    fn from(value: &CRJTypeArgs) -> Self {
-        Self {
-            rs1: value.rs1.into(),
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
-        }
-    }
-}
-
-impl From<&CSSTypeArgs> for Args {
-    fn from(value: &CSSTypeArgs) -> Self {
-        Self {
-            rs2: value.rs2.into(),
-            imm: value.imm,
-            width: InstrWidth::Compressed,
-            ..Self::DEFAULT
         }
     }
 }
