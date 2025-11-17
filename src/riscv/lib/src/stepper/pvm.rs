@@ -267,8 +267,8 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
         proof: Proof,
     ) -> Result<(), ProofVerificationFailure> {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
-        let (space, merkle_tree) =
-            deserialise_stream::deserialise::<PvmLayout<MC>>(&tree_serialisation)
+        let (pvm, merkle_tree) =
+            deserialise_stream::deserialise(&tree_serialisation, InterpretedCompiler)
                 .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
@@ -281,7 +281,7 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
             "The Merkle proof tree obtained through deserialisation should match the original proof tree"
         );
 
-        let stepper = self.as_verify_stepper(space)?;
+        let stepper = self.to_verify_stepper(pvm)?;
 
         stepper.verify_proof_internal(ProofPart::Present(proof.tree()), proof.final_state_hash())
     }
@@ -289,8 +289,8 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
         let proof_tree = ProofTree::Present(proof.tree());
-        let (space, deserialised_proof_tree) =
-            deserialise_owned::deserialise::<PvmLayout<MC>>(proof_tree)
+        let (pvm, deserialised_proof_tree) =
+            deserialise_owned::deserialise(proof_tree, InterpretedCompiler)
                 .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
@@ -302,15 +302,14 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
             "The Merkle proof tree obtained through deserialisation should match the original proof tree"
         );
 
-        let stepper = self.as_verify_stepper(space)?;
+        let stepper = self.to_verify_stepper(pvm)?;
         stepper.verify_proof_internal(proof_tree, proof.final_state_hash())
     }
 
-    fn as_verify_stepper(
+    fn to_verify_stepper(
         &self,
-        space: AllocatedOf<PvmLayout<MC>, Verify>,
+        pvm: Pvm<MC, Interpreted<MC, Verify>, Verify>,
     ) -> Result<PvmVerify<MC>, ProofVerificationFailure> {
-        let pvm = Pvm::<MC, Interpreted<MC, Verify>, Verify>::bind(space, InterpretedCompiler);
         Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,

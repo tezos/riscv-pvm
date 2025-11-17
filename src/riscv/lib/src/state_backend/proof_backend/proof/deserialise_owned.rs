@@ -8,18 +8,16 @@ use std::marker::PhantomData;
 use bincode::Decode;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
 use octez_riscv_data::tree::Tree;
 
 use super::deserialiser::Result;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::deserialiser;
@@ -208,17 +206,18 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
     }
 }
 
-/// Given a [`ProofTree`] deserialise it as an allocated state in [`Verify`] mode.
-pub fn deserialise<L: ProofLayout>(
+/// Given a [`ProofTree`] deserialise it as `T`.
+pub fn deserialise<T: FromProof<Arg>, Arg>(
     proof: ProofTree,
-) -> deserialiser::Result<(AllocatedOf<L, Verify>, OwnedProofPart)> {
+    arg: Arg,
+) -> deserialiser::Result<(T, OwnedProofPart)> {
     let owned_proof = match proof {
         ProofPart::Absent => OwnedProofPart::Absent,
         ProofPart::Present(proof) => OwnedProofPart::Present(proof.clone()),
     };
 
     let context = ProofTreeDeserialiser::from(proof);
-    let parser = L::into_verify_alloc::<ProofTreeDeserialiser>(context)?;
+    let parser = T::from_proof(context, arg)?;
     let result = parser.into_result();
 
     Ok((result, owned_proof))

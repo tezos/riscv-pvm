@@ -8,18 +8,16 @@ use bincode::Decode;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::tag::LeafTag;
 use octez_riscv_data::merkle_proof::tag::Tag;
-use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise_from;
 
 use super::deserialiser::Result;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
-use crate::state_backend::ProofLayout;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser;
 
@@ -347,16 +345,19 @@ impl<R> StreamParserComb<'_, R> {
     }
 }
 
-/// Deserialise raw bytes as a state in [`Verify`] mode and the partial state hash helper [`OwnedProofPart`].
+/// Deserialise raw bytes as `T` and the partial state hash helper [`OwnedProofPart`].
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
-pub fn deserialise<L: ProofLayout>(
+pub fn deserialise<T: FromProof<Arg>, Arg>(
     proof_tree_raw_bytes: &[u8],
-) -> deserialiser::Result<(AllocatedOf<L, Verify>, OwnedProofPart)> {
+    arg: Arg,
+) -> deserialiser::Result<(T, OwnedProofPart)> {
     let input = StreamInput::new(proof_tree_raw_bytes);
-    let comp_fn = L::into_verify_alloc(StreamDeserialiser::new_present(input))?;
+    let context = StreamDeserialiser::new_present(input);
+
+    let result = T::from_proof(context, arg)?;
 
     // SAFETY: The `Deserialiser` trait provided to the `FromProof` implementation of T
     // can not execute the suspended computation, it can only compose them due to encapsulation
-    comp_fn.into_result()
+    result.into_result()
 }
