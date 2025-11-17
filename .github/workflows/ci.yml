@@ -39,6 +39,7 @@ jobs:
         include:
           - runs-on: ubuntu-latest
             make-target: check check-nix build audit
+            disk-cleanup: true
             title: Linux Checks
           - runs-on: ubuntu-latest
             make-target: test
@@ -50,6 +51,7 @@ jobs:
             title: Code Coverage
           - runs-on: macos-latest
             make-target: check build
+            disk-cleanup: true
             title: MacOS Checks
 
     name: ${{ matrix.title }}
