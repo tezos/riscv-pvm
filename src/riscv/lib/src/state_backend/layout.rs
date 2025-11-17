@@ -167,29 +167,6 @@ macro_rules! struct_layout {
             >
             {
                 #[inline]
-                fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
-                    proof: D,
-                ) -> $crate::state_backend::VerifyAllocResult<D, Self> {
-                    use $crate::state_backend::proof_layout::tuple_branches_proof_layout;
-                    use octez_riscv_data::merkle_proof::DeserialiserNode;
-                    use octez_riscv_data::merkle_proof::Suspended;
-
-                    let result = tuple_branches_proof_layout!(proof $(, [<$field_name:camel>])+)?;
-
-                    let result = result.map(|values| {
-                        let ( $($field_name),+ ) = values;
-
-                        Self::Allocated {
-                            $(
-                                $field_name
-                            ),+
-                        }
-                    });
-
-                    Ok(result)
-                }
-
-                #[inline]
                 fn partial_state_hash(
                     state: $crate::state_backend::RefVerifyAlloc<Self>,
                     proof: $crate::state_backend::ProofTree,

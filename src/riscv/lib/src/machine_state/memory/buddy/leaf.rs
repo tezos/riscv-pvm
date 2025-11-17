@@ -48,13 +48,6 @@ impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn into_verify_alloc<D: Deserialiser>(
-        proof: D,
-    ) -> crate::state_backend::VerifyAllocResult<D, Self> {
-        let parser = Atom::into_verify_alloc(proof)?;
-        Ok(parser.map(|cell| Self::Allocated { set: cell }))
-    }
-
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,

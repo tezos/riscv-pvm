@@ -90,11 +90,6 @@ macro_rules! combined_buddy_branch {
             where
                 [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
             {
-                fn into_verify_alloc<D: Deserialiser>(proof: D) -> $crate::state_backend::VerifyAllocResult<D, Self> {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verify_alloc(proof)?;
-                    Ok(inner.map(|inner| [<$name Alloc>](inner)))
-                }
-
                 fn partial_state_hash(
                     state: RefVerifyAlloc<Self>,
                     proof: ProofTree,
