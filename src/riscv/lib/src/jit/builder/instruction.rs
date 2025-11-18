@@ -13,14 +13,15 @@
 //! IR generation, the instruction implementation uses [`ICB`] methods to produce Cranelift
 //! IR that represents the instruction's behavior, while the builder automatically tracks
 //! all possible execution outcomes. Once the instruction logic is complete,
-//! [`InstructionBuilder::finish`] converts the builder into a [`LoweredInstruction`] with all
-//! [outcomes] properly connected at their source, allowing the [sequence builder] to integrate it
-//! into the overall sequence control flow.
+//! [`InstructionBuilder::finish`] converts the builder into a [`LoweredInstruction`] with the
+//! [outcomes] properly connected at their source, allowing the [sequence builder] to integrate
+//! them into the overall sequence control flow. Any exceptions raised during instruction execution
+//! are linked to a common exception block and handled separately.
 //!
 //! [sequence builder]: super::sequence::SequenceBuilder
 //! [`build_next_instruction`]: super::sequence::SequenceBuilder::build_next_instruction
 //! [instruction builder]: InstructionBuilder
-//! [outcomes]: Outcome
+//! [outcomes]: InstructionOutcomes
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
@@ -44,7 +45,6 @@ use crate::jit::builder::typed::Value;
 use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -70,33 +70,39 @@ pub enum OutcomeProbability {
     Low,
 }
 
-/// Instruction execution outcome
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub enum Outcome {
+/// The resulting control flow information after executing an instruction.
+pub enum InstructionOutcomes {
     /// Continue execution
     Next {
         /// The block that the instruction will jump to in order to continue execution with the
         /// next instruction
         hook: Block,
     },
-
-    /// Branch to a known location
-    KnownBranch {
+    /// Jump to a relative offset.
+    Relative {
         /// Instruction destination relative to the instruction's program counter
         offset: i64,
-
-        /// The block that the instruction will jump to in case of a branch
+        /// The block that the instruction will jump to in case of this outcome
         hook: Block,
     },
-
-    /// Branch to an unknown location
-    UnknownBranch {
-        /// Address of the branch destination
+    /// Jump to an absolute address.
+    Absolute {
+        /// Address of the outcome's destination
         destination: Value<Address>,
-
-        /// The block that the instruction will jump to in case of a branch
+        /// The block that the instruction will jump to in case of this outcome
         hook: Block,
     },
+    /// Either fall-through to the next instruction or branch to a relative offset.
+    Branch {
+        /// The block that the instruction will jump to in case of fall-through
+        fallthrough_hook: Block,
+        /// Branch destination relative to the instruction's program counter
+        branch_offset: i64,
+        /// The block that the instruction will jump to in case of branch taken
+        branch_hook: Block,
+    },
+    /// Instruction is guaranteed to raise an exception.
+    GuaranteedException,
 }
 
 /// Lowered RISC-V instruction
@@ -108,7 +114,7 @@ pub struct LoweredInstruction {
     run_block: Block,
 
     /// Execution outcomes of the instruction
-    outcomes: Vec<Outcome>,
+    outcomes: InstructionOutcomes,
 
     /// Exception block, if any
     exception_block: Option<Block>,
@@ -129,7 +135,7 @@ impl LoweredInstruction {
     }
 
     /// Access the outcomes of the instruction.
-    pub fn outcomes(&self) -> &[Outcome] {
+    pub fn outcomes(&self) -> &InstructionOutcomes {
         &self.outcomes
     }
 
@@ -176,9 +182,6 @@ pub struct InstructionBuilder<'seq, 'jit, MC: MemoryConfig> {
     /// Parameter pointing to the sequence result
     result_param: Pointer<ExceptionCode>,
 
-    /// Execution outcomes of the instruction
-    outcomes: Vec<Outcome>,
-
     /// Width of the instruction being built
     width: InstrWidth,
 
@@ -210,7 +213,6 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
             instruction_pc,
             core_param,
             result_param,
-            outcomes: Vec::new(),
             exception_block: None,
             width,
         }
@@ -219,13 +221,6 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     /// Obtain an instruction inserter.
     pub(super) fn ins(&mut self) -> impl InstBuilder {
         self.builder.ins()
-    }
-
-    /// Allocate an outcome block for a known branch.
-    fn create_known_branch_outcome(&mut self, offset: i64) -> Block {
-        let hook = self.builder.create_block();
-        self.outcomes.push(Outcome::KnownBranch { offset, hook });
-        hook
     }
 
     /// Handle an exception raised by the instruction.
@@ -241,47 +236,24 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     }
 
     /// Finalise the instruction building and produce an instruction.
-    pub fn finish(
-        self,
-        result: InstructionResult<ProgramCounterUpdate<Value<XValue>>>,
-    ) -> LoweredInstruction {
-        let mut lowered = LoweredInstruction {
-            program_counter: self.instruction_pc,
-            run_block: self.entry_block,
-            outcomes: self.outcomes,
-            width: self.width,
-            exception_block: self.exception_block,
+    pub fn finish(self, result: InstructionResult<InstructionOutcomes>) -> LoweredInstruction {
+        let outcomes = match result {
+            InstructionResult::NoNext => {
+                // When the instruction being built exits regardless, that means the instruction
+                // is guaranteed to raise an exception.
+                InstructionOutcomes::GuaranteedException
+            }
+
+            InstructionResult::HasNext(outcomes) => outcomes,
         };
 
-        // Hook up the end of the instruction.
-        match result {
-            InstructionResult::NoNext => {
-                // When the instruction being built exits regardless, that means that the block
-                // we're currently targeting ends in a branching or jump IR instruction.
-            }
-
-            InstructionResult::HasNext(update) => {
-                // However, when a next instruction is possible, the current block needs to be
-                // populated. In this case, we jump to the corresponding outcome hook block. We
-                // need to insert this jump instruction to ensure that the block is not empty -
-                // otherwise we can't switch away from it.
-
-                let hook = self.builder.create_block();
-                self.builder.ins().jump(hook, []);
-
-                let outcome = match update {
-                    ProgramCounterUpdate::Set(address) => Outcome::UnknownBranch {
-                        destination: address,
-                        hook,
-                    },
-                    ProgramCounterUpdate::Relative(offset) => Outcome::KnownBranch { offset, hook },
-                    ProgramCounterUpdate::Next(_width) => Outcome::Next { hook },
-                };
-                lowered.outcomes.push(outcome);
-            }
+        LoweredInstruction {
+            program_counter: self.instruction_pc,
+            run_block: self.entry_block,
+            outcomes,
+            width: self.width,
+            exception_block: self.exception_block,
         }
-
-        lowered
     }
 }
 
@@ -295,6 +267,8 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
     type Bool = Value<bool>;
 
     type IResult<T> = InstructionResult<T>;
+
+    type Outcome = InstructionOutcomes;
 
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         let raw = self.ins().iconst(I64, imm);
@@ -391,24 +365,44 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         unsafe { lhs.lift_binary(mul_high_impl, rhs) }
     }
 
+    fn next(&mut self, _instr_width: InstrWidth) -> Self::Outcome {
+        let hook = self.builder.create_block();
+        self.ins().jump(hook, []);
+        InstructionOutcomes::Next { hook }
+    }
+
+    fn jump_relative(&mut self, offset: i64) -> Self::Outcome {
+        let hook = self.builder.create_block();
+        self.ins().jump(hook, []);
+        InstructionOutcomes::Relative { offset, hook }
+    }
+
+    fn jump_absolute(&mut self, destination: Self::XValue) -> Self::Outcome {
+        let hook = self.builder.create_block();
+        self.ins().jump(hook, []);
+        InstructionOutcomes::Absolute { destination, hook }
+    }
+
     fn branch(
         &mut self,
         condition: Self::Bool,
-        offset: i64,
-        instr_width: InstrWidth,
-    ) -> ProgramCounterUpdate<Self::XValue> {
-        let continue_block = self.builder.create_block();
-        let branch_block = self.create_known_branch_outcome(offset);
+        branch_offset: i64,
+        _instr_width: InstrWidth,
+    ) -> Self::Outcome {
+        let fallthrough_hook = self.builder.create_block();
+        let branch_hook = self.builder.create_block();
 
         self.ins()
-            .brif(condition.to_value(), branch_block, [], continue_block, []);
+            .brif(condition.to_value(), branch_hook, [], fallthrough_hook, []);
 
-        self.builder.seal_block(branch_block);
-        self.builder.seal_block(continue_block);
+        self.builder.seal_block(branch_hook);
+        self.builder.seal_block(fallthrough_hook);
 
-        self.builder.switch_to_block(continue_block);
-
-        ProgramCounterUpdate::Next(instr_width)
+        InstructionOutcomes::Branch {
+            fallthrough_hook,
+            branch_offset,
+            branch_hook,
+        }
     }
 
     fn if_then<OnTrue>(&mut self, cond: Self::Bool, true_branch: OnTrue) -> Self::IResult<()>

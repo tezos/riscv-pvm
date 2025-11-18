@@ -7,10 +7,10 @@
 //! This module provides the infrastructure for building and compiling sequences of RISC-V
 //! instructions using Cranelift IR. The [sequence builder] coordinates the compilation of multiple
 //! instructions into a single JIT function, managing control flow, program counter updates,
-//! and various [execution outcomes].
+//! and [instruction outcomes].
 //!
 //! [sequence builder]: SequenceBuilder
-//! [execution outcomes]: Outcome
+//! [instruction outcomes]: InstructionOutcomes
 
 use cranelift::codegen::Context;
 use cranelift::codegen::ir::BlockArg;
@@ -27,7 +27,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use octez_riscv_data::mode::Normal;
 
-use super::instruction::Outcome;
+use super::instruction::InstructionOutcomes;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::typed::Pointer;
@@ -287,24 +287,46 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         }
 
         while let Some((instr_index, instr)) = peekable_instrs.next() {
-            // Each instruction may have multiple outcomes. Each kind of outcome needs to be
-            // handled. This involves populating the hook block, which the instruction jumps to in
-            // order to indicate that outcome.
-            for outcome in instr.outcomes() {
-                match outcome {
-                    Outcome::Next { hook } => {
-                        let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
-                        self.handle_next_outcome(*hook, instr_index, instr, next_instr, exit_block);
-                    }
-
-                    Outcome::KnownBranch { offset, hook } => {
-                        self.handle_relative_outcome(offset, *hook, instr_index, instr, exit_block);
-                    }
-
-                    Outcome::UnknownBranch { destination, hook } => {
-                        self.handle_absolute_outcome(*destination, *hook, instr_index, exit_block);
-                    }
+            // This step populates the hook block of each outcome of the instruction as they have not been
+            // handled yet. The hook blocks are created during instruction building, but the control flow
+            // transitions are only handled here, once all instructions have been built.
+            match instr.outcomes() {
+                InstructionOutcomes::Next { hook } => {
+                    let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
+                    self.handle_next_outcome(*hook, instr_index, instr, next_instr, exit_block);
                 }
+
+                InstructionOutcomes::Relative { offset, hook } => {
+                    self.handle_relative_outcome(offset, *hook, instr_index, instr, exit_block);
+                }
+
+                InstructionOutcomes::Absolute { destination, hook } => {
+                    self.handle_absolute_outcome(*destination, *hook, instr_index, exit_block);
+                }
+
+                InstructionOutcomes::Branch {
+                    fallthrough_hook,
+                    branch_offset,
+                    branch_hook,
+                } => {
+                    let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
+                    self.handle_next_outcome(
+                        *fallthrough_hook,
+                        instr_index,
+                        instr,
+                        next_instr,
+                        exit_block,
+                    );
+
+                    self.handle_relative_outcome(
+                        branch_offset,
+                        *branch_hook,
+                        instr_index,
+                        instr,
+                        exit_block,
+                    );
+                }
+                InstructionOutcomes::GuaranteedException => {}
             }
 
             if let Some(hook) = instr.exception_block() {
