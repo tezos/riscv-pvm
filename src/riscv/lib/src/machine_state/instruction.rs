@@ -764,22 +764,24 @@ macro_rules! impl_r_type {
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
-            let pcu = ProgramCounterUpdate::Next(self.width);
-            icb.ok(pcu)
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 
     ($impl: path, $fn: ident, non_zero_rd) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.rs1.x, self.rs2.x, self.rd.nzx);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 
     ($fn: ident, $shift: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             integer::run_x64_shift(icb, Shift::$shift, self.rs1.nzx, self.rs2.nzx, self.rd.nzx);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -791,7 +793,8 @@ macro_rules! impl_x32_shift_type {
             let rs2 = self.rs2.x;
             let rd = self.rd.nzx;
             integer::run_x32_shift(icb, Shift::$shift, rs1, rs2, rd);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 
@@ -800,7 +803,8 @@ macro_rules! impl_x32_shift_type {
             let rs1 = self.rs1.nzx;
             let rd = self.rd.nzx;
             integer::run_x32_shift_imm(icb, Shift::$shift, rs1, self.imm, rd);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -815,7 +819,8 @@ macro_rules! impl_x64_mul_high_type {
                 self.rd.nzx,
                 MulHighType::$mul_high_type,
             );
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -824,21 +829,24 @@ macro_rules! impl_i_type {
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.imm, self.rs1.nzx, self.rd.nzx);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 
     ($impl: path, $fn: ident, non_zero_rd) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.imm, self.rs1.x, self.rd.nzx);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 
     ($fn: ident, $shift: path) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             integer::run_x64_shift_imm(icb, $shift, self.imm, self.rs1.nzx, self.rd.nzx);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -863,7 +871,7 @@ macro_rules! impl_load_type {
     ($fn: ident, $value: ty) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = load_store::run_load::<$value, I>(icb, self.imm, self.rs1.x, self.rd.x);
-            I::map(res, |_| Next(self.width))
+            I::map(res, |_| icb.next(self.width))
         }
     };
 }
@@ -887,7 +895,7 @@ macro_rules! impl_store_type {
     ($fn: ident, $value: ty) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = load_store::run_store::<$value, I>(icb, self.imm, self.rs1.x, self.rs2.x);
-            I::map(res, |_| Next(self.width))
+            I::map(res, |_| icb.next(self.width))
         }
     };
 }
@@ -943,7 +951,7 @@ macro_rules! impl_amo_type {
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = $impl(icb, self.rs1.x, self.rs2.x, self.rd.x, self.rl, self.aq);
-            I::map(res, |_| Next(self.width))
+            I::map(res, |_| icb.next(self.width))
         }
     };
 }
@@ -952,8 +960,8 @@ macro_rules! impl_ci_type {
     ($impl: path, $fn: ident, non_zero) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.imm, self.rd.nzx);
-            let pcu = ProgramCounterUpdate::Next(self.width);
-            icb.ok(pcu)
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -962,8 +970,8 @@ macro_rules! impl_cr_nz_type {
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.rd.nzx, self.rs2.nzx);
-            let pcu = ProgramCounterUpdate::Next(self.width);
-            icb.ok(pcu)
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -987,7 +995,7 @@ macro_rules! impl_csr_type {
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = $impl(icb, self.csr, self.rs1.x, self.rd.x);
-            I::map(res, |()| Next(self.width))
+            I::map(res, |()| icb.next(self.width))
         }
     };
 }
@@ -996,7 +1004,7 @@ macro_rules! impl_csr_imm_type {
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             let res = $impl(icb, self.csr, self.imm as u64, self.rd.x);
-            I::map(res, |()| Next(self.width))
+            I::map(res, |()| icb.next(self.width))
         }
     };
 }
@@ -1033,7 +1041,8 @@ macro_rules! impl_f_x_type {
     ($impl: path, $fn: ident) => {
         fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
             $impl(icb, self.rs1.x, self.rm, self.rd.f);
-            icb.ok(Next(self.width))
+            let outcome = icb.next(self.width);
+            icb.ok(outcome)
         }
     };
 }
@@ -1221,7 +1230,8 @@ impl Args {
     // RV64I U-type instructions
     fn run_add_immediate_to_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         branching::run_add_immediate_to_pc(icb, self.imm, self.rd.nzx);
-        icb.ok(Next(self.width))
+        let outcome = icb.next(self.width);
+        icb.ok(outcome)
     }
 
     // RV64A atomic instructions
@@ -1385,28 +1395,28 @@ impl Args {
     /// Performs an unconditional control transfer. The immediate value is used as a relative
     /// offset from the current program counter.
     fn run_jump_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
-        let pcu = ProgramCounterUpdate::Relative(self.imm);
-        icb.ok(pcu)
+        let outcome = icb.jump_relative(self.imm);
+        icb.ok(outcome)
     }
 
     fn run_j_absolute<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let addr = branching::run_j_absolute(icb, self.imm);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_jr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rs1 = self.rs1.nzx;
         let addr = branching::run_jr(icb, rs1);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_jr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rs1 = self.rs1.nzx;
         let addr = branching::run_jr_imm(icb, self.imm, rs1);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_jump_and_link_pc<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
@@ -1414,37 +1424,37 @@ impl Args {
         let rd = self.rd.nzx;
         branching::run_add_immediate_to_pc(icb, self.width as i64, rd);
 
-        let pcu = ProgramCounterUpdate::Relative(self.imm);
-        icb.ok(pcu)
+        let outcome = icb.jump_relative(self.imm);
+        icb.ok(outcome)
     }
 
     fn run_jalr<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rd = self.rd.nzx;
         let rs1 = self.rs1.nzx;
         let addr = branching::run_jalr(icb, rd, rs1, self.width);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_jalr_imm<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rs1 = self.rs1.nzx;
         let rd = self.rd.nzx;
         let addr = branching::run_jalr_imm(icb, self.imm, rs1, rd, self.width);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_jalr_absolute<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         let rd = self.rd.nzx;
         let addr = branching::run_jalr_absolute(icb, self.imm, rd, self.width);
-        let pcu = ProgramCounterUpdate::Set(addr);
-        icb.ok(pcu)
+        let outcome = icb.jump_absolute(addr);
+        icb.ok(outcome)
     }
 
     fn run_nop<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
         integer::run_nop(icb);
-        let pcu = ProgramCounterUpdate::Next(self.width);
-        icb.ok(pcu)
+        let outcome = icb.next(self.width);
+        icb.ok(outcome)
     }
 
     fn run_ecall<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {

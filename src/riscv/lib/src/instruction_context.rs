@@ -43,7 +43,7 @@ use crate::state_context::StateContext;
 pub type IcbLoweringFn<I> = unsafe fn(&Args, &mut I) -> IcbFnResult<I>;
 
 /// Result of lowering an instruction.
-pub type IcbFnResult<I> = <I as ICB>::IResult<ProgramCounterUpdate<<I as ICB>::XValue>>;
+pub type IcbFnResult<I> = <I as ICB>::IResult<<I as ICB>::Outcome>;
 
 /// Instruction Context Builder contains operations required to
 /// execute RISC-V instructions.
@@ -85,6 +85,9 @@ where
     ///
     /// [`FRegisters`]: crate::machine_state::registers::FRegisters
     type FValue;
+
+    /// A result produced from running an instruction.
+    type Outcome;
 
     /// Construct an [`ICB::XValue`] from an `imm: i64`.
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue;
@@ -130,18 +133,26 @@ where
     /// - `false -> 0`
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue;
 
+    /// Proceed to the following instruction.
+    fn next(&mut self, instr_width: InstrWidth) -> Self::Outcome;
+
+    /// Jump to a known relative target.
+    fn jump_relative(&mut self, offset: i64) -> Self::Outcome;
+
+    /// Proceed to the instruction at the supplied target address.
+    fn jump_absolute(&mut self, target: Self::XValue) -> Self::Outcome;
+
     /// Branching instruction.
     ///
-    /// If `condition` is true, the branch will be taken. The PC update
-    /// will be to the address returned by `take_branch`.
-    ///
-    /// If false, the PC update is to the next instruction.
+    /// If `condition` is true, the branch will be taken, and the outcome will
+    /// update the PC by the given `offset`. Otherwise, the outcome will update
+    /// the PC to the next instruction.
     fn branch(
         &mut self,
         condition: Self::Bool,
         offset: i64,
         instr_width: InstrWidth,
-    ) -> ProgramCounterUpdate<Self::XValue>;
+    ) -> Self::Outcome;
 
     /// Run the IR code produced by the `true_branch` if `cond` is true. If the condition is false,
     /// the IR code following this call will be executed instead.
@@ -227,6 +238,8 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<M
 
     type FValue = FValue;
 
+    type Outcome = ProgramCounterUpdate<Self::XValue>;
+
     #[inline(always)]
     fn xvalue_of_imm(&mut self, imm: i64) -> Self::XValue {
         imm as u64
@@ -285,6 +298,21 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<M
     #[inline(always)]
     fn xvalue_from_bool(&mut self, value: Self::Bool) -> Self::XValue {
         value as XValue
+    }
+
+    #[inline(always)]
+    fn next(&mut self, instr_width: InstrWidth) -> Self::Outcome {
+        ProgramCounterUpdate::Next(instr_width)
+    }
+
+    #[inline(always)]
+    fn jump_relative(&mut self, offset: i64) -> Self::Outcome {
+        ProgramCounterUpdate::Relative(offset)
+    }
+
+    #[inline(always)]
+    fn jump_absolute(&mut self, target: Self::XValue) -> Self::Outcome {
+        ProgramCounterUpdate::Set(target)
     }
 
     #[inline(always)]
