@@ -96,21 +96,6 @@ pub enum Error {
     DirectoryManager(#[from] DirectoryManagerError),
 }
 
-/// Mode in which the [`PersistenceLayer`] was instantiated.
-enum Mode<'a> {
-    /// Either a new database, or a clone of an existing database.
-    Temporary {
-        /// We keep it here to keep it alive for the lifetime of the rockdb instance
-        _tempdir: TempDir,
-    },
-
-    /// A database checked out from a specific commit.
-    FromCommit {
-        /// The underlying directory manager where the commit was checked out from.
-        repo: &'a DirectoryManager,
-    },
-}
-
 /// These options are used for opening and closing a newly created rocksdb instance.
 ///
 /// Although different fields are used for opening vs. destroying a rocksdb instance, you need to
@@ -131,7 +116,7 @@ fn rocksdb_creation_options() -> rocksdb::Options {
 /// Invariants:
 /// - The path in `temp_initial_db_path` is unique for each instance of [`PersistenceLayer`] and is
 ///   assumed to not be modified / known outside of this instance.
-pub struct PersistenceLayer<'a> {
+pub struct PersistenceLayer {
     /// The underlying handle to the RocksDB instance.
     ///
     /// [`ManuallyDrop`] is used to ensure safety when dropping [`PersistenceLayer`]. Calling
@@ -139,11 +124,14 @@ pub struct PersistenceLayer<'a> {
     /// in [`rocksdb::DB`]'s drop method.
     db_instance: ManuallyDrop<rocksdb::DB>,
 
-    /// What mode was the [`PersistenceLayer`] opened in.
-    mode: Mode<'a>,
+    /// The [`TempDir`] holding the rocksdb instance.
+    ///
+    /// We need to own this in order to keep alive the temporary directory for the lifetime of the
+    /// persistence layer.
+    _tempdir: TempDir,
 }
 
-impl<'a> PersistenceLayer<'a> {
+impl PersistenceLayer {
     /// Creates a checkpoint of the current database at the given `path`.
     fn checkpoint_at(&self, path: &Path) -> Result<(), Error> {
         // Note that we want the checkpoint object to be dropped before opening the DB in order to
@@ -162,8 +150,25 @@ impl<'a> PersistenceLayer<'a> {
         db.create_cf(BLOB_CF, &rocksdb::Options::default())?;
 
         Ok(Self {
-            mode: Mode::Temporary { _tempdir: tempdir },
             db_instance: ManuallyDrop::new(db),
+            _tempdir: tempdir,
+        })
+    }
+
+    fn clone_as_checkpoint(db: &rocksdb::DB, repo: &DirectoryManager) -> Result<Self, Error> {
+        let tempdir = repo.new_temporary_dir()?;
+        let checkpoint_path = tempdir.path().join("checkpoint");
+
+        // Note that we want the checkpoint object to be dropped before opening the DB in order to
+        // call its destroy method to avoid UB. This happens in this unit expression.
+        Checkpoint::new(db)?.create_checkpoint(&checkpoint_path)?;
+
+        let temp_db =
+            rocksdb::DB::open_cf(&rocksdb::Options::default(), &checkpoint_path, [BLOB_CF])?;
+
+        Ok(Self {
+            db_instance: ManuallyDrop::new(temp_db),
+            _tempdir: tempdir,
         })
     }
 
@@ -171,34 +176,11 @@ impl<'a> PersistenceLayer<'a> {
     ///
     /// Operations on the cloned instance will have no effect on the original instance.
     pub fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, Error> {
-        let tempdir = repo.new_temporary_dir()?;
-        let checkpoint_path = tempdir.path().join("checkpoint");
-
-        // Note that we want the checkpoint object to be dropped before opening the DB in order to
-        // call its destroy method to avoid UB. This happens in this unit expression.
-        Checkpoint::new(&self.db_instance)?.create_checkpoint(&checkpoint_path)?;
-
-        // We expect the db at this checkpoint to exist.
-        let db = rocksdb::DB::open_cf(&rocksdb::Options::default(), &checkpoint_path, [BLOB_CF])?;
-
-        Ok(Self {
-            mode: Mode::Temporary { _tempdir: tempdir },
-            db_instance: ManuallyDrop::new(db),
-        })
-    }
-
-    /// Whenever a mutable operation is performed, we need to ensure that the persistence layer is
-    /// in [`Mode::Temporary`] mode.
-    fn make_temporary(&mut self) -> Result<(), Error> {
-        if let Mode::FromCommit { repo } = &self.mode {
-            *self = self.try_clone(repo)?;
-        };
-
-        Ok(())
+        Self::clone_as_checkpoint(&self.db_instance, repo)
     }
 
     /// Checks out a specific commit in the repository from the given `repo`
-    pub fn checkout(repo: &'a DirectoryManager, id: &CommitId) -> Result<Self, Error> {
+    pub fn checkout(repo: &DirectoryManager, id: &CommitId) -> Result<Self, Error> {
         let db_path = repo.commit_dir(id);
 
         // We assume the commit is not found if the folder does not exist.
@@ -208,10 +190,7 @@ impl<'a> PersistenceLayer<'a> {
 
         let db = rocksdb::DB::open_cf(&rocksdb::Options::default(), &db_path, [BLOB_CF])?;
 
-        Ok(Self {
-            db_instance: ManuallyDrop::new(db),
-            mode: Mode::FromCommit { repo },
-        })
+        Self::clone_as_checkpoint(&db, repo)
     }
 
     /// Commits the current state to the repository within the given `repo`
@@ -232,7 +211,7 @@ impl<'a> PersistenceLayer<'a> {
 }
 
 // Interface used by the Merkle layer which operates over implicitly hashed values.
-impl PersistenceLayer<'_> {
+impl PersistenceLayer {
     fn blob_cf(&self) -> &rocksdb::ColumnFamily {
         self.db_instance
             .cf_handle(BLOB_CF)
@@ -247,24 +226,20 @@ impl PersistenceLayer<'_> {
     }
 
     /// Sets a value for the given key.
-    pub fn blob_set(&mut self, blob: &HashedData) -> Result<(), Error> {
-        self.make_temporary()?;
-
+    pub fn blob_set(&self, blob: &HashedData) -> Result<(), Error> {
         Ok(self
             .db_instance
             .put_cf(self.blob_cf(), blob.hash, blob.value)?)
     }
 
     /// Deletes a value associated with the given key.
-    pub fn blob_delete(&mut self, key: &Hash) -> Result<(), Error> {
-        self.make_temporary()?;
-
+    pub fn blob_delete(&self, key: &Hash) -> Result<(), Error> {
         Ok(self.db_instance.delete_cf(self.blob_cf(), key.as_ref())?)
     }
 }
 
 // Interface used by the Data layer which operates over raw key-value pairs.
-impl PersistenceLayer<'_> {
+impl PersistenceLayer {
     /// Retrieves a value associated with the given key.
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         self.db_instance
@@ -273,21 +248,17 @@ impl PersistenceLayer<'_> {
     }
 
     /// Sets a value for the given key.
-    pub fn set(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.make_temporary()?;
-
+    pub fn set(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), Error> {
         Ok(self.db_instance.put(key.as_ref(), value.as_ref())?)
     }
 
     /// Deletes a value associated with the given key.
-    pub fn delete(&mut self, key: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.make_temporary()?;
-
+    pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), Error> {
         Ok(self.db_instance.delete(key.as_ref())?)
     }
 }
 
-impl Drop for PersistenceLayer<'_> {
+impl Drop for PersistenceLayer {
     /// Databases created from a new or clone operation will have `temp_initial_db_path` set. These
     /// databases do not have to be saved on disk as they have not been committed to storage.
     fn drop(&mut self) {
@@ -298,17 +269,9 @@ impl Drop for PersistenceLayer<'_> {
             ManuallyDrop::drop(&mut self.db_instance);
         }
 
-        // SAFETY: Although marked as safe, destroy on a path requires all rocksdb connections to
-        // this path to be closed. This is why we need to manual drop the db_instance first & the
-        // invariants of `PersistenceLayer` to be upheld.
-        if let Mode::Temporary { .. } = &self.mode {
-            // Destroy the rocksdb at this path. The parent folder will be deleted by the drop
-            // method of the tempdir in the mode field.
-
-            let options = rocksdb_creation_options();
-            if let Err(e) = rocksdb::DB::destroy(&options, &db_path) {
-                log::error!("Failed to destroy temporary rocksdb at {db_path:?}: {e}");
-            }
+        let options = rocksdb_creation_options();
+        if let Err(e) = rocksdb::DB::destroy(&options, &db_path) {
+            log::error!("Failed to destroy temporary rocksdb at {db_path:?}: {e}");
         }
     }
 }
@@ -322,6 +285,7 @@ mod tests {
     use proptest::prelude::any;
     use proptest::proptest;
     use rocksdb::properties::ESTIMATE_NUM_KEYS;
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -414,7 +378,7 @@ mod tests {
         let test = |value_a: String, value_b: String| {
             let repo =
                 DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-            let mut db = PersistenceLayer::new(&repo)
+            let db = PersistenceLayer::new(&repo)
                 .expect("Should be able to create new persistence layer");
 
             let blob = HashedData::from_value(value_a.as_bytes());
@@ -507,14 +471,14 @@ mod tests {
         let repo =
             DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
 
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let initial_blob = &HashedData::from_value(b"initial_value");
         let another_blob = &HashedData::from_value(b"another_value");
         let third_blob = &HashedData::from_value(b"third_value");
 
         db_a.blob_set(initial_blob)
             .expect("Failed to set initial blob in A");
-        let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+        let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
 
         db_b.blob_set(another_blob)
             .expect("Failed to set another blob in B");
@@ -565,7 +529,7 @@ mod tests {
         let blob = &HashedData::from_value(b"some_value");
 
         // A -> (B, C)
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         db_a.blob_set(blob).expect("Failed to set blob in A");
 
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
@@ -602,7 +566,7 @@ mod tests {
         let repo =
             DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
 
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let blob = &HashedData::from_value(b"some_value");
         db_a.blob_set(blob).expect("Failed to set blob in A");
 
@@ -659,10 +623,10 @@ mod tests {
         let blob_b = &HashedData::from_value(b"another_value");
         let blob_c = &HashedData::from_value(b"third_value");
 
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         db_a.blob_set(blob_a).expect("Failed to set blob in A");
 
-        let mut db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+        let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
         db_b.blob_set(blob_b).expect("Failed to set blob in B");
 
         let commit_id: CommitId = blake3::hash(b"commit_1").into();
@@ -709,12 +673,12 @@ mod tests {
         let blob_b = &HashedData::from_value(b"another_value");
         let commit_id_1: CommitId = blake3::hash(b"commit_1").into();
         let commit_id_2: CommitId = blake3::hash(b"commit_2").into();
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         db_a.blob_set(blob_a).expect("Failed to set blob in A");
         db_a.commit(&repo, &commit_id_1)
             .expect("Failed to commit DB A");
 
-        let mut db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
+        let db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
             .expect("Failed to checkout commit into DB C");
         db_c.blob_set(blob_b).expect("Failed to set blob in C");
         db_c.commit(&repo, &commit_id_2)
@@ -758,7 +722,7 @@ mod tests {
 
         let repo =
             DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
-        let mut db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
 
         let blob = &HashedData::from_value(b"some_value");
         db_a.blob_set(blob).expect("Failed to set blob in A");
@@ -796,7 +760,7 @@ mod tests {
         let test = |key: String, value: String, value2: String| {
             let repo = DirectoryManager::new(std::path::Path::new("/tmp/test_data_basic_ops"))
                 .expect("Failed to create directory manager");
-            let mut db = PersistenceLayer::new(&repo)
+            let db = PersistenceLayer::new(&repo)
                 .expect("Should be able to create new persistence layer");
 
             // Initially the key should not be found

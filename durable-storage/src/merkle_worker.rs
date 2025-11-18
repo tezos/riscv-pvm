@@ -47,7 +47,7 @@ enum Command {
     /// Clone the current Merkle layer.
     Clone {
         /// The persistence layer to use for the cloned Merkle layer.
-        persistence_layer: Arc<PersistenceLayer<'static>>,
+        persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
         response: oneshot::Sender<Result<MerkleLayer, MerkleLayerError>>,
@@ -102,7 +102,7 @@ impl MerkleWorker {
     /// See [`MerkleLayer::clone_with`].
     pub(crate) fn clone_with(
         &self,
-        persistence_layer: Arc<PersistenceLayer<'static>>,
+        persistence_layer: Arc<PersistenceLayer>,
     ) -> Result<Self, MerkleWorkerError> {
         let (sender, receiver) = oneshot::channel();
 
