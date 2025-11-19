@@ -293,94 +293,136 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             for outcome in instr.outcomes() {
                 match outcome {
                     Outcome::Next { hook } => {
-                        self.builder.switch_to_block(*hook);
-
-                        if let Some((_, next_instr)) = peekable_instrs.peek() {
-                            // If there is a next instruction, we jump to its entry block.
-                            next_instr.build_run(&mut self.builder);
-                        } else {
-                            // This is a successful outcome, hence +1 step.
-                            let steps_completed = instr_index as u64 + 1;
-
-                            let final_program_counter = instr.next_instruction_address();
-
-                            // SAFETY: We are constructing this value directly from an Address type.
-                            let final_program_counter = unsafe {
-                                Value::<Address>::from_discriminant(
-                                    &self.target_config,
-                                    &mut self.builder,
-                                    final_program_counter as i64,
-                                )
-                            };
-
-                            // If there is no next instruction, we jump to the exit block.
-                            self.jump_to_exit(steps_completed, final_program_counter, exit_block);
-                        }
+                        let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
+                        self.handle_next_outcome(*hook, instr_index, instr, next_instr, exit_block);
                     }
 
                     Outcome::KnownBranch { offset, hook } => {
-                        self.builder.switch_to_block(*hook);
-
-                        // This is a successful outcome, hence +1 step.
-                        let steps_completed = instr_index as u64 + 1;
-
-                        let final_program_counter: Address =
-                            instr.program_counter().wrapping_add_signed(*offset);
-
-                        // SAFETY: We are constructing this value directly from an Address type.
-                        let final_program_counter = unsafe {
-                            Value::<Address>::from_discriminant(
-                                &self.target_config,
-                                &mut self.builder,
-                                final_program_counter as i64,
-                            )
-                        };
-
-                        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+                        self.handle_relative_outcome(offset, *hook, instr_index, instr, exit_block);
                     }
 
                     Outcome::UnknownBranch { destination, hook } => {
-                        self.builder.switch_to_block(*hook);
-
-                        // This is a successful outcome, hence +1 step.
-                        let steps_completed = instr_index as u64 + 1;
-
-                        // The instruction wants to jump somewhere, so we take the destination.
-                        let final_program_counter = *destination;
-
-                        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+                        self.handle_absolute_outcome(*destination, *hook, instr_index, exit_block);
                     }
                 }
             }
 
-            if let Some(exception_block) = instr.exception_block() {
-                self.builder.seal_block(exception_block);
-                self.builder.switch_to_block(exception_block);
-
-                // Exception outcomes do not increment the step counter.
-                let steps_completed = instr_index as u64;
-
-                // In the case of an exception, the program counter needs to refer to the
-                // instruction that caused the exception.
-                let final_program_counter = instr.program_counter();
-
-                // SAFETY: We are constructing this value directly from an Address type.
-                let final_program_counter = unsafe {
-                    Value::<Address>::from_discriminant(
-                        &self.target_config,
-                        &mut self.builder,
-                        final_program_counter as i64,
-                    )
-                };
-
-                // Exception outcomes do not increment the step counter, as they don't
-                // count as a successful step.
-                self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+            if let Some(hook) = instr.exception_block() {
+                self.handle_exception_outcome(hook, instr_index, instr, exit_block);
             }
         }
 
         self.builder.seal_all_blocks();
         self.builder.finalize();
+    }
+
+    fn handle_next_outcome(
+        &mut self,
+        hook: Block,
+        instr_index: usize,
+        instr: &LoweredInstruction,
+        next_instr: Option<&LoweredInstruction>,
+        exit_block: Block,
+    ) {
+        self.builder.switch_to_block(hook);
+
+        if let Some(next_instr) = next_instr {
+            // If there is a next instruction, we jump to its entry block.
+            next_instr.build_run(&mut self.builder);
+        } else {
+            // This is a successful outcome, hence +1 step.
+            let steps_completed = instr_index as u64 + 1;
+
+            let final_program_counter = instr.next_instruction_address();
+
+            // SAFETY: We are constructing this value directly from an Address type.
+            let final_program_counter = unsafe {
+                Value::<Address>::from_discriminant(
+                    &self.target_config,
+                    &mut self.builder,
+                    final_program_counter as i64,
+                )
+            };
+
+            // If there is no next instruction, we jump to the exit block.
+            self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+        }
+    }
+
+    fn handle_relative_outcome(
+        &mut self,
+        offset: &i64,
+        hook: Block,
+        instr_index: usize,
+        instr: &LoweredInstruction,
+        exit_block: Block,
+    ) {
+        self.builder.switch_to_block(hook);
+
+        // This is a successful outcome, hence +1 step.
+        let steps_completed = instr_index as u64 + 1;
+
+        let final_program_counter: Address = instr.program_counter().wrapping_add_signed(*offset);
+
+        // SAFETY: We are constructing this value directly from an Address type.
+        let final_program_counter = unsafe {
+            Value::<Address>::from_discriminant(
+                &self.target_config,
+                &mut self.builder,
+                final_program_counter as i64,
+            )
+        };
+
+        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+    }
+
+    fn handle_absolute_outcome(
+        &mut self,
+        destination: Value<Address>,
+        hook: Block,
+        instr_index: usize,
+        exit_block: Block,
+    ) {
+        self.builder.switch_to_block(hook);
+
+        // This is a successful outcome, hence +1 step.
+        let steps_completed = instr_index as u64 + 1;
+
+        // The instruction wants to jump somewhere, so we take the destination.
+        let final_program_counter = destination;
+
+        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+    }
+
+    fn handle_exception_outcome(
+        &mut self,
+        hook: Block,
+        instr_index: usize,
+        instr: &LoweredInstruction,
+        exit_block: Block,
+    ) {
+        self.builder.seal_block(hook);
+        self.builder.switch_to_block(hook);
+
+        // Exception outcomes do not increment the step counter.
+        let steps_completed = instr_index as u64;
+
+        // In the case of an exception, the program counter needs to refer to the
+        // instruction that caused the exception.
+        let final_program_counter = instr.program_counter();
+
+        // SAFETY: We are constructing this value directly from an Address type.
+        let final_program_counter = unsafe {
+            Value::<Address>::from_discriminant(
+                &self.target_config,
+                &mut self.builder,
+                final_program_counter as i64,
+            )
+        };
+
+        // Exception outcomes do not increment the step counter, as they don't
+        // count as a successful step.
+        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
     }
 }
 
