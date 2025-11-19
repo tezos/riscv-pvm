@@ -22,6 +22,7 @@ use crate::jit::builder::instr_map::InstrId;
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
 use crate::jit::builder::instruction::OutcomeProbability;
+use crate::jit::builder::outcome_map::ExitKind;
 use crate::jit::builder::outcome_map::Graph;
 use crate::jit::builder::outcome_map::OutcomeId;
 use crate::jit::builder::outcome_map::OutcomeMap;
@@ -221,13 +222,13 @@ where
                             // If the address is known, we create an internal edge.
                             .map(TargetInstrLoc::Internal)
                             // If the address is not known, we create an exit edge.
-                            .unwrap_or(TargetInstrLoc::Exit),
+                            .unwrap_or(TargetInstrLoc::Exit(ExitKind::Normal)),
 
                         Target::Unknown => {
                             // If the target is not known to the current context, we treat it as an
                             // exit. Commonly unknown targets used to represent exceptions. The JIT
                             // function will exit in this case.
-                            TargetInstrLoc::Exit
+                            TargetInstrLoc::Exit(ExitKind::Normal)
                         }
                     };
 
@@ -273,7 +274,7 @@ where
             let edge = self.outcomes[outcome_id].data();
 
             match self.outcomes[outcome_id].to() {
-                TargetInstrLoc::Exit => {
+                TargetInstrLoc::Exit(_) => {
                     let sc_update = StepCounterUpdate {
                         base_diff: source_delta.expect("Exit must have a source delta."),
                         exit_delta: 0,
@@ -362,7 +363,7 @@ where
 
             let child_node_id = match self.outcomes[*child_outcome].to() {
                 TargetInstrLoc::Internal(id) => id,
-                TargetInstrLoc::Exit => continue,
+                TargetInstrLoc::Exit(_) => continue,
             };
 
             match nodes[child_node_id] {
@@ -413,7 +414,7 @@ where
 
                 let child_node_id = match self.outcomes[child_outcome].to() {
                     TargetInstrLoc::Internal(id) => id,
-                    TargetInstrLoc::Exit => {
+                    TargetInstrLoc::Exit(_) => {
                         continue;
                     }
                 };
