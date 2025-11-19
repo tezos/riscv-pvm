@@ -312,7 +312,7 @@ pub enum OpCode {
     /// Jump to absolute address `imm` and link register.
     /// Same as `JAbsolute` but also stores next instr address in rd.
     JalrAbsolute,
-    /// Same as `Jr` but jumps to `val(rs1) + imm`.
+    /// Jumps to `val(rs1) + imm`.
     JrImm,
     /// Jump to `pc + imm` if `val(rs2) < 0`.
     BranchLessThanZero,
