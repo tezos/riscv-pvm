@@ -120,6 +120,15 @@ impl<T> IndexMut<OutcomeId> for OutcomeMap<T> {
     }
 }
 
+/// Whether an exit is successful or part of an exception.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExitKind {
+    /// Normal exit from the control flow graph context
+    Normal,
+    /// Exit due to an exception raised during instruction execution
+    Exception,
+}
+
 /// Location of a source instruction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceInstrLoc {
@@ -137,7 +146,7 @@ pub enum TargetInstrLoc {
     Internal(InstrId),
 
     /// Outside of the control flow graph context
-    Exit,
+    Exit(ExitKind),
 }
 
 impl TargetInstrLoc {
@@ -145,7 +154,7 @@ impl TargetInstrLoc {
     pub fn as_internal(&self) -> Option<&InstrId> {
         match self {
             TargetInstrLoc::Internal(id) => Some(id),
-            TargetInstrLoc::Exit => None,
+            TargetInstrLoc::Exit(_) => None,
         }
     }
 }
@@ -266,7 +275,7 @@ impl Graph {
     pub fn incoming_outcomes(&self, loc: TargetInstrLoc) -> &[OutcomeId] {
         match loc {
             TargetInstrLoc::Internal(instr) => self.incoming.outcomes(instr),
-            TargetInstrLoc::Exit => self.incoming.external_outcomes(),
+            TargetInstrLoc::Exit(_) => self.incoming.external_outcomes(),
         }
     }
 }
@@ -329,7 +338,7 @@ impl<T> OutcomeMapBuilder<T> {
                 self.outgoings.entry(instr).or_default().insert(id);
             }
 
-            TargetInstrLoc::Exit => {
+            TargetInstrLoc::Exit(_) => {
                 self.exits.insert(id);
             }
         }
@@ -356,6 +365,7 @@ mod tests {
 
     use crate::jit::builder::graph_walker::GraphWalker;
     use crate::jit::builder::instr_map::InstrMapBuilder;
+    use crate::jit::builder::outcome_map::ExitKind;
     use crate::jit::builder::outcome_map::OutcomeMapBuilder;
     use crate::jit::builder::outcome_map::SourceInstrLoc;
     use crate::jit::builder::outcome_map::TargetInstrLoc;
@@ -372,8 +382,11 @@ mod tests {
         let entries = graph.outgoing_outcomes(SourceInstrLoc::Entry);
         assert!(entries.is_empty());
 
-        let exits = graph.incoming_outcomes(TargetInstrLoc::Exit);
-        assert!(exits.is_empty());
+        let normal_exits = graph.incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Normal));
+        assert!(normal_exits.is_empty());
+
+        let exception_exits = graph.incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Exception));
+        assert!(exception_exits.is_empty());
     }
 
     #[test]
@@ -403,7 +416,11 @@ mod tests {
             TargetInstrLoc::Internal(id2),
             3,
         );
-        outcomes.insert(SourceInstrLoc::Internal(id2), TargetInstrLoc::Exit, 4);
+        outcomes.insert(
+            SourceInstrLoc::Internal(id2),
+            TargetInstrLoc::Exit(ExitKind::Normal),
+            4,
+        );
 
         let (_graph, mut outcomes) = outcomes.build();
 
@@ -418,7 +435,7 @@ mod tests {
 
             let rhs = match outcomes[id].to() {
                 TargetInstrLoc::Internal(instr_id) => instrs[instr_id],
-                TargetInstrLoc::Exit => 0,
+                TargetInstrLoc::Exit(_) => 0,
             };
 
             let val = *outcomes[id].data();
@@ -465,7 +482,11 @@ mod tests {
             TargetInstrLoc::Internal(id2),
             "world",
         );
-        outcomes.insert(SourceInstrLoc::Internal(id2), TargetInstrLoc::Exit, "!");
+        outcomes.insert(
+            SourceInstrLoc::Internal(id2),
+            TargetInstrLoc::Exit(ExitKind::Normal),
+            "!",
+        );
 
         let (graph, outcomes) = outcomes.build();
 
@@ -483,7 +504,7 @@ mod tests {
 
             cursor.done(out_ids.iter().filter_map(|&out| match outcomes[out].to() {
                 TargetInstrLoc::Internal(instr) => Some(SourceInstrLoc::Internal(instr)),
-                TargetInstrLoc::Exit => None,
+                TargetInstrLoc::Exit(_) => None,
             }));
         }
 
@@ -506,7 +527,11 @@ mod tests {
 
         let mut outcomes = OutcomeMapBuilder::new(instr_map.len());
 
-        outcomes.insert(SourceInstrLoc::Internal(id0), TargetInstrLoc::Exit, "hello");
+        outcomes.insert(
+            SourceInstrLoc::Internal(id0),
+            TargetInstrLoc::Exit(ExitKind::Normal),
+            "hello",
+        );
         outcomes.insert(
             SourceInstrLoc::Internal(id1),
             TargetInstrLoc::Internal(id0),
@@ -523,7 +548,7 @@ mod tests {
 
         let mut result = String::new();
 
-        let mut walker = GraphWalker::new(TargetInstrLoc::Exit);
+        let mut walker = GraphWalker::new(TargetInstrLoc::Exit(ExitKind::Normal));
         while let Some(cursor) = walker.next() {
             let pos = cursor.position();
 
