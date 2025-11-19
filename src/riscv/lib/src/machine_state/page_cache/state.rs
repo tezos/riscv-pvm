@@ -25,7 +25,6 @@ use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::InstructionData;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::memory::OFFSET_BITS;
 use crate::machine_state::memory::PAGE_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::address_to_page_index;
@@ -58,11 +57,39 @@ pub(crate) struct PageEntry<CPE> {
     entries: Arc<[CPE; INSTRUCTION_ENTRIES]>,
 }
 
-#[cfg(test)]
-impl<CPE: From<Instruction>> PageEntry<CPE> {
-    /// TEST ONLY
+impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
+    /// Construct a new [`PageEntry`].
     ///
+    /// `fetch_instr` should return the instruction that will be placed into the entrypoint
+    /// at `offset` in the `PageEntry`.
+    ///
+    /// This must be able to return an instruction for offsets from zero to [`INSTRUCTION_ENTRIES`].
+    /// *NB* the offsets refer to the _halfwords_ of the page, rather than each byte themselves.
+    fn new<E>(fetch_instr: impl Fn(usize) -> Result<Instruction, E>) -> Result<Self, E> {
+        // Unlike with `Box<[T; LEN]>` - we cannot initialise with a Vec and do an in-place
+        // conversion. To avoid copying, we're forced to allocate with `Arc` directly.
+        let mut entries = Arc::new_uninit_slice(INSTRUCTION_ENTRIES);
+        let page_entries =
+            Arc::get_mut(&mut entries).expect("We just created this arc, there's only one");
+
+        for (offset, entrypoint) in page_entries.iter_mut().enumerate() {
+            let instruction = fetch_instr(offset)?;
+            entrypoint.write(CPE::from(instruction));
+        }
+
+        // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. It is therefore
+        // safe to no longer treat these as unitialised.
+        let entries = unsafe { entries.assume_init() };
+
+        Ok(Self {
+            entries: entries
+                .try_into()
+                .expect("entries contains exactly `INSTRUCTION_ENTRIES` entries"),
+        })
+    }
+
     /// Construct a new page entry as if it were populated from a memory of entirely zeroes.
+    #[cfg(test)]
     pub(crate) fn zeroed() -> Self {
         use crate::machine_state::instruction::Instruction;
         use crate::parser::parse_compressed_instruction;
@@ -73,17 +100,16 @@ impl<CPE: From<Instruction>> PageEntry<CPE> {
         let instruction = parse_compressed_instruction(ZEROED_HALFWORD);
         let instruction = Instruction::from(&instruction);
 
-        Self {
-            entries: Arc::from(boxed_from_fn(|| CPE::from(instruction))),
-        }
+        let Ok(page) = Self::new::<std::convert::Infallible>(|_| Ok(instruction));
+
+        page
     }
 
-    /// TEST ONLY
-    ///
     /// Push a sequence of instructions to a page entry, starting from the page offset given by the
     /// address.
     ///
     /// The page in question must not have been cloned.
+    #[cfg(test)]
     pub(crate) fn push_instructions(
         &mut self,
         address: Address,
@@ -198,76 +224,60 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     where
         M: ManagerRead + ManagerWrite,
     {
-        // Unlike with `Box<[T; LEN]>` - we cannot initialise with a Vec and do an in-place
-        // conversion. To avoid copying, we're forced to allocate with `Arc` directly.
-        let mut entries = Arc::new_uninit_slice(INSTRUCTION_ENTRIES);
-        let page_entries =
-            Arc::get_mut(&mut entries).expect("We just created this arc, there's only one");
-
         let page_start = address & PAGE_MASK;
 
-        let page_last_halfword = page_start + LAST_HALFWORD_PAGE_OFFSET;
+        let Some(page_entry) = self
+            .pages
+            .get_mut(memory::address_to_page_index(page_start))
+        else {
+            // address is out of the range of the page cache
+            return;
+        };
 
-        let page_range = page_start..page_last_halfword;
+        if page_entry.is_some() {
+            // no need to populate the page entry a second time
+            return;
+        }
 
-        // fetch and parse all instructions in the page, except the final halfword as
-        // it could be the lower halfword of an uncompressed instruction, which would
-        // require looking up the next page (which may not be R+X).
-        //
-        // After this loop, all but the final entrypoint are initialised.
-        //
-        // TODO: RV-772: remove redundant permission checks/halfword fetches from memory.
-        let mut offset = 0;
-        for address in page_range.step_by(std::mem::size_of::<u16>()) {
-            let Ok(InstructionData {
-                data: instr,
+        *page_entry = PageEntry::new::<PopulationError>(|offset| {
+            let offset_bytes = (offset << 1) as u64;
+
+            if offset_bytes < LAST_HALFWORD_PAGE_OFFSET {
+                let InstructionData {
+                    data: instr,
+                    writable: false,
+                } = core.fetch_instr(page_start + offset_bytes)?
+                else {
+                    return Err(PopulationError::Writable);
+                };
+
+                return Ok(instr);
+            }
+
+            let page_last_halfword = page_start + LAST_HALFWORD_PAGE_OFFSET;
+
+            let InstructionData {
+                data: halfword,
                 writable: false,
-            }) = core.fetch_instr(address)
+            } = core.fetch_instr_halfword(page_last_halfword)?
             else {
-                return;
+                unreachable!(
+                    "If the page was not R+X only, we would have failed to fetch all previous halfwords"
+                );
             };
 
-            page_entries[offset].write(CPE::from(instr));
-            offset += 1;
-        }
+            if is_compressed(halfword) {
+                let instr = parse_compressed_instruction(halfword);
+                return Ok(Instruction::from(&instr));
+            }
 
-        // final halfword may need to use ForceFetchRun mechanism if it overlaps page boundary
-        let Ok(InstructionData {
-            data: halfword,
-            writable: false,
-        }) = core.fetch_instr_halfword(page_last_halfword)
-        else {
-            unreachable!(
-                "If the page was not R+X only, we would have failed to fetch all previous halfwords"
-            );
-        };
-
-        let final_entry = if is_compressed(halfword) {
-            let instr = parse_compressed_instruction(halfword);
-            Instruction::from(&instr)
-        } else {
             // uncompressed instruction crosses page boundary: fallback to
             // FetchRunParse here.
-            Instruction::DEFAULT
-        };
-
-        // Initialise the final entrypoint (which corresponds to the final halfword).
-        page_entries[offset].write(CPE::from(final_entry));
-
-        if let Some(page_entry) = self
-            .pages
-            .get_mut((page_start >> OFFSET_BITS.get()) as usize)
-        {
-            // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. It is therefore
-            // safe to no longer treat these as unitialised.
-            let entries = unsafe { entries.assume_init() };
-
-            *page_entry = Some(PageEntry {
-                entries: entries
-                    .try_into()
-                    .expect("instructions has exactly the length expected for PageEntry::entries"),
-            });
-        }
+            Ok(Instruction::DEFAULT)
+        }).map_err(|_err| {
+           #[cfg(feature = "log")]
+            log::warning!("Failed to populated page at {page_start:x}: {_err:?}");
+        }).ok()
     }
 
     /// Invalidate a range of pages corresponding to the provided range of memory.
@@ -300,6 +310,17 @@ where
             self.invalidate_pages(pages);
         }
     }
+}
+
+/// Error that occurs populating a page
+#[derive(thiserror::Error, Debug)]
+enum PopulationError {
+    #[error("Failed to access given page in memory")]
+    Access(#[from] memory::BadMemoryAccess),
+    #[error("Failed to fetch instruction")]
+    FetchInstr(#[from] crate::machine_state::Exception),
+    #[error("Cannot cache writable pages")]
+    Writable,
 }
 
 #[cfg(test)]
