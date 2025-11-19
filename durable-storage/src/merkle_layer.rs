@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 
 mod node;
@@ -12,6 +14,7 @@ use tree::Avl;
 use crate::persistence_layer::PersistenceLayer;
 
 /// An identifier generated for a given commit.
+#[derive(Debug, PartialEq, Eq)]
 pub struct CommitId;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
@@ -27,15 +30,19 @@ impl Key {
     }
 }
 
-const KEY_MAX_SIZE: usize = 256;
+/// Maximum size of a key in bytes
+pub(crate) const KEY_MAX_SIZE: usize = 256;
 
 /// Errors for fallible [MerkleLayer] operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MerkleLayerError {
     /// The maximum size of a key is [`KEY_MAX_SIZE`].
+    #[error("The provided key is too long")]
     KeyTooLong,
+
     /// An error occurred when trying to make changes in the Merkle layer persist on disk.
     #[expect(dead_code, reason = "Not yet implemented")]
+    #[error("An error occurred in the persistence layer")]
     PersistenceError,
 }
 
@@ -47,13 +54,25 @@ pub struct MerkleLayer {
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 impl MerkleLayer {
+    /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
+    pub fn new(_persistence: Arc<PersistenceLayer>) -> Result<Self, MerkleLayerError> {
+        todo!()
+    }
+
     /// Persist the data stored in the [MerkleLayer] to durable storage via the [PersistenceLayer].
-    #[expect(dead_code, reason = "Not yet implemented")]
     pub fn checkout(
-        _persistence: &PersistenceLayer,
+        _persistence: Arc<PersistenceLayer>,
         _root: blake3::Hash,
     ) -> Result<Self, MerkleLayerError> {
         todo!()
+    }
+
+    /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
+    pub fn clone_with(
+        &self,
+        _persistence: Arc<PersistenceLayer>,
+    ) -> Result<Self, MerkleLayerError> {
+        Ok(self.clone())
     }
 
     /// Clear all data from the [MerkleLayer].
@@ -62,7 +81,6 @@ impl MerkleLayer {
     }
 
     /// Generates a commitment for the [MerkleLayer].
-    #[expect(dead_code, reason = "Not yet implemented")]
     pub fn commit(&self) -> Result<CommitId, MerkleLayerError> {
         todo!()
     }
@@ -90,7 +108,6 @@ impl MerkleLayer {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    #[expect(dead_code, reason = "Not yet implemented")]
     pub fn hash(&mut self) -> blake3::Hash {
         todo!()
     }
