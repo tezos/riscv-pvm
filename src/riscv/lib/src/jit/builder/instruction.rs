@@ -65,7 +65,6 @@ use crate::state_context::projection::MachineCoreProjection;
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutcomeProbability {
-    Guaranteed,
     High,
     Low,
 }
