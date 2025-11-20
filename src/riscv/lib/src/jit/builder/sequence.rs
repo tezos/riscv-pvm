@@ -221,38 +221,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         instr_builder
     }
 
-    /// Update the `steps_remaining` variable and jump to the exit block.
-    ///
-    /// `final_program_counter` is the program counter that we want to commit back to the
-    /// machine core state when exiting the sequence.
-    fn jump_to_exit(
-        &mut self,
-        steps_completed: u64,
-        final_program_counter: Value<Address>,
-        exit_block: Block,
-    ) {
-        self.update_steps_remaining(steps_completed);
-
-        self.builder.ins().jump(exit_block, &[BlockArg::Value(
-            final_program_counter.to_value(),
-        )]);
-    }
-
-    /// Decrement 'steps_remaining' by the number of steps taken in the sequence.
-    fn update_steps_remaining(&mut self, steps_completed: u64) {
-        if steps_completed == 0 {
-            return;
-        }
-
-        let steps_completed = self.builder.ins().iconst(I64, steps_completed as i64);
-
-        let steps_remaining = self.builder.use_var(self.steps_remaining);
-        let result_steps_remaining = self.builder.ins().isub(steps_remaining, steps_completed);
-
-        self.builder
-            .def_var(self.steps_remaining, result_steps_remaining);
-    }
-
     /// Finish building the sequence.
     pub fn finish(mut self, instrs: &[LoweredInstruction]) {
         let exit_block = self.builder.create_block();
@@ -367,7 +335,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             };
 
             // If there is no next instruction, we jump to the exit block.
-            self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+            jump_to_exit(
+                &mut self.builder,
+                self.steps_remaining,
+                steps_completed,
+                final_program_counter,
+                exit_block,
+            );
         }
     }
 
@@ -395,7 +369,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             )
         };
 
-        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+        jump_to_exit(
+            &mut self.builder,
+            self.steps_remaining,
+            steps_completed,
+            final_program_counter,
+            exit_block,
+        );
     }
 
     fn handle_absolute_outcome(
@@ -413,7 +393,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         // The instruction wants to jump somewhere, so we take the destination.
         let final_program_counter = destination;
 
-        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+        jump_to_exit(
+            &mut self.builder,
+            self.steps_remaining,
+            steps_completed,
+            final_program_counter,
+            exit_block,
+        );
     }
 
     fn handle_exception_outcome(
@@ -444,7 +430,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
         // Exception outcomes do not increment the step counter, as they don't
         // count as a successful step.
-        self.jump_to_exit(steps_completed, final_program_counter, exit_block);
+        jump_to_exit(
+            &mut self.builder,
+            self.steps_remaining,
+            steps_completed,
+            final_program_counter,
+            exit_block,
+        );
     }
 }
 
@@ -476,4 +468,42 @@ impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
             value,
         )
     }
+}
+
+/// Decrement 'steps_remaining' by the number of steps taken in the sequence.
+pub fn update_steps_remaining(
+    builder: &mut FunctionBuilder,
+    steps_remaining_var: Variable,
+    step_delta: i64,
+) {
+    if step_delta == 0 {
+        return;
+    }
+
+    let step_delta = builder.ins().iconst(I64, step_delta);
+
+    let steps_remaining = builder.use_var(steps_remaining_var);
+    let result_steps_remaining = builder.ins().isub(steps_remaining, step_delta);
+
+    builder.def_var(steps_remaining_var, result_steps_remaining);
+}
+
+/// Update the `steps_remaining` variable and jump to the exit block.
+///
+/// `final_program_counter` is the program counter that we want to commit back to the
+/// machine core state when exiting the sequence.
+///
+/// `step_delta` is the number of steps taken since the last step counter update.
+pub fn jump_to_exit(
+    builder: &mut FunctionBuilder,
+    steps_remaining_var: Variable,
+    step_delta: u64,
+    final_program_counter: Value<Address>,
+    exit_block: Block,
+) {
+    update_steps_remaining(builder, steps_remaining_var, step_delta as i64);
+
+    builder.ins().jump(exit_block, &[BlockArg::Value(
+        final_program_counter.to_value(),
+    )]);
 }
