@@ -13,12 +13,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use octez_riscv_data::mode::Normal;
-
 use crate::jit::JIT;
-use crate::jit::JitFn;
-use crate::jit::state_access::ExceptionCode;
-use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
@@ -30,15 +25,11 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 /// Internally, this may be interpreted, just-in-time compiled, or do
 /// additional work over just execution.
 ///
-/// The first and last parameters must be thin-references, for ABI-compatibility reasons.
-pub type DispatchFn<D, MC> = unsafe extern "C" fn(
-    &JittedPage<D, MC>,
-    &mut MachineCoreState<MC, Normal>,
-    Address,
-    usize,
-    &mut ExceptionCode,
-    &mut D,
-) -> usize;
+/// The function signature is identical to that of the [jit compiler's]
+/// outputs.
+///
+/// [jit compiler's]: JIT
+pub type DispatchFn<D, MC> = crate::jit::JitFn<D, MC>;
 
 /// Dispatch target that wraps a [`DispatchFn`].
 ///
@@ -178,19 +169,8 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
     ) -> DispatchFn<Self, MC> {
         let instr = Jitted::compilation_request_instructions(&target.entries, program_counter);
 
-        let fun = match self.jit.compile(&instr, program_counter) {
-            Some(jitfn) => {
-                // Safety: the two function signatures are identical, apart from the first and
-                // last parameters. These are both thin-pointers, and ignored by the JitFn.
-                //
-                // It's therefore safe to cast this function pointer to an identical ABI, where
-                // this first and last parameter are thin-references to any value. This is the
-                // case for both `Jitted` and `Jitted::BlockBuilder` which are both Sized.
-                //
-                // See <https://doc.rust-lang.org/std/primitive.fn.html#abi-compatibility> for more
-                // information on ABI compatibility.
-                unsafe { std::mem::transmute::<JitFn<MC>, DispatchFn<Self, MC>>(jitfn) }
-            }
+        let fun: DispatchFn<Self, MC> = match self.jit.compile(&instr, program_counter) {
+            Some(jitfn) => jitfn,
             None => Jitted::run_entrypoint_not_compiled,
         };
 
@@ -267,7 +247,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                         msg.program_counter,
                     );
 
-                    if let Some(jitfn) = jit.compile::<MC>(&instr, msg.program_counter) {
+                    if let Some(jitfn) = jit.compile::<Self, MC>(&instr, msg.program_counter) {
                         let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
                         let dispatch = &msg.page.entries[offset].dispatch;
 

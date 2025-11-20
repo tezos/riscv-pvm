@@ -7,7 +7,6 @@
 
 pub(crate) mod builder;
 pub(crate) mod state_access;
-use std::ffi::c_void;
 
 use cranelift::codegen::CodegenError;
 use cranelift::codegen::settings::SetError;
@@ -29,32 +28,25 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::jitted::JittedPage;
 
 /// Alias for the function signature produced by the JIT compilation.
 ///
-/// This must have the same Abi as [`DispatchFn`], which is used by
-/// the entrypoint dispatch mechanism in the page cache.
+/// This is used in-turn by the entrypoint dispatch mechanism in the page cache.
 ///
-/// The JitFn does not inspect the first and last parameters here, however.
-/// These parameters are needed by the initial dispatch mechanism to enable
-/// JIT-compilation & hot-swapping. To avoid over-specifying these parameters here
-/// (which can among other things cause type-checking issues), we replace the parameters
-/// with pointers to `c_void` - which in the C abi map to the same parameter type as the
-/// thin-references to the actual variables passed.
-///
-/// It also does not inspect the third parameter as it is hard-coded in the sequence building.
-///
-/// [`DispatchFn`]: crate::machine_state::page_cache::dispatch::DispatchFn
-pub type JitFn<MC> = unsafe extern "C" fn(
+/// Functions produced by the JIT do not inspect the first, third and last parameters here.
+/// These parameters are needed, however, by the initial dispatch mechanism to enable
+/// JIT-compilation & hot-swapping.
+pub type JitFn<D, MC> = unsafe extern "C" fn(
     // ignored
-    *const c_void,
+    &JittedPage<D, MC>,
     &mut MachineCoreState<MC, Normal>,
-    // ignored
+    // ignored - address hardcoded in instruction building
     u64,
     usize,
     &mut ExceptionCode,
     // ignored
-    *const c_void,
+    &mut D,
     // TODO: RV-751 - Move the unused parameters for the JIT function to the end.
 ) -> usize;
 
@@ -125,11 +117,11 @@ impl JIT {
     ///
     /// Not all instructions are currently supported. For blocks containing
     /// unsupported instructions, `None` will be returned.
-    pub fn compile<MC: MemoryConfig>(
+    pub fn compile<D, MC: MemoryConfig>(
         &mut self,
         instr: &[Instruction],
         program_counter: Address,
-    ) -> Option<JitFn<MC>> {
+    ) -> Option<JitFn<D, MC>> {
         let Ok(hash) = Hash::blake3_hash((instr, program_counter)) else {
             return None;
         };
@@ -184,10 +176,10 @@ impl JIT {
     }
 
     /// Finalise the function under construction.
-    fn produce_function<MC: MemoryConfig>(
+    fn produce_function<D, MC: MemoryConfig>(
         &mut self,
         hash: &Hash,
-    ) -> Result<JitFn<MC>, Box<ModuleError>> {
+    ) -> Result<JitFn<D, MC>, Box<ModuleError>> {
         let name = hex::encode(hash);
 
         let fun = self.finalise(&name)?;
@@ -196,7 +188,10 @@ impl JIT {
     }
 
     /// Finalise the function currently under construction.
-    fn finalise<MC: MemoryConfig>(&mut self, name: &str) -> Result<JitFn<MC>, Box<ModuleError>> {
+    fn finalise<D, MC: MemoryConfig>(
+        &mut self,
+        name: &str,
+    ) -> Result<JitFn<D, MC>, Box<ModuleError>> {
         let id = self.module.declare_function(
             name.as_ref(),
             Linkage::Export,
@@ -254,7 +249,7 @@ impl JIT {
         // SAFETY: the signature of a JitFn matches exactly the abi we specified in the
         //         entry block. Compilation has succeeded & therefore this produced code
         //         is safe to call.
-        Ok(unsafe { std::mem::transmute::<*const u8, JitFn<MC>>(code) })
+        Ok(unsafe { std::mem::transmute::<*const u8, JitFn<D, MC>>(code) })
     }
 
     /// Clear the current context to allow a new function to be compiled
@@ -277,7 +272,6 @@ mod tests {
     use std::ops::BitAnd;
     use std::ops::BitOr;
     use std::ops::BitXor;
-    use std::ptr::null;
 
     use Instruction as I;
     use proptest::prelude::proptest;
@@ -300,6 +294,7 @@ mod tests {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
+    use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::jitted::MAX_INSTR_COMPILED;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
@@ -314,6 +309,27 @@ mod tests {
 
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Normal>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
+
+    /// Dummy compiler used as a generic parameter to `compile`.
+    #[derive(Debug, Default)]
+    struct DummyCompiler;
+
+    impl<MC: MemoryConfig> DispatchCompiler<MC> for DummyCompiler {
+        fn should_compile(
+            &self,
+            _target: &crate::machine_state::page_cache::DispatchTarget<Self, MC>,
+        ) -> bool {
+            unimplemented!("Dummy Compiler")
+        }
+
+        fn compile(
+            &mut self,
+            _target: &JittedPage<Self, MC>,
+            _program_counter: Address,
+        ) -> crate::machine_state::page_cache::dispatch::DispatchFn<Self, MC> {
+            unimplemented!("Dummy Compiler")
+        }
+    }
 
     /// Machine state for test scenarios with a configurable [`Block`] type.
     type TestMachineState<CPE> = MachineState<M4K, CPE, Normal>;
@@ -362,7 +378,10 @@ mod tests {
             // Ensure the set of instructions can be compiled in JIT.
             let mut test_jit = JIT::new().unwrap();
             test_jit
-                .compile::<M4K>(&self.instructions, self.initial_pc.unwrap_or_default())
+                .compile::<DummyCompiler, M4K>(
+                    &self.instructions,
+                    self.initial_pc.unwrap_or_default(),
+                )
                 .expect("JIT compilation should succeed.");
         }
 
@@ -1993,7 +2012,7 @@ mod tests {
             jitted.hart.xregisters.write_nz(x1, 1);
 
             // Act
-            let res = jit.compile::<M4K>(failure, initial_pc);
+            let res = jit.compile::<DummyCompiler, M4K>(failure, initial_pc);
 
             assert!(
                 res.is_none(),
@@ -2010,12 +2029,12 @@ mod tests {
                 // # Safety - the jit is not dropped until after we
                 //            exit the instruction sequence.
                 (fun)(
-                    null(),
+                    &PageEntry::zeroed(),
                     &mut jitted,
                     initial_pc,
                     max_steps,
                     &mut jitted_err,
-                    null(),
+                    &mut DummyCompiler,
                 )
             };
 
