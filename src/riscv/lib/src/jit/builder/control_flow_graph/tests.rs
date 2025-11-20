@@ -103,7 +103,7 @@ impl TestInstr {
         Self {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(1),
-                probability: OutcomeProbability::Guaranteed,
+                probability: OutcomeProbability::High,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
                 budget_check: Cell::new(1),
@@ -168,7 +168,7 @@ impl TestInstr {
         Self {
             outcomes: vec![TestInstrOutcome {
                 action: TestInstrPostAction::RelativeJump(offset),
-                probability: OutcomeProbability::Guaranteed,
+                probability: OutcomeProbability::High,
                 step_delta: Cell::new(1),
                 exit_delta: Cell::new(0),
                 budget_check: Cell::new(1),
