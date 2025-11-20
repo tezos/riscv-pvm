@@ -4,8 +4,6 @@
 
 //! Graph walker utilities
 
-// TODO: RV-703: We're waiting for a set of components to have merged before we can integrate them
-// into the JIT compiler. For the time being, this module will be test-only.
 #![cfg(test)]
 
 use std::collections::HashSet;

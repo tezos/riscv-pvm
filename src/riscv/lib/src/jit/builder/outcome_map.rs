@@ -15,9 +15,6 @@
 //! outcomes, [`Graph`] for navigating control flow relationships, and [`OutcomeMapBuilder`] for
 //! constructing these structures in a consistent manner.
 
-// TODO: RV-703 - `OutcomeMap` is currently only used in tests and has not yet been integrated into the JIT.
-#![cfg(test)]
-
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::ops::Index;
@@ -257,6 +254,7 @@ pub struct Graph {
     /// Graph for incoming control flow
     ///
     /// This graph represents the backward control flow relationships between instructions.
+    #[cfg(test)]
     incoming: SingleDirectionGraph,
 }
 
@@ -272,6 +270,7 @@ impl Graph {
     /// Find the incoming outcomes for a given target instruction.
     ///
     /// These are the outcomes that lead to the specified instruction.
+    #[cfg(test)]
     pub fn incoming_outcomes(&self, loc: TargetInstrLoc) -> &[OutcomeId] {
         match loc {
             TargetInstrLoc::Internal(instr) => self.incoming.outcomes(instr),
@@ -352,6 +351,7 @@ impl<T> OutcomeMapBuilder<T> {
 
         let graph = Graph {
             outgoing: SingleDirectionGraph::new(self.incomings, self.entries),
+            #[cfg(test)]
             incoming: SingleDirectionGraph::new(self.outgoings, self.exits),
         };
 
