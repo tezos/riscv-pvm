@@ -25,6 +25,7 @@ use crate::jit::builder::control_flow_graph::DirectedEdgeInfo;
 use crate::jit::builder::control_flow_graph::NodeInfo;
 use crate::jit::builder::control_flow_graph::Target;
 use crate::jit::builder::instruction::OutcomeProbability;
+use crate::jit::builder::outcome_map::ExitKind;
 
 /// Action associated with a test instruction outcome
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -45,7 +46,7 @@ impl TestInstrPostAction {
                 Target::Known(target)
             }
 
-            TestInstrPostAction::Exit => Target::Unknown,
+            TestInstrPostAction::Exit => Target::Unknown(ExitKind::Exception),
         }
     }
 }
@@ -310,7 +311,10 @@ fn evaluate_program(
 
 /// Graph analysis is performed on a slightly different representation of the program.
 /// This function transforms the test program into that representation.
-fn transform_program_type(program: &[TestInstr], start: u64) -> Vec<NodeInfo<&TestInstrOutcome>> {
+fn transform_program_type(
+    program: &[TestInstr],
+    start: u64,
+) -> Vec<NodeInfo<&TestInstrOutcome, ()>> {
     program
         .iter()
         .enumerate()
@@ -325,6 +329,7 @@ fn transform_program_type(program: &[TestInstr], start: u64) -> Vec<NodeInfo<&Te
 
             NodeInfo {
                 location: instr_pc,
+                run_block: (),
                 is_entrypoint: index == 0,
                 outgoing,
             }
@@ -378,8 +383,7 @@ fn run_sparse_program(
     }
 
     if with_budget_checks {
-        let bc_locations = graph.find_budget_check_locations();
-        let seq_budget = graph.annotate_budget_checks(&bc_locations, &exit_deltas);
+        let seq_budget = graph.annotate_budget_checks(&exit_deltas);
         let min_budget = seq_budget.min_budget();
         let budget_checks = seq_budget.budget_checks();
 

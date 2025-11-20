@@ -62,7 +62,6 @@ use crate::state_context::projection::MachineCoreProjection;
 /// should be treated as likely not-taken. Also, exception handlers should be treated
 /// as likely not-taken (except for a few instructions, such as `ECall`, which are guaranteed to
 /// result in an exception).
-#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutcomeProbability {
     High,
@@ -107,10 +106,10 @@ pub enum InstructionOutcomes {
 /// Lowered RISC-V instruction
 pub struct LoweredInstruction {
     /// Location of the instruction
-    program_counter: Address,
+    pub(super) program_counter: Address,
 
     /// Block that runs the instruction
-    run_block: Block,
+    pub(super) run_block: Block,
 
     /// Execution outcomes of the instruction
     outcomes: InstructionOutcomes,
@@ -123,11 +122,6 @@ pub struct LoweredInstruction {
 }
 
 impl LoweredInstruction {
-    /// Access the program counter for this instruction.
-    pub fn program_counter(&self) -> Address {
-        self.program_counter
-    }
-
     /// Return the address of the instruction following this one.
     pub fn next_instruction_address(&self) -> Address {
         self.program_counter.wrapping_add(self.width as u64)
@@ -136,11 +130,6 @@ impl LoweredInstruction {
     /// Access the outcomes of the instruction.
     pub fn outcomes(&self) -> &InstructionOutcomes {
         &self.outcomes
-    }
-
-    /// Build a jump that effectively runs the instruction.
-    pub fn build_run(&self, builder: &mut FunctionBuilder) {
-        builder.ins().jump(self.run_block, []);
     }
 
     /// Access the exception block, if any.
