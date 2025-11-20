@@ -12,15 +12,23 @@
 // is because we require several components to be in place for the integration to make sense. So we
 // introduce and test each component extensively in isolation first, then integrate them all at
 // once later.
-#![cfg(test)]
 
+use std::cell::Cell;
 use std::collections::VecDeque;
 
+use cranelift::codegen::ir::BlockArg;
+use cranelift::prelude::Block;
+use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::InstBuilder;
+use cranelift::prelude::Variable;
+use cranelift::prelude::isa::TargetFrontendConfig;
 use itertools::Itertools;
 
 use crate::jit::builder::instr_map::InstrId;
 use crate::jit::builder::instr_map::InstrMap;
 use crate::jit::builder::instr_map::InstrMapBuilder;
+use crate::jit::builder::instruction::InstructionOutcomes;
+use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::instruction::OutcomeProbability;
 use crate::jit::builder::outcome_map::ExitKind;
 use crate::jit::builder::outcome_map::Graph;
@@ -29,6 +37,9 @@ use crate::jit::builder::outcome_map::OutcomeMap;
 use crate::jit::builder::outcome_map::OutcomeMapBuilder;
 use crate::jit::builder::outcome_map::SourceInstrLoc;
 use crate::jit::builder::outcome_map::TargetInstrLoc;
+use crate::jit::builder::sequence::insert_budget_check_ir;
+use crate::jit::builder::sequence::update_steps_remaining;
+use crate::jit::builder::typed::Value;
 use crate::machine_state::memory::Address;
 
 /// Destination of a directed edge
@@ -46,7 +57,7 @@ pub enum Target {
     /// When using this, the control flow analysis will assume that the target is not part of the
     /// current instruction sequence. This is used for jumps to addresses outside of the current
     /// context, for example. It can also be used for exception-raising outcomes.
-    Unknown,
+    Unknown(ExitKind),
 }
 
 /// Information about a directed edge in the control flow graph
@@ -66,14 +77,109 @@ pub struct DirectedEdgeInfo<Info> {
     pub info: Info,
 }
 
+/// Any outcome may require an exit program counter to be communicated back to the caller.
+#[derive(Clone, Debug)]
+enum ExitPC {
+    /// Exit program counter is dynamic, represented as a Cranelift value.
+    Dynamic { exit_pc: Value<Address> },
+    /// Exit program counter is static, known at compile time.
+    Static { exit_pc: Address },
+    /// Exit PC is the source instruction's PC.
+    Exception { source_pc: Address },
+}
+
+/// Data associated with an instruction outcome.
+#[derive(Clone, Debug)]
+pub struct OutcomeData {
+    /// The block to jump to for this outcome
+    hook: Block,
+
+    /// Program counter of the destination of this outcome.
+    exit_pc: ExitPC,
+
+    /// Amount to increment the step counter by if this outcome is taken
+    step_delta: Cell<Option<usize>>,
+
+    /// Extra amount to increment the step counter if the program
+    /// exits after executing this outcome.
+    exit_delta: Cell<Option<usize>>,
+
+    /// The maximum number of steps that will be taken before another budget
+    /// check or exit will definitely occur.
+    budget_check: Cell<Option<usize>>,
+}
+
+impl OutcomeData {
+    /// Get the block to jump to for this outcome.
+    pub fn hook(&self) -> Block {
+        self.hook
+    }
+
+    /// Get the step counter delta
+    pub fn get_step_delta(&self) -> Option<usize> {
+        self.step_delta.get()
+    }
+
+    /// Set the step counter delta
+    pub fn set_step_delta(&self, delta: usize) {
+        self.step_delta.set(Some(delta));
+    }
+
+    /// Get the exit delta
+    pub fn get_exit_delta(&self) -> Option<usize> {
+        self.exit_delta.get()
+    }
+
+    /// Set the exit delta
+    pub fn set_exit_delta(&self, delta: usize) {
+        self.exit_delta.set(Some(delta));
+    }
+
+    /// Get the budget check value
+    pub fn get_budget_check(&self) -> Option<usize> {
+        self.budget_check.get()
+    }
+
+    /// Set the budget check value
+    pub fn set_budget_check(&self, budget: usize) {
+        self.budget_check.set(Some(budget));
+    }
+
+    /// Get the exit program counter as a Cranelift value.
+    pub fn exit_pc(
+        &self,
+        builder: &mut FunctionBuilder,
+        target_config: &TargetFrontendConfig,
+    ) -> Value<Address> {
+        match self.exit_pc {
+            ExitPC::Dynamic { exit_pc } => exit_pc,
+            ExitPC::Static { exit_pc } => {
+                // SAFETY: We are constructing this value directly from an Address type.
+                unsafe {
+                    Value::<Address>::from_discriminant(target_config, builder, exit_pc as i64)
+                }
+            }
+            ExitPC::Exception { source_pc } => {
+                // SAFETY: We are constructing this value directly from an Address type.
+                unsafe {
+                    Value::<Address>::from_discriminant(target_config, builder, source_pc as i64)
+                }
+            }
+        }
+    }
+}
+
 /// Information about a node in the control flow graph
 ///
 /// Nodes represent instructions. They contain information about the instruction itself, as well as
 /// the outgoing edges from that instruction.
 #[derive(Debug)]
-pub struct NodeInfo<T> {
+pub struct NodeInfo<T, B> {
     /// Location of the instruction (program counter)
     pub location: Address,
+
+    /// Block that runs the instruction.
+    run_block: B,
 
     /// Is this instruction used as an entrypoint in the instruction sequence?
     ///
@@ -82,6 +188,126 @@ pub struct NodeInfo<T> {
 
     /// Edges originating from this node
     pub outgoing: Box<[DirectedEdgeInfo<T>]>,
+}
+
+impl NodeInfo<OutcomeData, Block> {
+    /// Create a new `NodeInfo` from a lowered instruction.
+    pub fn from_lowered_instruction(instr: &LoweredInstruction, is_entrypoint: bool) -> Self {
+        let mut outgoing = match instr.outcomes() {
+            InstructionOutcomes::Next { hook } => {
+                vec![DirectedEdgeInfo {
+                    target: Target::Known(instr.next_instruction_address()),
+                    probability: OutcomeProbability::High,
+                    info: OutcomeData {
+                        hook: *hook,
+                        exit_pc: ExitPC::Static {
+                            exit_pc: instr.next_instruction_address(),
+                        },
+                        step_delta: Cell::new(None),
+                        exit_delta: Cell::new(None),
+                        budget_check: Cell::new(None),
+                    },
+                }]
+            }
+            InstructionOutcomes::Relative { offset, hook } => {
+                let target_address = instr.program_counter().wrapping_add(*offset as u64);
+                vec![DirectedEdgeInfo {
+                    target: Target::Known(target_address),
+                    probability: OutcomeProbability::High,
+                    info: OutcomeData {
+                        hook: *hook,
+                        exit_pc: ExitPC::Static {
+                            exit_pc: target_address,
+                        },
+                        step_delta: Cell::new(None),
+                        exit_delta: Cell::new(None),
+                        budget_check: Cell::new(None),
+                    },
+                }]
+            }
+            InstructionOutcomes::Absolute { destination, hook } => vec![DirectedEdgeInfo {
+                target: Target::Unknown(ExitKind::Normal),
+                probability: OutcomeProbability::High,
+                info: OutcomeData {
+                    hook: *hook,
+                    exit_pc: ExitPC::Dynamic {
+                        exit_pc: *destination,
+                    },
+                    step_delta: Cell::new(None),
+                    exit_delta: Cell::new(None),
+                    budget_check: Cell::new(None),
+                },
+            }],
+            InstructionOutcomes::Branch {
+                fallthrough_hook,
+                branch_offset,
+                branch_hook,
+            } => {
+                let (fallthrough_probability, branch_probability) = match *branch_offset < 0 {
+                    true => (OutcomeProbability::Low, OutcomeProbability::High),
+                    false => (OutcomeProbability::High, OutcomeProbability::Low),
+                };
+                let branch_target = instr.program_counter().wrapping_add(*branch_offset as u64);
+                vec![
+                    DirectedEdgeInfo {
+                        target: Target::Known(branch_target),
+                        probability: branch_probability,
+                        info: OutcomeData {
+                            hook: *branch_hook,
+                            exit_pc: ExitPC::Static {
+                                exit_pc: branch_target,
+                            },
+                            step_delta: Cell::new(None),
+                            exit_delta: Cell::new(None),
+                            budget_check: Cell::new(None),
+                        },
+                    },
+                    DirectedEdgeInfo {
+                        target: Target::Known(instr.next_instruction_address()),
+                        probability: fallthrough_probability,
+                        info: OutcomeData {
+                            hook: *fallthrough_hook,
+                            exit_pc: ExitPC::Static {
+                                exit_pc: instr.next_instruction_address(),
+                            },
+                            step_delta: Cell::new(None),
+                            exit_delta: Cell::new(None),
+                            budget_check: Cell::new(None),
+                        },
+                    },
+                ]
+            }
+            InstructionOutcomes::GuaranteedException => vec![],
+        };
+
+        if let Some(exception_block) = instr.exception_block() {
+            outgoing.push(DirectedEdgeInfo {
+                target: Target::Unknown(ExitKind::Exception),
+                probability: OutcomeProbability::Low,
+                info: OutcomeData {
+                    hook: exception_block,
+                    exit_pc: ExitPC::Exception {
+                        source_pc: instr.program_counter(),
+                    },
+                    step_delta: Cell::new(None),
+                    exit_delta: Cell::new(None),
+                    budget_check: Cell::new(None),
+                },
+            });
+        };
+
+        Self {
+            location: instr.program_counter(),
+            run_block: instr.run_block(),
+            is_entrypoint,
+            outgoing: outgoing.into_boxed_slice(),
+        }
+    }
+
+    /// Build a jump that effectively runs the instruction.
+    pub fn build_run(&self, builder: &mut FunctionBuilder) {
+        builder.ins().jump(self.run_block, []);
+    }
 }
 
 /// Information about a step counter update
@@ -97,7 +323,7 @@ pub struct StepCounterUpdate<'info, T> {
     /// If the program exits after this outcome, the step counter must be further increased by this
     /// amount (in addition to `base_diff`-related increments),
     /// as subsequent step-counter updates will not fire.
-    exit_delta: usize,
+    _exit_delta: usize,
 
     /// Edge where the step counter needs updating
     edge: &'info DirectedEdgeInfo<T>,
@@ -174,9 +400,9 @@ impl<'info, T> BudgetCheck<'info, T> {
 
 /// Control flow graph of instructions
 #[derive(Debug)]
-pub struct ControlFlowGraph<'info, T> {
+pub struct ControlFlowGraph<'info, T, B> {
     /// Nodes in the control flow graph, indexed by instruction ID
-    nodes: InstrMap<&'info NodeInfo<T>>,
+    nodes: InstrMap<&'info NodeInfo<T, B>>,
 
     /// Edges in the control flow graph, indexed by outcome ID
     outcomes: OutcomeMap<Option<&'info DirectedEdgeInfo<T>>>,
@@ -185,12 +411,12 @@ pub struct ControlFlowGraph<'info, T> {
     graph: Graph,
 }
 
-impl<'info, T> ControlFlowGraph<'info, T>
+impl<'info, T, B> ControlFlowGraph<'info, T, B>
 where
     T: 'info,
 {
     /// Constructs a new control flow graph from instruction information.
-    pub fn new(instrs: impl IntoIterator<Item = &'info NodeInfo<T>>) -> Self {
+    pub fn new(instrs: impl IntoIterator<Item = &'info NodeInfo<T, B>>) -> Self {
         // We need to put all the information we're given into an initial graph for more efficient
         // retrieval. `InstrMapBuilder` also provides us with a mechanism to translate addresses
         // such that we know whether they're in the current graph context or not.
@@ -224,11 +450,11 @@ where
                             // If the address is not known, we create an exit edge.
                             .unwrap_or(TargetInstrLoc::Exit(ExitKind::Normal)),
 
-                        Target::Unknown => {
+                        Target::Unknown(exit_kind) => {
                             // If the target is not known to the current context, we treat it as an
                             // exit. Commonly unknown targets used to represent exceptions. The JIT
                             // function will exit in this case.
-                            TargetInstrLoc::Exit(ExitKind::Normal)
+                            TargetInstrLoc::Exit(exit_kind)
                         }
                     };
 
@@ -277,7 +503,7 @@ where
                 TargetInstrLoc::Exit(_) => {
                     let sc_update = StepCounterUpdate {
                         base_diff: source_delta.expect("Exit must have a source delta."),
-                        exit_delta: 0,
+                        _exit_delta: 0,
                         edge: edge.expect("Exit edge must have edge info."),
                     };
                     *step_updates[outcome_id].data_mut() = Some(sc_update);
@@ -294,7 +520,7 @@ where
 
                         let sc_update = StepCounterUpdate {
                             base_diff,
-                            exit_delta: existing_delta,
+                            _exit_delta: existing_delta,
                             edge: edge.expect("Internal edge must have edge info."),
                         };
 
@@ -488,6 +714,116 @@ where
     }
 }
 
+impl ControlFlowGraph<'_, OutcomeData, Block> {
+    pub fn finish(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        target_config: &TargetFrontendConfig,
+        steps_remaining_var: Variable,
+        entry_block: Block,
+        exit_block: Block,
+    ) {
+        let (step_updates, exit_deltas) = self.find_step_counter_updates();
+        let bc_locations = self.find_budget_check_locations();
+        let sequence_budget = self.annotate_budget_checks(&bc_locations, &exit_deltas);
+
+        for (_outcome_id, outcome) in step_updates.iter() {
+            let Some(update) = outcome.data() else {
+                // The analysis determined there is nothing to do for this edge.
+                continue;
+            };
+
+            let step_delta = match outcome.to() {
+                TargetInstrLoc::Internal(_) => update.success_delta(),
+                TargetInstrLoc::Exit(ExitKind::Normal) => update.success_delta(),
+                TargetInstrLoc::Exit(ExitKind::Exception) => update.exception_delta(),
+            };
+
+            update.edge().info.set_step_delta(step_delta);
+        }
+
+        for (_, outcome) in sequence_budget.budget_checks.iter() {
+            let Some(budget_check) = outcome.data() else {
+                // The analysis determined there is nothing to do for this edge.
+                continue;
+            };
+
+            let bc_info = &budget_check.edge().info;
+            bc_info.set_budget_check(budget_check.budget());
+            bc_info.set_exit_delta(budget_check.exit_delta());
+        }
+
+        for (_, outcome) in self.outcomes.iter() {
+            let Some(edge) = outcome.data() else {
+                // This is an entry outcome.
+                builder.switch_to_block(entry_block);
+
+                let &entry_node_id = outcome
+                    .to()
+                    .as_internal()
+                    .expect("Entry outcomes must go to a node.");
+                let entry_node = self.nodes[entry_node_id];
+
+                // SAFETY: We are constructing this value directly from an Address type.
+                let entry_node_addr = unsafe {
+                    Value::<Address>::from_discriminant(
+                        target_config,
+                        builder,
+                        entry_node.location as i64,
+                    )
+                };
+
+                insert_budget_check_ir(
+                    builder,
+                    steps_remaining_var,
+                    sequence_budget.min_budget as u64,
+                    0,
+                    entry_node_addr,
+                    exit_block,
+                );
+                entry_node.build_run(builder);
+
+                continue;
+            };
+
+            let outcome_data = &edge.info;
+            builder.switch_to_block(outcome_data.hook());
+
+            if let Some(step_update) = outcome_data.get_step_delta() {
+                update_steps_remaining(builder, steps_remaining_var, step_update as i64);
+            }
+
+            if let Some(budget) = outcome_data.get_budget_check() {
+                let exit_pc = outcome_data.exit_pc(builder, target_config);
+                let exit_delta = outcome_data
+                    .get_exit_delta()
+                    .expect("Any budget check must have an exit delta.");
+                insert_budget_check_ir(
+                    builder,
+                    steps_remaining_var,
+                    budget as u64,
+                    exit_delta as i64,
+                    exit_pc,
+                    exit_block,
+                );
+            }
+
+            match outcome.to() {
+                TargetInstrLoc::Internal(target) => {
+                    // Continue to the target instruction.
+                    self.nodes[target].build_run(builder);
+                }
+                TargetInstrLoc::Exit(_) => {
+                    let exit_pc = outcome_data.exit_pc(builder, target_config);
+                    builder
+                        .ins()
+                        .jump(exit_block, &[BlockArg::Value(exit_pc.to_value())]);
+                }
+            }
+        }
+    }
+}
+
 /// State of a node during DFS traversal for budget check detection.
 enum NodeState {
     Unchecked,
@@ -501,6 +837,7 @@ pub struct SequenceBudget<'info, T> {
     budget_checks: OutcomeMap<Option<BudgetCheck<'info, T>>>,
 }
 
+#[cfg(test)]
 impl<T> SequenceBudget<'_, T> {
     /// Get the minimum budget required for the entry to the sequence.
     pub fn min_budget(&self) -> usize {

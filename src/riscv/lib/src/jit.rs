@@ -21,6 +21,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use thiserror::Error;
 
+use crate::jit::builder::instruction::InstructionResult;
 use crate::jit::builder::sequence::SequenceBuilder;
 use crate::jit::state_access::ExceptionCode;
 use crate::log;
@@ -145,8 +146,15 @@ impl JIT {
                 (lower)(i.args(), &mut instr_builder)
             };
 
+            let exits = matches!(instr_result, InstructionResult::NoNext);
+
             let lowered_instr = instr_builder.finish(instr_result);
+
             lowered_instrs.push(lowered_instr);
+
+            if exits {
+                break;
+            }
         }
 
         if lowered_instrs.is_empty() {

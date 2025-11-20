@@ -10,7 +10,6 @@
 //! constructing these maps in a consistent manner.
 
 // TODO: RV-703 - `InstrMap` is currently only used in tests and has not yet been integrated into the JIT.
-#![cfg(test)]
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -71,6 +70,7 @@ impl<V> InstrMap<V> {
     }
 
     /// Iterate over the instructions, yielding pairs of (`InstrId`, `&mut V`).
+    #[cfg(test)]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (InstrId, &mut V)> {
         self.instructions
             .iter_mut()
