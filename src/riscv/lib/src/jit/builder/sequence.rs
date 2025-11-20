@@ -10,7 +10,7 @@
 //! and [instruction outcomes].
 //!
 //! [sequence builder]: SequenceBuilder
-//! [instruction outcomes]: InstructionOutcomes
+//! [instruction outcomes]: crate::jit::builder::instruction::InstructionOutcomes
 
 use cranelift::codegen::Context;
 use cranelift::codegen::ir::BlockArg;
@@ -20,6 +20,7 @@ use cranelift::prelude::EntityRef;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::FunctionBuilderContext;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::IntCC::UnsignedGreaterThanOrEqual;
 use cranelift::prelude::Variable;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
@@ -27,7 +28,9 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use octez_riscv_data::mode::Normal;
 
-use super::instruction::InstructionOutcomes;
+use crate::jit::builder::control_flow_graph::ControlFlowGraph;
+use crate::jit::builder::control_flow_graph::NodeInfo;
+use crate::jit::builder::control_flow_graph::OutcomeData;
 use crate::jit::builder::instruction::InstructionBuilder;
 use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::typed::Pointer;
@@ -246,197 +249,26 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             self.builder.ins().return_(&[steps]);
         }
 
-        let mut peekable_instrs = instrs.iter().enumerate().peekable();
+        let node_infos: Vec<NodeInfo<OutcomeData, Block>> = instrs
+            .iter()
+            .enumerate()
+            .map(|(idx, instr)| {
+                NodeInfo::<OutcomeData, Block>::from_lowered_instruction(instr, idx == 0)
+            })
+            .collect();
 
-        if let Some((_, first_instr)) = peekable_instrs.peek() {
-            // Hook up the entry block to the first instruction.
-            self.builder.switch_to_block(self.entry_block);
-            first_instr.build_run(&mut self.builder);
-        }
+        let mut cfg = ControlFlowGraph::<OutcomeData, Block>::new(node_infos.iter());
 
-        while let Some((instr_index, instr)) = peekable_instrs.next() {
-            // This step populates the hook block of each outcome of the instruction as they have not been
-            // handled yet. The hook blocks are created during instruction building, but the control flow
-            // transitions are only handled here, once all instructions have been built.
-            match instr.outcomes() {
-                InstructionOutcomes::Next { hook } => {
-                    let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
-                    self.handle_next_outcome(*hook, instr_index, instr, next_instr, exit_block);
-                }
-
-                InstructionOutcomes::Relative { offset, hook } => {
-                    self.handle_relative_outcome(offset, *hook, instr_index, instr, exit_block);
-                }
-
-                InstructionOutcomes::Absolute { destination, hook } => {
-                    self.handle_absolute_outcome(*destination, *hook, instr_index, exit_block);
-                }
-
-                InstructionOutcomes::Branch {
-                    fallthrough_hook,
-                    branch_offset,
-                    branch_hook,
-                } => {
-                    let next_instr = peekable_instrs.peek().map(|(_, instr)| *instr);
-                    self.handle_next_outcome(
-                        *fallthrough_hook,
-                        instr_index,
-                        instr,
-                        next_instr,
-                        exit_block,
-                    );
-
-                    self.handle_relative_outcome(
-                        branch_offset,
-                        *branch_hook,
-                        instr_index,
-                        instr,
-                        exit_block,
-                    );
-                }
-                InstructionOutcomes::GuaranteedException => {}
-            }
-
-            if let Some(hook) = instr.exception_block() {
-                self.handle_exception_outcome(hook, instr_index, instr, exit_block);
-            }
-        }
+        cfg.insert_ir(
+            &mut self.builder,
+            &self.target_config,
+            self.steps_remaining,
+            self.entry_block,
+            exit_block,
+        );
 
         self.builder.seal_all_blocks();
         self.builder.finalize();
-    }
-
-    fn handle_next_outcome(
-        &mut self,
-        hook: Block,
-        instr_index: usize,
-        instr: &LoweredInstruction,
-        next_instr: Option<&LoweredInstruction>,
-        exit_block: Block,
-    ) {
-        self.builder.switch_to_block(hook);
-
-        if let Some(next_instr) = next_instr {
-            // If there is a next instruction, we jump to its entry block.
-            next_instr.build_run(&mut self.builder);
-        } else {
-            // This is a successful outcome, hence +1 step.
-            let steps_completed = instr_index as u64 + 1;
-
-            let final_program_counter = instr.next_instruction_address();
-
-            // SAFETY: We are constructing this value directly from an Address type.
-            let final_program_counter = unsafe {
-                Value::<Address>::from_discriminant(
-                    &self.target_config,
-                    &mut self.builder,
-                    final_program_counter as i64,
-                )
-            };
-
-            // If there is no next instruction, we jump to the exit block.
-            jump_to_exit(
-                &mut self.builder,
-                self.steps_remaining,
-                steps_completed,
-                final_program_counter,
-                exit_block,
-            );
-        }
-    }
-
-    fn handle_relative_outcome(
-        &mut self,
-        offset: &i64,
-        hook: Block,
-        instr_index: usize,
-        instr: &LoweredInstruction,
-        exit_block: Block,
-    ) {
-        self.builder.switch_to_block(hook);
-
-        // This is a successful outcome, hence +1 step.
-        let steps_completed = instr_index as u64 + 1;
-
-        let final_program_counter: Address = instr.program_counter().wrapping_add_signed(*offset);
-
-        // SAFETY: We are constructing this value directly from an Address type.
-        let final_program_counter = unsafe {
-            Value::<Address>::from_discriminant(
-                &self.target_config,
-                &mut self.builder,
-                final_program_counter as i64,
-            )
-        };
-
-        jump_to_exit(
-            &mut self.builder,
-            self.steps_remaining,
-            steps_completed,
-            final_program_counter,
-            exit_block,
-        );
-    }
-
-    fn handle_absolute_outcome(
-        &mut self,
-        destination: Value<Address>,
-        hook: Block,
-        instr_index: usize,
-        exit_block: Block,
-    ) {
-        self.builder.switch_to_block(hook);
-
-        // This is a successful outcome, hence +1 step.
-        let steps_completed = instr_index as u64 + 1;
-
-        // The instruction wants to jump somewhere, so we take the destination.
-        let final_program_counter = destination;
-
-        jump_to_exit(
-            &mut self.builder,
-            self.steps_remaining,
-            steps_completed,
-            final_program_counter,
-            exit_block,
-        );
-    }
-
-    fn handle_exception_outcome(
-        &mut self,
-        hook: Block,
-        instr_index: usize,
-        instr: &LoweredInstruction,
-        exit_block: Block,
-    ) {
-        self.builder.seal_block(hook);
-        self.builder.switch_to_block(hook);
-
-        // Exception outcomes do not increment the step counter.
-        let steps_completed = instr_index as u64;
-
-        // In the case of an exception, the program counter needs to refer to the
-        // instruction that caused the exception.
-        let final_program_counter = instr.program_counter();
-
-        // SAFETY: We are constructing this value directly from an Address type.
-        let final_program_counter = unsafe {
-            Value::<Address>::from_discriminant(
-                &self.target_config,
-                &mut self.builder,
-                final_program_counter as i64,
-            )
-        };
-
-        // Exception outcomes do not increment the step counter, as they don't
-        // count as a successful step.
-        jump_to_exit(
-            &mut self.builder,
-            self.steps_remaining,
-            steps_completed,
-            final_program_counter,
-            exit_block,
-        );
     }
 }
 
@@ -471,7 +303,7 @@ impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
 }
 
 /// Decrement 'steps_remaining' by the number of steps taken in the sequence.
-pub fn update_steps_remaining(
+pub fn insert_step_update_ir(
     builder: &mut FunctionBuilder,
     steps_remaining_var: Variable,
     step_delta: i64,
@@ -488,6 +320,50 @@ pub fn update_steps_remaining(
     builder.def_var(steps_remaining_var, result_steps_remaining);
 }
 
+/// Insert a budget-check into the control flow IR for the current block being built.
+pub fn insert_budget_check_ir(
+    builder: &mut FunctionBuilder,
+    steps_remaining_var: Variable,
+    budget: u64,
+    exit_delta: i64,
+    exit_pc: Value<u64>,
+    exit_block: Block,
+) {
+    let steps_remaining = builder.use_var(steps_remaining_var);
+
+    let steps_remaining = builder.ins().iadd_imm(steps_remaining, -exit_delta);
+    let budget = builder.ins().iconst(I64, budget as i64);
+    let is_enough_budget = builder
+        .ins()
+        .icmp(UnsignedGreaterThanOrEqual, steps_remaining, budget);
+
+    let continue_block = builder.create_block();
+    let out_of_budget_block = builder.create_block();
+
+    builder.ins().brif(
+        is_enough_budget,
+        continue_block,
+        &[],
+        out_of_budget_block,
+        &[],
+    );
+
+    builder.seal_block(out_of_budget_block);
+    builder.switch_to_block(out_of_budget_block);
+
+    builder.set_cold_block(out_of_budget_block);
+
+    jump_to_exit(
+        builder,
+        steps_remaining_var,
+        exit_delta as u64,
+        exit_pc,
+        exit_block,
+    );
+
+    builder.switch_to_block(continue_block);
+}
+
 /// Update the `steps_remaining` variable and jump to the exit block.
 ///
 /// `final_program_counter` is the program counter that we want to commit back to the
@@ -501,7 +377,7 @@ pub fn jump_to_exit(
     final_program_counter: Value<Address>,
     exit_block: Block,
 ) {
-    update_steps_remaining(builder, steps_remaining_var, step_delta as i64);
+    insert_step_update_ir(builder, steps_remaining_var, step_delta as i64);
 
     builder.ins().jump(exit_block, &[BlockArg::Value(
         final_program_counter.to_value(),

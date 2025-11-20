@@ -16,7 +16,6 @@
 //! constructing these structures in a consistent manner.
 
 // TODO: RV-703 - `OutcomeMap` is currently only used in tests and has not yet been integrated into the JIT.
-#![cfg(test)]
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -257,7 +256,7 @@ pub struct Graph {
     /// Graph for incoming control flow
     ///
     /// This graph represents the backward control flow relationships between instructions.
-    incoming: SingleDirectionGraph,
+    _incoming: SingleDirectionGraph,
 }
 
 impl Graph {
@@ -272,10 +271,10 @@ impl Graph {
     /// Find the incoming outcomes for a given target instruction.
     ///
     /// These are the outcomes that lead to the specified instruction.
-    pub fn incoming_outcomes(&self, loc: TargetInstrLoc) -> &[OutcomeId] {
+    pub fn _incoming_outcomes(&self, loc: TargetInstrLoc) -> &[OutcomeId] {
         match loc {
-            TargetInstrLoc::Internal(instr) => self.incoming.outcomes(instr),
-            TargetInstrLoc::Exit(_) => self.incoming.external_outcomes(),
+            TargetInstrLoc::Internal(instr) => self._incoming.outcomes(instr),
+            TargetInstrLoc::Exit(_) => self._incoming.external_outcomes(),
         }
     }
 }
@@ -352,7 +351,7 @@ impl<T> OutcomeMapBuilder<T> {
 
         let graph = Graph {
             outgoing: SingleDirectionGraph::new(self.incomings, self.entries),
-            incoming: SingleDirectionGraph::new(self.outgoings, self.exits),
+            _incoming: SingleDirectionGraph::new(self.outgoings, self.exits),
         };
 
         (graph, map)
@@ -382,10 +381,10 @@ mod tests {
         let entries = graph.outgoing_outcomes(SourceInstrLoc::Entry);
         assert!(entries.is_empty());
 
-        let normal_exits = graph.incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Normal));
+        let normal_exits = graph._incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Normal));
         assert!(normal_exits.is_empty());
 
-        let exception_exits = graph.incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Exception));
+        let exception_exits = graph._incoming_outcomes(TargetInstrLoc::Exit(ExitKind::Exception));
         assert!(exception_exits.is_empty());
     }
 
@@ -552,7 +551,7 @@ mod tests {
         while let Some(cursor) = walker.next() {
             let pos = cursor.position();
 
-            let out_ids = graph.incoming_outcomes(pos);
+            let out_ids = graph._incoming_outcomes(pos);
             for &out_id in out_ids {
                 let &outcome = outcomes[out_id].data();
                 result.push_str(outcome);
