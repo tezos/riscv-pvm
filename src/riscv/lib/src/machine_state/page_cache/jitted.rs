@@ -37,18 +37,18 @@ pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>>>;
 /// unsupported instructions, a fallback to [`super::Interpreted`] mode may occur (if the
 /// unsupported instruction is attempted for compilation).
 #[derive(derive_more::Debug)]
-pub struct Jitted<D: DispatchCompiler<MC>, MC: MemoryConfig> {
+pub struct Jitted<D, MC> {
     instruction: Instruction,
     pub(super) dispatch: DispatchTarget<D, MC>,
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> AsRef<Instruction> for Jitted<D, MC> {
+impl<D, MC> AsRef<Instruction> for Jitted<D, MC> {
     fn as_ref(&self) -> &Instruction {
         &self.instruction
     }
 }
 
-impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
+impl<D, MC> Jitted<D, MC> {
     /// The default initial dispatcher for jit.
     ///
     /// This will run the entrypoint in interpreted mode by default, but may attempt to JIT-compile
@@ -67,7 +67,11 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         max_steps: usize,
         result: &mut ExceptionCode,
         compiler: &mut D,
-    ) -> usize {
+    ) -> usize
+    where
+        D: DispatchCompiler<MC>,
+        MC: MemoryConfig,
+    {
         let page_offset = address_to_page_offset(instr_pc);
 
         // instr_pc is always halfword aligned
@@ -103,7 +107,10 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Jitted<D, MC> {
         max_steps: usize,
         result: &mut ExceptionCode,
         _compiler: &mut D,
-    ) -> usize {
+    ) -> usize
+    where
+        MC: MemoryConfig,
+    {
         let block_result =
             super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
 
