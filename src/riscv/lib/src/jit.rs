@@ -7,7 +7,6 @@
 
 pub(crate) mod builder;
 pub(crate) mod state_access;
-use std::collections::HashMap;
 use std::ffi::c_void;
 
 use cranelift::codegen::CodegenError;
@@ -78,7 +77,7 @@ pub enum JitError {
 
 /// The JIT is responsible for compiling blocks of instructions to machine code,
 /// returning a function that can be run over the [`MachineCoreState`].
-pub struct JIT<MC: MemoryConfig> {
+pub struct JIT {
     /// The function builder context, which is reused across multiple
     /// [`FunctionBuilder`] instances.
     builder_context: FunctionBuilderContext,
@@ -91,15 +90,11 @@ pub struct JIT<MC: MemoryConfig> {
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
     module: JITModule,
-
-    /// Cache of compilation results.
-    cache: HashMap<Hash, Option<JitFn<MC>>>,
 }
 
-impl<MC: MemoryConfig> JIT<MC> {
+impl JIT {
     /// Create a new instance of the JIT, which will be able to
-    /// produce functions that can be run over the current
-    /// memory configuration and manager.
+    /// produce functions that can be run over the machine state.
     pub fn new() -> Result<Self, JitError> {
         if std::mem::size_of::<usize>() != std::mem::size_of::<u64>() {
             return Err(JitError::UnsupportedPlatform(
@@ -123,7 +118,6 @@ impl<MC: MemoryConfig> JIT<MC> {
             builder_context: FunctionBuilderContext::new(),
             ctx: codegen::Context::new(),
             module,
-            cache: Default::default(),
         })
     }
 
@@ -131,7 +125,7 @@ impl<MC: MemoryConfig> JIT<MC> {
     ///
     /// Not all instructions are currently supported. For blocks containing
     /// unsupported instructions, `None` will be returned.
-    pub fn compile(
+    pub fn compile<MC: MemoryConfig>(
         &mut self,
         instr: &[Instruction],
         program_counter: Address,
@@ -140,11 +134,7 @@ impl<MC: MemoryConfig> JIT<MC> {
             return None;
         };
 
-        if let Some(compilation_result) = self.cache.get(&hash) {
-            return *compilation_result;
-        }
-
-        let mut builder = self.start(program_counter);
+        let mut builder = self.start::<MC>(program_counter);
         let mut lowered_instrs = Vec::with_capacity(instr.len());
 
         // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
@@ -152,7 +142,6 @@ impl<MC: MemoryConfig> JIT<MC> {
             let Some(lower) = i.opcode.to_lowering() else {
                 builder.abandon();
                 self.clear();
-                self.cache.insert(hash, None);
                 return None;
             };
 
@@ -185,7 +174,7 @@ impl<MC: MemoryConfig> JIT<MC> {
     }
 
     /// Start building a new sequence of instructions.
-    fn start(&mut self, program_counter: Address) -> SequenceBuilder<'_, MC> {
+    fn start<MC: MemoryConfig>(&mut self, program_counter: Address) -> SequenceBuilder<'_, MC> {
         SequenceBuilder::new(
             &mut self.module,
             &mut self.ctx,
@@ -194,19 +183,20 @@ impl<MC: MemoryConfig> JIT<MC> {
         )
     }
 
-    /// Finalise and cache the function under construction.
-    fn produce_function(&mut self, hash: &Hash) -> Result<JitFn<MC>, Box<ModuleError>> {
+    /// Finalise the function under construction.
+    fn produce_function<MC: MemoryConfig>(
+        &mut self,
+        hash: &Hash,
+    ) -> Result<JitFn<MC>, Box<ModuleError>> {
         let name = hex::encode(hash);
 
         let fun = self.finalise(&name)?;
-
-        self.cache.insert(*hash, Some(fun));
 
         Ok(fun)
     }
 
     /// Finalise the function currently under construction.
-    fn finalise(&mut self, name: &str) -> Result<JitFn<MC>, Box<ModuleError>> {
+    fn finalise<MC: MemoryConfig>(&mut self, name: &str) -> Result<JitFn<MC>, Box<ModuleError>> {
         let id = self.module.declare_function(
             name.as_ref(),
             Linkage::Export,
@@ -274,9 +264,9 @@ impl<MC: MemoryConfig> JIT<MC> {
 }
 
 // TODO: https://linear.app/tezos/issue/RV-496
-//       `Block::BlockBuilder` should not require Default, as it
+//       `CodePageEntry::Compiler` should not require Default, as it
 //         does not allow for potential fallilibility
-impl<MC: MemoryConfig> Default for JIT<MC> {
+impl Default for JIT {
     fn default() -> Self {
         Self::new().expect("JIT is supported on all octez-riscv supported platforms")
     }
@@ -370,9 +360,9 @@ mod tests {
 
         fn check_compilable(&self) {
             // Ensure the set of instructions can be compiled in JIT.
-            let mut test_jit = JIT::<M4K>::new().unwrap();
+            let mut test_jit = JIT::new().unwrap();
             test_jit
-                .compile(&self.instructions, self.initial_pc.unwrap_or_default())
+                .compile::<M4K>(&self.instructions, self.initial_pc.unwrap_or_default())
                 .expect("JIT compilation should succeed.");
         }
 
@@ -427,7 +417,7 @@ mod tests {
                 .main_memory
                 .set_all_readable_writeable(NoopMemoryGovernanceListener);
 
-            let mut jitted_state: TestMachineState<Jitted<InlineCompiler<_>, _>> =
+            let mut jitted_state: TestMachineState<Jitted<InlineCompiler, _>> =
                 MachineState::new(InlineCompiler::default());
             jitted_state
                 .core
@@ -448,7 +438,7 @@ mod tests {
                 .page_cache
                 .overwrite_page(initial_pc, interpreted_page);
 
-            let mut jitted_page = PageEntry::<Jitted<InlineCompiler<_>, M4K>>::zeroed();
+            let mut jitted_page = PageEntry::<Jitted<InlineCompiler, M4K>>::zeroed();
             PageEntry::push_instructions(
                 &mut jitted_page,
                 initial_pc,
@@ -1993,7 +1983,7 @@ mod tests {
         let success: &[I] = &[I::new_nop(Compressed)];
 
         for failure in failure_scenarios.iter() {
-            let mut jit = JIT::<M4K>::new().unwrap();
+            let mut jit = JIT::new().unwrap();
 
             let mut jitted = MachineCoreState::<M4K, _>::new();
 
@@ -2003,7 +1993,7 @@ mod tests {
             jitted.hart.xregisters.write_nz(x1, 1);
 
             // Act
-            let res = jit.compile(failure, initial_pc);
+            let res = jit.compile::<M4K>(failure, initial_pc);
 
             assert!(
                 res.is_none(),
