@@ -81,7 +81,7 @@ fn interpret_test(path: &str, required_perms: Permissions) {
 /// For the JIT, we run it twice - the first run to build up the blocks, and the
 /// second to run with these blocks already compiled (so that we actually use them).
 fn inline_jit_test(path: &str, required_perms: Permissions) {
-    type EntrypointImpl = Jitted<InlineCompiler<M1M>, M1M>;
+    type EntrypointImpl = Jitted<InlineCompiler, M1M>;
 
     let compiler = Default::default();
     let compiler = run_test::<EntrypointImpl>(path, compiler, required_perms);

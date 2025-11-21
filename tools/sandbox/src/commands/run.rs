@@ -35,7 +35,7 @@ cfg_if::cfg_if! {
         pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, Normal>;
     } else if #[cfg(feature = "inline-jit")] {
         /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler<MC>, MC>;
+        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler, MC>;
     } else {
         /// Execution strategy for entrypoints.
         pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::OutlineCompiler<MC>, MC>;

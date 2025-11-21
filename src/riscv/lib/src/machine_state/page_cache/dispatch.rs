@@ -158,19 +158,12 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
 }
 
 /// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
-pub struct InlineCompiler<MC: MemoryConfig> {
-    jit: JIT<MC>,
+#[derive(Default)]
+pub struct InlineCompiler {
+    jit: JIT,
 }
 
-impl<MC: MemoryConfig> Default for InlineCompiler<MC> {
-    fn default() -> Self {
-        Self {
-            jit: JIT::default(),
-        }
-    }
-}
-
-impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler<MC> {
+impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
     #[inline]
     fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
         // every entrypoint must be compiled immediately for inline jit, as it's used for testing
@@ -240,14 +233,14 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
     // even if the background compilation thread panics.
-    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>>,
+    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT>>>,
     sender: Sender<CompilationRequest<Self, MC>>,
 }
 
 impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
-        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT<MC>>>> = Default::default();
+        let jit: Arc<Mutex<internal_corro::SendWrapper<JIT>>> = Default::default();
 
         let compiler = Self {
             _do_not_use_this_is_for_drop_only: jit.clone(),
@@ -274,7 +267,7 @@ impl<MC: MemoryConfig + Send> OutlineCompiler<MC> {
                         msg.program_counter,
                     );
 
-                    if let Some(jitfn) = jit.compile(&instr, msg.program_counter) {
+                    if let Some(jitfn) = jit.compile::<MC>(&instr, msg.program_counter) {
                         let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
                         let dispatch = &msg.page.entries[offset].dispatch;
 
@@ -374,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_dispatch_debug_classification() {
-        let dispatch = DispatchTarget::<InlineCompiler<_>, M4K>::default();
+        let dispatch = DispatchTarget::<InlineCompiler, M4K>::default();
         let format = format!("{dispatch:?}");
 
         assert!(
