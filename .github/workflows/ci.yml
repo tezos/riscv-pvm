@@ -83,7 +83,7 @@ jobs:
           sudo rm -rf /usr/local/share/powershell
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Nix setup
         uses: nixbuild/nix-quick-install-action@v34
