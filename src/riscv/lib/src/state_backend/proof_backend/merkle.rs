@@ -154,10 +154,10 @@ impl AccessInfoAggregatable for () {
 
 /// Helper function which allows iterating over chunks of a dynamic array
 /// and writing them to a writer. The last chunk may be smaller than the
-/// Merkle leaf size. The implementations of [`HashState`] and
+/// Merkle leaf size. The implementations of [`Foldable`] and
 /// [`ProofLayout`] both use it, ensuring consistency between the two.
 ///
-/// [`HashState`]: octez_riscv_data::hash::HashState
+/// [`Foldable`]: octez_riscv_data::foldable::Foldable
 /// [`ProofLayout`]: crate::state_backend::proof_layout::ProofLayout
 pub(crate) fn chunks_to_writer<T: std::io::Write, F: Fn(usize) -> [u8; MERKLE_LEAF_SIZE.get()]>(
     writer: &mut T,

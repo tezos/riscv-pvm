@@ -13,12 +13,17 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::HashWriter;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::merkle_tree::MerkleTree;
+use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::FnManager;
@@ -39,6 +44,7 @@ use crate::state_backend::RegionProj;
 use crate::state_backend::normal_backend::region_elem_offset;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
+use crate::state_backend::proof_backend::merkle::MerkleWriter;
 use crate::state_backend::proof_backend::merkle::chunks_to_writer;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
@@ -169,9 +175,14 @@ impl<E: Clone, M: ManagerClone> CloneState for Cell<E, M> {
     }
 }
 
-impl<E: Encode, M: ManagerSerialise> HashState for Cell<E, M> {
-    fn hash_state(&self) -> Hash {
-        Hash::blake3_hash(self).expect("Cell hashing should not fail")
+impl<T, M, F> Foldable<F> for Cell<T, M>
+where
+    M: ManagerBase,
+    F: Fold,
+    Cells<T, 1, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        self.region.fold(builder)
     }
 }
 
@@ -357,9 +368,25 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> CloneState for Cells<E, LEN, M
     }
 }
 
-impl<E: Encode, const LEN: usize, M: ManagerSerialise> HashState for Cells<E, LEN, M> {
-    fn hash_state(&self) -> Hash {
-        Hash::blake3_hash(self).expect("Cells hashing should not fail")
+impl<T: Encode, const LEN: usize, M: ManagerSerialise> Foldable<HashFold> for Cells<T, LEN, M> {
+    fn fold(&self, _builder: HashFold) -> Hash {
+        Hash::blake3_hash(self).expect("Hashing should not fail")
+    }
+}
+
+impl<T: Encode, const LEN: usize> Foldable<MerkleTreeFold> for Cells<T, LEN, Prove<'_>> {
+    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
+        // RV-282: Break down into multiple leaves if the size of the `Cells`
+        // is too large for a proof.
+
+        // The Merkle leaf must hold the serialisation of the initial state.
+        // Directly serialising the `Prove` state would produce the serialisation
+        // of the final state. Therefore, access the inner region which contains the initial state.
+        let data = self.region.inner_region_ref();
+        let leaf_data = serialise(data).expect("Serialising cells should not fail");
+
+        let was_accessed = self.region.get_access_info();
+        MerkleTree::make_merkle_leaf(leaf_data, was_accessed)
     }
 }
 
@@ -554,8 +581,8 @@ impl<M: ManagerClone> CloneState for DynCells<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for DynCells<M> {
-    fn hash_state(&self) -> Hash {
+impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
+    fn fold(&self, _builder: HashFold) -> Hash {
         let length = self.len();
 
         let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
@@ -572,6 +599,36 @@ impl<M: ManagerSerialise> HashState for DynCells<M> {
         let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
 
         Hash::combine([length_node, pages_node])
+    }
+}
+
+impl Foldable<MerkleTreeFold> for DynCells<Prove<'_>> {
+    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
+        let len = self.len();
+
+        let region = self.region_ref();
+        let mut writer = MerkleWriter::new(
+            MERKLE_LEAF_SIZE,
+            MERKLE_ARITY,
+            region.get_read(),
+            region.get_write(),
+            len.div_ceil(MERKLE_ARITY),
+        );
+        let read = |address| -> [u8; MERKLE_LEAF_SIZE.get()] {
+            // SAFETY: The chunk writer will only request data within the given bounds. The bounds
+            // are set to the length of the dynamic array.
+            unsafe { region.inner_dyn_region_read(address) }
+        };
+        chunks_to_writer::<_, _>(&mut writer, len, read).expect("Writing chunks should not fail");
+
+        let pages_node = writer
+            .finalise()
+            .expect("Building the Merkle tree should not fail");
+
+        let length_bytes = serialise(len as u64).expect("Serialising length should not fail");
+        let length_node = MerkleTree::make_merkle_leaf(length_bytes, region.need_length_in_proof());
+
+        MerkleTree::make_merkle_node(vec![length_node, pages_node])
     }
 }
 

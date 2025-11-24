@@ -10,9 +10,14 @@ use std::ops::ControlFlow;
 use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_tree::MerkleTree;
+use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -37,11 +42,8 @@ use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerSerialise;
-use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
@@ -384,16 +386,19 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     }
 }
 
-impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove<'a>> {
+impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove<'a>>
+where
+    MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
+{
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
         // This read guarantees that the input request can be recovered from the proof.
         let _ = self.input_request();
 
-        let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = merkle_tree_to_merkle_proof(PvmLayout::<MC>::to_merkle_tree(refs)?);
+        let merkle_tree = MerkleTree::from_foldable(self);
+        let merkle_proof = merkle_tree_to_merkle_proof(merkle_tree);
 
-        let final_hash = self.hash_state();
+        let final_hash = Hash::from_foldable(self);
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
@@ -416,21 +421,32 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState fo
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerSerialise> HashState
-    for Pvm<MC, CPE, M>
+impl<MC, CPE, M, F> Foldable<F> for Pvm<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: ManagerBase,
+    F: Fold,
+    machine_state::MachineState<MC, CPE, M>: Foldable<F>,
+    RevealRequest<M>: Foldable<F>,
+    linux::SupervisorState<M>: Foldable<F>,
+    Cell<PvmStatus, M>: Foldable<F>,
+    Cell<bool, M>: Foldable<F>,
+    Cell<u32, M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
 {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.machine_state.hash_state(),
-            self.reveal_request.hash_state(),
-            self.system_state.hash_state(),
-            self.version.hash_state(),
-            self.tick.hash_state(),
-            self.message_counter.hash_state(),
-            self.level.hash_state(),
-            self.level_is_set.hash_state(),
-            self.status.hash_state(),
-        ])
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.machine_state);
+        builder.add(&self.reveal_request);
+        builder.add(&self.system_state);
+        builder.add(&self.version);
+        builder.add(&self.tick);
+        builder.add(&self.message_counter);
+        builder.add(&self.level);
+        builder.add(&self.level_is_set);
+        builder.add(&self.status);
+        builder.done()
     }
 }
 

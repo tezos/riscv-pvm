@@ -91,20 +91,25 @@ macro_rules! struct_layout {
             }
 
             impl <
+                __F: octez_riscv_data::foldable::Fold,
                 $(
-                    [<$field_name:camel>]: octez_riscv_data::hash::HashState
+                    [<$field_name:camel>]: octez_riscv_data::foldable::Foldable<__F>
                 ),+
-            > octez_riscv_data::hash::HashState for [<$layout_t F>]<
+            > octez_riscv_data::foldable::Foldable<__F> for [<$layout_t F>]<
                 $(
                     [<$field_name:camel>]
                 ),+
             > {
-                fn hash_state(&self) -> octez_riscv_data::hash::Hash {
-                    octez_riscv_data::hash::Hash::combine([
-                        $(
-                            self.$field_name.hash_state()
-                        ),+
-                    ])
+                fn fold(&self, builder: __F) -> __F::Folded {
+                    use octez_riscv_data::foldable::NodeFold;
+
+                    let mut builder = builder.into_node_fold();
+
+                    $(
+                        builder.add(&self.$field_name);
+                    )+
+
+                    builder.done()
                 }
             }
 
@@ -161,19 +166,6 @@ macro_rules! struct_layout {
                 ),+
             >
             {
-                #[inline]
-                fn to_merkle_tree<'outer, 'inner: 'outer>(
-                    state: $crate::state_backend::RefProveAlloc<'outer, 'inner, Self>,
-                ) -> std::result::Result<octez_riscv_data::merkle_tree::MerkleTree, octez_riscv_data::hash::HashError> {
-                    Ok(octez_riscv_data::merkle_tree::MerkleTree::make_merkle_node(
-                        vec![
-                            $(
-                                [<$field_name:camel>]::to_merkle_tree(state.$field_name)?
-                            ),+
-                        ]
-                    ))
-                }
-
                 #[inline]
                 fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
                     proof: D,
@@ -303,7 +295,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
 
     use super::*;
@@ -363,7 +356,7 @@ mod tests {
                 bar: &foo.bar,
                 qux: &foo.qux,
             };
-            let hash = refs.hash_state();
+            let hash = Hash::from_foldable(&refs);
 
             // Obtain the Merkle tree via the `Prove` mode
             let mut proof_foo = FooF {
@@ -371,11 +364,11 @@ mod tests {
                 qux: foo.qux.struct_ref::<ProofWrapper>(),
             };
             let proof_foo_refs = FooF {
-                bar: proof_foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: proof_foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &proof_foo.bar,
+                qux: &proof_foo.qux,
             };
 
-            let tree = Foo::to_merkle_tree(proof_foo_refs).unwrap();
+            let tree = MerkleTree::from_foldable(&proof_foo_refs);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -385,11 +378,11 @@ mod tests {
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
             let proof_foo_refs = FooF {
-                bar: proof_foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: proof_foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &proof_foo.bar,
+                qux: &proof_foo.qux,
             };
 
-            let tree = Foo::to_merkle_tree(proof_foo_refs).unwrap();
+            let tree = MerkleTree::from_foldable(&proof_foo_refs);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -406,7 +399,7 @@ mod tests {
                 bar: &foo.bar,
                 qux: &foo.qux,
             };
-            let final_hash = refs.hash_state();
+            let final_hash = Hash::from_foldable(&refs);
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {

@@ -18,8 +18,9 @@ use std::ops::ControlFlow;
 use std::ops::Range;
 
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
@@ -52,7 +53,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -1061,14 +1061,20 @@ impl<M: ManagerClone> CloneState for SupervisorState<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for SupervisorState<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.tid_address.hash_state(),
-            self.program.hash_state(),
-            self.heap.hash_state(),
-            self.stack_guard.hash_state(),
-        ])
+impl<M, F> Foldable<F> for SupervisorState<M>
+where
+    M: ManagerBase,
+    F: Fold,
+    Cell<VirtAddr, M>: Foldable<F>,
+    Cell<Range<VirtAddr>, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.tid_address);
+        builder.add(&self.program);
+        builder.add(&self.heap);
+        builder.add(&self.stack_guard);
+        builder.done()
     }
 }
 

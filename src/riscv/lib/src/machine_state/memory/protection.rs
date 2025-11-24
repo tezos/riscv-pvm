@@ -11,9 +11,12 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::merkle_tree::MerkleTree;
+use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -34,6 +37,7 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::Many;
 use crate::state_backend::NarrowlySized;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
+use crate::state_backend::proof_backend::merkle::build_custom_merkle_tree;
 
 /// State layout for page permissions
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
@@ -163,13 +167,29 @@ impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, 
     }
 }
 
-impl<const PAGES: usize, M: ManagerSerialise> HashState for PagePermissions<PAGES, M> {
-    fn hash_state(&self) -> Hash {
+impl<const PAGES: usize, M: ManagerSerialise> Foldable<HashFold> for PagePermissions<PAGES, M> {
+    fn fold(&self, _builder: HashFold) -> Hash {
         let nodes: Vec<Hash> = self
             .pages
             .iter()
-            .map(HashState::hash_state)
+            .map(Hash::from_foldable)
             .collect::<Vec<_>>();
         build_custom_merkle_hash(MERKLE_ARITY, nodes).expect("Hashing should not fail")
+    }
+}
+
+impl<const PAGES: usize, M> Foldable<MerkleTreeFold> for PagePermissions<PAGES, M>
+where
+    M: ManagerBase,
+    Cell<bool, M>: Foldable<MerkleTreeFold>,
+{
+    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
+        let leaves = self
+            .pages
+            .iter()
+            .map(MerkleTree::from_foldable)
+            .collect::<Vec<_>>();
+        build_custom_merkle_tree(MERKLE_ARITY, leaves)
+            .expect("Building Merkle tree should not fail")
     }
 }

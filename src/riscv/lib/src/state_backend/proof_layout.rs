@@ -11,13 +11,11 @@ use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
-use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
@@ -29,14 +27,9 @@ use super::Atom;
 use super::DynArray;
 use super::Layout;
 use super::Many;
-use super::Ref;
-use super::RefProveAlloc;
 use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
-use super::proof_backend::merkle::MerkleWriter;
-use super::proof_backend::merkle::build_custom_merkle_tree;
-use super::proof_backend::merkle::chunks_to_writer;
 use super::proof_backend::proof::MerkleProof;
 use super::proof_backend::proof::MerkleProofLeaf;
 use super::proof_backend::proof::deserialiser::Result;
@@ -324,12 +317,6 @@ impl OwnedProofPart {
 ///
 /// [`Layouts`]: crate::state_backend::Layout
 pub trait ProofLayout: Layout {
-    /// Obtain the complete Merkle tree which captures an execution trace
-    /// using the proof-generating backend.
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError>;
-
     /// Parse a Merkle proof into the allocated form of this layout.
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self>;
 
@@ -342,12 +329,6 @@ pub trait ProofLayout: Layout {
 }
 
 impl<T: ProofLayout> ProofLayout for Box<T> {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        T::to_merkle_tree(*state)
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         Ok(T::into_verify_alloc(proof)?.map(Box::new))
     }
@@ -364,19 +345,6 @@ impl<T> ProofLayout for Atom<T>
 where
     T: Encode + Decode<()> + 'static,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        // The Merkle leaf must hold the serialisation of the initial state.
-        // Directly serialising the `Prove` state would produce the serialisation
-        // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
-        let region = state.into_region();
-        let access_info = region.get_access_info();
-        let cell = super::Cell::<T, Ref<'_, Normal>>::bind(region.inner_region_ref());
-        let serialised = serialisation::serialise(&cell)?;
-        Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         let f = Array::<T, 1>::into_verify_alloc(proof)?;
         Ok(f.map(super::Cell::from))
@@ -399,22 +367,6 @@ impl<T, const LEN: usize> ProofLayout for Array<T, LEN>
 where
     T: Encode + Decode<()> + 'static,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        // RV-282: Break down into multiple leaves if the size of the `Cells`
-        // is too large for a proof.
-        //
-        // The Merkle leaf must hold the serialisation of the initial state.
-        // Directly serialising the `Prove` state would produce the serialisation
-        // of the final state. Therefore, we rebind and serialise the wrapped `Normal` state.
-        let region = state.into_region();
-        let access_info = region.get_access_info();
-        let cells = super::Cells::<T, LEN, Ref<'_, Normal>>::bind(region.inner_region_ref());
-        let serialised = serialisation::serialise(&cells)?;
-        Ok(MerkleTree::make_merkle_leaf(serialised, access_info))
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         Ok(proof
             .into_leaf::<super::Cells<T, LEN, Normal>>()?
@@ -444,38 +396,6 @@ where
 }
 
 impl ProofLayout for DynArray {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let len = state.len();
-
-        let region = state.region_ref();
-        let mut writer = MerkleWriter::new(
-            MERKLE_LEAF_SIZE,
-            MERKLE_ARITY,
-            region.get_read(),
-            region.get_write(),
-            len.div_ceil(MERKLE_ARITY),
-        );
-        let read = |address| -> [u8; MERKLE_LEAF_SIZE.get()] {
-            // SAFETY: The chunk writer will only request data within the given bounds. The bounds
-            // are set to the length of the dynamic array.
-            unsafe { region.inner_dyn_region_read(address) }
-        };
-        chunks_to_writer::<_, _>(&mut writer, len, read)?;
-
-        let pages_node = writer.finalise()?;
-
-        let length_node = MerkleTree::make_merkle_leaf(
-            serialisation::serialise(len as u64)?,
-            region.need_length_in_proof(),
-        );
-
-        let root_node = MerkleTree::make_merkle_node(vec![length_node, pages_node]);
-
-        Ok(root_node)
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         type PageData = (
             PageId<{ MERKLE_LEAF_SIZE.get() }>,
@@ -762,13 +682,6 @@ where
     A: ProofLayout,
     B: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = vec![A::to_merkle_tree(state.0)?, B::to_merkle_tree(state.1)?];
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B)
     }
@@ -794,17 +707,6 @@ where
     B: ProofLayout,
     C: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = vec![
-            A::to_merkle_tree(state.0)?,
-            B::to_merkle_tree(state.1)?,
-            C::to_merkle_tree(state.2)?,
-        ];
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C)
     }
@@ -832,18 +734,6 @@ where
     C: ProofLayout,
     D: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = vec![
-            A::to_merkle_tree(state.0)?,
-            B::to_merkle_tree(state.1)?,
-            C::to_merkle_tree(state.2)?,
-            D::to_merkle_tree(state.3)?,
-        ];
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D)
     }
@@ -873,22 +763,10 @@ where
     D: ProofLayout,
     E: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = vec![
-            A::to_merkle_tree(state.0)?,
-            B::to_merkle_tree(state.1)?,
-            C::to_merkle_tree(state.2)?,
-            D::to_merkle_tree(state.3)?,
-            E::to_merkle_tree(state.4)?,
-        ];
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D, E)
     }
+
     fn partial_state_hash(
         state: RefVerifyAlloc<Self>,
         proof: ProofTree,
@@ -916,20 +794,6 @@ where
     E: ProofLayout,
     F: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = vec![
-            A::to_merkle_tree(state.0)?,
-            B::to_merkle_tree(state.1)?,
-            C::to_merkle_tree(state.2)?,
-            D::to_merkle_tree(state.3)?,
-            E::to_merkle_tree(state.4)?,
-            F::to_merkle_tree(state.5)?,
-        ];
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<De: Deserialiser>(proof: De) -> VerifyAllocResult<De, Self> {
         tuple_branches_proof_layout!(proof, A, B, C, D, E, F)
     }
@@ -957,17 +821,6 @@ impl<T, const LEN: usize> ProofLayout for [T; LEN]
 where
     T: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let children = state
-            .into_iter()
-            .map(T::to_merkle_tree)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(MerkleTree::make_merkle_node(children))
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         let ctx = proof.into_node()?;
 
@@ -1007,17 +860,6 @@ impl<T, const LEN: usize> ProofLayout for Many<T, LEN>
 where
     T: ProofLayout,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        let leaves = state
-            .into_iter()
-            .map(T::to_merkle_tree)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        build_custom_merkle_tree(MERKLE_ARITY, leaves)
-    }
-
     fn into_verify_alloc<D: Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         // Avoids clippy warnings about the type being too complex.
         type NestedSuspendedResult<T> = Vec<AllocatedOf<T, Verify>>;
@@ -1222,7 +1064,7 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Prove;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -1255,18 +1097,16 @@ mod tests {
             let cells1 = [value_before; CELLS_SIZE];
             let mut proof_region1: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells1);
             Prove::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region1);
+            let proof_cells1: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region1);
 
             // Bind `Prove` cells and do not access them
             let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE> =
-                ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region2);
+            let proof_region2: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells2);
+            let proof_cells2: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region2);
 
             let proof_state = (proof_cells1, proof_cells2);
 
-            let merkle_proof = merkle_tree_to_merkle_proof( <TestLayout as ProofLayout>::to_merkle_tree(proof_state)
-                .unwrap());
+            let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
             let verifier_state = deserialise_owned::deserialise::<TestLayout>(
                 ProofTree::Present(&merkle_proof)
@@ -1314,7 +1154,7 @@ mod tests {
 
         // We require the initial hash to ensure that the generated proof, but also the
         // instantiated state from the proof match the "before" state.
-        let init_hash = owned_cell.hash_state();
+        let init_hash = Hash::from_foldable(&owned_cell);
 
         // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
         // setup for proof generation. You can think of this as starting the recording for a proof.
@@ -1324,9 +1164,9 @@ mod tests {
 
         // The post-hash is required to ensure that the verifier's final state matches the prover's
         // final state.
-        let post_hash = proof_cell.hash_state();
+        let post_hash = Hash::from_foldable(&proof_cell);
 
-        let tree = DynArray::to_merkle_tree(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
+        let tree = MerkleTree::from_foldable(&proof_cell);
         let proof_tree = merkle_tree_to_merkle_proof(tree);
         assert_eq!(proof_tree.root_hash(), init_hash);
 

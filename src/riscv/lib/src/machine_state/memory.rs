@@ -12,7 +12,6 @@ use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
 use listener::MemoryGovernanceListener;
-use octez_riscv_data::hash::Hash;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::page_cache::PageCache;
@@ -26,7 +25,6 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::ProofLayout;
 
@@ -248,11 +246,6 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn clone_state(&self) -> Self
     where
         M: ManagerClone;
-
-    /// Obtain the hash of the persistent state.
-    fn hash_state(&self) -> Hash
-    where
-        M: ManagerSerialise;
 
     /// Zero-out all memory.
     fn reset(&mut self, listener: impl MemoryGovernanceListener)

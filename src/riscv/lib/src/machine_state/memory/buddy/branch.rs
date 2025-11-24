@@ -10,8 +10,9 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -295,17 +296,6 @@ where
             right: Box::new(self.right.clone_state()),
         }
     }
-
-    fn hash_state(&self) -> Hash
-    where
-        M: ManagerSerialise,
-    {
-        Hash::combine([
-            self.free_info.hash_state(),
-            self.left.hash_state(),
-            self.right.hash_state(),
-        ])
-    }
 }
 
 impl<B: Encode, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
@@ -327,5 +317,21 @@ impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for BuddyBranch2<B, M> {
             left: inner.left,
             right: inner.right,
         })
+    }
+}
+
+impl<B, M, F> Foldable<F> for BuddyBranch2<B, M>
+where
+    B: Foldable<F>,
+    M: ManagerBase,
+    F: Fold,
+    Cell<FreeInfo, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.free_info);
+        builder.add(self.left.as_ref());
+        builder.add(self.right.as_ref());
+        builder.done()
     }
 }

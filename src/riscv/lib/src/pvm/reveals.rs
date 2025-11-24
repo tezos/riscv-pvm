@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
@@ -19,7 +20,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 
 /// Reveal request layout
 pub type RevealRequestLayout = (DynArray, Atom<u64>);
@@ -85,8 +85,17 @@ impl<M: ManagerClone> CloneState for RevealRequest<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for RevealRequest<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([self.bytes.hash_state(), self.size.hash_state()])
+impl<M, F> Foldable<F> for RevealRequest<M>
+where
+    M: ManagerBase,
+    F: Fold,
+    DynCells<M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.bytes);
+        builder.add(&self.size);
+        builder.done()
     }
 }

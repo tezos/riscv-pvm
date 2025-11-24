@@ -13,7 +13,10 @@ use octez_riscv::state_backend::RefNormalAlloc;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash;
+use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_test_utils::*;
 
 #[test]
@@ -59,6 +62,7 @@ fn run_steps_ladder<MC, F>(
     expected_hash: hash::Hash,
 ) where
     MC: MemoryConfig,
+    MC::State<Normal>: Foldable<HashFold>,
     for<'a> RefNormalAlloc<'a, PvmLayout<MC>>: PartialEq,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {

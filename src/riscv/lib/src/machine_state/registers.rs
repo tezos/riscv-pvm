@@ -21,8 +21,8 @@ use arbitrary_int::u5;
 use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::mode::Normal;
 use perfect_derive::perfect_derive;
 
@@ -32,7 +32,6 @@ use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
-use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -310,9 +309,14 @@ impl<M: backend::ManagerClone> CloneState for XRegisters<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for XRegisters<M> {
-    fn hash_state(&self) -> Hash {
-        self.registers.hash_state()
+impl<M, F> Foldable<F> for XRegisters<M>
+where
+    M: backend::ManagerBase,
+    F: Fold,
+    backend::Cells<u64, 31, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        self.registers.fold(builder)
     }
 }
 
@@ -695,9 +699,14 @@ impl<M: backend::ManagerClone> CloneState for FRegisters<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for FRegisters<M> {
-    fn hash_state(&self) -> Hash {
-        self.registers.hash_state()
+impl<M, F> Foldable<F> for FRegisters<M>
+where
+    M: backend::ManagerBase,
+    F: Fold,
+    backend::Cells<FValue, 32, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        self.registers.fold(builder)
     }
 }
 

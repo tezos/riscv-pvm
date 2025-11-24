@@ -10,8 +10,9 @@ use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use strum::EnumCount;
 use strum::FromRepr;
 use zerocopy::FromBytes;
@@ -53,7 +54,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -205,15 +205,22 @@ impl<M: ManagerWrite> SignalActions<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for SignalActions<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.actions.hash_state(),
-            self.flags.hash_state(),
-            self.masks.hash_state(),
-            self.restorer.hash_state(),
-            self.thread_mask.hash_state(),
-        ])
+impl<M, F> Foldable<F> for SignalActions<M>
+where
+    M: ManagerBase,
+    F: Fold,
+    Cell<VirtAddr, M>: Foldable<F>,
+    Cell<u32, M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.actions);
+        builder.add(&self.flags);
+        builder.add(&self.masks);
+        builder.add(&self.restorer);
+        builder.add(&self.thread_mask);
+        builder.done()
     }
 }
 

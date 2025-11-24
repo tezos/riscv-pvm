@@ -4,8 +4,9 @@
 // SPDX-License-Identifier: MIT
 
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::csregisters;
@@ -19,7 +20,6 @@ use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CellProj;
-use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -118,15 +118,22 @@ impl<M: backend::ManagerClone> CloneState for HartState<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for HartState<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.xregisters.hash_state(),
-            self.fregisters.hash_state(),
-            self.csregisters.hash_state(),
-            self.pc.hash_state(),
-            self.reservation_set.hash_state(),
-        ])
+impl<M: backend::ManagerBase, F: Fold> Foldable<F> for HartState<M>
+where
+    registers::XRegisters<M>: Foldable<F>,
+    registers::FRegisters<M>: Foldable<F>,
+    csregisters::CSRegisters<M>: Foldable<F>,
+    Cell<Address, M>: Foldable<F>,
+    ReservationSet<M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.xregisters);
+        builder.add(&self.fregisters);
+        builder.add(&self.csregisters);
+        builder.add(&self.pc);
+        builder.add(&self.reservation_set);
+        builder.done()
     }
 }
 
