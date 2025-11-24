@@ -7,7 +7,6 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -174,7 +173,7 @@ impl NodePvm {
 
     /// Compute the root hash of the PVM state.
     pub fn hash(&self) -> Hash {
-        self.with_backend(HashState::hash_state)
+        self.with_backend(Hash::from_foldable)
     }
 
     /// Produce the Merkle proof corresponding to the next step of the PVM.

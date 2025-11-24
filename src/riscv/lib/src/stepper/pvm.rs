@@ -9,8 +9,10 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
+use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -138,7 +140,10 @@ impl<H, MC: MemoryConfig> PvmStepper<H, MC, Normal> {
 
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
-    pub fn produce_proof(&mut self) -> Option<Proof> {
+    pub fn produce_proof<'a>(&'a mut self) -> Option<Proof>
+    where
+        MC::State<Prove<'a>>: Foldable<Hash> + Foldable<MerkleTree>,
+    {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
 

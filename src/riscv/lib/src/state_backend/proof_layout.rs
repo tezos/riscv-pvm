@@ -1222,7 +1222,6 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::HashState;
     use octez_riscv_data::mode::Prove;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
@@ -1255,18 +1254,16 @@ mod tests {
             let cells1 = [value_before; CELLS_SIZE];
             let mut proof_region1: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells1);
             Prove::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region1);
+            let proof_cells1: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region1);
 
             // Bind `Prove` cells and do not access them
             let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE> =
-                ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> = Cells::bind(&proof_region2);
+            let proof_region2: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells2);
+            let proof_cells2: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region2);
 
             let proof_state = (proof_cells1, proof_cells2);
 
-            let merkle_proof = merkle_tree_to_merkle_proof( <TestLayout as ProofLayout>::to_merkle_tree(proof_state)
-                .unwrap());
+            let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
             let verifier_state = deserialise_owned::deserialise::<TestLayout>(
                 ProofTree::Present(&merkle_proof)
@@ -1314,7 +1311,7 @@ mod tests {
 
         // We require the initial hash to ensure that the generated proof, but also the
         // instantiated state from the proof match the "before" state.
-        let init_hash = owned_cell.hash_state();
+        let init_hash = Hash::from_foldable(&owned_cell);
 
         // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
         // setup for proof generation. You can think of this as starting the recording for a proof.
@@ -1324,9 +1321,9 @@ mod tests {
 
         // The post-hash is required to ensure that the verifier's final state matches the prover's
         // final state.
-        let post_hash = proof_cell.hash_state();
+        let post_hash = Hash::from_foldable(&proof_cell);
 
-        let tree = DynArray::to_merkle_tree(proof_cell.struct_ref::<FnManagerIdent>()).unwrap();
+        let tree = MerkleTree::from_foldable(&proof_cell);
         let proof_tree = merkle_tree_to_merkle_proof(tree);
         assert_eq!(proof_tree.root_hash(), init_hash);
 

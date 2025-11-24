@@ -15,6 +15,7 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
+use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -39,11 +40,9 @@ use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerSerialise;
-use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
@@ -386,16 +385,22 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     }
 }
 
-impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove<'a>> {
+impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove<'a>>
+where
+    MC::State<Prove<'a>>: Foldable<MerkleTree> + Foldable<Hash>,
+{
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
         // This read guarantees that the input request can be recovered from the proof.
         let _ = self.input_request();
 
-        let refs = self.struct_ref::<FnManagerIdent>();
-        let merkle_proof = merkle_tree_to_merkle_proof(PvmLayout::<MC>::to_merkle_tree(refs)?);
+        let merkle_tree = MerkleTree::from_foldable(self);
+        // let refs = self.struct_ref::<FnManagerIdent>();
+        // let merkle_tree = PvmLayout::<MC>::to_merkle_tree(refs)?;
+        let merkle_proof = merkle_tree_to_merkle_proof(merkle_tree);
 
-        let final_hash = self.hash_state();
+        // let final_hash = self.hash_state();
+        let final_hash = Hash::from_foldable(self);
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)

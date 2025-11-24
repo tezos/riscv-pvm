@@ -468,7 +468,7 @@ impl<'normal> FnManager<'normal, Normal> for ProofWrapper {
 mod tests {
     use std::collections::VecDeque;
 
-    use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
     use proptest::array;
@@ -479,12 +479,9 @@ mod tests {
     use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
     use crate::state_backend::Cells;
-    use crate::state_backend::DynArray;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerAlloc;
-    use crate::state_backend::ProofLayout;
     use crate::state_backend::Ref;
-    use crate::state_backend::layout::Array;
 
     const CELLS_SIZE: usize = 32;
 
@@ -542,16 +539,13 @@ mod tests {
             // Check correct Merkleisation
             let cells = [value_before; CELLS_SIZE];
             let cells_owned: Cells<u64, CELLS_SIZE, Ref<'_, Normal>> = Cells::bind(&cells);
-            let initial_root_hash = cells_owned.hash_state();
+            let initial_root_hash = Hash::from_foldable(&cells_owned);
 
-            let mut proof_region: ProofRegion<'_, u64, CELLS_SIZE> =
-                ProofRegion::bind(&cells);
+            let mut proof_region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
             Prove::region_write(&mut proof_region, i, value_after);
-            let proof_cells: Cells<u64, CELLS_SIZE, Ref<'_, Prove>> =
-                Cells::bind(&proof_region);
+            let proof_cells: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region);
 
-            let merkle_tree =
-                <Array<u64, CELLS_SIZE> as ProofLayout>::to_merkle_tree(proof_cells).unwrap();
+            let merkle_tree = MerkleTree::from_foldable(&proof_cells);
             merkle_tree.check_root_hash();
             match merkle_tree {
                 MerkleTree::Leaf(hash, access_info, _) => {
@@ -641,7 +635,7 @@ mod tests {
             let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
             let owned_dyn_cells: DynCells<Ref<'_, Normal>> = DynCells::bind(&cells);
-            let initial_root_hash = owned_dyn_cells.hash_state();
+            let initial_root_hash = Hash::from_foldable(&owned_dyn_cells);
 
             let mut proof_dyn_region: ProofDynRegion = ProofDynRegion::bind(&cells);
 
@@ -663,10 +657,8 @@ mod tests {
 
             // Build the Merkle tree and check that it has the root hash of the
             // initial wrapped region.
-            let proof_dyn_cells: DynCells<Ref<'_, Prove>> =
-                DynCells::bind(&proof_dyn_region);
-            let merkle_tree =
-                <DynArray as ProofLayout>::to_merkle_tree(proof_dyn_cells).unwrap();
+            let proof_dyn_cells: DynCells<Prove> = DynCells::bind(proof_dyn_region);
+            let merkle_tree = MerkleTree::from_foldable(&proof_dyn_cells);
             merkle_tree.check_root_hash();
             prop_assert_eq!(merkle_tree.root_hash(), initial_root_hash);
 

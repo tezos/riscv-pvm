@@ -324,7 +324,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::HashState;
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
 
     use super::*;
@@ -384,7 +385,7 @@ mod tests {
                 bar: &foo.bar,
                 qux: &foo.qux,
             };
-            let hash = refs.hash_state();
+            let hash = Hash::from_foldable(&refs);
 
             // Obtain the Merkle tree via the `Prove` mode
             let mut proof_foo = FooF {
@@ -392,11 +393,11 @@ mod tests {
                 qux: foo.qux.struct_ref::<ProofWrapper>(),
             };
             let proof_foo_refs = FooF {
-                bar: proof_foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: proof_foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &proof_foo.bar,
+                qux: &proof_foo.qux,
             };
 
-            let tree = Foo::to_merkle_tree(proof_foo_refs).unwrap();
+            let tree = MerkleTree::from_foldable(&proof_foo_refs);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -406,11 +407,11 @@ mod tests {
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
             let proof_foo_refs = FooF {
-                bar: proof_foo.bar.struct_ref::<FnManagerIdent>(),
-                qux: proof_foo.qux.struct_ref::<FnManagerIdent>(),
+                bar: &proof_foo.bar,
+                qux: &proof_foo.qux,
             };
 
-            let tree = Foo::to_merkle_tree(proof_foo_refs).unwrap();
+            let tree = MerkleTree::from_foldable(&proof_foo_refs);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -427,7 +428,7 @@ mod tests {
                 bar: &foo.bar,
                 qux: &foo.qux,
             };
-            let final_hash = refs.hash_state();
+            let final_hash = Hash::from_foldable(&refs);
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
