@@ -153,11 +153,11 @@ impl<'a> ProofTree<'a> {
         };
 
         match proof {
-            Tree::Node(branches) => {
+            Tree::Node { children, .. } => {
                 let branches: &[MerkleProof; LEN] =
-                    branches.as_slice().try_into().map_err(|_| {
+                    children.as_slice().try_into().map_err(|_| {
                         ProofError::BadNumberOfBranches {
-                            got: branches.len(),
+                            got: children.len(),
                             expected: LEN,
                         }
                     })?;
@@ -174,7 +174,7 @@ impl<'a> ProofTree<'a> {
                     .unwrap())
             }
 
-            Tree::Leaf(leaf) => match leaf {
+            Tree::Leaf { data } => match data {
                 MerkleProofLeaf::Blind(_hash) => Ok(boxed_array![ProofTree::Absent; LEN]),
                 _ => Err(ProofError::UnexpectedLeaf)?,
             },
@@ -185,8 +185,8 @@ impl<'a> ProofTree<'a> {
     pub fn into_leaf(self) -> Result<ProofPart<'a, [u8]>> {
         if let ProofTree::Present(proof) = self {
             match proof {
-                Tree::Node(_) => Err(ProofError::UnexpectedNode),
-                Tree::Leaf(leaf) => match leaf {
+                Tree::Node { .. } => Err(ProofError::UnexpectedNode),
+                Tree::Leaf { data } => match data {
                     MerkleProofLeaf::Blind(_) => Ok(ProofPart::Absent),
                     MerkleProofLeaf::Read(data) => Ok(ProofPart::Present(data.as_slice())),
                 },
@@ -204,11 +204,11 @@ impl<'a> ProofTree<'a> {
             return Err(PartialHashError::PotentiallyRecoverable);
         };
 
-        let Tree::Leaf(leaf) = proof else {
+        let Tree::Leaf { data } = proof else {
             return Err(ProofError::UnexpectedNode.into());
         };
 
-        let hash = match leaf {
+        let hash = match data {
             MerkleProofLeaf::Blind(hash) => *hash,
             MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data),
         };
@@ -232,14 +232,14 @@ impl<'a> ProofTree<'a> {
         };
 
         match proof {
-            Tree::Node(branches) if branches.len() != LEN => Err(PartialHashError::FromProof(
-                ProofError::BadNumberOfBranches {
-                    got: branches.len(),
+            Tree::Node { children, .. } if children.len() != LEN => Err(
+                PartialHashError::FromProof(ProofError::BadNumberOfBranches {
+                    got: children.len(),
                     expected: LEN,
-                },
-            )),
-            Tree::Node(branches) => Ok((
-                branches
+                }),
+            ),
+            Tree::Node { children, .. } => Ok((
+                children
                     .iter()
                     .map(ProofTree::Present)
                     .collect::<Vec<_>>()
@@ -248,7 +248,7 @@ impl<'a> ProofTree<'a> {
                     .map_err(|_| PartialHashError::Fatal)?,
                 None,
             )),
-            Tree::Leaf(leaf) => match leaf {
+            Tree::Leaf { data: leaf } => match leaf {
                 MerkleProofLeaf::Blind(hash) => {
                     Ok((boxed_array![ProofTree::Absent; LEN], Some(*hash)))
                 }
@@ -282,7 +282,10 @@ impl OwnedProofPart {
         match partial {
             Partial::Absent => OwnedProofPart::Absent,
             Partial::Blinded(hash) => OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
-            Partial::Present(children) => OwnedProofPart::Present(MerkleProof::Node(children)),
+            Partial::Present(children) => OwnedProofPart::Present(MerkleProof::Node {
+                data: Default::default(),
+                children,
+            }),
         }
     }
 
@@ -309,7 +312,10 @@ impl OwnedProofPart {
             }
         }
 
-        OwnedProofPart::Present(MerkleProof::Node(partial_children))
+        OwnedProofPart::Present(MerkleProof::Node {
+            data: Default::default(),
+            children: partial_children,
+        })
     }
 }
 
@@ -507,32 +513,34 @@ impl ProofLayout for DynArray {
         };
 
         let children = match proof {
-            Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
-                if !region.is_completely_absent() {
-                    // The verifier contains data, but the proof is not in the right shape for us
-                    // to insert back the data and obtain a root hash. This indicates an invalid
-                    // proof.
-                    //
-                    // From a partial Merkle tree perspective, technically you can blind a node in
-                    // the proof and then write all the data necessary to expand the node fully
-                    // after the verification is done. In the context of a dynamic region that
-                    // would entail setting the length and writing all pages. However, dynamic
-                    // regions cannot be re-created hence you cannot "write" the length. Any
-                    // modification requires at least the length node to be present. Hence,
-                    // blinding the pages node can be paired with modifications, but you cannot
-                    // blind the dynamic region's root node if there are modifications.
-                    return Err(PartialHashError::Fatal);
+            Tree::Leaf { data } => {
+                match data {
+                    MerkleProofLeaf::Blind(hash) => {
+                        if !region.is_completely_absent() {
+                            // The verifier contains data, but the proof is not in the right shape for us
+                            // to insert back the data and obtain a root hash. This indicates an invalid
+                            // proof.
+                            //
+                            // From a partial Merkle tree perspective, technically you can blind a node in
+                            // the proof and then write all the data necessary to expand the node fully
+                            // after the verification is done. In the context of a dynamic region that
+                            // would entail setting the length and writing all pages. However, dynamic
+                            // regions cannot be re-created hence you cannot "write" the length. Any
+                            // modification requires at least the length node to be present. Hence,
+                            // blinding the pages node can be paired with modifications, but you cannot
+                            // blind the dynamic region's root node if there are modifications.
+                            return Err(PartialHashError::Fatal);
+                        }
+
+                        // We already know that the dynamic region has been untouched at this point.
+                        return Ok(*hash);
+                    }
+                    MerkleProofLeaf::Read(_) => {
+                        return Err(PartialHashError::FromProof(ProofError::UnexpectedLeaf));
+                    }
                 }
-
-                // We already know that the dynamic region has been untouched at this point.
-                return Ok(*hash);
             }
-
-            Tree::Leaf(MerkleProofLeaf::Read(_)) => {
-                return Err(PartialHashError::FromProof(ProofError::UnexpectedLeaf));
-            }
-
-            Tree::Node(children) => children.as_slice(),
+            Tree::Node { children, .. } => children.as_slice(),
         };
 
         let [length_tree, pages_tree] = children else {
@@ -544,12 +552,15 @@ impl ProofLayout for DynArray {
             ));
         };
 
-        let length = if let Tree::Leaf(MerkleProofLeaf::Read(data)) = length_tree {
+        let length = if let Tree::Leaf {
+            data: MerkleProofLeaf::Read(read_data),
+        } = length_tree
+        {
             // The length data must be present if the node is present. Practically, if there is any
             // pages data to be dealt with we require the length. Or if there is no pages data,
             // then the only reason the parent node would be present is if the length was to be
             // read during verification.
-            serialisation::deserialise::<u64>(data).map_err(ProofError::Deserialise)? as usize
+            serialisation::deserialise::<u64>(read_data).map_err(ProofError::Deserialise)? as usize
         } else {
             return Err(PartialHashError::Fatal);
         };

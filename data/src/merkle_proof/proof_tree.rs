@@ -8,6 +8,9 @@ use super::tag::Tag;
 use crate::hash::Hash;
 use crate::tree::Tree;
 
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct MerkleProofNodeData;
+
 /// Merkle proof tree structure.
 ///
 /// Leaves can be read and/or written to.
@@ -21,7 +24,7 @@ use crate::tree::Tree;
 /// do not need to be stored in either the proof or its encoding.
 ///
 /// [`MerkleTree`]: crate::merkle_tree::MerkleTree
-pub type MerkleProof = Tree<MerkleProofLeaf>;
+pub type MerkleProof = Tree<MerkleProofLeaf, MerkleProofNodeData>;
 
 impl bincode::Encode for MerkleProof {
     fn encode<E: bincode::enc::Encoder>(
@@ -32,25 +35,27 @@ impl bincode::Encode for MerkleProof {
 
         while let Some(node) = nodes.pop() {
             match node {
-                Self::Node(trees) => {
+                Self::Node { children, .. } => {
                     Tag::Node.encode(encoder)?;
 
                     // We add the children in reverse order so that when we pop them from the
                     // `nodes` stack, they are in the original order.
-                    nodes.extend(trees.iter().rev());
+                    nodes.extend(children.iter().rev());
                 }
+                Self::Leaf { data } => {
+                    match data {
+                        MerkleProofLeaf::Read(read_data) => {
+                            Tag::Leaf(LeafTag::Read).encode(encoder)?;
 
-                Self::Leaf(MerkleProofLeaf::Read(data)) => {
-                    Tag::Leaf(LeafTag::Read).encode(encoder)?;
-
-                    // We want to write the raw data, and avoid the bincode length prefix. The decoder
-                    // will know how many bytes to read.
-                    encoder.writer().write(data.as_slice())?;
-                }
-
-                Self::Leaf(MerkleProofLeaf::Blind(hash)) => {
-                    Tag::Leaf(LeafTag::Blind).encode(encoder)?;
-                    hash.encode(encoder)?;
+                            // We want to write the raw data, and avoid the bincode length prefix. The decoder
+                            // will know how many bytes to read.
+                            encoder.writer().write(read_data.as_slice())?;
+                        }
+                        MerkleProofLeaf::Blind(hash) => {
+                            Tag::Leaf(LeafTag::Blind).encode(encoder)?;
+                            hash.encode(encoder)?;
+                        }
+                    }
                 }
             }
         }
@@ -130,36 +135,43 @@ impl HashState {
 impl MerkleProof {
     /// Create a new Merkle proof as a read leaf.
     pub fn leaf_read(data: Vec<u8>) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Read(data))
+        MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(data),
+        }
     }
 
     /// Create a new Merkle proof as a blind leaf.
     pub fn leaf_blind(hash: Hash) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
+        MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(hash),
+        }
     }
 
-    /// Compute the root hash of the Merkle proof.
     pub fn root_hash(&self) -> Hash {
         let mut nodes: Vec<(&MerkleProof, usize)> = vec![(self, 0)];
         let mut hashes: Vec<HashState> = vec![];
 
         while let Some((node, parent_index)) = nodes.pop() {
             match node {
-                Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
+                Tree::Leaf {
+                    data: MerkleProofLeaf::Blind(hash),
+                } => {
                     hashes.push(HashState::new_with_digest(
                         NodeLeaf::Leaf,
                         parent_index,
                         hash.digest,
                     ));
                 }
-                Tree::Leaf(MerkleProofLeaf::Read(data)) => {
+                Tree::Leaf {
+                    data: MerkleProofLeaf::Read(data),
+                } => {
                     hashes.push(HashState::new_with_digest(
                         NodeLeaf::Leaf,
                         parent_index,
                         Hash::blake3_hash_bytes(data.as_slice()).digest,
                     ));
                 }
-                Tree::Node(children) => {
+                Tree::Node { children, .. } => {
                     hashes.push(HashState::new(NodeLeaf::Node, parent_index));
                     let new_parent_index = hashes.len() - 1;
                     for child in children.iter() {
@@ -181,9 +193,13 @@ impl MerkleProof {
 impl From<&MerkleProof> for Tag {
     fn from(value: &MerkleProof) -> Self {
         match value {
-            MerkleProof::Node(_) => Tag::Node,
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
-            MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
+            MerkleProof::Node { .. } => Tag::Node,
+            MerkleProof::Leaf {
+                data: MerkleProofLeaf::Blind(_),
+            } => Tag::Leaf(LeafTag::Blind),
+            MerkleProof::Leaf {
+                data: MerkleProofLeaf::Read(_),
+            } => Tag::Leaf(LeafTag::Read),
         }
     }
 }
@@ -201,13 +217,14 @@ mod tests {
         let merkle_proofs = [
             MerkleProof::leaf_read([1, 2, 3].to_vec()),
             MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
-            Tree::Node(
-                [
+            Tree::Node {
+                data: Default::default(),
+                children: [
                     MerkleProof::leaf_read([1, 2, 3].to_vec()),
                     MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
                 ]
                 .to_vec(),
-            ),
+            },
         ];
         for merkle_proof in merkle_proofs.iter() {
             bincode::encode_to_vec(merkle_proof, get_bincode_config())
@@ -217,13 +234,14 @@ mod tests {
 
     #[test]
     fn we_can_take_the_merkle_proof_of_the_root_hash() {
-        let node = Tree::Node(
-            [
+        let node = Tree::Node {
+            data: Default::default(),
+            children: [
                 MerkleProof::leaf_read([1, 2, 3].to_vec()),
                 MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
             ]
             .to_vec(),
-        );
+        };
         let _ = node.root_hash();
     }
 }

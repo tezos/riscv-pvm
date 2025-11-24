@@ -143,15 +143,18 @@ impl CompressedMerkleTree {
         match self {
             CompressedMerkleTree::Leaf(hash, compressed_access_info) => {
                 match compressed_access_info {
-                    CompressedAccessInfo::NoAccess => Tree::Leaf(MerkleProofLeaf::Blind(hash)),
-                    CompressedAccessInfo::ReadWrite(data) => {
-                        Tree::Leaf(MerkleProofLeaf::Read(data))
-                    }
+                    CompressedAccessInfo::NoAccess => Tree::Leaf {
+                        data: MerkleProofLeaf::Blind(hash),
+                    },
+                    CompressedAccessInfo::ReadWrite(data) => Tree::Leaf {
+                        data: MerkleProofLeaf::Read(data),
+                    },
                 }
             }
-            CompressedMerkleTree::Node(_, children) => {
-                Tree::Node(children.into_iter().map(|child| child.to_proof()).collect())
-            }
+            CompressedMerkleTree::Node(_, children) => Tree::Node {
+                data: Default::default(),
+                children: children.into_iter().map(|child| child.to_proof()).collect(),
+            },
         }
     }
 }
@@ -468,79 +471,126 @@ mod tests {
             let merkle_proof_leaf =
                 |data: &Vec<u8>, access: bool| -> Result<MerkleProof, HashError> {
                     let hash = Hash::blake3_hash_bytes(data);
-                    Ok(MerkleProof::Leaf(if access {
-                        MerkleProofLeaf::Read(data.clone())
-                    } else {
-                        MerkleProofLeaf::Blind(hash)
-                    }))
+                    Ok(MerkleProof::Leaf {
+                        data: if access {
+                            MerkleProofLeaf::Read(data.clone())
+                        } else {
+                            MerkleProofLeaf::Blind(hash)
+                        },
+                    })
                 };
 
-            let proof_single_leaves = MerkleProof::Node(vec![
-                merkle_proof_leaf(&l[0], false)?,
-                merkle_proof_leaf(&l[1], true)?,
-            ]);
+            let proof_single_leaves = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    merkle_proof_leaf(&l[0], false)?,
+                    merkle_proof_leaf(&l[1], true)?,
+                ],
+            };
 
             // The structure of the original subtree is compressed into a single leaf.
-            let proof_no_access = MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                Hash::blake3_hash_bytes(&l[2]),
-                Hash::combine([
-                    Hash::blake3_hash_bytes(&l[3]),
-                    Hash::blake3_hash_bytes(&l[4]),
-                ]),
-            ])));
-
-            let proof_read_write_3 = MerkleProof::Node(vec![
-                MerkleProof::Node(vec![
-                    merkle_proof_leaf(&l[5], true)?,
-                    merkle_proof_leaf(&l[6], true)?,
-                ]),
-                merkle_proof_leaf(&l[7], true)?,
-            ]);
-
-            let proof_read_write_4 = MerkleProof::Node(vec![
-                MerkleProof::Node(vec![
-                    merkle_proof_leaf(&l[8], true)?,
-                    merkle_proof_leaf(&l[9], true)?,
-                ]),
-                MerkleProof::Node(vec![
-                    merkle_proof_leaf(&l[10], true)?,
-                    merkle_proof_leaf(&l[11], true)?,
-                ]),
-            ]);
-
-            let proof_combine_isolated = MerkleProof::Node(vec![
-                MerkleProof::Node(vec![proof_no_access, proof_read_write_3]),
-                proof_read_write_4,
-            ]);
-
-            let proof_mix = MerkleProof::Node(vec![
-                // The structure of the original subtree is compressed into a single leaf.
-                MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                    Hash::blake3_hash_bytes(&l[12]),
+            let proof_no_access = MerkleProof::Leaf {
+                data: MerkleProofLeaf::Blind(Hash::combine([
+                    Hash::blake3_hash_bytes(&l[2]),
                     Hash::combine([
-                        Hash::blake3_hash_bytes(&l[13]),
-                        Hash::combine([
-                            Hash::blake3_hash_bytes(&l[14]),
-                            Hash::blake3_hash_bytes(&l[15]),
-                        ]),
+                        Hash::blake3_hash_bytes(&l[3]),
+                        Hash::blake3_hash_bytes(&l[4]),
                     ]),
-                ]))),
-                MerkleProof::Node(vec![
-                    MerkleProof::Node(vec![
-                        merkle_proof_leaf(&l[16], true)?,
-                        MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                            Hash::blake3_hash_bytes(&l[17]),
-                            Hash::blake3_hash_bytes(&l[18]),
-                        ]))),
-                    ]),
-                    merkle_proof_leaf(&l[19], true)?,
-                ]),
-            ]);
+                ])),
+            };
 
-            let proof = MerkleProof::Node(vec![
-                proof_single_leaves,
-                MerkleProof::Node(vec![proof_combine_isolated, proof_mix]),
-            ]);
+            let proof_read_write_3 = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![
+                            merkle_proof_leaf(&l[5], true)?,
+                            merkle_proof_leaf(&l[6], true)?,
+                        ],
+                    },
+                    merkle_proof_leaf(&l[7], true)?,
+                ],
+            };
+
+            let proof_read_write_4 = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![
+                            merkle_proof_leaf(&l[8], true)?,
+                            merkle_proof_leaf(&l[9], true)?,
+                        ],
+                    },
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![
+                            merkle_proof_leaf(&l[10], true)?,
+                            merkle_proof_leaf(&l[11], true)?,
+                        ],
+                    },
+                ],
+            };
+
+            let proof_combine_isolated = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![proof_no_access, proof_read_write_3],
+                    },
+                    proof_read_write_4,
+                ],
+            };
+
+            let proof_mix = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    // The structure of the original subtree is compressed into a single leaf.
+                    MerkleProof::Leaf {
+                        data: MerkleProofLeaf::Blind(Hash::combine([
+                            Hash::blake3_hash_bytes(&l[12]),
+                            Hash::combine([
+                                Hash::blake3_hash_bytes(&l[13]),
+                                Hash::combine([
+                                    Hash::blake3_hash_bytes(&l[14]),
+                                    Hash::blake3_hash_bytes(&l[15]),
+                                ]),
+                            ]),
+                        ])),
+                    },
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![
+                            MerkleProof::Node {
+                                data: Default::default(),
+                                children: vec![
+                                    merkle_proof_leaf(&l[16], true)?,
+                                    MerkleProof::Leaf {
+                                        data: MerkleProofLeaf::Blind(Hash::combine([
+                                            Hash::blake3_hash_bytes(&l[17]),
+                                            Hash::blake3_hash_bytes(&l[18]),
+                                        ])),
+                                    },
+                                ],
+                            },
+                            merkle_proof_leaf(&l[19], true)?,
+                        ],
+                    },
+                ],
+            };
+
+            let proof = MerkleProof::Node {
+                data: Default::default(),
+                children: vec![
+                    proof_single_leaves,
+                    MerkleProof::Node {
+                        data: Default::default(),
+                        children: vec![proof_combine_isolated, proof_mix],
+                    },
+                ],
+            };
 
             let merkle_tree_root_hash = merkle_tree.root_hash();
 
@@ -587,25 +637,50 @@ mod tests {
         // Check leaves
         check(
             CompressedMerkleTree::Leaf(hash, NoAccess),
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)),
+            MerkleProof::Leaf {
+                data: MerkleProofLeaf::Blind(hash),
+            },
         );
         check(
             CompressedMerkleTree::Leaf(hash, ReadWrite(data.clone())),
-            MerkleProof::Leaf(MerkleProofLeaf::Read(data.clone())),
+            MerkleProof::Leaf {
+                data: MerkleProofLeaf::Read(data.clone()),
+            },
         );
 
         // Check nodes
         let [d0, d1, d2, d3, d4, d5, d6, d7, d8] = [0; 9].map(|_| gen_hash_data());
-        let l0 = MerkleProof::Leaf(MerkleProofLeaf::Read(d0.0.clone()));
-        let l1 = MerkleProof::Leaf(MerkleProofLeaf::Read(d1.0.clone()));
-        let l2 = MerkleProof::Leaf(MerkleProofLeaf::Read(d2.0.clone()));
-        let l3 = MerkleProof::Leaf(MerkleProofLeaf::Blind(d3.1));
-        let l4 = MerkleProof::Leaf(MerkleProofLeaf::Blind(d4.1));
-        let l5 = MerkleProof::Leaf(MerkleProofLeaf::Blind(d5.1));
+        let l0 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(d0.0.clone()),
+        };
+        let l1 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(d1.0.clone()),
+        };
+        let l2 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(d2.0.clone()),
+        };
+        let l3 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(d3.1),
+        };
+        let l4 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(d4.1),
+        };
+        let l5 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(d5.1),
+        };
 
-        let n6 = MerkleProof::Node(vec![l0, l1, l3]);
-        let n7 = MerkleProof::Node(vec![l4, l2, l5]);
-        let root = MerkleProof::Node(vec![n6, n7]);
+        let n6 = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![l0, l1, l3],
+        };
+        let n7 = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![l4, l2, l5],
+        };
+        let root = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![n6, n7],
+        };
 
         let t0 = CompressedMerkleTree::Leaf(d0.1, ReadWrite(d0.0));
         let t1 = CompressedMerkleTree::Leaf(d1.1, ReadWrite(d1.0));

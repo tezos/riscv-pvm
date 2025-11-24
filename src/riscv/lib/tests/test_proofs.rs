@@ -250,11 +250,22 @@ mod proof_helpers {
     use octez_riscv_data::tree::Tree;
 
     pub fn fully_blinded(hash: Hash) -> Proof {
-        Proof::new(Tree::Leaf(MerkleProofLeaf::Blind(hash)), hash)
+        Proof::new(
+            Tree::Leaf {
+                data: MerkleProofLeaf::Blind(hash),
+            },
+            hash,
+        )
     }
 
     pub(crate) fn empty(hash: Hash) -> Proof {
-        Proof::new(Tree::Node(Vec::new()), hash)
+        Proof::new(
+            Tree::Node {
+                data: Default::default(),
+                children: Vec::new(),
+            },
+            hash,
+        )
     }
 
     pub(crate) fn with_final_hash(proof: &Proof, hash: Hash) -> Proof {

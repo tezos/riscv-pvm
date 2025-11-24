@@ -73,13 +73,11 @@ impl ProofTreeDeserialiser<'_> {
     pub fn deserialise_as_leaf(self) -> Result<Partial<Vec<u8>>> {
         match self.0 {
             ProofPart::Absent => Ok(Partial::Absent),
-            ProofPart::Present(Tree::Node(_)) => Err(ProofError::UnexpectedNode),
-            ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Blind(hash))) => {
-                Ok(Partial::Blinded(*hash))
-            }
-            ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Read(items))) => {
-                Ok(Partial::Present(items.clone()))
-            }
+            ProofPart::Present(Tree::Node { .. }) => Err(ProofError::UnexpectedNode),
+            ProofPart::Present(Tree::Leaf { data }) => match data {
+                MerkleProofLeaf::Blind(hash) => Ok(Partial::Blinded(*hash)),
+                MerkleProofLeaf::Read(items) => Ok(Partial::Present(items.clone())),
+            },
         }
     }
 
@@ -87,14 +85,12 @@ impl ProofTreeDeserialiser<'_> {
     pub fn deserialise_as_node(self) -> Result<Partial<Vec<Self>>> {
         match self.0 {
             ProofPart::Absent => Ok(Partial::Absent),
-            ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Blind(hash))) => {
-                Ok(Partial::Blinded(*hash))
-            }
-            ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Read(_))) => {
-                Err(ProofError::UnexpectedLeaf)
-            }
-            ProofPart::Present(Tree::Node(trees)) => Ok(Partial::Present(
-                trees
+            ProofPart::Present(Tree::Leaf { data }) => match data {
+                MerkleProofLeaf::Blind(hash) => Ok(Partial::Blinded(*hash)),
+                MerkleProofLeaf::Read(_) => Err(ProofError::UnexpectedLeaf),
+            },
+            ProofPart::Present(Tree::Node { children, .. }) => Ok(Partial::Present(
+                children
                     .iter()
                     .map(ProofPart::Present)
                     .map(ProofTreeDeserialiser)

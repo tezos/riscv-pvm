@@ -180,12 +180,16 @@ mod tests {
         /// Generate the serialisation bound for a [`MerkleProof`] leaf.
         fn from_merkle_leaf(leaf: &MerkleProof) -> Self {
             match leaf {
-                MerkleProof::Node(_) => panic!("Expected a Merkle proof leaf"),
-                MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)) => Self {
+                MerkleProof::Node { .. } => panic!("Expected a Merkle proof leaf"),
+                MerkleProof::Leaf {
+                    data: MerkleProofLeaf::Blind(hash),
+                } => Self {
                     nodes_count: 1,
                     content_size: hash.as_ref().len() as u64,
                 },
-                MerkleProof::Leaf(MerkleProofLeaf::Read(data)) => Self {
+                MerkleProof::Leaf {
+                    data: MerkleProofLeaf::Read(data),
+                } => Self {
                     nodes_count: 1,
                     content_size: data.len() as u64,
                 },
@@ -202,8 +206,12 @@ mod tests {
         let blind_hash: Hash = Hash::blake3_hash_bytes(&raw_array);
 
         match is_leaf_read {
-            true => MerkleProof::Leaf(MerkleProofLeaf::Read(raw_array)),
-            false => MerkleProof::Leaf(MerkleProofLeaf::Blind(blind_hash)),
+            true => MerkleProof::Leaf {
+                data: MerkleProofLeaf::Read(raw_array),
+            },
+            false => MerkleProof::Leaf {
+                data: MerkleProofLeaf::Blind(blind_hash),
+            },
         }
     }
 
@@ -224,12 +232,16 @@ mod tests {
 
         let raw_array: [u8; 10] = rand::random();
 
-        let rleaf = MerkleProof::Leaf(MerkleProofLeaf::Read(raw_array.to_vec()));
+        let rleaf = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(raw_array.to_vec()),
+        };
         check_serialisation(rleaf, &[&[TAG_READ], raw_array.as_slice()].concat());
 
         let hash = Hash::blake3_hash_bytes(&raw_array);
         check_serialisation(
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)),
+            MerkleProof::Leaf {
+                data: MerkleProofLeaf::Blind(hash),
+            },
             &[&[TAG_BLIND], hash.as_ref()].concat(),
         );
     }
@@ -241,15 +253,29 @@ mod tests {
         let h1 = Hash::blake3_hash_bytes(&[1, 2, 3]);
         let h2 = Hash::blake3_hash_bytes(&[20, 30, 1, 5, 6]);
 
-        let n1 = MerkleProof::Leaf(MerkleProofLeaf::Read(vec![12, 15, 30, 40]));
-        let n2 = MerkleProof::Leaf(MerkleProofLeaf::Blind(h1));
-        let n3 = MerkleProof::Leaf(MerkleProofLeaf::Blind(h2));
-        let n4 = MerkleProof::Leaf(MerkleProofLeaf::Read(vec![123, 234, 42, 1, 2, 3]));
+        let n1 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(vec![12, 15, 30, 40]),
+        };
+        let n2 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(h1),
+        };
+        let n3 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Blind(h2),
+        };
+        let n4 = MerkleProof::Leaf {
+            data: MerkleProofLeaf::Read(vec![123, 234, 42, 1, 2, 3]),
+        };
 
-        let root = MerkleProof::Node(vec![n1.clone()]);
+        let root = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![n1.clone()],
+        };
         check_serialisation(root, &[TAG_NODE, TAG_READ, 12, 15, 30, 40]);
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone()]);
+        let root = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![n1.clone(), n2.clone()],
+        };
         check_serialisation(
             root,
             &[
@@ -262,7 +288,10 @@ mod tests {
             .concat(),
         );
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone(), n3.clone()]);
+        let root = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![n1.clone(), n2.clone(), n3.clone()],
+        };
         check_serialisation(
             root,
             &[
@@ -277,7 +306,10 @@ mod tests {
             .concat(),
         );
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone(), n4.clone(), n3.clone()]);
+        let root = MerkleProof::Node {
+            data: Default::default(),
+            children: vec![n1.clone(), n2.clone(), n4.clone(), n3.clone()],
+        };
         check_serialisation(
             root,
             &[
@@ -314,7 +346,10 @@ mod tests {
                 .map(SerialisationBound::from_merkle_leaf)
                 .collect();
 
-            let root = MerkleProof::Node(children);
+            let root = MerkleProof::Node {
+                data: Default::default(),
+                children: children,
+            };
             let bound = SerialisationBound::node_combine(bounds);
 
             check_bounds(root, &bound);
@@ -357,7 +392,7 @@ mod tests {
                     nothing_taken = new_bounds.is_empty();
 
                     if !nothing_taken {
-                        let node = MerkleProof::Node(new_children);
+                        let node = MerkleProof::Node{ data: Default::default(), children: new_children};
                         let bound = SerialisationBound::node_combine(new_bounds);
 
                         new_nodes.push((node, bound));
