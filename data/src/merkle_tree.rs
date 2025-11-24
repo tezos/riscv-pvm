@@ -3,6 +3,8 @@
 
 //! Merkle tree data structure and utilities
 
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
 use crate::hash::Hash;
 
 /// A variable-width Merkle tree with access metadata for leaves.
@@ -80,5 +82,17 @@ impl MerkleTree {
             }
         }
         true
+    }
+
+    /// Extract the Merkle tree from a foldable structure.
+    pub fn from_foldable(foldable: &impl Foldable<MerkleTree>) -> MerkleTree {
+        foldable.fold()
+    }
+}
+
+impl NodeFold for MerkleTree {
+    fn fold_children(children: impl IntoIterator<Item = Self>) -> Self {
+        let children: Vec<MerkleTree> = children.into_iter().collect();
+        MerkleTree::make_merkle_node(children)
     }
 }

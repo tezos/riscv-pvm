@@ -13,6 +13,8 @@ use bincode::Encode;
 use bincode::error::EncodeError;
 use thiserror::Error;
 
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
 use crate::serialisation as binary;
 
 #[derive(Error, Debug)]
@@ -99,6 +101,11 @@ impl Hash {
         let digest = hasher.finalize().into();
         Ok(Hash { digest })
     }
+
+    /// Hash the underlying state of a foldable structure.
+    pub fn from_foldable(foldable: &impl Foldable<Hash>) -> Self {
+        foldable.fold()
+    }
 }
 
 impl std::fmt::Display for Hash {
@@ -116,6 +123,12 @@ impl From<Hash> for [u8; DIGEST_SIZE] {
 impl AsRef<[u8]> for Hash {
     fn as_ref(&self) -> &[u8] {
         &self.digest
+    }
+}
+
+impl NodeFold for Hash {
+    fn fold_children(children: impl IntoIterator<Item = Self>) -> Self {
+        Hash::combine(children)
     }
 }
 
