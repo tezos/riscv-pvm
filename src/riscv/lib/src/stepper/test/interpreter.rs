@@ -30,11 +30,7 @@ enum Permissions {
     Rwx,
 }
 
-fn run_test<CPE: CodePageEntry<M1M, Normal>>(
-    path: &str,
-    compiler: CPE::Compiler,
-    required_perms: Permissions,
-) -> CPE::Compiler {
+fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permissions) {
     // Create a Mint instance: when it goes out of scope (at the end of interpret_test),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
@@ -42,6 +38,7 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(
 
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
+    let compiler = Default::default();
     let mut interpreter: TestStepper<M1M, CPE> =
         TestStepper::new(&contents, compiler).expect("Boot failed");
 
@@ -69,24 +66,6 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(
             None => panic!("Unexpected exception after {steps} steps: {cause:?}"),
         },
     };
-
-    interpreter.recover_builder()
-}
-
-fn interpret_test(path: &str, required_perms: Permissions) {
-    let compiler = Default::default();
-    run_test::<Interpreted<M1M, Normal>>(path, compiler, required_perms);
-}
-
-/// For the JIT, we run it twice - the first run to build up the blocks, and the
-/// second to run with these blocks already compiled (so that we actually use them).
-fn inline_jit_test(path: &str, required_perms: Permissions) {
-    type EntrypointImpl = Jitted<InlineCompiler, M1M>;
-
-    let compiler = Default::default();
-    let compiler = run_test::<EntrypointImpl>(path, compiler, required_perms);
-
-    run_test::<EntrypointImpl>(path, compiler, required_perms);
 }
 
 macro_rules! test_case {
@@ -100,13 +79,13 @@ macro_rules! test_case {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                interpret_test($path, $required_perms)
+                run_test::<Interpreted<M1M, Normal>>($path, $required_perms)
             }
 
             #[test]
             $(#[$m])*
             fn [< $name _inline_jit >]() {
-                inline_jit_test($path, $required_perms)
+                run_test::<Jitted<InlineCompiler, M1M>>($path, $required_perms)
             }
         }
     }

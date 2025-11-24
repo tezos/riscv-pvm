@@ -96,15 +96,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
         Ok(Self::new_with_parsed_program(program, compiler)?.0)
     }
 
-    /// Consumes the stepper, returning the [`Compiler`] used internally.
-    ///
-    /// This allows the compiler to be re-used with a second stepper.
-    ///
-    /// [`Compiler`]: CodePageEntry::Compiler
-    pub fn recover_builder(self) -> CPE::Compiler {
-        self.machine_state.compiler
-    }
-
     /// Initialise an interpreter with a given `program`. Returns both the interpreter and the fully
     /// parsed program.
     #[inline]
