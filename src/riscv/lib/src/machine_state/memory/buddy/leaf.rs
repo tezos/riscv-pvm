@@ -12,10 +12,8 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::merkle_proof::Suspended;
-use octez_riscv_data::merkle_tree::MerkleTree;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
@@ -36,7 +34,6 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
@@ -47,12 +44,6 @@ impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
 }
 
 impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        Atom::to_merkle_tree(state.set)
-    }
-
     fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
     ) -> crate::state_backend::VerifyAllocResult<D, Self> {

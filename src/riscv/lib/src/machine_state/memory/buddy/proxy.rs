@@ -5,9 +5,7 @@
 //! Simplified [`BuddyLayout`] selection using const-generics
 
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashError;
 use octez_riscv_data::merkle_proof;
-use octez_riscv_data::merkle_tree::MerkleTree;
 
 use super::BuddyLayout;
 use super::branch_combinations::BuddyBranch1KiLayout;
@@ -24,7 +22,6 @@ use crate::state_backend::ManagerBase;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
 use crate::state_backend::VerifyAllocResult;
 
@@ -42,12 +39,6 @@ impl<const PAGES: usize> ProofLayout for BuddyLayoutProxy<PAGES>
 where
     (): BuddyLayoutMatch<PAGES>,
 {
-    fn to_merkle_tree<'outer, 'inner: 'outer>(
-        state: RefProveAlloc<'outer, 'inner, Self>,
-    ) -> Result<MerkleTree, HashError> {
-        <PickLayout<PAGES> as ProofLayout>::to_merkle_tree(state)
-    }
-
     fn into_verify_alloc<D: merkle_proof::Deserialiser>(proof: D) -> VerifyAllocResult<D, Self> {
         <PickLayout<PAGES> as ProofLayout>::into_verify_alloc(proof)
     }

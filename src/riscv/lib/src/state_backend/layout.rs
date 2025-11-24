@@ -162,19 +162,6 @@ macro_rules! struct_layout {
             >
             {
                 #[inline]
-                fn to_merkle_tree<'outer, 'inner: 'outer>(
-                    state: $crate::state_backend::RefProveAlloc<'outer, 'inner, Self>,
-                ) -> std::result::Result<octez_riscv_data::merkle_tree::MerkleTree, octez_riscv_data::hash::HashError> {
-                    Ok(octez_riscv_data::merkle_tree::MerkleTree::make_merkle_node(
-                        vec![
-                            $(
-                                [<$field_name:camel>]::to_merkle_tree(state.$field_name)?
-                            ),+
-                        ]
-                    ))
-                }
-
-                #[inline]
                 fn into_verify_alloc<D: octez_riscv_data::merkle_proof::Deserialiser>(
                     proof: D,
                 ) -> $crate::state_backend::VerifyAllocResult<D, Self> {
