@@ -1,0 +1,628 @@
+{
+  "setup": [
+    {
+      "operation": "store_has",
+      "path": "/evm/keep_events"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/events/length",
+      "size": 8
+    },
+    {
+      "operation": "store_delete",
+      "path": "/evm/events/length"
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/info_per_level/timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/l1_level",
+      "size": 4
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_write",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_write",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/chunk_hashes",
+      "size": 68
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/chunk_hashes",
+      "size": 68
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_has",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1"
+    },
+    {
+      "operation": "store_write",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1",
+      "size": 590
+    },
+    {
+      "operation": "store_has",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/chunk_hashes",
+      "size": 68
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_has",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0"
+    },
+    {
+      "operation": "store_write",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0",
+      "size": 2048
+    },
+    {
+      "operation": "store_write",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0",
+      "size": 1959
+    },
+    {
+      "operation": "store_has",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0"
+    },
+    {
+      "operation": "store_has",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1"
+    },
+    {
+      "operation": "store_value_size",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0"
+    },
+    {
+      "operation": "store_read",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0",
+      "size": 2048
+    },
+    {
+      "operation": "store_read",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0",
+      "size": 2048
+    },
+    {
+      "operation": "store_value_size",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1"
+    },
+    {
+      "operation": "store_read",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1",
+      "size": 2048
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_delete",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/0"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/1"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/num_chunks"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/chunked_transactions/d015418d07023585864aaec0ce5e327e27cd63facb5ab17d015bc8d79bc64d11/chunk_hashes"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/info_per_level/timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/blueprints/0/nb_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/blueprints/generation",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/blueprints/0/generation",
+      "size": 32
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/evm/blueprints/0/0",
+      "size": 48027
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/trace/input"
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/fees/da_fee_per_byte",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/world_state/fees/da_fee_per_byte",
+      "size": 32
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/kernel_upgrade"
+    },
+    {
+      "operation": "store_has",
+      "path": "/tmp/evm/world_state/blocks/in_progress"
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/sequencer_upgrade"
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/blueprints/0/nb_chunks"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/blueprints/0/nb_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/blueprints/generation",
+      "size": 32
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/blueprints/0/generation",
+      "size": 32
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/evm/blueprints/0/0",
+      "size": 48027
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/world_state/fees/last_timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/world_state/fees/backlog",
+      "size": 8
+    },
+    {
+      "operation": "store_copy",
+      "from_path": "/evm/world_state",
+      "to_path": "/tmp/evm/world_state"
+    }
+  ],
+  "transaction": [
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/balance",
+      "size": 32
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/nonce",
+      "size": 8
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code.hash",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/balance"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/nonce"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code.hash"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code"
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/balance",
+      "size": 32
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/nonce",
+      "size": 8
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code.hash",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
+      "size": 77
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/balance"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/nonce"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code.hash"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code"
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/0000000000000000000000000000000000000000/info",
+      "size": 77
+    },
+    {
+      "operation": "store_has",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code"
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code",
+      "size": 0
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
+      "size": 77
+    },
+    {
+      "operation": "store_has",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code"
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/fees/burned",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/fees/burned",
+      "size": 32
+    }
+  ],
+  "block_creation": [
+    {
+      "operation": "store_read_slice",
+      "path": "/tmp/evm/world_state/fees/last_timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/fees/last_timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/tmp/evm/world_state/fees/backlog",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/fees/backlog",
+      "size": 8
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/tmp/evm/world_state/blocks/current/transactions_receipts",
+      "size": 131220
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/tmp/evm/world_state/blocks/current/transactions_objects",
+      "size": 77927
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/tmp/evm/world_state/fees/last_timestamp",
+      "size": 8
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/tmp/evm/world_state/fees/backlog",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/blocks/current/number",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/blocks/current/hash",
+      "size": 32
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/tmp/evm/world_state/indexes/blocks/0",
+      "size": 32
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/tmp/evm/world_state/blocks/current/block",
+      "size": 7368
+    },
+    {
+      "operation": "store_has",
+      "path": "/tmp/evm/trace"
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/blueprints/0/nb_chunks"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/blueprints/0/nb_chunks",
+      "size": 2
+    },
+    {
+      "operation": "store_delete",
+      "path": "/evm/blueprints/0/0"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/evm/blueprints/0/generation"
+    },
+    {
+      "operation": "store_delete",
+      "path": "/evm/blueprints/0/nb_chunks"
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/evm/current_block_header",
+      "size": 147
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/events/length",
+      "size": 8
+    },
+    {
+      "operation": "store_write",
+      "path": "/evm/events/length",
+      "size": 8
+    },
+    {
+      "operation": "store_write_all",
+      "path": "/evm/events/0",
+      "size": 71
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/world_state/__outbox_queue/meta",
+      "size": 8
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/world_state/sequencer_key_change"
+    },
+    {
+      "operation": "store_has",
+      "path": "/__tmp/reveal_config"
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/chain_id",
+      "size": 32
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/storage_version",
+      "size": 0
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/remove_whitelist"
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/storage_version",
+      "size": 8
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/evm/kernel_version",
+      "size": 40
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/maximum_gas_per_transaction",
+      "size": 8
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/fees/minimum_base_fee_per_gas",
+      "size": 32
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/evm/evm_version",
+      "size": 4
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/feature_flags/enable_tezos_runtime"
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/ticketer",
+      "size": 36
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/admin",
+      "size": 36
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/sequencer_governance",
+      "size": 36
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/kernel_governance",
+      "size": 36
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/kernel_security_governance",
+      "size": 36
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/maximum_allowed_ticks",
+      "size": 8
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/sequencer"
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/feature_flags/enable_fa_bridge"
+    },
+    {
+      "operation": "store_has",
+      "path": "/evm/feature_flags/enable_dal"
+    },
+    {
+      "operation": "store_read_slice",
+      "path": "/evm/sequencer_pool_address",
+      "size": 20
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/eth_accounts/0000000000000000000000000000000000000000/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/eth_accounts/ff00000000000000000000000000000000000001/info",
+      "size": 77
+    },
+    {
+      "operation": "store_read",
+      "path": "/evm/world_state/eth_accounts/ff00000000000000000000000000000000000002/info",
+      "size": 77
+    }
+  ]
+}
