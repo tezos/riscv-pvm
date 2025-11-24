@@ -3,6 +3,9 @@
 
 //! Merkle tree data structure and utilities
 
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
 use crate::hash::Hash;
 
 /// A variable-width Merkle tree with access metadata for leaves.
@@ -80,5 +83,40 @@ impl MerkleTree {
             }
         }
         true
+    }
+
+    /// Extract the Merkle tree from a foldable structure.
+    pub fn from_foldable(foldable: &impl Foldable<MerkleTreeFold>) -> MerkleTree {
+        foldable.fold(MerkleTreeFold)
+    }
+}
+
+pub struct MerkleTreeFold;
+
+impl Fold for MerkleTreeFold {
+    type Folded = MerkleTree;
+
+    type NodeFold = MerkleNodeFold;
+
+    fn into_node_fold(self) -> Self::NodeFold {
+        MerkleNodeFold::default()
+    }
+}
+
+#[derive(Default)]
+pub struct MerkleNodeFold {
+    children: Vec<MerkleTree>,
+}
+
+impl NodeFold for MerkleNodeFold {
+    type Parent = MerkleTreeFold;
+
+    fn add<F: Foldable<MerkleTreeFold>>(&mut self, child: &F) {
+        let folded_child = child.fold(MerkleTreeFold);
+        self.children.push(folded_child);
+    }
+
+    fn done(self) -> MerkleTree {
+        MerkleTree::make_merkle_node(self.children)
     }
 }

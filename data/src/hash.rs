@@ -13,6 +13,9 @@ use bincode::Encode;
 use bincode::error::EncodeError;
 use thiserror::Error;
 
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
 use crate::serialisation as binary;
 
 #[derive(Error, Debug)]
@@ -99,6 +102,11 @@ impl Hash {
         let digest = hasher.finalize().into();
         Ok(Hash { digest })
     }
+
+    /// Hash the underlying state of a foldable structure.
+    pub fn from_foldable(foldable: &impl Foldable<HashFold>) -> Self {
+        foldable.fold(HashFold)
+    }
 }
 
 impl std::fmt::Display for Hash {
@@ -116,6 +124,37 @@ impl From<Hash> for [u8; DIGEST_SIZE] {
 impl AsRef<[u8]> for Hash {
     fn as_ref(&self) -> &[u8] {
         &self.digest
+    }
+}
+
+pub struct HashFold;
+
+impl Fold for HashFold {
+    type Folded = Hash;
+
+    type NodeFold = HashNodeFold;
+
+    fn into_node_fold(self) -> Self::NodeFold {
+        HashNodeFold::default()
+    }
+}
+
+#[derive(Default)]
+pub struct HashNodeFold {
+    hasher: blake3::Hasher,
+}
+
+impl NodeFold for HashNodeFold {
+    type Parent = HashFold;
+
+    fn add<F: Foldable<HashFold>>(&mut self, child: &F) {
+        let folded_child = child.fold(HashFold);
+        self.hasher.update(folded_child.as_ref());
+    }
+
+    fn done(self) -> Hash {
+        let digest = self.hasher.finalize().into();
+        Hash { digest }
     }
 }
 
@@ -207,24 +246,4 @@ pub fn build_custom_merkle_hash(arity: usize, mut nodes: Vec<Hash>) -> Result<Ha
     }
 
     Ok(nodes[0])
-}
-
-/// Hashable persistent state
-///
-/// This trait shall be implemented for types which manage persistent state which can be hashed.
-pub trait HashState {
-    /// Compute the hash of the persistent state.
-    fn hash_state(&self) -> Hash;
-}
-
-impl<T: HashState> HashState for &T {
-    fn hash_state(&self) -> Hash {
-        T::hash_state(self)
-    }
-}
-
-impl<T: HashState, const N: usize> HashState for [T; N] {
-    fn hash_state(&self) -> Hash {
-        Hash::combine(self.iter().map(HashState::hash_state))
-    }
 }
