@@ -26,26 +26,23 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
-mod database;
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
+        pub mod database;
         pub mod merkle_layer;
+        pub mod merkle_worker;
+        pub mod persistence_layer;
+        pub mod repo;
+        pub mod random;
     } else {
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+        mod database;
+        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         mod merkle_layer;
+        mod merkle_worker;
+        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+        pub(crate) mod persistence_layer;
+        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+        mod repo;
     }
 }
-mod merkle_worker;
-#[cfg_attr(
-    not(any(test, feature = "bench")),
-    expect(
-        dead_code,
-        reason = "Database will use the persistence layer in RV-808"
-    )
-)]
-pub(crate) mod persistence_layer;
-#[cfg_attr(
-    not(any(test, feature = "bench")),
-    expect(dead_code, reason = "Incomplete")
-)]
-mod repo;

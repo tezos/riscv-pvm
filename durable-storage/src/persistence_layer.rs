@@ -332,17 +332,20 @@ pub mod utils {
 
     use tempfile::TempDir;
 
+    /// A temporary directory used for testing
     pub struct TestableTmpdir {
         tempdir: TempDir,
     }
 
     impl TestableTmpdir {
+        /// Create a new temporary directory for testing
         pub fn new() -> Self {
             let tempdir = TempDir::new().expect("Should be able to create temp dir");
 
             Self { tempdir }
         }
 
+        // The path of the temporary directory
         pub fn path(&self) -> &Path {
             self.tempdir.path()
         }

@@ -55,7 +55,7 @@ enum Command {
 /// Merkle worker that processes commands asynchronously in a background thread
 ///
 /// It works like the [`MerkleLayer`] but does not block on `set` and `delete` operations.
-pub(crate) struct MerkleWorker {
+pub struct MerkleWorker {
     /// Send end of the command channel that is connected to the background worker thread
     sender: mpsc::UnboundedSender<Command>,
 }
@@ -71,7 +71,7 @@ impl MerkleWorker {
     /// Create a new Merkle worker with an empty Merkle tree.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    pub(crate) fn new(
+    pub fn new(
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
     ) -> Result<Self, MerkleWorkerError> {

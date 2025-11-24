@@ -47,17 +47,15 @@ pub enum DatabaseError {
 }
 
 impl Database {
-    #[cfg_attr(not(test), expect(dead_code, reason = "Added in RV-827"))]
     /// Remove a key from the database.
-    pub(crate) fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
+    pub fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
         self.persistent.delete(key.as_ref())?;
         self.merkle.delete(key);
         Ok(())
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Returns true if the provided key exists in the database, false if it does not.
-    pub(crate) fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
+    pub fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
         match self.persistent.get(key.as_ref()) {
             Ok(_) => Ok(true),
             Err(PersistenceLayerError::KeyNotFound) => Ok(false),
@@ -66,24 +64,17 @@ impl Database {
     }
 
     /// Obtain, and possibly calculate, the root hash of the database>
-    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
-    pub(crate) fn hash(&self) -> Hash {
+    pub fn hash(&self) -> Hash {
         self.merkle.hash()
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Read a portion of the value associated with the provided key. The read data will be written
     /// into `data`. `offset` specifies from where in the associated value to start reading.
     ///
     /// Fails if:
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
-    pub(crate) fn read(
-        &self,
-        key: &Key,
-        offset: usize,
-        data: &mut [u8],
-    ) -> Result<usize, DatabaseError> {
+    pub fn read(&self, key: &Key, offset: usize, data: &mut [u8]) -> Result<usize, DatabaseError> {
         let value = self.persistent.get(key.as_ref())?;
         let value_ref = value.as_ref();
 
@@ -99,10 +90,6 @@ impl Database {
         Ok(bytes_to_copy)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Used in RV-828 and integration of the registry")
-    )]
     /// Try to construct a new Database
     pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
         let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
@@ -110,7 +97,6 @@ impl Database {
         Ok(Self { persistent, merkle })
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Modify the value associated with the provided key. `offset` specifies from where to start
     /// writing within the associated value, appending if it is equal to the length. Non-existent
     /// keys have the implicit length 0, so they are writeable.
@@ -118,12 +104,7 @@ impl Database {
     /// Fails if:
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
-    pub(crate) fn write(
-        &mut self,
-        key: Key,
-        offset: usize,
-        data: Bytes,
-    ) -> Result<usize, DatabaseError> {
+    pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, DatabaseError> {
         if offset != 0 {
             let value = None;
             // TODO : Implement [`MerkleLayer::node::get_mut`] in RV-827
@@ -136,8 +117,11 @@ impl Database {
         }
     }
 
-    #[expect(dead_code, reason = "Used in RV-828 and integration of the registry")]
     /// Try to create a cheap clone of the Database.
+    #[cfg_attr(
+        not(feature = "bench"),
+        expect(dead_code, reason = "Only currently used in benchmarks")
+    )]
     pub fn try_clone_with(
         &self,
         handle: &Handle,
@@ -150,12 +134,11 @@ impl Database {
         })
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Retrieve the length of the value associated with the provided key.
     ///
     /// Fails if:
     ///  - The key does not exist in the database.
-    pub(crate) fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
+    pub fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
         let value = self.persistent.get(key.as_ref())?;
         Ok(value.as_ref().len())
     }

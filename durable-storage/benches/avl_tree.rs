@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::time::Duration;
 
 use bytes::Bytes;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use octez_riscv_durable_storage::merkle_layer::KEY_MAX_SIZE;
 use octez_riscv_durable_storage::merkle_layer::Key;
 use octez_riscv_durable_storage::merkle_layer::tree::Avl;
+use octez_riscv_durable_storage::random::generate_keys;
+use octez_riscv_durable_storage::random::generate_random_bytes_in_range;
 use rand::prelude::*;
 
 const KEY_COUNT: usize = 10_000_000;
@@ -24,31 +24,7 @@ pub enum Operation {
     Delete(Key),
 }
 
-fn generate_byte_vector(rng: &mut impl Rng, length: usize) -> Vec<u8> {
-    let mut ret = vec![0u8; length];
-    rng.fill(ret.as_mut_slice());
-    ret
-}
-
-fn generate_keys(rng: &mut impl Rng, length: usize) -> Vec<Key> {
-    let mut tmp: HashSet<Key> = HashSet::new();
-    while tmp.len() < length {
-        let key_length = rng.random_range(1..KEY_MAX_SIZE);
-        tmp.insert(
-            Key::new(generate_byte_vector(rng, key_length).as_slice())
-                .expect("The key should be created"),
-        );
-    }
-    tmp.into_iter().collect()
-}
-
-fn get_random_data(rng: &mut impl Rng) -> Bytes {
-    let length: usize = rng.random_range(1..20);
-    let bytes = generate_byte_vector(rng, length);
-    Bytes::from(bytes)
-}
-
-fn get_operations_batch(rng: &mut impl Rng, keys: &[Key], batch_size: usize) -> Vec<Operation> {
+fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize) -> Vec<Operation> {
     (0..batch_size)
         .map(|_| {
             let key: Key = keys
@@ -57,7 +33,7 @@ fn get_operations_batch(rng: &mut impl Rng, keys: &[Key], batch_size: usize) -> 
                 .clone();
             match rng.random_range(0..3) {
                 0 => Operation::Get(key),
-                1 => Operation::Upsert(key, get_random_data(rng)),
+                1 => Operation::Upsert(key, generate_random_bytes_in_range(&mut rng, 1..20).into()),
                 _ => Operation::Delete(key),
             }
         })
@@ -75,7 +51,7 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
     // Setting up the tree
     let mut tree = Avl::default();
     for key in &keys[..keys.len() / 2] {
-        tree.set(key, get_random_data(&mut rng));
+        tree.set(key, generate_random_bytes_in_range(&mut rng, 1..20).into());
     }
 
     c.bench_function("Bench AVL tree with operations", |b| {
@@ -111,7 +87,10 @@ fn reference(c: &mut Criterion) {
 
     let mut tree = BTreeMap::<Key, Bytes>::new();
     for key in &keys[..keys.len() / 2] {
-        tree.insert(key.clone(), get_random_data(&mut rng));
+        tree.insert(
+            key.clone(),
+            generate_random_bytes_in_range(&mut rng, 1..20).into(),
+        );
     }
 
     c.bench_function("BTreeMap reference", |b| {

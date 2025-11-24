@@ -14,7 +14,10 @@ cfg-if.workspace = true
 log.workspace = true
 hex.workspace = true
 octez-riscv-data.workspace = true
+rand.workspace = true
 rocksdb.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -29,5 +32,10 @@ bench = []
 
 [[bench]]
 name = "avl_tree"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "database"
 harness = false
 required-features = ["bench"]
