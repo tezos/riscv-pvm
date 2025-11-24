@@ -6,8 +6,9 @@ use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 
 use super::Address;
 use super::BadMemoryAccess;
@@ -23,7 +24,6 @@ use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
@@ -241,19 +241,6 @@ where
         }
     }
 
-    fn hash_state(&self) -> Hash
-    where
-        M: ManagerSerialise,
-    {
-        Hash::combine([
-            self.data.hash_state(),
-            self.readable_pages.hash_state(),
-            self.writable_pages.hash_state(),
-            self.executable_pages.hash_state(),
-            self.allocated_pages.hash_state(),
-        ])
-    }
-
     fn reset(&mut self, mut listener: impl MemoryGovernanceListener)
     where
         M: ManagerWrite,
@@ -425,6 +412,26 @@ where
         }
 
         Ok(address)
+    }
+}
+
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+where
+    M: ManagerBase,
+    F: Fold,
+    DynCells<M>: Foldable<F>,
+    B: Foldable<F>,
+    PagePermissions<PAGES, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.data);
+        builder.add(&self.readable_pages);
+        builder.add(&self.writable_pages);
+        builder.add(&self.executable_pages);
+        builder.add(&self.allocated_pages);
+        builder.done()
     }
 }
 

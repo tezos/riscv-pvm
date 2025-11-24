@@ -27,8 +27,9 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
 
@@ -49,7 +50,6 @@ use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
@@ -173,17 +173,21 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
     }
 }
 
-impl<MC, M> HashState for MachineCoreState<MC, M>
+impl<MC, M, F> Foldable<F> for MachineCoreState<MC, M>
 where
     MC: MemoryConfig,
-    M: ManagerSerialise,
+    M: backend::ManagerBase,
+    F: Fold,
+    HartState<M>: Foldable<F>,
+    MC::State<M>: Foldable<F>,
+    SignalActions<M>: Foldable<F>,
 {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.hart.hash_state(),
-            self.main_memory.hash_state(),
-            self.signal_actions.hash_state(),
-        ])
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.hart);
+        builder.add(&self.main_memory);
+        builder.add(&self.signal_actions);
+        builder.done()
     }
 }
 
@@ -701,14 +705,16 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     }
 }
 
-impl<MC, CPE, M> HashState for MachineState<MC, CPE, M>
+impl<MC, CPE, M, F> Foldable<F> for MachineState<MC, CPE, M>
 where
     MC: MemoryConfig,
     CPE: CodePageEntry<MC, M>,
-    M: ManagerSerialise,
+    M: backend::ManagerBase,
+    F: Fold,
+    MachineCoreState<MC, M>: Foldable<F>,
 {
-    fn hash_state(&self) -> Hash {
-        self.core.hash_state()
+    fn fold(&self, builder: F) -> F::Folded {
+        self.core.fold(builder)
     }
 }
 

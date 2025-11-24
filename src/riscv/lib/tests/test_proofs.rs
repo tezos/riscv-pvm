@@ -21,8 +21,12 @@ use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash;
+use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_test_utils::*;
 use rand::Rng;
 
@@ -103,6 +107,8 @@ fn test_initial_proof_regression(inputs: TestConfig) {
 fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC, Normal>, inputs: TestConfig)
 where
     MC: MemoryConfig,
+    MC::State<Normal>: Foldable<HashFold>,
+    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
 {
     let make_stepper = make_stepper_factory::<MC>(&inputs);
 
@@ -133,6 +139,8 @@ fn run_steps_ladder<MC, F>(
     verify_fn: StepperVerifyFn<MC, Normal>,
 ) where
     MC: MemoryConfig,
+    MC::State<Normal>: Foldable<HashFold>,
+    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();

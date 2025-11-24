@@ -10,8 +10,8 @@
 use std::ops::BitAnd;
 
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::backend;
@@ -27,7 +27,6 @@ use crate::machine_state::backend;
 /// order."
 use crate::machine_state::backend::Cell;
 use crate::state::NewState;
-use crate::state_backend::ManagerSerialise;
 
 #[perfect_derive(Clone)]
 pub struct ReservationSet<M: backend::ManagerBase> {
@@ -131,8 +130,13 @@ impl<M: backend::ManagerClone> CloneState for ReservationSet<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for ReservationSet<M> {
-    fn hash_state(&self) -> Hash {
-        self.start_addr.hash_state()
+impl<M, F> Foldable<F> for ReservationSet<M>
+where
+    M: backend::ManagerBase,
+    F: Fold,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        self.start_addr.fold(builder)
     }
 }

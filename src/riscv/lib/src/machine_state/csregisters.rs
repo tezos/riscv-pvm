@@ -11,8 +11,9 @@ use bincode::Decode;
 use bincode::Encode;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -23,7 +24,6 @@ use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::ManagerSerialise;
 use crate::struct_layout;
 
 /// CSR index
@@ -389,9 +389,18 @@ impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for CSRegisters<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([self.fflags.hash_state(), self.frm.hash_state()])
+impl<M, F> Foldable<F> for CSRegisters<M>
+where
+    M: backend::ManagerBase,
+    F: Fold,
+    Cell<FloatExceptionFlags, M>: Foldable<F>,
+    Cell<RoundingMode, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.fflags);
+        builder.add(&self.frm);
+        builder.done()
     }
 }
 

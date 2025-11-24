@@ -13,11 +13,11 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
-use octez_riscv_data::merkle_tree::MerkleTree;
 
 use super::Buddy;
 use super::BuddyLayout;
@@ -37,7 +37,6 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::RefProveAlloc;
 use crate::state_backend::RefVerifyAlloc;
 
 /// Generate a new combined Buddy branch.
@@ -89,12 +88,6 @@ macro_rules! combined_buddy_branch {
             where
                 [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
             {
-                fn to_merkle_tree<'outer, 'inner: 'outer>(
-                    state: RefProveAlloc<'outer, 'inner, Self>,
-                ) -> Result<MerkleTree, HashError> {
-                    <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::to_merkle_tree(state.0)
-                }
-
                 fn into_verify_alloc<D: Deserialiser>(proof: D) -> $crate::state_backend::VerifyAllocResult<D, Self> {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::into_verify_alloc(proof)?;
                     Ok(inner.map(|inner| [<$name Alloc>](inner)))
@@ -214,12 +207,16 @@ macro_rules! combined_buddy_branch {
             {
                 $name(self.0.clone_state())
             }
+        }
 
-            fn hash_state(&self) -> Hash
-            where
-                M: ManagerSerialise,
-            {
-                self.0.hash_state()
+        impl<B, M, F> Foldable<F> for $name<B, M>
+        where
+            M: ManagerBase,
+            F: Fold,
+            $buddy1<$buddy2<B, M>, M>: Foldable<F>,
+        {
+            fn fold(&self, builder: F) -> F::Folded {
+                self.0.fold(builder)
             }
         }
     };
