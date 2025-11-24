@@ -467,6 +467,7 @@ impl<'normal> FnManager<'normal, Normal> for ProofWrapper {
 mod tests {
     use std::collections::VecDeque;
 
+    use octez_riscv_data::compressed_merkle_tree::MERKLE_LEAF_SIZE;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
@@ -475,7 +476,6 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
-    use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;

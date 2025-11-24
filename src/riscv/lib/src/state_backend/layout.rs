@@ -295,6 +295,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::compressed_merkle_tree::CompressedMerkleTree;
+    use octez_riscv_data::compressed_merkle_tree::merkle_tree_to_compressed_merkle_tree;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
@@ -309,8 +311,6 @@ mod tests {
     use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::ProofWrapper;
-    use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
 

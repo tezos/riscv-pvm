@@ -426,13 +426,10 @@ mod tests {
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
         assert!(comp_fn.is_err_and(|e| {
             println!("{e:?}");
-            matches!(
-                e,
-                ProofError::BadNumberOfBranches {
-                    expected: 0,
-                    got: 3
-                }
-            )
+            matches!(e, ProofError::BadNumberOfBranches {
+                expected: 0,
+                got: 3
+            })
         }));
 
         // The first child is a node, but is expected to be a leaf

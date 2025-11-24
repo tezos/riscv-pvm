@@ -20,7 +20,6 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
-use tailcall::tailcall;
 
 use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;

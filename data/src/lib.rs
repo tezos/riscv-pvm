@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 pub mod clone;
+pub mod compressed_merkle_tree;
 pub mod foldable;
 pub mod hash;
 pub mod merkle_proof;

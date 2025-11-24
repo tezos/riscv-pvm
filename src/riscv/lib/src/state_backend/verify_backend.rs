@@ -11,6 +11,7 @@ use std::panic::resume_unwind;
 use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
+use octez_riscv_data::compressed_merkle_tree::MERKLE_LEAF_SIZE;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
@@ -26,7 +27,6 @@ use super::Ref;
 use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
-use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Panic payload that is raised when a value isn't present when running in `Verify` mode.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]

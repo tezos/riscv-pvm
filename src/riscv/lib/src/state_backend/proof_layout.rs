@@ -10,6 +10,7 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::compressed_merkle_tree::MERKLE_LEAF_SIZE;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserError;
@@ -33,7 +34,6 @@ use super::Layout;
 use super::Many;
 use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
-use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use super::proof_backend::proof::deserialiser::Result;
 use super::verify_backend;
 use super::verify_backend::PartialState;
@@ -1075,6 +1075,9 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::compressed_merkle_tree::CompressedMerkleTree;
+    use octez_riscv_data::compressed_merkle_tree::merkle_tree_to_compressed_merkle_tree;
+    use octez_riscv_data::compressed_merkle_tree::merkle_tree_to_merkle_proof;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Prove;
     use proptest::prop_assert;
@@ -1089,9 +1092,6 @@ mod tests {
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
-    use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
-    use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const CELLS_SIZE: usize = 32;
