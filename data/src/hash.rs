@@ -228,3 +228,7 @@ impl<T: HashState, const N: usize> HashState for [T; N] {
         Hash::combine(self.iter().map(HashState::hash_state))
     }
 }
+
+pub fn return_four() -> u32 {
+    4
+}
