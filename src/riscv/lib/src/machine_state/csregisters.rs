@@ -11,6 +11,8 @@ use bincode::Decode;
 use bincode::Encode;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
@@ -392,6 +394,18 @@ impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
 impl<M: ManagerSerialise> HashState for CSRegisters<M> {
     fn hash_state(&self) -> Hash {
         Hash::combine([self.fflags.hash_state(), self.frm.hash_state()])
+    }
+}
+
+impl<M, F> Foldable<F> for CSRegisters<M>
+where
+    M: backend::ManagerBase,
+    F: NodeFold,
+    Cell<FloatExceptionFlags, M>: Foldable<F>,
+    Cell<RoundingMode, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([self.fflags.fold(), self.frm.fold()])
     }
 }
 

@@ -6,6 +6,8 @@ use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 
@@ -425,6 +427,26 @@ where
         }
 
         Ok(address)
+    }
+}
+
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+where
+    M: ManagerBase,
+    F: NodeFold,
+    DynCells<M>: Foldable<F>,
+    B: Foldable<F>,
+    PagePermissions<PAGES, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.data.fold(),
+            self.readable_pages.fold(),
+            self.writable_pages.fold(),
+            self.executable_pages.fold(),
+            self.allocated_pages.fold(),
+        ])
     }
 }
 

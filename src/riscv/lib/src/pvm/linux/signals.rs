@@ -10,6 +10,8 @@ use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use strum::EnumCount;
@@ -213,6 +215,25 @@ impl<M: ManagerSerialise> HashState for SignalActions<M> {
             self.masks.hash_state(),
             self.restorer.hash_state(),
             self.thread_mask.hash_state(),
+        ])
+    }
+}
+
+impl<M, F> Foldable<F> for SignalActions<M>
+where
+    M: ManagerBase,
+    F: NodeFold,
+    Cell<VirtAddr, M>: Foldable<F>,
+    Cell<u32, M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.actions.fold(),
+            self.flags.fold(),
+            self.masks.fold(),
+            self.restorer.fold(),
+            self.thread_mask.fold(),
         ])
     }
 }

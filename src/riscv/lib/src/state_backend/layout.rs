@@ -212,6 +212,27 @@ macro_rules! struct_layout {
                     $crate::state_backend::combine_partial_hashes([$($field_name),+], proof_hash)
                 }
             }
+
+            impl <
+                __F: octez_riscv_data::foldable::NodeFold,
+                $(
+                    [<$field_name:camel>]: octez_riscv_data::foldable::Foldable<__F>
+                ),+
+            > octez_riscv_data::foldable::Foldable<__F> for [<$layout_t F>]<
+                $(
+                    [<$field_name:camel>]
+                ),+
+            > {
+                fn fold(&self) -> __F {
+                    __F::fold_children(
+                        [
+                            $(
+                                self.$field_name.fold()
+                            ),+
+                        ]
+                    )
+                }
+            }
         }
     };
 }

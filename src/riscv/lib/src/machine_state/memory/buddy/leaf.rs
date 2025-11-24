@@ -10,6 +10,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
@@ -243,5 +244,15 @@ impl<const PAGES: u64, M: ManagerDeserialise> Decode<()> for BuddyLeaf<PAGES, M>
     fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let set = Decode::decode(decoder)?;
         Ok(Self { set })
+    }
+}
+
+impl<const PAGES: u64, M, F> Foldable<F> for BuddyLeaf<PAGES, M>
+where
+    M: ManagerBase,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        self.set.fold()
     }
 }

@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: MIT
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
@@ -126,6 +128,25 @@ impl<M: ManagerSerialise> HashState for HartState<M> {
             self.csregisters.hash_state(),
             self.pc.hash_state(),
             self.reservation_set.hash_state(),
+        ])
+    }
+}
+
+impl<M: backend::ManagerBase, F: NodeFold> Foldable<F> for HartState<M>
+where
+    registers::XRegisters<M>: Foldable<F>,
+    registers::FRegisters<M>: Foldable<F>,
+    csregisters::CSRegisters<M>: Foldable<F>,
+    Cell<Address, M>: Foldable<F>,
+    ReservationSet<M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.xregisters.fold(),
+            self.fregisters.fold(),
+            self.csregisters.fold(),
+            self.pc.fold(),
+            self.reservation_set.fold(),
         ])
     }
 }

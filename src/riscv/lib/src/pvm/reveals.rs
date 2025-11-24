@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: MIT
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
@@ -88,5 +90,15 @@ impl<M: ManagerClone> CloneState for RevealRequest<M> {
 impl<M: ManagerSerialise> HashState for RevealRequest<M> {
     fn hash_state(&self) -> Hash {
         Hash::combine([self.bytes.hash_state(), self.size.hash_state()])
+    }
+}
+
+impl<M: ManagerBase, F: NodeFold> Foldable<F> for RevealRequest<M>
+where
+    DynCells<M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([self.bytes.fold(), self.size.fold()])
     }
 }

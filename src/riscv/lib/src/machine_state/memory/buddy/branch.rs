@@ -10,6 +10,8 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
@@ -327,5 +329,17 @@ impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for BuddyBranch2<B, M> {
             left: inner.left,
             right: inner.right,
         })
+    }
+}
+
+impl<B, M, F> Foldable<F> for BuddyBranch2<B, M>
+where
+    B: Foldable<F>,
+    M: ManagerBase,
+    F: NodeFold,
+    Cell<FreeInfo, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([self.free_info.fold(), self.left.fold(), self.right.fold()])
     }
 }

@@ -13,6 +13,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -220,6 +221,16 @@ macro_rules! combined_buddy_branch {
                 M: ManagerSerialise,
             {
                 self.0.hash_state()
+            }
+        }
+
+        impl<B, M, F> Foldable<F> for $name<B, M>
+        where
+            M: ManagerBase,
+            $buddy1<$buddy2<B, M>, M>: Foldable<F>,
+        {
+            fn fold(&self) -> F {
+                self.0.fold()
             }
         }
     };

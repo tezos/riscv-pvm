@@ -18,6 +18,8 @@ use std::ops::ControlFlow;
 use std::ops::Range;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use parameters::SystemCallResultExecution;
@@ -1068,6 +1070,21 @@ impl<M: ManagerSerialise> HashState for SupervisorState<M> {
             self.program.hash_state(),
             self.heap.hash_state(),
             self.stack_guard.hash_state(),
+        ])
+    }
+}
+
+impl<M: ManagerBase, F: NodeFold> Foldable<F> for SupervisorState<M>
+where
+    Cell<VirtAddr, M>: Foldable<F>,
+    Cell<Range<VirtAddr>, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.tid_address.fold(),
+            self.program.fold(),
+            self.heap.fold(),
+            self.stack_guard.fold(),
         ])
     }
 }

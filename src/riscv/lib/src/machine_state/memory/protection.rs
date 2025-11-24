@@ -11,9 +11,11 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::merkle_tree::MerkleTree;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -34,6 +36,7 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::Many;
 use crate::state_backend::NarrowlySized;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
+use crate::state_backend::proof_backend::merkle::build_custom_merkle_tree;
 
 /// State layout for page permissions
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
@@ -171,5 +174,23 @@ impl<const PAGES: usize, M: ManagerSerialise> HashState for PagePermissions<PAGE
             .map(HashState::hash_state)
             .collect::<Vec<_>>();
         build_custom_merkle_hash(MERKLE_ARITY, nodes).expect("Hashing should not fail")
+    }
+}
+
+impl<const PAGES: usize, M: ManagerSerialise> Foldable<Hash> for PagePermissions<PAGES, M> {
+    fn fold(&self) -> Hash {
+        self.hash_state()
+    }
+}
+
+impl<const PAGES: usize, M> Foldable<MerkleTree> for PagePermissions<PAGES, M>
+where
+    M: ManagerBase,
+    Cell<bool, M>: Foldable<MerkleTree>,
+{
+    fn fold(&self) -> MerkleTree {
+        let leaves = self.pages.iter().map(Foldable::fold).collect::<Vec<_>>();
+        build_custom_merkle_tree(MERKLE_ARITY, leaves)
+            .expect("Building Merkle tree should not fail")
     }
 }

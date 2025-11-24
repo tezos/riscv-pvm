@@ -10,6 +10,8 @@ use std::ops::ControlFlow;
 use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashState;
@@ -430,6 +432,32 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerSerialise> HashState
             self.level.hash_state(),
             self.level_is_set.hash_state(),
             self.status.hash_state(),
+        ])
+    }
+}
+
+impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase, F: NodeFold> Foldable<F>
+    for Pvm<MC, CPE, M>
+where
+    machine_state::MachineState<MC, CPE, M>: Foldable<F>,
+    RevealRequest<M>: Foldable<F>,
+    linux::SupervisorState<M>: Foldable<F>,
+    Cell<PvmStatus, M>: Foldable<F>,
+    Cell<bool, M>: Foldable<F>,
+    Cell<u32, M>: Foldable<F>,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.machine_state.fold(),
+            self.reveal_request.fold(),
+            self.system_state.fold(),
+            self.version.fold(),
+            self.tick.fold(),
+            self.message_counter.fold(),
+            self.level.fold(),
+            self.level_is_set.fold(),
+            self.status.fold(),
         ])
     }
 }

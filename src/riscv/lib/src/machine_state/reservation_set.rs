@@ -10,6 +10,7 @@
 use std::ops::BitAnd;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
@@ -134,5 +135,15 @@ impl<M: backend::ManagerClone> CloneState for ReservationSet<M> {
 impl<M: ManagerSerialise> HashState for ReservationSet<M> {
     fn hash_state(&self) -> Hash {
         self.start_addr.hash_state()
+    }
+}
+
+impl<M, F> Foldable<F> for ReservationSet<M>
+where
+    M: backend::ManagerBase,
+    Cell<u64, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        self.start_addr.fold()
     }
 }

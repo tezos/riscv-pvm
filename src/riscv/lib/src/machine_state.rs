@@ -27,6 +27,8 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashState;
 use page_cache::PageCache;
@@ -183,6 +185,24 @@ where
             self.hart.hash_state(),
             self.main_memory.hash_state(),
             self.signal_actions.hash_state(),
+        ])
+    }
+}
+
+impl<MC, M, F> Foldable<F> for MachineCoreState<MC, M>
+where
+    MC: MemoryConfig,
+    M: backend::ManagerBase,
+    F: NodeFold,
+    HartState<M>: Foldable<F>,
+    MC::State<M>: Foldable<F>,
+    SignalActions<M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        F::fold_children([
+            self.hart.fold(),
+            self.main_memory.fold(),
+            self.signal_actions.fold(),
         ])
     }
 }
@@ -709,6 +729,18 @@ where
 {
     fn hash_state(&self) -> Hash {
         self.core.hash_state()
+    }
+}
+
+impl<MC, CPE, M, F> Foldable<F> for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerBase,
+    MachineCoreState<MC, M>: Foldable<F>,
+{
+    fn fold(&self) -> F {
+        self.core.fold()
     }
 }
 
