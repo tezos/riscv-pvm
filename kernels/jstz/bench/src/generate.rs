@@ -14,7 +14,6 @@ use http::HeaderMap;
 use http::Method;
 use http::Uri;
 use jstz_crypto::hash::Hash;
-use jstz_crypto::keypair_from_passphrase;
 use jstz_crypto::public_key::PublicKey;
 use jstz_crypto::public_key_hash::PublicKeyHash;
 use jstz_crypto::secret_key::SecretKey;
@@ -22,14 +21,17 @@ use jstz_crypto::smart_function_hash::SmartFunctionHash;
 use jstz_proto::context::account::Address;
 use jstz_proto::context::account::Addressable;
 use jstz_proto::context::account::Nonce;
-use jstz_proto::context::account::ParsedCode;
 use jstz_proto::operation::Content;
 use jstz_proto::operation::DeployFunction;
 use jstz_proto::operation::Operation;
 use jstz_proto::operation::RunFunction;
 use jstz_proto::operation::SignedOperation;
+use rand::RngCore;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::Serialize;
 use serde::Serializer;
+use tezos_crypto_rs::hash::SeedEd25519;
 use tezos_data_encoding::enc::BinWriter;
 use tezos_smart_rollup::core_unsafe::MAX_INPUT_MESSAGE_SIZE;
 use tezos_smart_rollup::inbox::ExternalMessageFrame;
@@ -179,10 +181,10 @@ fn transfer_op(
     let body = serde_json::ser::to_vec(&transfer)?;
 
     let content = Content::RunFunction(RunFunction {
-        uri: Uri::try_from(format!("tezos://{fa2}/transfer"))?,
+        uri: Uri::try_from(format!("jstz://{fa2}/transfer"))?,
         method: Method::POST,
         headers: HeaderMap::default(),
-        body: Some(body),
+        body: jstz_proto::HttpBody(Some(body)),
         gas_limit: DEFAULT_GAS_LIMIT.try_into()?,
     });
 
@@ -205,10 +207,10 @@ fn balance(
     let query = URL_SAFE.encode(query);
 
     let content = Content::RunFunction(RunFunction {
-        uri: Uri::try_from(format!("tezos://{fa2}/balance_of?requests={query}"))?,
+        uri: Uri::try_from(format!("jstz://{fa2}/balance_of?requests={query}"))?,
         method: Method::GET,
         headers: HeaderMap::default(),
-        body: None,
+        body: jstz_proto::HttpBody(None),
         gas_limit: DEFAULT_GAS_LIMIT.try_into()?,
     });
 
@@ -235,10 +237,10 @@ fn batch_mint(
     let account = &mut accounts[0];
 
     let content = Content::RunFunction(RunFunction {
-        uri: Uri::try_from(format!("tezos://{fa2}/mint_new"))?,
+        uri: Uri::try_from(format!("jstz://{fa2}/mint_new"))?,
         method: Method::POST,
         headers: HeaderMap::default(),
-        body: Some(body),
+        body: jstz_proto::HttpBody(Some(body)),
         gas_limit: DEFAULT_GAS_LIMIT.try_into()?,
     });
 
@@ -249,14 +251,12 @@ fn deploy_fa2(
     rollup_addr: SmartRollupAddress,
     account: &mut Account,
 ) -> Result<(Address, Message)> {
-    let code: ParsedCode = FA2.to_string().try_into()?;
-
     let address = Address::SmartFunction(SmartFunctionHash::digest(
-        format!("{}{}{}", &account.address, code, account.nonce.next()).as_bytes(),
+        format!("{}{}{}", &account.address, FA2, account.nonce.next()).as_bytes(),
     )?);
 
     let content = Content::DeployFunction(DeployFunction {
-        function_code: code,
+        function_code: FA2.to_string(),
         account_credit: 0,
     });
 
@@ -267,9 +267,19 @@ fn deploy_fa2(
 
 fn gen_keys(num: usize) -> Result<Vec<Account>> {
     let mut res = Vec::with_capacity(num);
+    // WARNING: this is very unsecure. We do this because we'd like a
+    // deterministic benchmarking scenario, and these keys will never
+    // be used for anything other than our benchmarking.
+    let mut rng = StdRng::seed_from_u64(0);
 
-    for i in 0..num {
-        let (sk, pk) = keypair_from_passphrase(&i.to_string())?;
+    for _ in 0..num {
+        let seed = &mut [0; 32];
+        rng.fill_bytes(seed);
+        let (pk, sk) = SeedEd25519::try_from(seed.as_slice())?.keypair()?;
+
+        let pk = jstz_crypto::public_key::PublicKey::Ed25519(pk.into());
+        let sk = jstz_crypto::secret_key::SecretKey::Ed25519(sk);
+
         let address = Address::User(PublicKeyHash::from(&pk));
         let account = Account {
             address,
@@ -296,18 +306,18 @@ impl Account {
         rollup_addr: SmartRollupAddress,
         content: Content,
     ) -> Result<Message> {
-        let Address::User(source) = &self.address else {
+        let Address::User(_source) = &self.address else {
             return Err("Expected a user address".into());
         };
 
         let op = Operation {
-            source: source.clone(),
+            public_key: self.pk.clone(),
             nonce: self.nonce,
             content,
         };
 
         let hash = op.hash();
-        let signed_op = SignedOperation::new(self.pk.clone(), self.sk.sign(hash)?, op);
+        let signed_op = SignedOperation::new(self.sk.sign(hash)?, op);
 
         let bytes = bincode::encode_to_vec(signed_op, BINCODE_CONFIGURATION)?;
         let mut external = Vec::with_capacity(bytes.len() + EXTERNAL_FRAME_SIZE);

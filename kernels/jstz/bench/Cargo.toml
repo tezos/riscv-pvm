@@ -17,3 +17,5 @@ bincode.workspace = true
 regex.workspace = true
 tezos_data_encoding.workspace = true
 comfy-table.workspace = true
+tezos_crypto_rs.workspace = true
+rand.workspace = true

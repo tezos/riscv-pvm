@@ -404,7 +404,7 @@ enum LogType {
     SmartFunctionLog(LogLine),
 }
 
-const SOL: &str = "Message: Internal(StartOfLevel)";
+const SOL: &str = "Internal message: start of level";
 const DEPLOY: &str = "[📜] Smart function deployed";
 const SUCCESS: &str = "🚀 Smart function executed successfully";
 const EOL: &str = "Internal message: end of level";
