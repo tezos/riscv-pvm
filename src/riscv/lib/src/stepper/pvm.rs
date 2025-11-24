@@ -11,7 +11,6 @@ use std::path::Path;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -113,8 +112,11 @@ impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Norm
     }
 
     /// Obtain the root hash for the PVM state.
-    pub fn hash(&self) -> Hash {
-        self.pvm.hash_state()
+    pub fn hash(&self) -> Hash
+    where
+        MC::State<Normal>: Foldable<Hash>,
+    {
+        Hash::from_foldable(&self.pvm)
     }
 }
 

@@ -20,8 +20,6 @@ use std::ops::Range;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
@@ -54,7 +52,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -1060,17 +1057,6 @@ impl<M: ManagerClone> CloneState for SupervisorState<M> {
             heap: self.heap.clone_state(),
             stack_guard: self.stack_guard.clone_state(),
         }
-    }
-}
-
-impl<M: ManagerSerialise> HashState for SupervisorState<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.tid_address.hash_state(),
-            self.program.hash_state(),
-            self.heap.hash_state(),
-            self.stack_guard.hash_state(),
-        ])
     }
 }
 

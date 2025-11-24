@@ -8,8 +8,6 @@ use std::ops::RangeInclusive;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 
 use super::Address;
 use super::BadMemoryAccess;
@@ -25,7 +23,6 @@ use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
@@ -241,19 +238,6 @@ where
             executable_pages: self.executable_pages.clone_state(),
             allocated_pages: self.allocated_pages.clone_state(),
         }
-    }
-
-    fn hash_state(&self) -> Hash
-    where
-        M: ManagerSerialise,
-    {
-        Hash::combine([
-            self.data.hash_state(),
-            self.readable_pages.hash_state(),
-            self.writable_pages.hash_state(),
-            self.executable_pages.hash_state(),
-            self.allocated_pages.hash_state(),
-        ])
     }
 
     fn reset(&mut self, mut listener: impl MemoryGovernanceListener)

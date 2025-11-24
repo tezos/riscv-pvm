@@ -15,7 +15,6 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use octez_riscv_data::hash::HashWriter;
 use octez_riscv_data::hash::build_custom_merkle_hash;
 use octez_riscv_data::merkle_tree::MerkleTree;
@@ -170,12 +169,6 @@ impl<E, M: ManagerRead> Deref for Cell<E, M> {
 impl<E: Clone, M: ManagerClone> CloneState for Cell<E, M> {
     fn clone_state(&self) -> Self {
         self.clone()
-    }
-}
-
-impl<E: Encode, M: ManagerSerialise> HashState for Cell<E, M> {
-    fn hash_state(&self) -> Hash {
-        Hash::blake3_hash(self).expect("Cell hashing should not fail")
     }
 }
 
@@ -367,12 +360,6 @@ impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
 impl<E: Clone, const LEN: usize, M: ManagerClone> CloneState for Cells<E, LEN, M> {
     fn clone_state(&self) -> Self {
         self.clone()
-    }
-}
-
-impl<E: Encode, const LEN: usize, M: ManagerSerialise> HashState for Cells<E, LEN, M> {
-    fn hash_state(&self) -> Hash {
-        Hash::blake3_hash(self).expect("Cells hashing should not fail")
     }
 }
 
@@ -582,8 +569,8 @@ impl<M: ManagerClone> CloneState for DynCells<M> {
     }
 }
 
-impl<M: ManagerSerialise> HashState for DynCells<M> {
-    fn hash_state(&self) -> Hash {
+impl<M: ManagerSerialise> Foldable<Hash> for DynCells<M> {
+    fn fold(&self) -> Hash {
         let length = self.len();
 
         let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
@@ -600,12 +587,6 @@ impl<M: ManagerSerialise> HashState for DynCells<M> {
         let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
 
         Hash::combine([length_node, pages_node])
-    }
-}
-
-impl<M: ManagerSerialise> Foldable<Hash> for DynCells<M> {
-    fn fold(&self) -> Hash {
-        self.hash_state()
     }
 }
 

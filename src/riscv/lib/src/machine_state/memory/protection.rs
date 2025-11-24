@@ -13,7 +13,6 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use octez_riscv_data::hash::build_custom_merkle_hash;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use perfect_derive::perfect_derive;
@@ -166,20 +165,10 @@ impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, 
     }
 }
 
-impl<const PAGES: usize, M: ManagerSerialise> HashState for PagePermissions<PAGES, M> {
-    fn hash_state(&self) -> Hash {
-        let nodes: Vec<Hash> = self
-            .pages
-            .iter()
-            .map(HashState::hash_state)
-            .collect::<Vec<_>>();
-        build_custom_merkle_hash(MERKLE_ARITY, nodes).expect("Hashing should not fail")
-    }
-}
-
 impl<const PAGES: usize, M: ManagerSerialise> Foldable<Hash> for PagePermissions<PAGES, M> {
     fn fold(&self) -> Hash {
-        self.hash_state()
+        let nodes: Vec<Hash> = self.pages.iter().map(Foldable::fold).collect::<Vec<_>>();
+        build_custom_merkle_hash(MERKLE_ARITY, nodes).expect("Hashing should not fail")
     }
 }
 

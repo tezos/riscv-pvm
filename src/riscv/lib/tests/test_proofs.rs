@@ -107,6 +107,7 @@ fn test_initial_proof_regression(inputs: TestConfig) {
 fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC, Normal>, inputs: TestConfig)
 where
     MC: MemoryConfig,
+    MC::State<Normal>: Foldable<Hash>,
     for<'a> MC::State<Prove<'a>>: Foldable<Hash> + Foldable<MerkleTree>,
 {
     let make_stepper = make_stepper_factory::<MC>(&inputs);
@@ -138,6 +139,7 @@ fn run_steps_ladder<MC, F>(
     verify_fn: StepperVerifyFn<MC, Normal>,
 ) where
     MC: MemoryConfig,
+    MC::State<Normal>: Foldable<Hash>,
     for<'a> MC::State<Prove<'a>>: Foldable<Hash> + Foldable<MerkleTree>,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {

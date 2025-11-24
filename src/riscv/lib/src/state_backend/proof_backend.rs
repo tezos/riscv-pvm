@@ -538,7 +538,7 @@ mod tests {
 
             // Check correct Merkleisation
             let cells = [value_before; CELLS_SIZE];
-            let cells_owned: Cells<u64, CELLS_SIZE, Ref<'_, Normal>> = Cells::bind(&cells);
+            let cells_owned: Cells<u64, CELLS_SIZE, Normal> = Cells::bind(cells);
             let initial_root_hash = Hash::from_foldable(&cells_owned);
 
             let mut proof_region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);

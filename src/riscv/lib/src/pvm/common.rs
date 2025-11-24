@@ -14,7 +14,6 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
-use octez_riscv_data::hash::HashState;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -42,7 +41,6 @@ use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
@@ -420,24 +418,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState fo
             level_is_set: self.level_is_set.clone_state(),
             status: self.status.clone_state(),
         }
-    }
-}
-
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerSerialise> HashState
-    for Pvm<MC, CPE, M>
-{
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.machine_state.hash_state(),
-            self.reveal_request.hash_state(),
-            self.system_state.hash_state(),
-            self.version.hash_state(),
-            self.tick.hash_state(),
-            self.message_counter.hash_state(),
-            self.level.hash_state(),
-            self.level_is_set.hash_state(),
-            self.status.hash_state(),
-        ])
     }
 }
 

@@ -6,8 +6,6 @@
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::csregisters;
@@ -21,7 +19,6 @@ use crate::state_backend as backend;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CellProj;
-use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -117,18 +114,6 @@ impl<M: backend::ManagerClone> CloneState for HartState<M> {
             pc: self.pc.clone_state(),
             reservation_set: self.reservation_set.clone_state(),
         }
-    }
-}
-
-impl<M: ManagerSerialise> HashState for HartState<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([
-            self.xregisters.hash_state(),
-            self.fregisters.hash_state(),
-            self.csregisters.hash_state(),
-            self.pc.hash_state(),
-            self.reservation_set.hash_state(),
-        ])
     }
 }
 

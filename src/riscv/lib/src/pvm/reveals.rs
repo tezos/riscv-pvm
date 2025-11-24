@@ -5,8 +5,6 @@
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashState;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
@@ -21,7 +19,6 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 
 /// Reveal request layout
 pub type RevealRequestLayout = (DynArray, Atom<u64>);
@@ -84,12 +81,6 @@ impl<M: ManagerClone> CloneState for RevealRequest<M> {
             bytes: self.bytes.clone_state(),
             size: self.size.clone_state(),
         }
-    }
-}
-
-impl<M: ManagerSerialise> HashState for RevealRequest<M> {
-    fn hash_state(&self) -> Hash {
-        Hash::combine([self.bytes.hash_state(), self.size.hash_state()])
     }
 }
 

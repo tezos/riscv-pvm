@@ -90,24 +90,6 @@ macro_rules! struct_layout {
                 ),+
             }
 
-            impl <
-                $(
-                    [<$field_name:camel>]: octez_riscv_data::hash::HashState
-                ),+
-            > octez_riscv_data::hash::HashState for [<$layout_t F>]<
-                $(
-                    [<$field_name:camel>]
-                ),+
-            > {
-                fn hash_state(&self) -> octez_riscv_data::hash::Hash {
-                    octez_riscv_data::hash::Hash::combine([
-                        $(
-                            self.$field_name.hash_state()
-                        ),+
-                    ])
-                }
-            }
-
             $vis type $layout_t $(< $($param),+ >)? = [<$layout_t F>]<
                 $(
                     $cell_repr

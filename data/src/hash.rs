@@ -221,23 +221,3 @@ pub fn build_custom_merkle_hash(arity: usize, mut nodes: Vec<Hash>) -> Result<Ha
 
     Ok(nodes[0])
 }
-
-/// Hashable persistent state
-///
-/// This trait shall be implemented for types which manage persistent state which can be hashed.
-pub trait HashState {
-    /// Compute the hash of the persistent state.
-    fn hash_state(&self) -> Hash;
-}
-
-impl<T: HashState> HashState for &T {
-    fn hash_state(&self) -> Hash {
-        T::hash_state(self)
-    }
-}
-
-impl<T: HashState, const N: usize> HashState for [T; N] {
-    fn hash_state(&self) -> Hash {
-        Hash::combine(self.iter().map(HashState::hash_state))
-    }
-}
