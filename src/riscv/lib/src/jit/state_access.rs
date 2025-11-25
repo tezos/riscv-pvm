@@ -422,10 +422,16 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
 }
 #[cfg(test)]
 mod state_access_test_utils {
+    use std::ffi::CStr;
+    use std::ffi::c_char;
+    use std::ptr::NonNull;
+
     use cranelift::prelude::FunctionBuilder;
+    use octez_riscv_data::serialisation::elem::Elem;
 
     use crate::jit::builder::ext_calls;
     use crate::jit::builder::typed::Pointer;
+    use crate::jit::builder::typed::Typed;
     use crate::jit::builder::typed::Value;
     use crate::jit::state_access::JsaCalls;
     use crate::machine_state::memory::Address;
@@ -461,6 +467,14 @@ mod state_access_test_utils {
             .dispatch
             .jit_counters
             .record_fallback_to_interpreter();
+    }
+
+    extern "C" fn debug_print<E: Elem + std::fmt::Debug>(message: NonNull<c_char>, value: E) {
+        // SAFETY: `message` is a non-null pointer to a NUL-terminated C string with static
+        // storage duration, provided by the JIT helper.
+        let message = unsafe { CStr::from_ptr(message.as_ptr()) };
+        let s = message.to_string_lossy();
+        eprintln!("[DEBUG]: {s} {value:?}");
     }
 
     impl<MC: MemoryConfig> JsaCalls<MC> {
@@ -510,6 +524,24 @@ mod state_access_test_utils {
                 unsafe { page.as_ref() },
                 entrypoint,
             );
+        }
+
+        /// Print a debug message in a JIT function with an additional possible value (test-only).
+        ///
+        /// Note: C Strings can be created using `c"Hello World!"` in Rust.
+        pub(crate) fn debug<E: Elem + std::fmt::Debug + Typed>(
+            &self,
+            builder: &mut FunctionBuilder,
+            msg: &'static CStr,
+            value: Value<E>,
+        ) {
+            let msg = NonNull::new(msg.as_ptr().cast_mut())
+                .expect("Debug message CStr pointer should be non-null");
+            // SAFETY: The pointer is constructed from a reference to a valid CStr with a static lifetime.
+            let ptr: Pointer<c_char> = unsafe {
+                Pointer::from_discriminant(&self.target_config, builder, msg.addr().get() as i64)
+            };
+            ext_calls::call2(&self.target_config, builder, self::debug_print, ptr, value);
         }
     }
 }
