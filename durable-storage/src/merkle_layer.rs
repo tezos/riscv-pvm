@@ -9,6 +9,8 @@ use bytes::Bytes;
 mod node;
 mod tree;
 
+use bincode::Decode;
+use bincode::Encode;
 use tree::Avl;
 
 use crate::persistence_layer::PersistenceLayer;
@@ -18,7 +20,7 @@ use crate::persistence_layer::PersistenceLayer;
 pub struct CommitId;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Decode, Default, Encode, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Key(Vec<u8>);
 
 impl Key {
@@ -108,7 +110,7 @@ impl MerkleLayer {
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
     pub fn hash(&mut self) -> blake3::Hash {
-        todo!()
+        self.tree.hash()
     }
 
     /// Sets the data associated with a given [Key].

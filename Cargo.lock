@@ -1729,10 +1729,12 @@ dependencies = [
 name = "octez-riscv-durable-storage"
 version = "0.0.0"
 dependencies = [
+ "bincode",
  "blake3",
  "bytes",
  "hex",
  "log",
+ "octez-riscv-data",
  "proptest",
  "rocksdb",
  "tempfile",
