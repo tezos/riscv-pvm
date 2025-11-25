@@ -243,9 +243,13 @@ mod tests {
         }
 
         let mut ml2 = ml.clone();
+        let original_hash = ml.hash();
+        assert_eq!(original_hash, ml2.hash());
 
         let cow_data = "🐮<(moo!)";
         ml2.set(&keys[0], cow_data.into());
+        assert_ne!(original_hash, ml2.hash());
+        assert_eq!(original_hash, ml.hash());
 
         let old_node1 = MavlNode::new(keys[0].clone(), data[0].clone().into());
         let new_node1 = MavlNode::new(keys[0].clone(), cow_data.into());
@@ -304,7 +308,9 @@ mod tests {
             }
 
             // Create a cheap copy
+            let original_hash = ml.hash();
             let mut ml2 = ml.clone();
+            prop_assert_eq!(original_hash, ml2.hash());
 
             // Delete all the keys in the copy
             for bytes in &keys1 {
@@ -318,6 +324,13 @@ mod tests {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
                 ml2.set(&key, data2.clone());
             }
+
+            if keys1.is_empty() && keys2.is_empty() {
+                prop_assert_eq!(original_hash, ml2.hash());
+            } else {
+                prop_assert_ne!(original_hash, ml2.hash());
+            }
+            prop_assert_eq!(original_hash, ml.hash());
 
             // Check both trees are still correct
             for bytes in &keys1 {
@@ -339,7 +352,9 @@ mod tests {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::from("create");
         let mut ml = new_merkle_layer();
+        let empty_hash = ml.hash();
         ml.set(&key, data.clone());
+        assert_ne!(empty_hash, ml.hash());
 
         let node = MavlNode::new(key.clone(), data.clone());
         let get_node = ml
@@ -357,6 +372,7 @@ mod tests {
         let data2 = Bytes::from("new");
         let mut ml = new_merkle_layer();
         ml.set(&key, data.clone());
+        let old_hash = ml.hash();
 
         let node = MavlNode::new(key.clone(), data.clone());
         let get_node = ml
@@ -366,6 +382,7 @@ mod tests {
         assert_eq!(&get_node, &node.data());
 
         ml.set(&key, data2.clone());
+        assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
         let node = MavlNode::new(key.clone(), data2.clone());
         let get_node = ml
@@ -396,7 +413,9 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for (key, data) in keys.iter().zip(data.iter()) {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(data));
         }
@@ -416,15 +435,19 @@ mod tests {
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
         let mut ml = new_merkle_layer();
+        let empty_hash = ml.hash();
 
         // Left imbalance
         let data = Bytes::from("imbalanced left");
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
         }
 
         ml.clear();
+        assert_eq!(empty_hash, ml.hash());
 
         let keys = {
             let mut keys = keys;
@@ -435,7 +458,9 @@ mod tests {
         // Right imbalance
         let data = Bytes::from("imbalanced right");
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
         }
     }
@@ -450,7 +475,9 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(&data));
         }
@@ -466,7 +493,9 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(&data));
         }
@@ -493,7 +522,9 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(&data));
         }
@@ -520,7 +551,9 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for key in keys.iter() {
+            let old_hash = ml.hash();
             ml.set(key, data.clone());
+            assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(&data));
         }
@@ -531,10 +564,15 @@ mod tests {
         fn test_mavl_create_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = Bytes::from("property");
             let mut ml = new_merkle_layer();
+            let old_hash = ml.hash();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
                 ml.set(&key, data.clone());
+            }
+
+            if !keys.is_empty() {
+                assert_ne!(old_hash, ml.hash());
             }
 
             for bytes in &keys {
@@ -551,9 +589,14 @@ mod tests {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = Bytes::from("delete");
         let mut ml = new_merkle_layer();
+        let empty_hash = ml.hash();
         ml.set(&key, data.clone());
+        let full_hash = ml.hash();
+        assert_ne!(empty_hash, full_hash);
 
         ml.delete(&key);
+        assert_ne!(full_hash, ml.hash());
+        assert_eq!(empty_hash, ml.hash());
 
         let get_node = ml.get(&key);
 
@@ -566,10 +609,15 @@ mod tests {
         fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = Bytes::from("delete_prop");
             let mut ml = new_merkle_layer();
+            let empty_hash = ml.hash();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
                 ml.set(&key, data.clone());
+            }
+
+            if !keys.is_empty() {
+                prop_assert_ne!(empty_hash, ml.hash());
             }
 
             for bytes in &keys {
@@ -577,6 +625,8 @@ mod tests {
                 ml.delete(&key);
                 prop_assert_eq!(ml.get(&key), None);
             }
+
+            prop_assert_eq!(empty_hash, ml.hash());
 
             ml.tree.check(line!());
         }
@@ -586,11 +636,16 @@ mod tests {
         let data = Bytes::from("delete");
 
         let mut ml = new_merkle_layer();
+        let empty_hash = ml.hash();
 
         for key in keys.iter() {
             ml.set(key, data.clone());
             ml.tree.check(line!());
             assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+        }
+
+        if !keys.is_empty() {
+            assert_ne!(empty_hash, ml.hash());
         }
 
         for key in keys.iter() {
@@ -599,6 +654,8 @@ mod tests {
             ml.delete(key);
             assert_eq!(ml.get(key), None);
         }
+
+        assert_eq!(empty_hash, ml.hash());
     }
 
     // Requires replacing a node with its successor while rebalancing a node on the return path.
