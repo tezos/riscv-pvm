@@ -520,11 +520,12 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
         Ordering::Equal => {
             let node = Arc::make_mut(node);
             node.data = data;
+            node.invalidate_hash();
             false
         }
         Ordering::Greater => {
             let node_mut = Arc::make_mut(node);
-            let grew = set(&mut node_mut.left, key, data);
+            let grew = set(node_mut.left_mut(), key, data);
             if grew {
                 node_mut.balance_factor -= 1;
                 *node = rebalance(node);
@@ -535,7 +536,7 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
         }
         Ordering::Less => {
             let node_mut = Arc::make_mut(node);
-            let grew = set(&mut node_mut.right, key, data);
+            let grew = set(node_mut.right_mut(), key, data);
             if grew {
                 node_mut.balance_factor += 1;
                 *node = rebalance(node);
