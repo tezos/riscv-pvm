@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use octez_riscv_data::serialisation::serialise_into;
 
 use super::Key;
 use super::node::MavlNode;
@@ -28,6 +29,15 @@ impl Avl {
     /// The data stored in a node in the tree with a given key.
     pub(super) fn get(&self, key: &Key) -> Option<&Bytes> {
         get(&self.root, key)
+    }
+
+    /// Returns the root hash, potentially re-hashing uncached nodes.
+    pub fn hash(&mut self) -> blake3::Hash {
+        let encodable = self.root.as_deref().map(|node| node.to_encode());
+        let mut hasher = blake3::Hasher::new();
+        serialise_into(encodable, &mut hasher)
+            .expect("None of the `EncodeError`s can be triggered by this encoding");
+        hasher.finalize()
     }
 
     /// The root node of the tree.

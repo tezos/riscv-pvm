@@ -5,8 +5,11 @@
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
+use bincode::Encode;
 use bytes::Bytes;
+use octez_riscv_data::serialisation::serialise_into;
 
 use super::Key;
 
@@ -18,10 +21,25 @@ pub(super) struct MavlNode {
     left: Option<Arc<Self>>,
     right: Option<Arc<Self>>,
 
-    /// A [None] hash is a hash that has not been set or has been dirtied.
-    hash: Option<blake3::Hash>,
+    /// A cache for the hash of this node. This uses `OnceLock` so that updating the cache is a
+    /// non-mutating operation.
+    ///
+    /// An uninitialised hash is a hash that has not been set or has been dirtied.
+    hash: OnceLock<blake3::Hash>,
 
     /// The difference in heights between child branches (right - left).
+    balance_factor: i64,
+}
+
+#[derive(Encode)]
+/// A serialisable representation of [`MavlNode`].
+struct MavlNodeHashRepresentation<'a> {
+    key: &'a Key,
+    data: &'a [u8],
+    // The bytes of the hash of an optional left child
+    left: Option<&'a [u8; blake3::OUT_LEN]>,
+    // The bytes of the hash of an optional right child
+    right: Option<&'a [u8; blake3::OUT_LEN]>,
     balance_factor: i64,
 }
 
@@ -74,9 +92,26 @@ impl MavlNode {
         &self.right
     }
 
+    /// Converts the node to an encoded, serialisable representation, potentially re-hashing
+    /// uncached nodes.
+    pub(super) fn to_encode(&self) -> impl Encode + '_ {
+        MavlNodeHashRepresentation {
+            key: &self.key,
+            data: &self.data,
+
+            // Recursively hashes any left child and its children
+            left: self.left.as_ref().map(hash).map(|h| h.as_bytes()),
+
+            // Recursively hashes any right child and its children
+            right: self.right.as_ref().map(hash).map(|h| h.as_bytes()),
+
+            balance_factor: self.balance_factor,
+        }
+    }
+
     /// Mark the hash of this node as dirty.
     fn invalidate_hash(&mut self) {
-        self.hash = None;
+        self.hash = OnceLock::new();
     }
 }
 
@@ -149,6 +184,19 @@ pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a 
             Ordering::Less => node = node.right_ref().as_deref()?,
         }
     }
+}
+
+/// Returns the hash of this node, including recursively hashing any child nodes.
+///
+/// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
+/// cached.
+fn hash(node: &Arc<MavlNode>) -> &blake3::Hash {
+    node.hash.get_or_init(|| {
+        let mut hasher = blake3::Hasher::new();
+        serialise_into(node.to_encode(), &mut hasher)
+            .expect("None of the `EncodeError`s can be triggered by this encoding");
+        hasher.finalize()
+    })
 }
 
 /// Rebalance the node so that the difference in height between child branches is in the range
