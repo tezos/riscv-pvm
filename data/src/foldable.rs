@@ -5,6 +5,8 @@
 
 //! Foldable data structures
 
+pub mod seq_tree;
+
 /// Implementing types which define a state structure that can be folded
 ///
 /// The `F` parameter is used to describe the folding capabilities. Implementing types will commonly

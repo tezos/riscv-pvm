@@ -7,6 +7,7 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
@@ -25,9 +26,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::FnManagerIdent;
-use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::storage;
 use crate::storage::Repo;
@@ -226,12 +224,9 @@ impl NodePvm<Verify> {
                 }
             };
 
-            let refs = pvm.struct_ref::<FnManagerIdent>();
-            let final_hash =
-                NodePvmLayout::partial_state_hash(refs, ProofTree::Present(merkle_proof_tree))
-                    .ok()?;
+            let final_hash = PartialHash::from_foldable(Some(merkle_proof_tree), pvm).to_hash()?;
 
-            if final_hash != *final_state_hash {
+            if &final_hash != final_state_hash {
                 return None;
             }
 

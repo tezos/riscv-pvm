@@ -91,6 +91,12 @@ impl MerkleTree {
     }
 }
 
+impl Foldable<MerkleTreeFold> for MerkleTree {
+    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
+        self.clone()
+    }
+}
+
 pub struct MerkleTreeFold;
 
 impl Fold for MerkleTreeFold {

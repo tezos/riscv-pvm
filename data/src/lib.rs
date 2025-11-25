@@ -11,3 +11,4 @@ pub mod merkle_tree;
 pub mod mode;
 pub mod serialisation;
 pub mod tree;
+pub(crate) mod utils;

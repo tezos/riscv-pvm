@@ -15,10 +15,12 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
-use octez_riscv_data::hash::HashWriter;
-use octez_riscv_data::hash::build_custom_merkle_hash;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -51,8 +53,6 @@ use crate::state_backend::RegionProj;
 use crate::state_backend::normal_backend::region_elem_offset;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
-use crate::state_backend::proof_backend::merkle::MerkleWriter;
-use crate::state_backend::proof_backend::merkle::chunks_to_writer;
 use crate::state_backend::verify_backend;
 use crate::state_context::projection::ApplyCons;
 use crate::state_context::projection::CellCons;
@@ -429,6 +429,37 @@ impl<E: Decode<()>, const LEN: usize, Arg> FromProof<Arg> for Cells<E, LEN, Veri
     }
 }
 
+impl<T: Encode, const LEN: usize> Foldable<PartialHashFold<'_>> for Cells<T, LEN, Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        let verify_backend::Region::Partial(values) = &self.region else {
+            return builder.previous();
+        };
+
+        let values = values
+            .iter()
+            .filter_map(|item| item.as_ref())
+            .collect::<Vec<_>>();
+
+        if values.is_empty() {
+            // Nothing hash changed.
+            return builder.previous();
+        }
+
+        if values.len() != LEN {
+            // Some elements are missing, so we cannot compute the full hash.
+            return PartialHash::InvalidProof;
+        }
+
+        let Ok(values) = <[&T; LEN]>::try_from(values) else {
+            unreachable!("We checked the length before")
+        };
+
+        let hash =
+            Hash::blake3_hash(values).expect("Hashing element in partial region should not fail");
+        PartialHash::Present(hash)
+    }
+}
+
 /// Projection from [`Cells`] to its element type `E`
 pub struct CellsProj<E, const LEN: usize>(PhantomData<E>);
 
@@ -621,23 +652,28 @@ impl<M: ManagerClone> CloneState for DynCells<M> {
 }
 
 impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
-    fn fold(&self, _builder: HashFold) -> Hash {
+    fn fold(&self, builder: HashFold) -> Hash {
         let length = self.len();
-
-        let mut writer = HashWriter::new(MERKLE_LEAF_SIZE);
-        chunks_to_writer::<_, _>(&mut writer, length, |address| {
-            // SAFETY: The chunk writer will only request data within the bounds that we specified.
-            // Given we provided the correct length, this is safe.
-            unsafe { self.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) }
-        })
-        .expect("Hashing elements should not fail");
-        let hashes = writer.finalise();
-        let pages_node = build_custom_merkle_hash(MERKLE_ARITY, hashes)
-            .expect("Building merkle hash should not fail");
-
         let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
 
-        Hash::combine([length_node, pages_node])
+        let generator = |idx: usize| {
+            let address = MERKLE_LEAF_SIZE
+                .get()
+                .checked_mul(idx)
+                .expect("This should not overflow as we split the length into chunks of MERKLE_LEAF_SIZE bytes before");
+
+            // SAFETY: The chunk writer will only request data within the bounds that we specified.
+            // Given we provided the correct length, this is safe.
+            let data = unsafe { self.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) };
+            Hash::blake3_hash_bytes(&data)
+        };
+
+        let pages = length.div_ceil(MERKLE_LEAF_SIZE.get());
+
+        let mut builder = builder.into_node_fold();
+        builder.add(&length_node);
+        builder.add(&IndexableSeqAsTree::new(pages, MERKLE_ARITY, &generator));
+        builder.done()
     }
 }
 
@@ -709,32 +745,80 @@ impl<Arg> FromProof<Arg> for DynCells<Verify> {
 }
 
 impl Foldable<MerkleTreeFold> for DynCells<Prove<'_>> {
-    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
-        let len = self.len();
+    fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
+        let length = self.region.unrecorded_len();
+        let length_data = serialise(length as u64).expect("Serialising length should not fail");
+        let length_needed = self.region.need_length_in_proof();
+        let length_node = MerkleTree::make_merkle_leaf(length_data, length_needed);
 
         let region = self.region_ref();
-        let mut writer = MerkleWriter::new(
-            MERKLE_LEAF_SIZE,
-            MERKLE_ARITY,
-            region.get_read(),
-            region.get_write(),
-            len.div_ceil(MERKLE_ARITY),
-        );
-        let read = |address| -> [u8; MERKLE_LEAF_SIZE.get()] {
-            // SAFETY: The chunk writer will only request data within the given bounds. The bounds
-            // are set to the length of the dynamic array.
-            unsafe { region.inner_dyn_region_read(address) }
+        let reads = region.get_read();
+        let writes = region.get_write();
+
+        let page_tree_generator = |idx| {
+            let address = MERKLE_LEAF_SIZE
+                .get()
+                .checked_mul(idx)
+                .expect("This should not overflow as we split the length into chunks of MERKLE_LEAF_SIZE bytes before");
+            let range = address..(address + MERKLE_LEAF_SIZE.get());
+            let accessed = reads.includes_range(range.clone()) || writes.includes_range(range);
+            let data: [u8; MERKLE_LEAF_SIZE.get()] =
+                unsafe { region.inner_dyn_region_read(address) };
+            MerkleTree::make_merkle_leaf(data.to_vec(), accessed)
         };
-        chunks_to_writer::<_, _>(&mut writer, len, read).expect("Writing chunks should not fail");
 
-        let pages_node = writer
-            .finalise()
-            .expect("Building the Merkle tree should not fail");
+        let pages = length.div_ceil(MERKLE_LEAF_SIZE.get());
 
-        let length_bytes = serialise(len as u64).expect("Serialising length should not fail");
-        let length_node = MerkleTree::make_merkle_leaf(length_bytes, region.need_length_in_proof());
+        let mut builder = builder.into_node_fold();
+        builder.add(&length_node);
+        builder.add(&IndexableSeqAsTree::new(
+            pages,
+            MERKLE_ARITY,
+            &page_tree_generator,
+        ));
+        builder.done()
+    }
+}
 
-        MerkleTree::make_merkle_node(vec![length_node, pages_node])
+impl Foldable<PartialHashFold<'_>> for DynCells<Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        if self.region.is_completely_absent() {
+            return PartialHash::Previous;
+        }
+
+        // The length must be present if the region is not completely absent. Otherwise we can't
+        // properly construct the partial Merkle tree and therefore obtain the final hash.
+        let Some(len) = self.region.len_opt() else {
+            return PartialHash::InvalidProof;
+        };
+        let length_hash = Hash::blake3_hash(len as u64).expect("Hashing length should not fail");
+
+        let page_hash_generator = |idx| {
+            let address = MERKLE_LEAF_SIZE
+                .get()
+                .checked_mul(idx)
+                .expect("This should not overflow as we split the length into chunks of MERKLE_LEAF_SIZE bytes before");
+            let page_id = verify_backend::PageId::from_address(address);
+
+            let page = self.region.get_partial_page(page_id);
+            match page {
+                verify_backend::PartialState::Incomplete => PartialHash::InvalidProof,
+                verify_backend::PartialState::Absent => PartialHash::Previous,
+                verify_backend::PartialState::Complete(data) => {
+                    let hash = Hash::blake3_hash(data).expect("Hashing page should not fail");
+                    PartialHash::Present(hash)
+                }
+            }
+        };
+
+        let mut builder = builder.into_node_fold();
+        builder.add(&PartialHash::Present(length_hash));
+        builder.add(&IndexableSeqAsTree::new(
+            len.div_ceil(MERKLE_LEAF_SIZE.get()),
+            MERKLE_ARITY,
+            &page_hash_generator,
+        ));
+        builder.done()
     }
 }
 
