@@ -232,6 +232,16 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
         let max_steps = self.max_steps_param.to_value();
         let steps = self.builder.ins().isub(max_steps, steps_remaining);
 
+        #[cfg(test)]
+        // SAFETY: The value is constructed from a valid u64 type `steps`.
+        unsafe {
+            self.ext_calls.debug::<u64>(
+                &mut self.builder,
+                c"exiting. took steps: ",
+                Value::from_raw(steps),
+            );
+        }
+
         self.builder.ins().return_(&[steps]);
     }
 

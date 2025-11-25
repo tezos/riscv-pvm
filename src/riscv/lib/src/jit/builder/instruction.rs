@@ -69,6 +69,7 @@ pub enum OutcomeProbability {
 }
 
 /// The resulting control flow information after executing an instruction.
+#[derive(Debug)]
 pub enum InstructionOutcomes {
     /// Continue execution
     Next {
@@ -104,6 +105,7 @@ pub enum InstructionOutcomes {
 }
 
 /// Lowered RISC-V instruction
+#[derive(Debug)]
 pub struct LoweredInstruction {
     /// Location of the instruction
     pub(super) program_counter: Address,
@@ -139,6 +141,7 @@ impl LoweredInstruction {
 }
 
 /// Result of an instruction execution
+#[derive(Debug)]
 pub enum InstructionResult<T> {
     /// The instruction will exit the sequence no matter what
     NoNext,
