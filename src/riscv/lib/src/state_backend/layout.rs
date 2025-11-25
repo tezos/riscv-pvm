@@ -273,6 +273,7 @@ where
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
@@ -283,8 +284,6 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
-    use crate::state_backend::FnManagerIdent;
-    use crate::state_backend::ProofLayout;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
@@ -396,13 +395,9 @@ mod tests {
                 verify_foo.bar.write(bar.wrapping_add(1));
                 verify_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
 
-                let verify_foo_refs = FooF {
-                    bar: verify_foo.bar.struct_ref::<FnManagerIdent>(),
-                    qux: verify_foo.qux.struct_ref::<FnManagerIdent>(),
-                };
-
-                let verify_hash =
-                    Foo::partial_state_hash(verify_foo_refs, ProofPart::Present(&proof)).unwrap();
+                let verify_hash = PartialHash::from_foldable(Some(&proof), &verify_foo)
+                    .to_hash()
+                    .unwrap();
                 assert_eq!(verify_hash, final_hash)
             })
             .unwrap();

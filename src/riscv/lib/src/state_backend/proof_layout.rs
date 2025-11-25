@@ -249,7 +249,7 @@ impl<'a> ProofTree<'a> {
 }
 
 /// Similar to [`ProofPart`], but owns the underlying [`MerkleProof`].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum OwnedProofPart {
     /// This part of the tree is absent.
     Absent,
@@ -300,6 +300,14 @@ impl OwnedProofPart {
         }
 
         OwnedProofPart::Present(MerkleProof::Node(partial_children))
+    }
+
+    /// Obtain the [`ProofTree`] reference corresponding to this owned proof part.
+    pub fn as_ref(&self) -> Option<&MerkleProof> {
+        match self {
+            Self::Present(proof) => Some(proof),
+            Self::Absent => None,
+        }
     }
 }
 
@@ -815,6 +823,7 @@ fn push_work_items_for_branches<'a, const CHILDREN: usize>(
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Prove;
     use proptest::prop_assert;
@@ -825,7 +834,6 @@ mod tests {
     use crate::state_backend::AllocatedOf;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
-    use crate::state_backend::FnManagerIdent;
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::ProofWrapper;
@@ -875,13 +883,11 @@ mod tests {
                 prop_assert!(handle_stepper_panics(|| verifier_state.0.1.read(i)).is_err());
             };
 
-            let ref_verifier_state = (
-                verifier_state.0.0.struct_ref::<FnManagerIdent>(),
-                verifier_state.0.1.struct_ref::<FnManagerIdent>(),
+            let partial_hash = PartialHash::from_foldable(
+                Some(&merkle_proof),
+                &verifier_state.0,
             );
-            prop_assert!(
-                <TestLayout as ProofLayout>::partial_state_hash(ref_verifier_state, ProofTree::Present(&merkle_proof)).is_ok()
-            );
+            prop_assert!(partial_hash.to_hash().is_some());
         })
     }
 
@@ -930,19 +936,16 @@ mod tests {
         >(ProofTree::Present(&proof_tree))
         .unwrap();
 
-        let OwnedProofPart::Present(out_proof) = out_proof else {
+        let OwnedProofPart::Present(out_tree) = &out_proof else {
             panic!("Expected present proof");
         };
-        assert_eq!(proof_tree, out_proof);
-
-        let out_proof_tree = ProofTree::Present(&out_proof);
+        assert_eq!(&proof_tree, out_tree);
 
         // The initial verifier state must match that of the initial state against which we
         // produced the proof.
-        let verifier_init_hash = {
-            let state_ref = verify_cell.struct_ref::<FnManagerIdent>();
-            DynArray::partial_state_hash(state_ref, out_proof_tree).unwrap()
-        };
+        let verifier_init_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+            .to_hash()
+            .unwrap();
         assert_eq!(verifier_init_hash, init_hash);
 
         test_verify(&mut verify_cell);
@@ -950,10 +953,9 @@ mod tests {
         // Once we're doing replaying the computation on the verifier side, the final state must
         // match that of the prover's. If not, that means we produced a proof that results in a
         // transition that we did not intend to prove.
-        let verifier_post_hash = {
-            let state_ref = verify_cell.struct_ref::<FnManagerIdent>();
-            DynArray::partial_state_hash(state_ref, out_proof_tree).unwrap()
-        };
+        let verifier_post_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+            .to_hash()
+            .unwrap();
         assert_eq!(verifier_post_hash, post_hash);
     }
 
