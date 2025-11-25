@@ -402,7 +402,7 @@ impl<'normal> ProofDynRegion<'normal> {
     }
 
     /// Like [`Self::len`], but does not record the access as a read.
-    fn unrecorded_len(&self) -> usize {
+    pub(crate) fn unrecorded_len(&self) -> usize {
         // XXX: This implies the size can't change in a proof.
         Normal::dyn_region_len(&self.source)
     }

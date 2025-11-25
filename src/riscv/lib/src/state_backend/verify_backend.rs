@@ -21,7 +21,6 @@ use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerWrite;
-use super::PartialHashError;
 use super::Ref;
 use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
@@ -68,8 +67,8 @@ pub enum ProofVerificationFailure {
     #[error("Attempted to access absent data")]
     AbsentDataAccess(#[from] NotFound),
 
-    #[error("Error computing final state hash: {0}")]
-    PartialHashError(#[from] PartialHashError),
+    #[error("Proof cannot be used for hashing after the verification step")]
+    BadProofForHashing,
 
     #[error("Final state hash mismatch (expected {expected}, computed {computed})")]
     FinalHashMismatch { expected: Hash, computed: Hash },
@@ -383,6 +382,11 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         }
     }
 
+    /// Like [`Self::len`] but returns `None` if the length is not known, instead of panicking.
+    pub(crate) fn len_opt(&self) -> Option<usize> {
+        self.length
+    }
+
     /// Construct a verifier dynamic region using the given known pages.
     pub fn from_pages(
         length: Option<usize>,
@@ -517,6 +521,8 @@ impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verify>>> for Cell<E, Normal> {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::hash::PartialHash;
+
     use super::*;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
@@ -764,5 +770,42 @@ mod tests {
             assert_not_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE - 1));
             assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE));
         }
+    }
+
+    #[test]
+    fn test_partial_hash_absent() {
+        let verify_cell: Cell<u64, Verify> = Cell::bind(Region::Absent);
+        let proof = None;
+
+        let hash = PartialHash::from_foldable(proof, &verify_cell);
+        assert_eq!(hash, PartialHash::Previous);
+    }
+
+    #[test]
+    fn test_partial_hash_absent_written() {
+        let mut verify_cell: Cell<u64, Verify> = Cell::bind(Region::Absent);
+        let proof = None;
+
+        let written_value = 1337;
+        verify_cell.write(written_value);
+
+        let value_hash = Hash::blake3_hash(written_value).unwrap();
+        let expected_state_hash = PartialHash::Present(value_hash);
+        let hash = PartialHash::from_foldable(proof, &verify_cell);
+        assert_eq!(hash, expected_state_hash);
+    }
+
+    #[test]
+    fn test_partial_hash_present_written() {
+        let mut verify_cell: Cell<u64, Verify> = Cell::bind(Region::Partial(Box::new([Some(42)])));
+        let proof = None;
+
+        let written_value = 1337;
+        verify_cell.write(written_value);
+
+        let value_hash = Hash::blake3_hash(written_value).unwrap();
+        let expected_state_hash = PartialHash::Present(value_hash);
+        let hash = PartialHash::from_foldable(proof, &verify_cell);
+        assert_eq!(hash, expected_state_hash);
     }
 }

@@ -12,6 +12,8 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -42,7 +44,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::OwnedProofPart;
-use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::Ref;
@@ -260,10 +261,10 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
     ///
     /// Useful for testing the stream deserialisation.
-    pub fn verify_proof_using_raw_bytes(
-        &self,
-        proof: Proof,
-    ) -> Result<(), ProofVerificationFailure> {
+    pub fn verify_proof_using_raw_bytes(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
+    where
+        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+    {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
         let (pvm, merkle_tree) = deserialise_stream::deserialise(&tree_serialisation)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
@@ -284,7 +285,10 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     }
 
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
-    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure> {
+    pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
+    where
+        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+    {
         let proof_tree = ProofTree::Present(proof.tree());
         let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
@@ -361,11 +365,20 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> PvmStepper<H
         self,
         proof_tree: ProofTree,
         expected_final_hash: Hash,
-    ) -> Result<(), ProofVerificationFailure> {
+    ) -> Result<(), ProofVerificationFailure>
+    where
+        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+    {
         let stepper = self.try_step_partial()?;
 
-        let refs = stepper.pvm.struct_ref::<FnManagerIdent>();
-        let final_hash = PvmLayout::<MC>::partial_state_hash(refs, proof_tree)?;
+        let proof_tree = match proof_tree {
+            ProofTree::Present(tree) => Some(tree),
+            ProofTree::Absent => None,
+        };
+        let final_hash = PartialHash::from_foldable(proof_tree, &stepper.pvm)
+            .to_hash()
+            .ok_or(ProofVerificationFailure::BadProofForHashing)?;
+
         if final_hash != expected_final_hash {
             return Err(ProofVerificationFailure::FinalHashMismatch {
                 expected: expected_final_hash,
