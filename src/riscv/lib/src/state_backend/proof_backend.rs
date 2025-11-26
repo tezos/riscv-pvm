@@ -40,7 +40,6 @@ use crate::state_backend::elem_bytes;
 
 pub mod merkle;
 pub mod proof;
-pub mod tree;
 
 impl<'normal> ManagerBase for Prove<'normal> {
     type Region<E: 'static, const LEN: usize> = ProofRegion<'normal, E, LEN>;

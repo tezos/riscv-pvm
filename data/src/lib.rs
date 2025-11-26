@@ -10,3 +10,4 @@ pub mod merkle_proof;
 pub mod merkle_tree;
 pub mod mode;
 pub mod serialisation;
+pub mod tree;

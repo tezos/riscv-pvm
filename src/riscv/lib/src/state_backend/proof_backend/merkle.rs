@@ -8,13 +8,13 @@ use std::num::NonZeroUsize;
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+use octez_riscv_data::merkle_proof::transform::ModifyResult;
+use octez_riscv_data::merkle_proof::transform::impl_modify_map_collect;
 use octez_riscv_data::merkle_tree::MerkleTree;
 
 use super::DynAccess;
-use super::proof::MerkleProof;
-use super::proof::MerkleProofLeaf;
-use crate::state_backend::proof_backend::tree::ModifyResult;
-use crate::state_backend::proof_backend::tree::impl_modify_map_collect;
 
 // TODO RV-322: Choose optimal Merkleisation parameters for main memory.
 /// Size of the Merkle leaf used for Merkleising [`DynArrays`].
@@ -316,6 +316,8 @@ mod tests {
 
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::HashError;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
     use proptest::prelude::*;
 
     use super::CompressedAccessInfo;
@@ -325,8 +327,6 @@ mod tests {
     use super::chunks_to_writer;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
-    use crate::state_backend::proof_backend::proof::MerkleProof;
-    use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 
     impl CompressedMerkleTree {
         /// Get the root hash of a compressed Merkle tree

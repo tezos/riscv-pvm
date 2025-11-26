@@ -10,8 +10,10 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
+use octez_riscv_data::tree::Tree;
 
 use super::deserialiser::Result;
 use crate::state_backend::AllocatedOf;
@@ -20,9 +22,7 @@ use crate::state_backend::ProofError;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
-use crate::state_backend::proof_backend::proof::MerkleProofLeaf;
 use crate::state_backend::proof_backend::proof::deserialiser;
-use crate::state_backend::proof_backend::tree::Tree;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
 pub struct ProofTreeDeserialiser<'t>(ProofTree<'t>);

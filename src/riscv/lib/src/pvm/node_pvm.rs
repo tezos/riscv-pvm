@@ -7,6 +7,7 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -27,7 +28,6 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ProofLayout;
 use crate::state_backend::ProofTree;
-use crate::state_backend::proof_backend::proof::MerkleProof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::storage;
 use crate::storage::Repo;
