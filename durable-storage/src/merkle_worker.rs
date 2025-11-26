@@ -77,7 +77,7 @@ impl MerkleWorker {
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
     ) -> Result<Self, MerkleWorkerError> {
-        let layer = MerkleLayer::new(persistence_layer)?;
+        let layer = MerkleLayer::new(persistence_layer);
         let worker = MerkleWorker::from_layer(async_handle, layer);
         Ok(worker)
     }
@@ -327,7 +327,7 @@ mod tests {
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
             let persistence_layer = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
-            let mut merkle_layer = MerkleLayer::new(persistence_layer).expect("Creating a Merkle layer should succeed");
+            let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
             let persistence_worker = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
