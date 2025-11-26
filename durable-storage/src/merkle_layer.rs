@@ -47,16 +47,21 @@ pub enum MerkleLayerError {
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MerkleLayer {
     tree: Avl,
+    #[expect(dead_code, reason = "To be used in RV-825")]
+    persistence: Arc<PersistenceLayer>,
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 impl MerkleLayer {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
-    pub fn new(_persistence: Arc<PersistenceLayer>) -> Result<Self, MerkleLayerError> {
-        todo!()
+    pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
+        MerkleLayer {
+            tree: Avl::default(),
+            persistence,
+        }
     }
 
     /// Persist the data stored in the [MerkleLayer] to durable storage via the [PersistenceLayer].
@@ -88,12 +93,6 @@ impl MerkleLayer {
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) {
         self.tree.delete(key);
-    }
-
-    /// Creates an empty [MerkleLayer].
-    pub fn empty(_persistence: &PersistenceLayer) -> Self {
-        // TODO: use persistence layer
-        Self::default()
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
@@ -224,7 +223,7 @@ mod tests {
             DirectoryManager::new(Path::new("/tmp")).expect("Should be a valid directory");
         let persistence_layer =
             PersistenceLayer::new(&directory_manager).expect("Should be a valid directory");
-        MerkleLayer::empty(&persistence_layer)
+        MerkleLayer::new(persistence_layer.into())
     }
 
     #[test]

@@ -16,9 +16,13 @@ use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+use octez_riscv_data::merkle_proof::tag::InvalidTagError;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation;
+use octez_riscv_data::tree::Tree;
 use perfect_derive::perfect_derive;
 
 use super::AllocatedOf;
@@ -30,14 +34,10 @@ use super::Many;
 use super::RefVerifyAlloc;
 use super::proof_backend::merkle::MERKLE_ARITY;
 use super::proof_backend::merkle::MERKLE_LEAF_SIZE;
-use super::proof_backend::proof::MerkleProof;
-use super::proof_backend::proof::MerkleProofLeaf;
 use super::proof_backend::proof::deserialiser::Result;
-use super::proof_backend::tree::Tree;
 use super::verify_backend;
 use super::verify_backend::PartialState;
 use crate::array_utils::boxed_array;
-use crate::state_backend::proof_backend::proof::InvalidTagError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::verify_backend::PageId;
 

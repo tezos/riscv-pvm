@@ -28,15 +28,15 @@ mod tests {
     use octez_riscv_data::merkle_proof::Deserialiser;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::Partial;
+    use octez_riscv_data::merkle_proof::tag::InvalidTagError;
+    use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
+    use octez_riscv_data::merkle_proof::tag::TAG_NODE;
+    use octez_riscv_data::merkle_proof::tag::TAG_READ;
 
     use super::Result;
     use crate::state_backend::ProofError;
     use crate::state_backend::ProofTree;
-    use crate::state_backend::proof_backend::proof::InvalidTagError;
     use crate::state_backend::proof_backend::proof::MerkleProof;
-    use crate::state_backend::proof_backend::proof::TAG_BLIND;
-    use crate::state_backend::proof_backend::proof::TAG_NODE;
-    use crate::state_backend::proof_backend::proof::TAG_READ;
     use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;

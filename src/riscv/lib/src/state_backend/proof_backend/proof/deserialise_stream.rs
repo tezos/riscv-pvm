@@ -10,11 +10,11 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::tag::LeafTag;
+use octez_riscv_data::merkle_proof::tag::Tag;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise_from;
 
-use super::LeafTag;
-use super::Tag;
 use super::deserialiser::Result;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::OwnedProofPart;

@@ -116,6 +116,7 @@ fn rocksdb_creation_options() -> rocksdb::Options {
 /// Invariants:
 /// - The path in `temp_initial_db_path` is unique for each instance of [`PersistenceLayer`] and is
 ///   assumed to not be modified / known outside of this instance.
+#[derive(Debug)]
 pub struct PersistenceLayer {
     /// The underlying handle to the RocksDB instance.
     ///

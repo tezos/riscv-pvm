@@ -244,10 +244,10 @@ fn basic_invalid_proofs_are_rejected<MC: MemoryConfig>(
 }
 
 mod proof_helpers {
-    use octez_riscv::state_backend::proof_backend::proof::MerkleProofLeaf;
     use octez_riscv::state_backend::proof_backend::proof::Proof;
-    use octez_riscv::state_backend::proof_backend::tree::Tree;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+    use octez_riscv_data::tree::Tree;
 
     pub fn fully_blinded(hash: Hash) -> Proof {
         Proof::new(Tree::Leaf(MerkleProofLeaf::Blind(hash)), hash)

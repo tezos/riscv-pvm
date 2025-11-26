@@ -15,16 +15,12 @@
 //! - Convert [`octez_riscv_data::merkle_tree::MerkleTree`] to [`MerkleProof`]
 
 use bincode::Encode;
-use bincode::enc::write::Writer;
 use octez_riscv_data::hash::DIGEST_SIZE;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 
-use super::tree::ModifyResult;
-use super::tree::Tree;
-use super::tree::impl_modify_map_collect;
-use crate::bits::ones;
 use crate::pvm::node_pvm::NodePvm;
 use crate::pvm::node_pvm::NodePvmLayout;
 use crate::state_backend::OwnedProofPart;
@@ -78,237 +74,6 @@ impl Proof {
     }
 }
 
-/// Merkle proof tree structure.
-///
-/// Leaves can be read and/or written to.
-/// If a read was done, the content will be stored in the proof.
-/// If a write was done, the written content is not necessary since the semantics of running the step will
-/// deduce the written contents.
-///
-/// A proof will have the shape of a subtree of a [`MerkleTree`].
-/// The structure of the full [`MerkleTree`] is known statically (since it represents the whole state of the PVM)
-/// so the number of children of a node and the sizes of the leaves
-/// do not need to be stored in either the proof or its encoding.
-///
-/// [`MerkleTree`]: octez_riscv_data::merkle_tree::MerkleTree
-pub type MerkleProof = Tree<MerkleProofLeaf>;
-
-impl bincode::Encode for MerkleProof {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        let mut nodes = vec![self];
-
-        while let Some(node) = nodes.pop() {
-            match node {
-                Self::Node(trees) => {
-                    Tag::Node.encode(encoder)?;
-
-                    // We add the children in reverse order so that when we pop them from the
-                    // `nodes` stack, they are in the original order.
-                    nodes.extend(trees.iter().rev());
-                }
-
-                Self::Leaf(MerkleProofLeaf::Read(data)) => {
-                    Tag::Leaf(LeafTag::Read).encode(encoder)?;
-
-                    // We want to write the raw data, and avoid the bincode length prefix. The decoder
-                    // will know how many bytes to read.
-                    encoder.writer().write(data.as_slice())?;
-                }
-
-                Self::Leaf(MerkleProofLeaf::Blind(hash)) => {
-                    Tag::Leaf(LeafTag::Blind).encode(encoder)?;
-                    hash.encode(encoder)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Type used to describe the leaves of a [`MerkleProof`].
-/// For more details see the documentation of [`MerkleProof`].
-#[derive(Clone, Debug, PartialEq)]
-pub enum MerkleProofLeaf {
-    /// A leaf that is not read. It may be written.
-    /// Contains the hash of the contents from initial state.
-    ///
-    /// Note: a blinded leaf can correspond to a blinded subtree
-    /// in a [`octez_riscv_data::merkle_tree::MerkleTree`] due to compression.
-    Blind(Hash),
-    /// A leaf that is read. It may also be written.
-    /// Contains the read data from the initial state.
-    /// The initial hash can be deduced based on the read data.
-    Read(Vec<u8>),
-}
-
-impl MerkleProof {
-    /// Create a new Merkle proof as a read leaf.
-    pub fn leaf_read(data: Vec<u8>) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Read(data))
-    }
-
-    /// Create a new Merkle proof as a blind leaf.
-    pub fn leaf_blind(hash: Hash) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
-    }
-
-    /// Return a 2-bit tag for the variant of the node in the proof.
-    pub fn to_raw_tag(&self) -> Tag {
-        match self {
-            MerkleProof::Node(_) => Tag::Node,
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
-            MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
-        }
-    }
-
-    /// Compute the root hash of the Merkle proof.
-    pub fn root_hash(&self) -> Hash {
-        impl_modify_map_collect(
-            self,
-            |subtree| match subtree {
-                Tree::Node(vec) => ModifyResult::NodeContinue((), vec.iter().collect()),
-                Tree::Leaf(data) => ModifyResult::LeafStop(data),
-            },
-            |leaf| match leaf {
-                MerkleProofLeaf::Blind(hash) => *hash,
-                MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data.as_slice()),
-            },
-            |(), leaves| Hash::combine(leaves),
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Tag {
-    Node,
-    Leaf(LeafTag),
-}
-
-impl bincode::Encode for Tag {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        match self {
-            Tag::Node => TAG_NODE.encode(encoder),
-            Tag::Leaf(leaf_tag) => leaf_tag.encode(encoder),
-        }
-    }
-}
-
-impl<'de, C> bincode::BorrowDecode<'de, C> for Tag {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        let byte = u8::borrow_decode(decoder)?;
-        Tag::try_from(byte)
-            .map_err(|error| bincode::error::DecodeError::OtherString(error.to_string()))
-    }
-}
-
-impl<C> bincode::Decode<C> for Tag {
-    fn decode<D: bincode::de::Decoder<Context = C>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        let byte = u8::decode(decoder)?;
-        Tag::try_from(byte)
-            .map_err(|error| bincode::error::DecodeError::OtherString(error.to_string()))
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum LeafTag {
-    Blind,
-    Read,
-}
-
-impl Encode for LeafTag {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        match self {
-            LeafTag::Blind => TAG_BLIND,
-            LeafTag::Read => TAG_READ,
-        }
-        .encode(encoder)
-    }
-}
-
-/// Tag of a node
-const TAG_NODE: u8 = 0b00;
-/// Tag of a blind leaf
-const TAG_BLIND: u8 = 0b10;
-/// Tag of a read leaf
-const TAG_READ: u8 = 0b11;
-
-/// Number of bits used to represent a tag
-const TAG_BITS: u32 = 2;
-/// Number of tags that can fit in a single byte
-const TAGS_PER_BYTE: usize = u8::BITS as usize / TAG_BITS as usize;
-/// Bitmask for tags
-const TAG_MASK: u8 = ones(TAG_BITS as u64) as u8;
-
-/// Return the offset of the `index`-th tag in a byte.
-const fn tag_offset(index: usize) -> usize {
-    debug_assert!(index < TAGS_PER_BYTE);
-    u8::BITS as usize - (index + 1) * TAG_BITS as usize
-}
-
-impl From<&MerkleProof> for Tag {
-    fn from(value: &MerkleProof) -> Self {
-        match value {
-            MerkleProof::Node(_) => Tag::Node,
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
-            MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
-        }
-    }
-}
-
-impl TryFrom<u8> for Tag {
-    type Error = InvalidTagError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            TAG_NODE => Ok(Self::Node),
-            TAG_BLIND => Ok(Self::Leaf(LeafTag::Blind)),
-            TAG_READ => Ok(Self::Leaf(LeafTag::Read)),
-            _ => Err(InvalidTagError),
-        }
-    }
-}
-
-impl From<Tag> for u8 {
-    fn from(value: Tag) -> Self {
-        match value {
-            Tag::Node => TAG_NODE,
-            Tag::Leaf(leaf_tag) => match leaf_tag {
-                LeafTag::Blind => TAG_BLIND,
-                LeafTag::Read => TAG_READ,
-            },
-        }
-    }
-}
-
-impl From<LeafTag> for Tag {
-    fn from(value: LeafTag) -> Self {
-        Tag::Leaf(value)
-    }
-}
-
-impl Tag {
-    /// Obtain the parsed tags from the most significant bits to the lower ones.
-    pub fn ordered_tags_from_u8(byte: u8) -> [Result<Tag, InvalidTagError>; TAGS_PER_BYTE] {
-        core::array::from_fn(tag_offset)
-            .map(|offset| (byte >> offset) & TAG_MASK)
-            .map(Tag::try_from)
-    }
-}
-
 /// Serialise a [`Proof`] to an array of bytes.
 ///
 /// In the encoding, lengths are not necessary, but tags are,
@@ -323,11 +88,6 @@ pub fn serialise_proof(proof: &Proof) -> Vec<u8> {
 pub fn serialise_merkle_tree(tree: &MerkleProof) -> Vec<u8> {
     serialise(tree).expect("Serialisation of Merkle tree should not fail")
 }
-
-/// The tag is invalid.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("Invalid tag")]
-pub struct InvalidTagError;
 
 /// When parsing, not enough bytes were provided to successfully complete the operation.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -371,14 +131,14 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
 mod tests {
     use octez_riscv_data::hash::DIGEST_SIZE;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+    use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
+    use octez_riscv_data::merkle_proof::tag::TAG_NODE;
+    use octez_riscv_data::merkle_proof::tag::TAG_READ;
     use proptest::proptest;
     use rand::Fill;
 
-    use super::MerkleProof;
-    use super::MerkleProofLeaf;
-    use super::TAG_BLIND;
-    use super::TAG_NODE;
-    use super::TAG_READ;
     use super::serialise_proof;
     use crate::state_backend::proof_backend::proof::Proof;
 
