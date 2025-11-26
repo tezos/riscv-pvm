@@ -28,6 +28,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use octez_riscv_data::mode::Normal;
 
+use crate::exceptions::Exception;
 use crate::jit::builder::control_flow_graph::ControlFlowGraph;
 use crate::jit::builder::control_flow_graph::NodeInfo;
 use crate::jit::builder::control_flow_graph::OutcomeData;
@@ -265,6 +266,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             self.steps_remaining,
             self.entry_block,
             exit_block,
+            self.result_param,
         );
 
         self.builder.seal_all_blocks();
@@ -328,6 +330,7 @@ pub fn insert_budget_check_ir(
     exit_delta: i64,
     exit_pc: Value<u64>,
     exit_block: Block,
+    entry_budget_check: Option<Pointer<ExceptionCode>>,
 ) {
     let steps_remaining = builder.use_var(steps_remaining_var);
 
@@ -349,6 +352,11 @@ pub fn insert_budget_check_ir(
 
     builder.seal_block(out_of_budget_block);
     builder.switch_to_block(out_of_budget_block);
+
+    if let Some(result_param) = entry_budget_check {
+        let exception_val = ExceptionCode::build_exception_code(builder, Exception::ForceFetchRun);
+        result_param.write(builder, exception_val);
+    }
 
     jump_to_exit(
         builder,

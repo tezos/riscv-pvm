@@ -39,7 +39,9 @@ use crate::jit::builder::outcome_map::SourceInstrLoc;
 use crate::jit::builder::outcome_map::TargetInstrLoc;
 use crate::jit::builder::sequence::insert_budget_check_ir;
 use crate::jit::builder::sequence::update_steps_remaining;
+use crate::jit::builder::typed::Pointer;
 use crate::jit::builder::typed::Value;
+use crate::jit::state_access::ExceptionCode;
 use crate::machine_state::memory::Address;
 
 /// Destination of a directed edge
@@ -722,6 +724,7 @@ impl ControlFlowGraph<'_, OutcomeData, Block> {
         steps_remaining_var: Variable,
         entry_block: Block,
         exit_block: Block,
+        result_param: Pointer<ExceptionCode>,
     ) {
         let (step_updates, exit_deltas) = self.find_step_counter_updates();
         let bc_locations = self.find_budget_check_locations();
@@ -780,6 +783,7 @@ impl ControlFlowGraph<'_, OutcomeData, Block> {
                     0,
                     entry_node_addr,
                     exit_block,
+                    Some(result_param),
                 );
                 entry_node.build_run(builder);
 
@@ -805,6 +809,7 @@ impl ControlFlowGraph<'_, OutcomeData, Block> {
                     exit_delta as i64,
                     exit_pc,
                     exit_block,
+                    None,
                 );
             }
 
