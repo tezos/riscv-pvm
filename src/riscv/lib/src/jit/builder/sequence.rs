@@ -28,6 +28,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use octez_riscv_data::mode::Normal;
 
+use crate::exceptions::Exception;
 use crate::jit::builder::control_flow_graph::ControlFlowGraph;
 use crate::jit::builder::control_flow_graph::NodeInfo;
 use crate::jit::builder::control_flow_graph::OutcomeData;
@@ -265,6 +266,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         exit_delta: i64,
         exit_pc: Value<u64>,
         exit_block: Block,
+        is_entry: bool,
     ) {
         let steps_remaining = self.builder.use_var(self.steps_remaining);
 
@@ -289,6 +291,18 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         self.builder.seal_block(out_of_budget_block);
         self.builder.switch_to_block(out_of_budget_block);
 
+        // If we are in the entry block budget-check, write the ForceFetchRun exception
+        // to the result in the out-of-budget case.
+
+        // TODO: RV-812: failing the budget check should fall back to
+        //       interpreted mode in general - we can unify entry and other budget check
+        //       code at that point.
+        if is_entry {
+            let exception_val =
+                ExceptionCode::build_exception_code(&mut self.builder, Exception::ForceFetchRun);
+            self.result_param.write(&mut self.builder, exception_val);
+        }
+
         // We expect to almost always have budget remaining - therefore we
         // ensure that the failure case is not placed in the hot path of
         // execution
@@ -298,8 +312,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         self.builder.switch_to_block(continue_block);
     }
 
-    // TODO: RV-803/RV-812: failing the entry budget check should fall back to
-    //       interpreted mode.
     /// Insert a budget-check into the control flow IR for the current entrypoint.
     fn build_entry_outcome_ir(
         &mut self,
@@ -318,7 +330,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             )
         };
 
-        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr, exit_block);
+        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr, exit_block, true);
         entry_node.run_instruction(&mut self.builder);
     }
 
@@ -342,7 +354,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             let exit_delta = outcome_data
                 .get_exit_delta()
                 .expect("Any budget check must have an exit delta.");
-            self.insert_budget_check_ir(budget as u64, exit_delta as i64, exit_pc, exit_block);
+            self.insert_budget_check_ir(
+                budget as u64,
+                exit_delta as i64,
+                exit_pc,
+                exit_block,
+                false,
+            );
         }
 
         match outcome_target {
