@@ -470,6 +470,7 @@ mod tests {
     use octez_riscv_data::compressed_merkle_tree::MERKLE_LEAF_SIZE;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
+    use octez_riscv_data::merkle_tree::MerkleTreeLeafData;
     use octez_riscv_data::mode::Normal;
     use proptest::array;
     use proptest::prop_assert;
@@ -548,9 +549,11 @@ mod tests {
             merkle_tree.check_root_hash();
             match merkle_tree {
                 MerkleTree::Leaf{
-                    hash,
-                    access_info,
-                    ..
+                    data: MerkleTreeLeafData {
+                        hash,
+                        access_info,
+                        ..
+                    }
                 } => {
                     prop_assert_eq!(hash, initial_root_hash);
                     prop_assert!(access_info);
@@ -683,7 +686,7 @@ mod tests {
 
             let pages_tree = match merkle_tree {
                 MerkleTree::Leaf{ .. } => panic!("Did not expect leaf"),
-                MerkleTree::Node(_, mut children) => {
+                MerkleTree::Node{ mut children, ..} => {
                     // The node for the pages is the second child.
                     children.remove(1)
                 },
@@ -693,10 +696,9 @@ mod tests {
             let mut leaf: usize = 0;
             while let Some(node) = queue.pop_front() {
                 match node {
-                    MerkleTree::Node(_, children) => queue.extend(children),
+                    MerkleTree::Node{ children, ..} => queue.extend(children),
                     MerkleTree::Leaf{
-                        access_info,
-                        ..
+                        data: MerkleTreeLeafData { access_info, .. }
                     } => {
                         prop_assert_eq!(
                             access_info,

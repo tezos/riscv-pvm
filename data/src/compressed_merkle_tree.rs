@@ -7,6 +7,8 @@ use crate::hash::Hash;
 use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::MerkleProofLeaf;
 use crate::merkle_tree::MerkleTree;
+use crate::merkle_tree::MerkleTreeLeafData;
+use crate::merkle_tree::MerkleTreeNodeData;
 use crate::tree::Tree;
 
 // TODO RV-322: Choose optimal Merkleisation parameters for main memory.
@@ -128,9 +130,12 @@ fn merkle_child_to_compressed_child(
     child: MerkleTree,
 ) -> Result<CompressedMerkleTree, MerkleTreeCompressionError> {
     if let MerkleTree::Leaf {
-        hash,
-        access_info,
-        data,
+        data:
+            MerkleTreeLeafData {
+                hash,
+                access_info,
+                data,
+            },
     } = child
     {
         if access_info {
@@ -165,7 +170,10 @@ pub fn merkle_tree_to_compressed_merkle_tree(
             leaf @ MerkleTree::Leaf { .. } => {
                 compressed_nodes.push((merkle_child_to_compressed_child(leaf)?, parent_index));
             }
-            MerkleTree::Node(hash, children) => {
+            MerkleTree::Node {
+                data: MerkleTreeNodeData { hash },
+                children,
+            } => {
                 compressed_nodes.push((
                     CompressedMerkleTree::Node {
                         data: CompressedMerkleTreeNodeData { hash },
@@ -261,6 +269,7 @@ mod tests {
     use crate::merkle_proof::proof_tree::MerkleProof;
     use crate::merkle_proof::proof_tree::MerkleProofLeaf;
     use crate::merkle_tree::MerkleTree;
+    use crate::merkle_tree::MerkleTreeLeafData;
 
     impl CompressedMerkleTree {
         /// Get the root hash of a compressed Merkle tree
@@ -317,9 +326,11 @@ mod tests {
     fn m_l(data: &[u8], access: bool) -> Result<MerkleTree, HashError> {
         let hash = Hash::blake3_hash_bytes(data);
         Ok(MerkleTree::Leaf {
-            hash,
-            access_info: access,
-            data: data.to_vec(),
+            data: MerkleTreeLeafData {
+                hash,
+                access_info: access,
+                data: data.to_vec(),
+            },
         })
     }
 

@@ -7,21 +7,26 @@ use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
+use crate::tree::Tree;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MerkleTreeLeafData {
+    pub hash: Hash,
+    pub access_info: bool,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MerkleTreeNodeData {
+    pub hash: Hash,
+}
 
 /// A variable-width Merkle tree with access metadata for leaves.
 ///
 /// Values of this type are produced by the proof-generating backend to capture
 /// a snapshot of the machine state along with access information for leaves
 /// which hold data that was used in a particular evaluation step.
-#[derive(Debug, Clone)]
-pub enum MerkleTree {
-    Leaf {
-        hash: Hash,
-        access_info: bool,
-        data: Vec<u8>,
-    },
-    Node(Hash, Vec<Self>),
-}
+pub type MerkleTree = Tree<MerkleTreeLeafData, MerkleTreeNodeData>;
 
 impl MerkleTree {
     /// Returns the precalculated root hash of the node.
@@ -41,8 +46,13 @@ impl MerkleTree {
     /// ```
     pub fn root_hash(&self) -> Hash {
         match self {
-            Self::Node(hash, _) => *hash,
-            Self::Leaf { hash, .. } => *hash,
+            Self::Node {
+                data: MerkleTreeNodeData { hash },
+                ..
+            } => *hash,
+            Self::Leaf {
+                data: MerkleTreeLeafData { hash, .. },
+            } => *hash,
         }
     }
 
@@ -50,9 +60,11 @@ impl MerkleTree {
     pub fn make_merkle_leaf(data: Vec<u8>, access_info: bool) -> Self {
         let hash = Hash::blake3_hash_bytes(&data);
         MerkleTree::Leaf {
-            hash,
-            access_info,
-            data,
+            data: MerkleTreeLeafData {
+                hash,
+                access_info,
+                data,
+            },
         }
     }
 
@@ -60,8 +72,11 @@ impl MerkleTree {
     /// new parent node on top of them.
     pub fn make_merkle_node(children: Vec<Self>) -> Self {
         let children_hashes = children.iter().map(|t| t.root_hash());
-        let node_hash = Hash::combine(children_hashes);
-        MerkleTree::Node(node_hash, children)
+        let hash = Hash::combine(children_hashes);
+        MerkleTree::Node {
+            data: MerkleTreeNodeData { hash },
+            children,
+        }
     }
 
     /// Recomputes the hashes for the whole tree
@@ -73,8 +88,18 @@ impl MerkleTree {
 
         while let Some(node) = deque.pop_front() {
             let is_valid_hash = match node {
-                Self::Leaf { hash, data, .. } => &Hash::blake3_hash_bytes(data) == hash,
-                Self::Node(hash, children) => {
+                Self::Leaf {
+                    data:
+                        MerkleTreeLeafData {
+                            hash,
+                            data: node_data,
+                            ..
+                        },
+                } => &Hash::blake3_hash_bytes(node_data) == hash,
+                Self::Node {
+                    data: MerkleTreeNodeData { hash },
+                    children,
+                } => {
                     let children_hashes: Vec<Hash> = children
                         .iter()
                         .map(|child| {
