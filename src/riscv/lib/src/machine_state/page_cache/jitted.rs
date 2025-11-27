@@ -5,8 +5,6 @@
 
 //! JIT-compilation support for entrypoints in pages.
 
-use std::sync::Arc;
-
 use octez_riscv_data::mode::Normal;
 
 use super::INSTRUCTION_ENTRIES;
@@ -29,7 +27,7 @@ use crate::machine_state::page_cache::DispatchTarget;
 pub(crate) const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
-pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>>>;
+pub type JittedPage<D, MC> = super::state::PageEntry<Jitted<D, MC>>;
 
 /// Entrypoints that are compiled to native code for execution, when possible & desirable.
 ///
@@ -61,7 +59,7 @@ impl<D, MC> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_interpreted(
-        page: &Arc<super::state::PageEntry<Self>>,
+        page: &super::state::PageEntry<Self>,
         core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
@@ -101,7 +99,7 @@ impl<D, MC> Jitted<D, MC> {
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     pub(super) unsafe extern "C" fn run_entrypoint_not_compiled(
-        page: &Arc<super::state::PageEntry<Self>>,
+        page: &super::state::PageEntry<Self>,
         core: &mut MachineCoreState<MC, Normal>,
         instr_pc: Address,
         max_steps: usize,
@@ -169,7 +167,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
     /// This ensures that the builder in question is guaranteed to be alive, for at least as long
     /// as this entrypoint may be run via [`CodePageEntry::run_entrypoint`].
     unsafe fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self>>,
+        page: &super::state::PageEntry<Self>,
         core: &mut MachineCoreState<MC, Normal>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,

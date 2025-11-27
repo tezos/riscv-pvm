@@ -8,7 +8,6 @@
 //! [`CodePage`]: super::CodePage
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use super::code_page_entry::CodePageEntry;
 use crate::exceptions::Exception;
@@ -42,7 +41,7 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
     ///
     /// This function is always safe to call.
     unsafe fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self>>,
+        page: &super::state::PageEntry<Self>,
         core: &mut MachineCoreState<MC, M>,
         _compiler: &mut Self::Compiler,
         instr_pc: Address,

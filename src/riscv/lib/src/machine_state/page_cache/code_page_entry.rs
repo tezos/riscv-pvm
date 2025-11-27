@@ -44,7 +44,7 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     /// that the compiler in question is guaranteed to be alive, for as long as this entrypoint may
     /// be run.
     unsafe fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self>>,
+        page: &super::state::PageEntry<Self>,
         core: &mut MachineCoreState<MC, M>,
         compiler: &mut Self::Compiler,
         instr_pc: Address,

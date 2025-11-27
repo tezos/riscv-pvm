@@ -303,8 +303,15 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         let offset = memory::address_to_page_offset(program_counter) >> 1;
         target.entries[offset].dispatch.set(fun);
 
+        let page = unsafe {
+            let target = target as *const JittedPage<Self, MC>;
+
+            Arc::increment_strong_count(target);
+            Arc::from_raw(target)
+        };
+
         let request = CompilationRequest {
-            page: target.clone(),
+            page,
             program_counter,
         };
 

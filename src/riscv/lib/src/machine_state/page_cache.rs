@@ -23,8 +23,6 @@ pub(crate) mod interpreted;
 pub(crate) mod jitted;
 pub(crate) mod state;
 
-use std::sync::Arc;
-
 pub use code_page_entry::CodePageEntry;
 pub use dispatch::DispatchTarget;
 pub use dispatch::InlineCompiler;
@@ -99,7 +97,8 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 /// A page containing code that may then be run against the [`MachineCoreState`].
 #[derive(Debug)]
 pub struct CodePage<'a, CPE> {
-    page: &'a Arc<state::PageEntry<CPE>>,
+    // always from an arc
+    page: &'a state::PageEntry<CPE>,
 }
 
 impl<CPE> CodePage<'_, CPE> {
