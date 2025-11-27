@@ -342,6 +342,7 @@ pub fn insert_budget_check_ir(
 
     let continue_block = builder.create_block();
     let out_of_budget_block = builder.create_block();
+
     builder.ins().brif(
         is_enough_budget,
         continue_block,
@@ -352,6 +353,8 @@ pub fn insert_budget_check_ir(
 
     builder.seal_block(out_of_budget_block);
     builder.switch_to_block(out_of_budget_block);
+
+    builder.set_cold_block(out_of_budget_block);
 
     if let Some(result_param) = entry_budget_check {
         let exception_val = ExceptionCode::build_exception_code(builder, Exception::ForceFetchRun);

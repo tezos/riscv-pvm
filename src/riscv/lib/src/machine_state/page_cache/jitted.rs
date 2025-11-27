@@ -175,10 +175,6 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception> {
-        if max_steps < MAX_INSTR_COMPILED {
-            return super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
-        }
-
         let page_offset = address_to_page_offset(instr_pc);
 
         // Since we know the instruction pc to always be halfword-aligned, there are half
