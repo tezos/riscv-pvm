@@ -10,6 +10,9 @@
 //! - **Repository**: Corresponds to a directory on disk, and acts as the storage place for the
 //!   commits.
 //!
+//! - **Database**: The interface for a KV database implemented by the Merkle layer and Persistence
+//!   layer.
+//!
 //! - **Database registry**: Keeps track of individual & separate KV databases. The registry
 //!   provides create, delete, copy & move operations between databases. The main motivation for
 //!   this is to obtain atomicity.
@@ -23,6 +26,7 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
+mod database;
 #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 mod merkle_layer;
 mod merkle_worker;
