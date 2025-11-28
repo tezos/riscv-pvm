@@ -51,11 +51,12 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
 ///
 /// [page cache]: super::PageCache
 #[derive(Debug)]
-pub struct PageEntry<CPE> {
+pub struct PageEntry<CPE, C> {
     pub(super) entries: [CPE; INSTRUCTION_ENTRIES],
+    pub(super) compiler: C,
 }
 
-impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
+impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
     /// Construct a new [`PageEntry`].
     ///
     /// `fetch_instr` should return the instruction that will be placed into the entrypoint
@@ -64,6 +65,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
     /// This must be able to return an instruction for offsets from zero to [`INSTRUCTION_ENTRIES`].
     /// *NB* the offsets refer to the _halfwords_ of the page, rather than each byte themselves.
     pub(super) fn new<E>(
+        compiler: C,
         fetch_instr: impl Fn(usize) -> Result<Instruction, E>,
     ) -> Result<Arc<Self>, E> {
         let mut page = Arc::<Self>::new_uninit();
@@ -90,8 +92,14 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
             }
         }
 
-        // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. It is therefore
-        // safe to no longer treat these as unitialised.
+        // SAFETY: it is safe to construct a pointer to an uninitialised field of an uninitialised
+        // struct and then write to it
+        unsafe {
+            std::ptr::addr_of_mut!((*page_ptr).compiler).write(compiler);
+        }
+
+        // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. The compiler field is
+        // also initialised. It is therefore safe to no longer treat these as unitialised.
         let page = unsafe { page.assume_init() };
 
         Ok(page)
@@ -99,7 +107,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
 
     /// Construct a new page entry as if it were populated from a memory of entirely zeroes.
     #[cfg(test)]
-    pub(crate) fn zeroed() -> Arc<Self> {
+    pub(crate) fn zeroed(compiler: C) -> Arc<Self> {
         use crate::machine_state::instruction::Instruction;
         use crate::parser::parse_compressed_instruction;
 
@@ -109,7 +117,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug> PageEntry<CPE> {
         let instruction = parse_compressed_instruction(ZEROED_HALFWORD);
         let instruction = Instruction::from(&instruction);
 
-        let Ok(page) = Self::new::<std::convert::Infallible>(|_| Ok(instruction));
+        let Ok(page) = Self::new::<std::convert::Infallible>(compiler, |_| Ok(instruction));
 
         page
     }
@@ -153,7 +161,7 @@ impl<const PAGES: usize, D, MC>
     PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, octez_riscv_data::mode::Normal>
 where
     MC: MemoryConfig,
-    D: super::dispatch::DispatchCompiler<MC>,
+    D: Clone + super::dispatch::DispatchCompiler<MC>,
 {
     /// TEST ONLY
     ///
@@ -169,6 +177,9 @@ where
         Some(page.entries[offset].dispatch.called_times())
     }
 }
+
+/// Type alias to simplify the [`PageCacheImpl`] struct.
+type BoxedPages<const PAGES: usize, CPE, C> = Box<[Option<Arc<PageEntry<CPE, C>>>; PAGES]>;
 
 /// Default implementor of [`PageCache`].
 ///
@@ -186,7 +197,7 @@ pub struct PageCacheImpl<
     MC: MemoryConfig,
     M: ManagerBase,
 > {
-    pages: Box<[Option<Arc<PageEntry<CPE>>>; PAGES]>,
+    pages: BoxedPages<PAGES, CPE, CPE::Compiler>,
     compiler: CPE::Compiler,
 }
 
@@ -198,7 +209,11 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     ///
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
     /// the given address.
-    pub(crate) fn overwrite_page(&mut self, address: Address, page_entry: Arc<PageEntry<CPE>>) {
+    pub(crate) fn overwrite_page(
+        &mut self,
+        address: Address,
+        page_entry: Arc<PageEntry<CPE, CPE::Compiler>>,
+    ) {
         let page_index = address_to_page_index(address);
 
         self.pages[page_index] = Some(page_entry);
@@ -244,10 +259,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
         self.pages
             .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
-            .map(|page| super::CodePage {
-                page,
-                compiler: &mut self.compiler,
-            })
+            .map(|page| super::CodePage { page })
     }
 
     /// Populates the entry in the page cache, that the given address points to.
@@ -272,7 +284,7 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
             return;
         }
 
-        *page_entry = PageEntry::new::<PopulationError>(|offset| {
+        *page_entry = PageEntry::new::<PopulationError>(self.compiler.clone(), |offset| {
             let offset_bytes = (offset << 1) as u64;
 
             if offset_bytes < LAST_HALFWORD_PAGE_OFFSET {
@@ -375,6 +387,7 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::interpreted::Interpreted;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -403,9 +416,9 @@ mod tests {
         let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Normal>::new();
 
         for page in cache.pages.iter_mut().take(16) {
-            *page = PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|_| {
-                Ok(Instruction::DEFAULT)
-            })
+            *page = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+                std::convert::Infallible,
+            >(InterpretedCompiler, |_| Ok(Instruction::DEFAULT))
             .ok()
         }
         assert_eq!(count_active_pages(&cache), 16);

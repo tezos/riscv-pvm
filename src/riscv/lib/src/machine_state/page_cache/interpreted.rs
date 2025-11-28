@@ -22,7 +22,7 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
 /// Interpreted entrypoints are built automatically, and require no additional context.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InterpretedCompiler;
 
 /// Entrypoints that are interpreted only.
@@ -39,14 +39,9 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
     type Compiler = InterpretedCompiler;
 
     /// Run an entrypoint in a purely interpreted manner.
-    ///
-    /// # SAFETY
-    ///
-    /// This function is always safe to call.
-    unsafe fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self>>,
+    fn run_entrypoint(
+        page: &Arc<super::state::PageEntry<Self, InterpretedCompiler>>,
         core: &mut MachineCoreState<MC, M>,
-        _compiler: &mut Self::Compiler,
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>

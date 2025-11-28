@@ -34,9 +34,14 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 ///
 /// This is used in-turn by the entrypoint dispatch mechanism in the page cache.
 ///
-/// Functions produced by the JIT do not inspect the first, third and last parameters here.
+/// Functions produced by the JIT do not inspect the first and third parameters here.
 /// These parameters are needed, however, by the initial dispatch mechanism to enable
 /// JIT-compilation & hot-swapping.
+///
+/// # Safety
+///
+/// The rust compiler has no way of checking if function pointers returned by the JIT
+/// compiler are still valid, so any function pointer it returns must be marked `unsafe`.
 pub type JitFn<D, MC> = unsafe extern "C" fn(
     // ignored
     &JittedPage<D, MC>,
@@ -45,8 +50,6 @@ pub type JitFn<D, MC> = unsafe extern "C" fn(
     u64,
     usize,
     &mut ExceptionCode,
-    // ignored
-    &mut D,
     // TODO: RV-751 - Move the unused parameters for the JIT function to the end.
 ) -> usize;
 
@@ -283,6 +286,7 @@ mod tests {
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::state::PageEntry;
@@ -311,7 +315,6 @@ mod tests {
         }
 
         fn compile(
-            &mut self,
             _target: &JittedPage<Self, MC>,
             _program_counter: Address,
         ) -> crate::machine_state::page_cache::dispatch::DispatchFn<Self, MC> {
@@ -435,7 +438,10 @@ mod tests {
             let initial_pc = self.initial_pc.unwrap_or_default();
 
             // Push the given instructions to the correct page
-            let mut interpreted_page = PageEntry::<Interpreted<M4K, Normal>>::zeroed();
+            let mut interpreted_page =
+                PageEntry::<Interpreted<M4K, Normal>, InterpretedCompiler>::zeroed(
+                    InterpretedCompiler,
+                );
             PageEntry::push_instructions(
                 &mut interpreted_page,
                 initial_pc,
@@ -446,7 +452,9 @@ mod tests {
                 .page_cache
                 .overwrite_page(initial_pc, interpreted_page);
 
-            let mut jitted_page = PageEntry::<Jitted<InlineCompiler, M4K>>::zeroed();
+            let mut jitted_page = PageEntry::<Jitted<InlineCompiler, M4K>, InlineCompiler>::zeroed(
+                InlineCompiler::default(),
+            );
             PageEntry::push_instructions(
                 &mut jitted_page,
                 initial_pc,
@@ -2024,21 +2032,19 @@ mod tests {
             );
 
             let fun = jit
-                .compile(success, initial_pc)
+                .compile::<DummyCompiler, _>(success, initial_pc)
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_err = ExceptionCode::NoException;
             let max_steps = usize::MAX;
+            // SAFETY: `jit` is still alive so the function pointer is safe to call.
             let jitted_steps = unsafe {
-                // # Safety - the jit is not dropped until after we
-                //            exit the instruction sequence.
                 (fun)(
-                    &PageEntry::zeroed(),
+                    &PageEntry::zeroed(DummyCompiler),
                     &mut jitted,
                     initial_pc,
                     max_steps,
                     &mut jitted_err,
-                    &mut DummyCompiler,
                 )
             };
 

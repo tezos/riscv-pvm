@@ -943,6 +943,7 @@ mod tests {
     use crate::machine_state::memory::M64M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
@@ -1192,7 +1193,7 @@ mod tests {
                     .unwrap();
             }
 
-            let mut page = PageEntry::zeroed();
+            let mut page = PageEntry::zeroed(InterpretedCompiler);
             PageEntry::push_instructions(&mut page, initial_pc, [Instruction::DEFAULT].into_iter());
 
             state.page_cache.overwrite_page(initial_pc, page);

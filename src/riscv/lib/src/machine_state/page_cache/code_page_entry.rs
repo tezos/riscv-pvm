@@ -31,22 +31,17 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ///
     /// We require the compiler capable of doing so to be passed in when
     /// dispatching.
-    type Compiler: Default;
+    type Compiler: Clone + Default;
 
     /// Run a code-page entrypoint against the [`MachineCoreState`].
     ///
     /// This will run for up-to `max_steps`, but never over.
     ///
-    /// # SAFETY
-    ///
-    /// The `compiler` must always be the same instance as passed to any
-    /// call to `run_entrypoint` within the same page, for the lifetime of that page. This ensures
-    /// that the compiler in question is guaranteed to be alive, for as long as this entrypoint may
-    /// be run.
-    unsafe fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self>>,
+    /// This entrypoint may be either interpreted or compiled. If compiled, compilation occurs
+    /// using the compiler contained in the `PageEntry`.
+    fn run_entrypoint(
+        page: &Arc<super::state::PageEntry<Self, Self::Compiler>>,
         core: &mut MachineCoreState<MC, M>,
-        compiler: &mut Self::Compiler,
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception>
