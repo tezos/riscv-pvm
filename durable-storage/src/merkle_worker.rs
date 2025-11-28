@@ -8,9 +8,6 @@
 //! background thread. It allows non-blocking `set` and `delete` operations while still providing
 //! synchronous access to `hash` and `commit` operations.
 
-// The functionality in this module is not currently tested upstream.
-#![cfg(test)]
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -73,6 +70,7 @@ impl MerkleWorker {
     /// Create a new Merkle worker with an empty Merkle tree.
     ///
     /// The provided handle is used to spawn the background worker thread.
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn new(
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
@@ -100,6 +98,7 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::clone_with`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn clone_with(
         &self,
         persistence_layer: Arc<PersistenceLayer>,
@@ -162,6 +161,7 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::set`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn set(&self, key: Key, value: Bytes) {
         self.sender
             .send(Command::Set { key, value })
@@ -169,6 +169,7 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::delete`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn delete(&self, key: Key) {
         self.sender
             .send(Command::Delete { key })
@@ -176,6 +177,7 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::hash`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn hash(&self) -> blake3::Hash {
         let (sender, receiver) = oneshot::channel();
 
@@ -189,6 +191,7 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::commit`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn commit(&self) -> Result<CommitId, MerkleWorkerError> {
         let (sender, receiver) = oneshot::channel();
 
