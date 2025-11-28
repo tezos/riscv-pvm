@@ -97,13 +97,9 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 }
 
 /// A page containing code that may then be run against the [`MachineCoreState`].
-///
-/// This also contains a reference to the `compiler` owned by the page cache. This allows the `run`
-/// method to access it and ensures that the `compiler` lives as long as any pages are being run.
 #[derive(Debug)]
 pub struct CodePage<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
-    page: &'a Arc<state::PageEntry<CPE>>,
-    compiler: &'a mut CPE::Compiler,
+    page: &'a Arc<state::PageEntry<CPE, CPE::Compiler>>,
 }
 
 impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, MC, M, CPE> {
@@ -118,9 +114,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, M
         MC: MemoryConfig,
         M: ManagerRead + ManagerWrite,
     {
-        // SAFETY: the compiler remains the same for the lifetime of the page this code-page
-        // references
-        unsafe { CPE::run_entrypoint(self.page, core, self.compiler, instr_pc, max_steps) }
+        CPE::run_entrypoint(self.page, core, instr_pc, max_steps)
     }
 }
 
@@ -235,21 +229,19 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let Ok(mut page_entry) =
-            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|_| {
-                Ok(Instruction::new_addi(
-                    nz::a0,
-                    nz::a0,
-                    5,
-                    InstrWidth::Compressed,
-                ))
-            });
-
-        let mut compiler = InterpretedCompiler;
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |_| {
+            Ok(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                5,
+                InstrWidth::Compressed,
+            ))
+        });
 
         let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
-            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();
@@ -295,23 +287,21 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let Ok(mut page_entry) =
-            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|idx| {
-                // we put uncompressed instructions on 4-byte aligned addresses
-                let instr = if idx % 2 == 0 {
-                    Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
-                } else {
-                    Instruction::new_nop(InstrWidth::Compressed)
-                };
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |idx| {
+            // we put uncompressed instructions on 4-byte aligned addresses
+            let instr = if idx % 2 == 0 {
+                Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
+            } else {
+                Instruction::new_nop(InstrWidth::Compressed)
+            };
 
-                Ok(instr)
-            });
-
-        let mut compiler = InterpretedCompiler;
+            Ok(instr)
+        });
 
         let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
-            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();
@@ -405,16 +395,12 @@ mod tests {
             instructions.push(Instruction::new_nop(InstrWidth::Compressed));
         }
 
-        let Ok(mut page_entry) =
-            PageEntry::<Interpreted<_, _>>::new::<std::convert::Infallible>(|offset| {
-                Ok(instructions[offset])
-            });
-
-        let mut compiler = InterpretedCompiler;
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |offset| Ok(instructions[offset]));
 
         let dispatch = &RefCell::new(CodePage {
             page: &mut page_entry,
-            compiler: &mut compiler,
         });
 
         let state = MachineCoreState::<M4K, F>::new();

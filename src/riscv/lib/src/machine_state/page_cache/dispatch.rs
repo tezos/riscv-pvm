@@ -5,13 +5,17 @@
 //!
 //! This module exposes wrappers for the style of dispatch and compilation that is done.
 
+use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+
+use perfect_derive::perfect_derive;
 
 use crate::jit::JIT;
 use crate::machine_state::memory;
@@ -141,22 +145,21 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
     /// NB - the hot-swapping of JIT-compiled entrypoints may occur at any time, and is not
     /// guaranteed to be contained within the call-time of this function. (This is true for
     /// outline jit, especially).
-    fn compile(
-        &mut self,
-        target: &JittedPage<Self, MC>,
-        program_counter: Address,
-    ) -> DispatchFn<Self, MC>;
+    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC>;
 }
 
 /// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
+#[derive(Clone)]
 pub struct InlineCompiler {
-    jit: JIT,
+    jit: Rc<RefCell<JIT>>,
 }
 
 impl Default for InlineCompiler {
     fn default() -> Self {
         Self {
-            jit: JIT::new().expect("InlineCompiler should instantiate its `JIT`"),
+            jit: Rc::new(RefCell::new(
+                JIT::new().expect("InlineCompiler should instantiate its `JIT`"),
+            )),
         }
     }
 }
@@ -169,14 +172,15 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
         true
     }
 
-    fn compile(
-        &mut self,
-        target: &JittedPage<Self, MC>,
-        program_counter: Address,
-    ) -> DispatchFn<Self, MC> {
+    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
         let instr = Jitted::compilation_request_instructions(&target.entries, program_counter);
 
-        let fun: DispatchFn<Self, MC> = match self.jit.compile(&instr, program_counter) {
+        // The `InlineCompiler` is exclusively used in a single threaded context (compilation is
+        // done in the same thread as execution). Therefore, this borrow should never panic as
+        // there can be no other attempts to borrow concurrently.
+        let mut jit = target.compiler.jit.borrow_mut();
+
+        let fun: DispatchFn<Self, MC> = match jit.compile(&instr, program_counter) {
             Some(jitfn) => jitfn,
             None => Jitted::run_entrypoint_not_compiled,
         };
@@ -220,6 +224,7 @@ mod internal_corro {
 
 /// JIT compiler for entrypoints that performs compilation in a
 /// background thread.
+#[perfect_derive(Clone)]
 pub struct OutlineCompiler<MC: MemoryConfig> {
     // We will not touch the jit from the execution thread, however we must maintain
     // a reference to it - to ensure it is not dropped before we are done with execution,
@@ -290,11 +295,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         target.remaining_calls.fetch_sub(1, Ordering::SeqCst) == 1
     }
 
-    fn compile(
-        &mut self,
-        target: &JittedPage<Self, MC>,
-        program_counter: Address,
-    ) -> DispatchFn<Self, MC> {
+    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_entrypoint_not_compiled;
 
         let offset = memory::address_to_page_offset(program_counter) >> 1;
@@ -314,7 +315,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         // NB - any entrypoints already JIT compiled are safe to keep calling, as the
         // data behind the mutex (the JIT) is kept alive for as long as we maintain
         // our reference to it, despite the lock itself being poisoned.
-        let _ = self.sender.send(request);
+        let _ = target.compiler.sender.send(request);
 
         fun
     }
@@ -323,7 +324,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 /// Compilation request sent to the background JIT-thread of the [`OutlineCompiler`].
 struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// Reference to the page containing the entrypoint to compile.
-    page: Arc<super::state::PageEntry<Jitted<D, MC>>>,
+    page: Arc<super::state::PageEntry<Jitted<D, MC>, D>>,
     /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,
 }
@@ -360,13 +361,12 @@ mod tests {
             "unexpected formatting \"{format}\""
         );
 
-        unsafe extern "C" fn compiled_dummy<D: DispatchCompiler<M4K>>(
+        extern "C" fn compiled_dummy<D: DispatchCompiler<M4K>>(
             _: &JittedPage<D, M4K>,
             _: &mut MachineCoreState<M4K, Normal>,
             _: Address,
             _: usize,
             _: &mut ExceptionCode,
-            _: &mut D,
         ) -> usize {
             0
         }
