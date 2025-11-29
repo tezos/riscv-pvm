@@ -91,6 +91,7 @@ impl MerkleTree {
     }
 }
 
+/// [`Fold`] implementation for Merkle trees
 pub struct MerkleTreeFold;
 
 impl Fold for MerkleTreeFold {
@@ -103,8 +104,13 @@ impl Fold for MerkleTreeFold {
     }
 }
 
+/// [`NodeFold`] implementation for Merkle trees
+///
+/// It accumulates child [`MerkleTree`] node and constructs a parent node when [`NodeFold::done`] is
+/// called.
 #[derive(Default)]
 pub struct MerkleNodeFold {
+    /// Accumulated child nodes
     children: Vec<MerkleTree>,
 }
 
