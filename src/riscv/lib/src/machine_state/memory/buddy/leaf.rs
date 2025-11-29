@@ -12,7 +12,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -24,7 +23,6 @@ use super::Buddy;
 use super::BuddyLayout;
 use crate::bits::ones;
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
@@ -35,25 +33,12 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::PartialHashError;
-use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofTree;
-use crate::state_backend::RefVerifyAlloc;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafLayout<const PAGES: u64>;
 
 impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
     type Allocated<M: ManagerBase> = BuddyLeaf<PAGES, M>;
-}
-
-impl<const PAGES: u64> ProofLayout for BuddyLeafLayout<PAGES> {
-    fn partial_state_hash(
-        state: RefVerifyAlloc<Self>,
-        proof: ProofTree,
-    ) -> Result<Hash, PartialHashError> {
-        Atom::partial_state_hash(state.set, proof)
-    }
 }
 
 impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
