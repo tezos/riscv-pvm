@@ -135,26 +135,6 @@ macro_rules! struct_layout {
                 >;
 
             }
-
-            impl <
-                $(
-                    [<$field_name:camel>]: $crate::state_backend::proof_backend::merkle::AccessInfoAggregatable + bincode::Encode
-                ),+
-            > $crate::state_backend::proof_backend::merkle::AccessInfoAggregatable for [<$layout_t F>]<
-                $(
-                    [<$field_name:camel>]
-                ),+
-            > {
-                #[inline]
-                fn aggregate_access_info(&self) -> bool {
-                    let children = [
-                        $(
-                            self.$field_name.aggregate_access_info()
-                        ),+
-                    ];
-                    children.iter().any(|&x| x)
-                }
-            }
         }
     };
 }

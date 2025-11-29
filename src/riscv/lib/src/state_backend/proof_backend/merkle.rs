@@ -134,21 +134,6 @@ impl CompressedAccessInfo {
     }
 }
 
-pub trait AccessInfoAggregatable {
-    /// Aggregate the access information of the Merkle tree described by
-    /// the layout of the given data, without constructing the tree.
-    ///
-    /// Used in implementations of `to_merkle_tree` in which certain leaves can
-    /// combine data corresponding to multiple layout elements.
-    fn aggregate_access_info(&self) -> bool;
-}
-
-impl AccessInfoAggregatable for () {
-    fn aggregate_access_info(&self) -> bool {
-        false
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::hash::Hash;
