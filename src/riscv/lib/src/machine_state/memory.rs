@@ -24,11 +24,11 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Elem;
 use crate::state_backend::FnManager;
+use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::ProofLayout;
 
 /// Number of bits needed so you can address every byte in a page
 pub const OFFSET_BITS: NonZeroU64 = NonZeroU64::new(12).expect("OFFSET_BITS is non-zero");
@@ -317,7 +317,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     const TOTAL_BYTES: NonZeroUsize;
 
     /// Layout for memory instance's state
-    type Layout: ProofLayout;
+    type Layout: Layout;
 
     /// Memory instance
     type State<M: ManagerBase>: Memory<M>;
