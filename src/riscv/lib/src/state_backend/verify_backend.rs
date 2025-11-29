@@ -21,9 +21,7 @@ use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerWrite;
-use super::Ref;
 use crate::state_backend::Elem;
-use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
@@ -503,20 +501,6 @@ impl<E> Cell<E, Verify> {
         let values = Box::new(cell.into_region().map(Some));
         let region = Region::Partial(values);
         Cell::bind(region)
-    }
-}
-
-impl<E: Clone> TryFrom<Cell<E, Ref<'_, Verify>>> for Cell<E, Normal> {
-    type Error = PartialHashError;
-
-    fn try_from(cell: Cell<E, Ref<'_, Verify>>) -> Result<Self, Self::Error> {
-        match cell.into_region() {
-            Region::Absent => Err(PartialHashError::PotentiallyRecoverable),
-            Region::Partial(value) => match value.as_ref() {
-                [Some(v)] => Ok(Cell::bind([v.clone()])),
-                [None] => Err(PartialHashError::PotentiallyRecoverable),
-            },
-        }
     }
 }
 
