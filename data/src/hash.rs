@@ -18,6 +18,7 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::serialisation as binary;
 
+/// Errors that can occur during hashing operations
 #[derive(Error, Debug)]
 pub enum HashError {
     #[error("Encoding error: {0}")]
@@ -127,6 +128,7 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
+/// [`Fold`] implementation producing a [`struct@Hash`]
 pub struct HashFold;
 
 impl Fold for HashFold {
@@ -139,8 +141,13 @@ impl Fold for HashFold {
     }
 }
 
+/// [`NodeFold`] implementation producing a [`struct@Hash`]
+///
+/// It collects the hashes of all children and then combines them by hashing the concatenation of
+/// children's [`struct@Hash`] bytes.
 #[derive(Default)]
 pub struct HashNodeFold {
+    /// Hasher used to combine children's hashes
     hasher: blake3::Hasher,
 }
 
