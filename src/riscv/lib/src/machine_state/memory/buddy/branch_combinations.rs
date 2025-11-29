@@ -15,7 +15,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
@@ -36,10 +35,6 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::PartialHashError;
-use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofTree;
-use crate::state_backend::RefVerifyAlloc;
 
 /// Generate a new combined Buddy branch.
 macro_rules! combined_buddy_branch {
@@ -84,18 +79,6 @@ macro_rules! combined_buddy_branch {
 
             impl<B: Layout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-            }
-
-            impl<B: ProofLayout> ProofLayout for [<$name Layout>]<B>
-            where
-                [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: ProofLayout
-            {
-                fn partial_state_hash(
-                    state: RefVerifyAlloc<Self>,
-                    proof: ProofTree,
-                ) -> Result<Hash, PartialHashError> {
-                    <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>>::partial_state_hash(state.0, proof)
-                }
             }
 
             impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B>

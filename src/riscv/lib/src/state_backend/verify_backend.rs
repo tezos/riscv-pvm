@@ -23,6 +23,7 @@ use super::ManagerRead;
 use super::ManagerWrite;
 use super::Ref;
 use crate::state_backend::Elem;
+use crate::state_backend::PartialHashError;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;

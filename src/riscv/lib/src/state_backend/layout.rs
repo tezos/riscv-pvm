@@ -155,32 +155,6 @@ macro_rules! struct_layout {
                     children.iter().any(|&x| x)
                 }
             }
-
-            impl <
-                $(
-                    [<$field_name:camel>]: $crate::state_backend::ProofLayout
-                ),+
-            > $crate::state_backend::ProofLayout for [<$layout_t F>]<
-                $(
-                    [<$field_name:camel>]
-                ),+
-            >
-            {
-                #[inline]
-                fn partial_state_hash(
-                    state: $crate::state_backend::RefVerifyAlloc<Self>,
-                    proof: $crate::state_backend::ProofTree,
-                ) -> std::result::Result<octez_riscv_data::hash::Hash, $crate::state_backend::PartialHashError> {
-                    let (branches, proof_hash) = proof.into_branches_with_hash()?;
-                    let [ $($field_name),+ ] = *branches;
-
-                    $(
-                        let $field_name = [<$field_name:camel>]::partial_state_hash(state.$field_name, $field_name);
-                    )+
-
-                    $crate::state_backend::combine_partial_hashes([$($field_name),+], proof_hash)
-                }
-            }
         }
     };
 }

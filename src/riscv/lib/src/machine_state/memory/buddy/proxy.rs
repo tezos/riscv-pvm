@@ -4,7 +4,6 @@
 
 //! Simplified [`BuddyLayout`] selection using const-generics
 
-use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::mode::Verify;
 
@@ -20,10 +19,6 @@ use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layou
 use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
-use crate::state_backend::PartialHashError;
-use crate::state_backend::ProofLayout;
-use crate::state_backend::ProofTree;
-use crate::state_backend::RefVerifyAlloc;
 
 /// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
 pub struct BuddyLayoutProxy<const PAGES: usize>;
@@ -33,18 +28,6 @@ where
     (): BuddyLayoutMatch<PAGES>,
 {
     type Allocated<M: ManagerBase> = <PickLayout<PAGES> as Layout>::Allocated<M>;
-}
-
-impl<const PAGES: usize> ProofLayout for BuddyLayoutProxy<PAGES>
-where
-    (): BuddyLayoutMatch<PAGES>,
-{
-    fn partial_state_hash(
-        state: RefVerifyAlloc<Self>,
-        proof: ProofTree,
-    ) -> Result<Hash, PartialHashError> {
-        <PickLayout<PAGES> as ProofLayout>::partial_state_hash(state, proof)
-    }
 }
 
 impl<const PAGES: usize> BuddyLayout for BuddyLayoutProxy<PAGES>
