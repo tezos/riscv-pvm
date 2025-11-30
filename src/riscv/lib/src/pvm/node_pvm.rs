@@ -242,8 +242,7 @@ impl NodePvm<Verify> {
 
 impl PartialEq for NodePvm {
     fn eq(&self, other: &Self) -> bool {
-        self.state.struct_ref::<state_backend::FnManagerIdent>()
-            == other.state.struct_ref::<state_backend::FnManagerIdent>()
+        self.hash() == other.hash()
     }
 }
 
