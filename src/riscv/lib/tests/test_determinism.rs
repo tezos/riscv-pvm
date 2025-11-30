@@ -48,19 +48,13 @@ fn test_determinism(inputs: TestConfig) {
     eprintln!("Final hash is {base_hash}");
     eprintln!("Final result is {base_result:?}");
 
-    let base_refs = base_stepper.struct_ref();
-
     // Create multiple series of bisections that we will evaluate.
     let ladder = dissect_steps(steps, 0);
-    run_steps_ladder::<M64M, _>(&make_stepper, &ladder, &base_refs, base_hash);
+    run_steps_ladder::<M64M, _>(&make_stepper, &ladder, base_hash);
 }
 
-fn run_steps_ladder<MC, F>(
-    make_stepper: F,
-    ladder: &[usize],
-    expected_refs: &RefNormalAlloc<PvmLayout<MC>>,
-    expected_hash: hash::Hash,
-) where
+fn run_steps_ladder<MC, F>(make_stepper: F, ladder: &[usize], expected_hash: hash::Hash)
+where
     MC: MemoryConfig,
     MC::State<Normal>: Foldable<HashFold>,
     for<'a> RefNormalAlloc<'a, PvmLayout<MC>>: PartialEq,
@@ -70,8 +64,9 @@ fn run_steps_ladder<MC, F>(
     let mut stepper_lhs = make_stepper();
     let mut stepper_rhs = make_stepper();
 
-    assert!(
-        stepper_lhs.struct_ref() == stepper_rhs.struct_ref(),
+    assert_eq!(
+        stepper_lhs.hash(),
+        stepper_rhs.hash(),
         "Stepper states have diverged before doing anything"
     );
 
@@ -95,33 +90,15 @@ fn run_steps_ladder<MC, F>(
             steps,
             result_lhs.steps()
         );
-        assert!(
-            stepper_lhs.struct_ref() == stepper_rhs.struct_ref(),
+        assert_eq!(
+            stepper_lhs.hash(),
+            stepper_rhs.hash(),
             "Stepper states have diverged after running {steps} steps"
         );
 
         stepper_lhs.rebind_via_clone();
     }
 
-    assert_eq_struct_wrapper::<MC>(stepper_lhs.struct_ref(), expected_refs);
     assert_eq!(stepper_lhs.hash(), expected_hash);
     assert_eq!(stepper_rhs.hash(), expected_hash);
-}
-
-fn assert_eq_struct_wrapper<'a, 'regions1, 'regions2, MC: MemoryConfig>(
-    refs: RefNormalAlloc<'regions1, PvmLayout<MC>>,
-    expected: &'a RefNormalAlloc<'regions2, PvmLayout<MC>>,
-) where
-    RefNormalAlloc<'regions2, PvmLayout<MC>>: PartialEq,
-{
-    // SAFETY: Rust does not allow us to compare two references with different lifetimes.
-    // Theoretically this should be possible and safe thanks to `PartialEq`. However, Rust's
-    // subtyping rules seem to influence trait-implementation selection for our `AllocatedOf<...>`
-    // in a way that make it more human-friendly but ultimately ends up selecting `A: PartialEq<A>`
-    // (where `A` is our `AllocatedOf`-struct) such that left-hand and right-hand side operands of
-    // the `==` operator need to be identical in type. This also means lifetimes are forcibly
-    // unified. We can work around this by transmuting the references to the same lifetime. This is
-    // safe because lifetimes are not violated as dictated by the interface of this function.
-    let refs: RefNormalAlloc<'regions2, PvmLayout<MC>> = unsafe { std::mem::transmute(refs) };
-    assert!(&refs == expected);
 }
