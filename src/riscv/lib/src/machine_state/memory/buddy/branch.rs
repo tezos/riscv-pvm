@@ -16,6 +16,8 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -83,6 +85,14 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
             free_info: space.free_info.struct_ref::<F>(),
             left: Box::new(B::struct_ref::<F, M>(&space.left)),
             right: Box::new(B::struct_ref::<F, M>(&space.right)),
+        }
+    }
+
+    fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
+        BuddyBranch2 {
+            free_info: instance.free_info.start_proof(),
+            left: Box::new(B::start_proof(instance.left.as_ref())),
+            right: Box::new(B::start_proof(instance.right.as_ref())),
         }
     }
 

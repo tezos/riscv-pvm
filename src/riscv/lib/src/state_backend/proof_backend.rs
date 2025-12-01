@@ -26,7 +26,6 @@ use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 
-use super::FnManager;
 use super::ManagerBase;
 use super::ManagerRead;
 use super::ManagerSerialise;
@@ -439,25 +438,6 @@ impl DynAccess {
     /// Check whether no address has been accessed.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-}
-
-/// Natural transformation from a [`Normal`] to a proof-generating mode [`Prove`]
-pub enum ProofWrapper {}
-
-impl<'normal> FnManager<'normal, Normal> for ProofWrapper {
-    type Output = Prove<'normal>;
-
-    fn map_region<E: 'static, const LEN: usize>(
-        input: &'normal <Normal as ManagerBase>::Region<E, LEN>,
-    ) -> <Prove<'normal> as ManagerBase>::Region<E, LEN> {
-        ProofRegion::bind(input)
-    }
-
-    fn map_dyn_region(
-        input: &'normal <Normal as ManagerBase>::DynRegion,
-    ) -> <Prove<'normal> as ManagerBase>::DynRegion {
-        ProofDynRegion::bind(input)
     }
 }
 

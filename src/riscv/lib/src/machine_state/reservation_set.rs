@@ -16,6 +16,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -113,6 +115,15 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
         // invalidates any reservation held by this hart.
         self.reset();
         start_addr != UNSET_VALUE && start_addr == addr.bitand(RES_SET_BITMASK)
+    }
+}
+
+impl ReservationSet<Normal> {
+    /// Return a proof-generating version of this ReservationSet.
+    pub fn start_proof(&self) -> ReservationSet<Prove<'_>> {
+        ReservationSet {
+            start_addr: self.start_addr.start_proof(),
+        }
     }
 }
 

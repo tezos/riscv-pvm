@@ -5,6 +5,8 @@
 //! Simplified [`BuddyLayout`] selection using const-generics
 
 use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
 use super::BuddyLayout;
@@ -47,6 +49,10 @@ where
         F: FnManager<'a, M>,
     {
         <PickLayout<PAGES> as BuddyLayout>::struct_ref::<F, M>(space)
+    }
+
+    fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
+        <PickLayout<PAGES> as BuddyLayout>::start_proof(instance)
     }
 
     fn buddy_from_proof<D: merkle_proof::Deserialiser>(

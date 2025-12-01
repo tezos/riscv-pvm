@@ -6,6 +6,8 @@ use std::num::NonZeroUsize;
 
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
 use super::buddy::BuddyLayout;
@@ -124,6 +126,18 @@ where
             executable_pages,
             allocated_pages,
         })
+    }
+
+    fn start_proof(instance: &Self::State<Normal>) -> Self::State<Prove<'_>> {
+        MemoryImpl {
+            data: instance.data.start_proof(),
+            readable_pages: instance.readable_pages.start_proof(),
+            writable_pages: instance.writable_pages.start_proof(),
+            executable_pages: instance.executable_pages.start_proof(),
+            allocated_pages: <BuddyLayoutProxy<PAGES> as BuddyLayout>::start_proof(
+                &instance.allocated_pages,
+            ),
+        }
     }
 }
 

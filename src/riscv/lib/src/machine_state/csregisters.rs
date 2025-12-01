@@ -18,6 +18,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -370,6 +372,16 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
 
         // 000 = RNE aka "round to nearest, ties to even"
         self.frm.write(RoundingMode::DEFAULT);
+    }
+}
+
+impl CSRegisters<Normal> {
+    /// Return a proof-generating version of this CSRegisters.
+    pub fn start_proof(&self) -> CSRegisters<Prove<'_>> {
+        CSRegisters {
+            fflags: self.fflags.start_proof(),
+            frm: self.frm.start_proof(),
+        }
     }
 }
 

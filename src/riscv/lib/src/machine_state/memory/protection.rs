@@ -20,6 +20,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -135,6 +137,23 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
         M: ManagerWrite,
     {
         self.pages.iter_mut().for_each(|page| page.write(false));
+    }
+}
+
+impl<const PAGES: usize> PagePermissions<PAGES, Normal> {
+    /// Return a proof-generating version of this PagePermissions.
+    pub fn start_proof(&self) -> PagePermissions<PAGES, Prove<'_>> {
+        let Ok(pages) = self
+            .pages
+            .iter()
+            .map(Cell::start_proof)
+            .collect::<Vec<_>>()
+            .try_into()
+        else {
+            unreachable!("Collecting into an array of the same length should always succeed")
+        };
+
+        PagePermissions { pages }
     }
 }
 

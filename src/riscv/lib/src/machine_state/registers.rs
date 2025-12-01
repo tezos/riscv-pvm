@@ -28,6 +28,7 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -292,6 +293,13 @@ impl XRegisters<Normal> {
     pub(crate) const fn xregister_offset(reg: NonZeroXRegister) -> usize {
         std::mem::offset_of!(Self, registers)
             + backend::Cells::<XValue, 31, Normal>::region_elem_offset(reg as usize)
+    }
+
+    /// Return a proof-generating version of this XRegisters.
+    pub fn start_proof(&self) -> XRegisters<Prove<'_>> {
+        XRegisters {
+            registers: self.registers.start_proof(),
+        }
     }
 }
 
@@ -690,6 +698,15 @@ impl<M: backend::ManagerBase> FRegisters<M> {
         M: backend::ManagerWrite,
     {
         self.registers.write(reg as usize, val)
+    }
+}
+
+impl FRegisters<Normal> {
+    /// Return a proof-generating version of this FRegisters.
+    pub fn start_proof(&self) -> FRegisters<Prove<'_>> {
+        FRegisters {
+            registers: self.registers.start_proof(),
+        }
     }
 }
 
