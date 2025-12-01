@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use bincode::Encode;
 use bytes::Bytes;
+use bytes::BytesMut;
 use octez_riscv_data::serialisation::serialise_into;
 
 use super::Key;
@@ -17,7 +18,7 @@ use super::Key;
 #[derive(Clone, Default, Debug)]
 pub(super) struct MavlNode {
     key: Key,
-    data: Bytes,
+    data: BytesMut,
     left: Option<Arc<Self>>,
     right: Option<Arc<Self>>,
 
@@ -51,7 +52,7 @@ impl MavlNode {
     }
 
     /// The data stored in the node.
-    pub(super) fn data(&self) -> &Bytes {
+    pub(super) fn data(&self) -> &BytesMut {
         &self.data
     }
 
@@ -75,7 +76,7 @@ impl MavlNode {
     pub(super) fn new(key: Key, data: Bytes) -> Self {
         MavlNode {
             key,
-            data,
+            data: data.into(),
             balance_factor: 0,
             ..Default::default()
         }
@@ -175,7 +176,7 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
 }
 
 /// The data stored in a node in the tree with a given key.
-pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a Bytes> {
+pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a BytesMut> {
     let mut node = root.as_deref()?;
     loop {
         match node.key().cmp(key) {
@@ -183,6 +184,23 @@ pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a 
             Ordering::Greater => node = node.left_ref().as_deref()?,
             Ordering::Less => node = node.right_ref().as_deref()?,
         }
+    }
+}
+
+/// A mutable reference to the data stored in a node in the tree with a given key.
+pub(super) fn get_mut<'a>(
+    root: &'a mut Option<Arc<MavlNode>>,
+    key: &Key,
+) -> Option<&'a mut BytesMut> {
+    let node = root.as_mut()?;
+    let node = Arc::make_mut(node);
+    match node.key().cmp(key) {
+        Ordering::Equal => {
+            node.invalidate_hash();
+            Some(&mut node.data)
+        }
+        Ordering::Greater => get_mut(node.left_mut(), key),
+        Ordering::Less => get_mut(node.right_mut(), key),
     }
 }
 
@@ -567,7 +585,7 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
         // The key already exists and should be updated.
         Ordering::Equal => {
             let node = Arc::make_mut(node);
-            node.data = data;
+            node.data = data.into();
             node.invalidate_hash();
             false
         }

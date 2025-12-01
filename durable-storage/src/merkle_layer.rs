@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use bytes::BytesMut;
 
 mod node;
 mod tree;
@@ -98,14 +99,13 @@ impl MerkleLayer {
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
-    pub fn get(&self, key: &Key) -> Option<&Bytes> {
+    pub fn get(&self, key: &Key) -> Option<&BytesMut> {
         self.tree.get(key)
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
-    #[expect(dead_code, reason = "Not yet implemented")]
-    pub fn get_mut(&mut self, _key: &Key) -> Option<&mut Bytes> {
-        todo!()
+    pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
+        self.tree.get_mut(key)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
@@ -124,6 +124,7 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    use bytes::BufMut;
     use bytes::Bytes;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
@@ -335,11 +336,11 @@ mod tests {
             // Check both trees are still correct
             for bytes in &keys1 {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml.get(&key), Some(&data1));
+                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data1);
             }
             for bytes in &keys2 {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml2.get(&key), Some(&data2));
+                prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully"), &data2);
             }
 
             ml.tree.check(line!());
@@ -417,7 +418,11 @@ mod tests {
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(data));
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                data
+            );
         }
     }
 
@@ -479,7 +484,11 @@ mod tests {
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(&data));
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                &data
+            );
         }
     }
 
@@ -497,7 +506,11 @@ mod tests {
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(&data));
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                &data
+            );
         }
     }
 
@@ -526,7 +539,11 @@ mod tests {
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(&data));
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                &data
+            );
         }
     }
 
@@ -555,7 +572,11 @@ mod tests {
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(&data));
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                &data
+            );
         }
     }
 
@@ -577,7 +598,7 @@ mod tests {
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml.get(&key), Some(&data));
+                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data);
             }
 
             ml.tree.check(line!());
@@ -641,7 +662,11 @@ mod tests {
         for key in keys.iter() {
             ml.set(key, data.clone());
             ml.tree.check(line!());
-            assert_eq!(ml.get(key), Some(data.clone()).as_ref());
+            assert_eq!(
+                ml.get(key)
+                    .expect("The node should be retrieved successfully"),
+                data.as_ref()
+            );
         }
 
         if !keys.is_empty() {
@@ -790,5 +815,37 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
         test_mavl_delete_keys(&keys);
+    }
+
+    #[test]
+    fn test_mavl_get_mut() {
+        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
+        let data = Bytes::from("get_mut");
+        let mut ml = new_merkle_layer();
+        let empty_hash = ml.hash();
+        ml.set(&key, data.clone());
+        let full_hash = ml.hash();
+        assert_ne!(empty_hash, full_hash);
+
+        let data2 = Bytes::from("mutated with larger data");
+
+        let data_mut = ml.get_mut(&key).expect("The operation should succeed");
+        data_mut.clear();
+        data_mut.put_slice(&data2);
+
+        assert_ne!(empty_hash, ml.hash());
+        assert_ne!(full_hash, ml.hash());
+
+        let before_node = MavlNode::new(key.clone(), data.clone());
+        let after_node = MavlNode::new(key.clone(), data2.clone());
+
+        let get_node = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_ne!(&get_node, &before_node.data());
+        assert_eq!(&get_node, &after_node.data());
+
+        ml.tree.check(line!());
     }
 }

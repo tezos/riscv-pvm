@@ -6,12 +6,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use bytes::BytesMut;
 use octez_riscv_data::serialisation::serialise_into;
 
 use super::Key;
 use super::node::MavlNode;
 use super::node::delete;
 use super::node::get;
+use super::node::get_mut;
 use super::node::set;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
@@ -27,8 +29,13 @@ impl Avl {
     }
 
     /// The data stored in a node in the tree with a given key.
-    pub(super) fn get(&self, key: &Key) -> Option<&Bytes> {
+    pub(super) fn get(&self, key: &Key) -> Option<&BytesMut> {
         get(&self.root, key)
+    }
+
+    /// A mutable reference to the data stored in a node in the tree with a given key.
+    pub(super) fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
+        get_mut(&mut self.root, key)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
@@ -199,9 +206,8 @@ mod tests {
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
-                        let tree_value = tree.get(&key);
-                        let reference_value = reference.get(&key);
-                        assert_eq!(tree_value, reference_value);
+                        let tree_value = tree.get(&key).map(|b| b.clone().freeze());
+                        assert_eq!(tree_value.as_ref(), reference.get(&key));
                         continue;
                     },
                     Operation::Upsert(key, value) => {
