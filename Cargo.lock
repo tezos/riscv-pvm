@@ -2247,6 +2247,7 @@ dependencies = [
  "rustc-demangle",
  "serde",
  "serde_json",
+ "strum 0.27.2",
  "tezos-smart-rollup",
  "tezos-smart-rollup-encoding",
  "tracing-subscriber",

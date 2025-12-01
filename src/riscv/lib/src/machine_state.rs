@@ -49,6 +49,7 @@ use perfect_derive::perfect_derive;
 use crate::bits::u64;
 use crate::exceptions::Exception;
 use crate::log;
+pub use crate::machine_state::registers::NonZeroXRegister;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;

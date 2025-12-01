@@ -37,15 +37,16 @@ use gdbstub::target::ext::breakpoints::SwBreakpoint;
 use gdbstub::target::ext::breakpoints::SwBreakpointOps;
 use gdbstub::target::ext::exec_file::ExecFile;
 use gdbstub_arch::riscv::reg::RiscvCoreRegs;
+use octez_riscv::machine_state::NonZeroXRegister;
 use octez_riscv::machine_state::memory::BadMemoryAccess;
 use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::machine_state::memory::Memory;
 use octez_riscv::pvm::hooks::StdoutDebugHooks;
-use octez_riscv::state_backend::FnManagerIdent;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
+use strum::IntoEnumIterator;
 use tezos_smart_rollup::utils::inbox::InboxBuilder;
 use tezos_smart_rollup_encoding::smart_rollup::SmartRollupAddress;
 
@@ -189,11 +190,13 @@ impl<S: Stepper> SingleThreadBase for RiscvGdb<'_, S> {
         let state = self.stepper.machine_state();
         regs.pc = state.hart.pc.read();
 
-        let array = state.hart.xregisters.struct_ref::<FnManagerIdent>();
-        for i in 0..31 {
-            // first is x0 == zero, only x1..=x31 are set
-            regs.x[i + 1] = array.read(i);
+        for register in <NonZeroXRegister as IntoEnumIterator>::iter() {
+            // `x1` has discriminant 0, but `regs.x[1]` corresponds to `x1`. We need to offset the
+            // discriminant by 1 to get the correct index.
+            let index = 1 + register as usize;
+            regs.x[index] = state.hart.xregisters.read_nz(register);
         }
+
         Ok(())
     }
 
