@@ -77,20 +77,6 @@ impl<M: backend::ManagerBase> HartState<M> {
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<HartStateLayout, F::Output> {
-        (
-            self.xregisters.struct_ref::<F>(),
-            self.fregisters.struct_ref::<F>(),
-            self.csregisters.struct_ref::<F>(),
-            self.pc.struct_ref::<F>(),
-            self.reservation_set.struct_ref::<F>(),
-        )
-    }
-
     /// Reset the hart state.
     pub fn reset(&mut self, pc: Address)
     where

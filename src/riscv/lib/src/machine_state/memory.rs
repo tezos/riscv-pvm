@@ -29,7 +29,6 @@ use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Elem;
-use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -345,14 +344,6 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
 
     /// Bind the allocated regions to produce a memory instance.
     fn bind<M: ManagerBase>(space: AllocatedOf<Self::Layout, M>) -> Self::State<M>;
-
-    /// Given a manager morphism `f : &M -> N`, return the memory instance layout's allocated
-    /// structure containing the constituents of `N` that were produced from the constituents of
-    /// `&M`.
-    fn struct_ref<'a, M, F>(instance: &'a Self::State<M>) -> AllocatedOf<Self::Layout, F::Output>
-    where
-        M: ManagerBase + 'a,
-        F: FnManager<'a, M>;
 
     /// Parse the proof to obtain a memory instance.
     fn state_from_proof<D: merkle_proof::Deserialiser>(

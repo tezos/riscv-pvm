@@ -26,7 +26,6 @@ use super::BuddyLayout;
 use crate::state::NewState;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -74,17 +73,6 @@ impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
             free_info: space.free_info,
             left: Box::new(B::bind(*space.left)),
             right: Box::new(B::bind(*space.right)),
-        }
-    }
-
-    fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
-    where
-        F: FnManager<'a, M>,
-    {
-        BuddyBranch2LayoutF {
-            free_info: space.free_info.struct_ref::<F>(),
-            left: Box::new(B::struct_ref::<F, M>(&space.left)),
-            right: Box::new(B::struct_ref::<F, M>(&space.right)),
         }
     }
 

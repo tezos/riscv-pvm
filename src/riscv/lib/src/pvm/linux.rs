@@ -61,7 +61,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -496,19 +495,6 @@ impl<M: ManagerBase> SupervisorState<M> {
             program: space.program,
             stack_guard: space.stack_guard,
             heap: space.heap,
-        }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(
-        &'a self,
-    ) -> AllocatedOf<SupervisorStateLayout, F::Output> {
-        SupervisorStateLayoutF {
-            tid_address: self.tid_address.struct_ref::<F>(),
-            program: self.program.struct_ref::<F>(),
-            stack_guard: self.stack_guard.struct_ref::<F>(),
-            heap: self.heap.struct_ref::<F>(),
         }
     }
 

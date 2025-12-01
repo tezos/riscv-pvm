@@ -32,13 +32,10 @@ use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
 use crate::pvm::Pvm;
-use crate::pvm::PvmLayout;
 use crate::pvm::PvmStatus;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::AllocatedOf;
-use crate::state_backend::FnManagerIdent;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -46,7 +43,6 @@ use crate::state_backend::ManagerWrite;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
-use crate::state_backend::Ref;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
@@ -240,12 +236,6 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + 
             StepperStatus::Running { steps: 1 } | StepperStatus::Exited { steps: 1, .. } => true,
             _ => false,
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref(&self) -> AllocatedOf<PvmLayout<MC>, Ref<'_, M>> {
-        self.pvm.struct_ref::<FnManagerIdent>()
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.

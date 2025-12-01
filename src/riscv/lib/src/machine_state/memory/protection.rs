@@ -32,7 +32,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -61,17 +60,6 @@ impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
                 unreachable!("Converting a vector into an array of the same length always succeeds")
             }),
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(
-        &'a self,
-    ) -> AllocatedOf<PagePermissionsLayout<PAGES>, F::Output> {
-        self.pages
-            .iter()
-            .map(|item| item.struct_ref::<F>())
-            .collect()
     }
 
     /// Check if the memory at `address..address+length` can be accessed.

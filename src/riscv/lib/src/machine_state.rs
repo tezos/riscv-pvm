@@ -113,18 +113,6 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<MachineCoreStateLayout<MC>, F::Output> {
-        (
-            self.hart.struct_ref::<F>(),
-            MC::struct_ref::<_, F>(&self.main_memory),
-            self.signal_actions.struct_ref::<F>(),
-        )
-    }
-
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
@@ -491,14 +479,6 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             core: MachineCoreState::bind(space),
             page_cache: MC::PageCache::new(),
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<MachineStateLayout<MC>, F::Output> {
-        self.core.struct_ref::<F>()
     }
 
     /// Reset the machine state.

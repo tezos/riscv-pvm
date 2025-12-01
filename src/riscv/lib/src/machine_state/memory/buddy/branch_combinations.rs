@@ -28,7 +28,6 @@ use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
-use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -91,14 +90,6 @@ macro_rules! combined_buddy_branch {
                 fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::bind(space.0);
                     $name(inner)
-                }
-
-                fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
-                where
-                    F: FnManager<'a, M>,
-                {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::struct_ref::<F, M>(&space.0);
-                    [<$name Alloc>](inner)
                 }
 
                 fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {

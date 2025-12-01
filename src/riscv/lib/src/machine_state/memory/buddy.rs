@@ -33,7 +33,6 @@ use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
-use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -49,13 +48,6 @@ pub trait BuddyLayout: Layout {
 
     /// Bind the allocated space.
     fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M>;
-
-    /// Given a manager morphism `F : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    fn struct_ref<'a, F, M>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
-    where
-        M: ManagerBase + 'a,
-        F: FnManager<'a, M>;
 
     /// Return a proof-generating Buddy memory manager instance.
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
