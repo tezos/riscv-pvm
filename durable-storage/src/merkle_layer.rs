@@ -6,14 +6,18 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-mod node;
+pub(crate) mod node;
+use node::MavlNode;
+mod node_operations;
 mod tree;
 
 use bincode::Decode;
 use bincode::Encode;
 use tree::Avl;
 
+use crate::commit_operation::CommitOperationCollection;
 use crate::persistence_layer::PersistenceLayer;
+use octez_riscv_data::serialisation::serialise_into;
 
 /// An identifier generated for a given commit.
 #[derive(Debug, PartialEq, Eq)]
@@ -54,6 +58,7 @@ pub struct MerkleLayer {
     tree: Avl,
     #[expect(dead_code, reason = "To be used in RV-825")]
     persistence: Arc<PersistenceLayer>,
+    commit_collection: CommitOperationCollection,
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
@@ -63,6 +68,7 @@ impl MerkleLayer {
         MerkleLayer {
             tree: Avl::default(),
             persistence,
+            commit_collection: Default::default(),
         }
     }
 
@@ -115,8 +121,21 @@ impl MerkleLayer {
 
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: Bytes) {
-        self.tree.set(key, data)
+        self.tree.set(key, data, &mut self.commit_collection)
     }
+}
+
+/// Returns the hash of this node, including recursively hashing any child nodes.
+///
+/// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
+/// cached.
+pub(crate) fn hash(node: &Arc<MavlNode>) -> &blake3::Hash {
+    node.hash.get_or_init(|| {
+        let mut hasher = blake3::Hasher::new();
+        serialise_into(node.to_encode(), &mut hasher)
+            .expect("None of the `EncodeError`s can be triggered by this encoding");
+        hasher.finalize()
+    })
 }
 
 #[cfg(test)]

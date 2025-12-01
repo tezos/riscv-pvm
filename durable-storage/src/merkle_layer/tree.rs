@@ -10,9 +10,10 @@ use octez_riscv_data::serialisation::serialise_into;
 
 use super::Key;
 use super::node::MavlNode;
-use super::node::delete;
-use super::node::get;
-use super::node::set;
+use super::node_operations::delete;
+use super::node_operations::get;
+use super::node_operations::set;
+use crate::commit_operation::CommitOperationCollection;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
@@ -52,8 +53,13 @@ impl Avl {
     }
 
     /// Set the value of a node in the tree with a given key.
-    pub(super) fn set(&mut self, key: &Key, data: Bytes) {
-        set(&mut self.root, key, data);
+    pub(super) fn set(
+        &mut self,
+        key: &Key,
+        data: Bytes,
+        commit_collection: &mut CommitOperationCollection,
+    ) {
+        set(&mut self.root, key, data, commit_collection);
     }
 }
 
@@ -65,6 +71,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::commit_operation::CommitOperationCollection;
     use crate::merkle_layer::KEY_MAX_SIZE;
     use crate::merkle_layer::Key;
 
@@ -195,6 +202,7 @@ mod tests {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
             let mut tree: Avl = Default::default();
+            let mut commit_collection: CommitOperationCollection = Default::default();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
             for operation in operations {
                 match operation {
@@ -205,7 +213,7 @@ mod tests {
                         continue;
                     },
                     Operation::Upsert(key, value) => {
-                        tree.set(&key, value.clone());
+                        tree.set(&key, value.clone(), &mut commit_collection);
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {

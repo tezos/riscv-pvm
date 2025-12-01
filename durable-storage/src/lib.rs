@@ -23,6 +23,7 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
+mod commit_operation;
 #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 mod merkle_layer;
 mod merkle_worker;
