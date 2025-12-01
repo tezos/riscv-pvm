@@ -13,6 +13,8 @@ use std::num::NonZeroUsize;
 
 use listener::MemoryGovernanceListener;
 use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
@@ -340,6 +342,9 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     fn state_from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>>;
+
+    /// Return a proof-generating version of the memory state.
+    fn start_proof(instance: &Self::State<Normal>) -> Self::State<Prove<'_>>;
 }
 
 // Re-export memory configurations

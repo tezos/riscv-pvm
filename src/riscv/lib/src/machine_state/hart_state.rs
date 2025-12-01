@@ -11,6 +11,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -93,6 +95,19 @@ impl<M: backend::ManagerBase> HartState<M> {
         self.csregisters.reset();
         self.pc.write(pc);
         self.reservation_set.reset();
+    }
+}
+
+impl HartState<Normal> {
+    /// Return a proof-generating version of this HartState.
+    pub fn start_proof(&self) -> HartState<Prove<'_>> {
+        HartState {
+            xregisters: self.xregisters.start_proof(),
+            fregisters: self.fregisters.start_proof(),
+            csregisters: self.csregisters.start_proof(),
+            pc: self.pc.start_proof(),
+            reservation_set: self.reservation_set.start_proof(),
+        }
     }
 }
 

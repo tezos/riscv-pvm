@@ -18,6 +18,8 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
 use super::Buddy;
@@ -97,6 +99,11 @@ macro_rules! combined_buddy_branch {
                 {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::struct_ref::<F, M>(&space.0);
                     [<$name Alloc>](inner)
+                }
+
+                fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
+                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::start_proof(&instance.0);
+                    $name(inner)
                 }
 
                 fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {

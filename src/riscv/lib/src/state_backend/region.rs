@@ -49,6 +49,7 @@ use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::RegionProj;
 use crate::state_backend::normal_backend::region_elem_offset;
+use crate::state_backend::proof_backend;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::verify_backend;
@@ -114,6 +115,15 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
         M: ManagerWrite,
     {
         self.region.write(0, value)
+    }
+}
+
+impl<E: 'static> Cell<E, Normal> {
+    /// Return a proof-generating version of this Cell.
+    pub fn start_proof(&self) -> Cell<E, Prove<'_>> {
+        Cell {
+            region: self.region.start_proof(),
+        }
     }
 }
 
@@ -317,6 +327,15 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         M: ManagerWrite,
     {
         M::region_write_all(&mut self.region, value)
+    }
+}
+
+impl<E: 'static, const LEN: usize> Cells<E, LEN, Normal> {
+    /// Return a proof-generating version of these Cells.
+    pub fn start_proof(&self) -> Cells<E, LEN, Prove<'_>> {
+        Cells {
+            region: proof_backend::ProofRegion::bind(&self.region),
+        }
     }
 }
 
@@ -581,6 +600,15 @@ impl<M: ManagerBase> DynCells<M> {
         M: ManagerWrite + ManagerRead,
     {
         M::dyn_region_write_all(&mut self.region, address, values)
+    }
+}
+
+impl DynCells<Normal> {
+    /// Return a proof-generating version of these DynCells.
+    pub fn start_proof(&self) -> DynCells<Prove<'_>> {
+        DynCells {
+            region: proof_backend::ProofDynRegion::bind(&self.region),
+        }
     }
 }
 

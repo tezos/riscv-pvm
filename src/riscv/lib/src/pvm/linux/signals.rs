@@ -17,6 +17,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use strum::EnumCount;
 use strum::FromRepr;
@@ -460,6 +462,19 @@ impl<M: ManagerBase> SignalActions<M> {
         self.actions
             .iter_mut()
             .for_each(|sig_action| sig_action.write(VirtAddr::new(0)));
+    }
+}
+
+impl SignalActions<Normal> {
+    /// Return a proof-generating version of this SignalActions.
+    pub fn start_proof(&self) -> SignalActions<Prove<'_>> {
+        SignalActions {
+            actions: self.actions.each_ref().map(|action| action.start_proof()),
+            flags: self.flags.each_ref().map(|flags| flags.start_proof()),
+            masks: self.masks.each_ref().map(|mask| mask.start_proof()),
+            restorer: self.restorer.start_proof(),
+            thread_mask: self.thread_mask.start_proof(),
+        }
     }
 }
 

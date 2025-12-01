@@ -156,7 +156,6 @@ mod tests {
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
-    use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -237,7 +236,7 @@ mod tests {
 
         // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
         // setup for proof generation. You can think of this as starting the recording for a proof.
-        let mut proof_cell = owned_cell.struct_ref::<ProofWrapper>();
+        let mut proof_cell = owned_cell.start_proof();
 
         test_proof(&mut proof_cell);
 

@@ -33,6 +33,8 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
@@ -234,6 +236,17 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineC
     }
 }
 
+impl<MC: memory::MemoryConfig> MachineCoreState<MC, Normal> {
+    /// Return a proof-generating version of this MachineCoreState.
+    pub fn start_proof(&self) -> MachineCoreState<MC, Prove<'_>> {
+        MachineCoreState {
+            hart: self.hart.start_proof(),
+            main_memory: MC::start_proof(&self.main_memory),
+            signal_actions: self.signal_actions.start_proof(),
+        }
+    }
+}
+
 impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreState<MC, M> {
     fn clone(&self) -> Self {
         Self {
@@ -274,6 +287,18 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClo
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
+            page_cache: MC::PageCache::new(),
+        }
+    }
+}
+
+impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Normal>> MachineState<MC, CPE, Normal> {
+    /// Return a proof-generating version of this MachineState.
+    pub fn start_proof(
+        &self,
+    ) -> MachineState<MC, page_cache::Interpreted<MC, Prove<'_>>, Prove<'_>> {
+        MachineState {
+            core: self.core.start_proof(),
             page_cache: MC::PageCache::new(),
         }
     }

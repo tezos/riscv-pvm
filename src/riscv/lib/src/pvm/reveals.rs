@@ -10,6 +10,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
@@ -66,6 +68,16 @@ impl<M: ManagerBase> RevealRequest<M> {
         let mut buffer = vec![0u8; min(size, REVEAL_REQUEST_MAX_SIZE)];
         self.bytes.read_all(0, &mut buffer);
         buffer
+    }
+}
+
+impl RevealRequest<Normal> {
+    /// Return a proof-generating version of this RevealRequest.
+    pub fn start_proof(&self) -> RevealRequest<Prove<'_>> {
+        RevealRequest {
+            bytes: self.bytes.start_proof(),
+            size: self.size.start_proof(),
+        }
     }
 }
 

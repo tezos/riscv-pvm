@@ -49,7 +49,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofTree;
-use crate::state_backend::proof_backend::ProofWrapper;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -383,10 +382,19 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
 }
 
 impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
-    /// Generate a proof-generating version of this PVM.
+    /// Return a proof-generating version of this PVM.
     pub(crate) fn start_proof(&self) -> PvmProve<'_, MC> {
-        let space = self.struct_ref::<ProofWrapper>();
-        Pvm::bind(space)
+        Pvm {
+            machine_state: self.machine_state.start_proof(),
+            reveal_request: self.reveal_request.start_proof(),
+            system_state: self.system_state.start_proof(),
+            version: self.version.start_proof(),
+            tick: self.tick.start_proof(),
+            message_counter: self.message_counter.start_proof(),
+            level: self.level.start_proof(),
+            level_is_set: self.level_is_set.start_proof(),
+            status: self.status.start_proof(),
+        }
     }
 }
 

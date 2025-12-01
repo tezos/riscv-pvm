@@ -25,6 +25,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use parameters::SystemCallResultExecution;
 use perfect_derive::perfect_derive;
@@ -1044,6 +1046,20 @@ impl<M: ManagerBase> SupervisorState<M> {
 
         // Return 0 as an indicator of success
         Ok(0)
+    }
+}
+
+impl SupervisorState<Normal> {
+    /// Return a proof-generating version of this SupervisorState.
+    pub fn start_proof(&self) -> SupervisorState<Prove<'_>> {
+        SupervisorState {
+            tid_address: self.tid_address.start_proof(),
+            exited: self.exited,
+            exit_code: self.exit_code,
+            program: self.program.start_proof(),
+            heap: self.heap.start_proof(),
+            stack_guard: self.stack_guard.start_proof(),
+        }
     }
 }
 

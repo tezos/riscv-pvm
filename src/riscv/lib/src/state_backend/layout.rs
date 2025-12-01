@@ -239,7 +239,6 @@ mod tests {
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::ProofPart;
-    use crate::state_backend::proof_backend::ProofWrapper;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
     use crate::state_backend::verify_backend::handle_stepper_panics;
@@ -291,15 +290,11 @@ mod tests {
 
             // Obtain the Merkle tree via the `Prove` mode
             let mut proof_foo = FooF {
-                bar: foo.bar.struct_ref::<ProofWrapper>(),
-                qux: foo.qux.struct_ref::<ProofWrapper>(),
-            };
-            let proof_foo_refs = FooF {
-                bar: &proof_foo.bar,
-                qux: &proof_foo.qux,
+                bar: foo.bar.start_proof(),
+                qux: foo.qux.start_proof(),
             };
 
-            let tree = MerkleTree::from_foldable(&proof_foo_refs);
+            let tree = MerkleTree::from_foldable(&proof_foo);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 

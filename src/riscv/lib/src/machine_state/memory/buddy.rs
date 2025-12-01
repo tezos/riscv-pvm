@@ -23,6 +23,8 @@ mod leaf;
 mod proxy;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyLayoutProxy;
 
@@ -48,6 +50,9 @@ pub trait BuddyLayout: Layout {
     where
         M: ManagerBase + 'a,
         F: FnManager<'a, M>;
+
+    /// Return a proof-generating Buddy memory manager instance.
+    fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
 
     /// Parse a proof to obtain the Buddy memory manager state.
     fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>>;

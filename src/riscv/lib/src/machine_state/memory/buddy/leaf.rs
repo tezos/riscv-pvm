@@ -16,6 +16,8 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
@@ -54,6 +56,12 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
     {
         BuddyLeaf {
             set: space.set.struct_ref::<F>(),
+        }
+    }
+
+    fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
+        BuddyLeaf {
+            set: instance.set.start_proof(),
         }
     }
 
