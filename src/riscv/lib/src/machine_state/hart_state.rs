@@ -38,7 +38,7 @@ use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
 /// RISC-V hart state
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct HartState<M: backend::ManagerBase> {
     /// Integer registers
     pub xregisters: registers::XRegisters<M>,

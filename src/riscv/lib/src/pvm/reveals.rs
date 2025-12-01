@@ -40,7 +40,7 @@ use crate::state_backend::ManagerSerialise;
 pub type RevealRequestLayout = (DynArray, Atom<u64>);
 
 /// Request content of reveal
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct RevealRequest<M: ManagerBase> {
     /// Reveal request payload
     pub bytes: DynCells<M>,

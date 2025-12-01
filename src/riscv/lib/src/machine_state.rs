@@ -44,6 +44,7 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
+use perfect_derive::perfect_derive;
 
 use crate::bits::u64;
 use crate::exceptions::Exception;
@@ -79,6 +80,7 @@ pub type MachineCoreStateLayout<MC> = (
 ///
 /// Certain instructions (e.g. `FENCE.I` may invalidate other parts of the state, but this are
 /// small in number).
+#[perfect_derive(PartialEq, Eq)]
 pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
     pub hart: HartState<M>,
     pub main_memory: MC::State<M>,
@@ -382,6 +384,27 @@ where
             page_cache: MC::PageCache::new(),
         })
     }
+}
+
+impl<MC, CPE, M> PartialEq for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerBase,
+    MachineCoreState<MC, M>: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.core == other.core
+    }
+}
+
+impl<MC, CPE, M> Eq for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerBase,
+    MachineCoreState<MC, M>: PartialEq,
+{
 }
 
 /// How to modify the program counter
@@ -987,7 +1010,6 @@ mod tests {
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::signals::Signal;
     use crate::pvm::linux::signals::SignalError;
-    use crate::state_backend::FnManagerIdent;
 
     backend_test!(test_step, F, {
         let state = TestMachineOf::<F>::new();
@@ -1167,10 +1189,7 @@ mod tests {
             "State didn't exit cleanly"
         );
 
-        assert!(
-            state.struct_ref::<FnManagerIdent>() == alt_state.struct_ref::<FnManagerIdent>(),
-            "States aren't equal"
-        );
+        assert!(state == alt_state, "States aren't equal");
     });
 
     // Ensure that cloning the machine state does not result in a stack overflow
@@ -1179,10 +1198,7 @@ mod tests {
 
         let second = state.clone();
 
-        assert!(
-            state.struct_ref::<FnManagerIdent>() == second.struct_ref::<FnManagerIdent>(),
-            "State equality expected"
-        );
+        assert!(state == second, "State equality expected");
     });
 
     // Ensure that the force-fetch-run mechanism correctly fetches instructions directly from

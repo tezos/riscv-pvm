@@ -41,7 +41,7 @@ use crate::machine_state::backend;
 use crate::machine_state::backend::Cell;
 use crate::state::NewState;
 
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct ReservationSet<M: backend::ManagerBase> {
     pub(crate) start_addr: Cell<u64, M>,
 }

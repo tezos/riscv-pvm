@@ -210,7 +210,7 @@ pub type XValue32 = u32;
 pub type XRegistersLayout = backend::Array<XValue, 31>;
 
 /// Integer registers
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct XRegisters<M: backend::ManagerBase> {
     registers: backend::Cells<XValue, 31, M>,
 }
@@ -672,7 +672,7 @@ impl typed::Typed for FValue {
 pub type FRegistersLayout = backend::Array<FValue, 32>;
 
 /// Floating-point number registers
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct FRegisters<M: backend::ManagerBase> {
     registers: backend::Cells<FValue, 32, M>,
 }

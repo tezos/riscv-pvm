@@ -48,7 +48,7 @@ use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
 
 /// Tracks access permissions for each page
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
     pages: Box<[Cell<bool, M>; PAGES]>,
 }
