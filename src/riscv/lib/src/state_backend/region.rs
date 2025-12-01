@@ -60,7 +60,7 @@ use crate::state_context::projection::Projection;
 use crate::state_context::projection::ProjectionOffset;
 
 /// Single element of type `E`
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Cell<E: 'static, M: ManagerBase> {
     region: Cells<E, 1, M>,
@@ -155,18 +155,10 @@ impl<C, E: Decode<C>, M: ManagerDeserialise> Decode<C> for Cell<E, M> {
     }
 }
 
-impl<A: PartialEq<B>, B, M: ManagerRead, N: ManagerRead> PartialEq<Cell<B, N>> for Cell<A, M> {
-    fn eq(&self, other: &Cell<B, N>) -> bool {
-        self.as_ref() == other.as_ref()
-    }
-}
-
-impl<E: Eq, M: ManagerRead> Eq for Cell<E, M> {}
-
 impl<E, M: ManagerRead> AsRef<E> for Cell<E, M> {
     #[inline]
     fn as_ref(&self) -> &E {
-        M::region_ref(&self.region.region, 0)
+        self.region.read_ref(0)
     }
 }
 
@@ -300,6 +292,14 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
         M::region_read(&self.region, index)
     }
 
+    /// Obtain a reference to an element in the region.
+    pub fn read_ref(&self, index: usize) -> &E
+    where
+        M: ManagerRead,
+    {
+        M::region_ref(&self.region, index)
+    }
+
     /// Read all elements in the region.
     #[inline]
     pub fn read_all(&self) -> Vec<E>
@@ -369,13 +369,15 @@ impl<C, E: Decode<C>, const LEN: usize, M: ManagerDeserialise> Decode<C> for Cel
     }
 }
 
-impl<A: PartialEq<B> + Copy, B: Copy, const LEN: usize, M: ManagerRead, N: ManagerRead>
+impl<A: PartialEq<B>, B, const LEN: usize, M: ManagerRead, N: ManagerRead>
     PartialEq<Cells<B, LEN, N>> for Cells<A, LEN, M>
 {
     fn eq(&self, other: &Cells<B, LEN, N>) -> bool {
-        (0..LEN).all(|i| self.read(i) == other.read(i))
+        (0..LEN).all(|i| self.read_ref(i).eq(other.read_ref(i)))
     }
 }
+
+impl<T: Eq, const LEN: usize, M: ManagerRead> Eq for Cells<T, LEN, M> {}
 
 impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
     fn clone(&self) -> Self {

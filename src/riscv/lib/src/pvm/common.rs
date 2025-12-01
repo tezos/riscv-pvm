@@ -115,7 +115,7 @@ const INITIAL_VERSION: u64 = 0;
 pub(crate) type PvmProve<'a, MC> = Pvm<MC, Interpreted<MC, Prove<'a>>, Prove<'a>>;
 
 /// Proof-generating virtual machine
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
     pub(crate) machine_state: machine_state::MachineState<MC, CPE, M>,
     pub(crate) reveal_request: RevealRequest<M>,

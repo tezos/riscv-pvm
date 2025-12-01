@@ -450,7 +450,7 @@ struct_layout! {
 }
 
 /// Linux supervisor state
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct SupervisorState<M: ManagerBase> {
     /// Thread lock address
     tid_address: Cell<VirtAddr, M>,

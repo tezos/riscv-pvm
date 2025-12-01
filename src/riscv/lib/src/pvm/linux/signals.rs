@@ -26,6 +26,7 @@ use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use perfect_derive::perfect_derive;
 use strum::EnumCount;
 use strum::FromRepr;
 use zerocopy::FromBytes;
@@ -157,6 +158,7 @@ impl Elem for LinuxSigAction {
 // used for the member's type.
 
 /// Information to support handling each supported signal
+#[perfect_derive(PartialEq, Eq)]
 pub struct SignalActions<M: ManagerBase> {
     /// An array of [VirtAddr]s, one action for each supported signal
     actions: [Cell<VirtAddr, M>; SignalIndex::COUNT],

@@ -178,7 +178,7 @@ struct_layout! {
 }
 
 /// Cntrol and State Registers (CSRs)
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct CSRegisters<M: backend::ManagerBase> {
     /// Floating-point exception flags
     pub fflags: Cell<FloatExceptionFlags, M>,

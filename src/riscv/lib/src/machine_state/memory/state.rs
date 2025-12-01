@@ -15,6 +15,7 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use perfect_derive::perfect_derive;
 
 use super::Address;
 use super::BadMemoryAccess;
@@ -35,6 +36,7 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
+#[perfect_derive(PartialEq, Eq)]
 pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase> {
     /// Memory contents
     pub(super) data: DynCells<M>,
@@ -505,7 +507,6 @@ pub mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::state::NewState;
-    use crate::state_backend::FnManagerIdent;
 
     #[test]
     fn bounds_check() {
@@ -603,11 +604,7 @@ pub mod tests {
         memory.write(5, 0xFFu8).unwrap();
         memory.reset(NoopMemoryGovernanceListener);
 
-        assert!(
-            M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)
-                == M4K::struct_ref::<F, FnManagerIdent>(&memory),
-            "RW memory did not reset correctly"
-        );
+        assert!(clean_memory == memory, "RW memory did not reset correctly");
 
         // setting executable permissions should reset
         memory
@@ -615,10 +612,6 @@ pub mod tests {
             .unwrap();
         memory.reset(NoopMemoryGovernanceListener);
 
-        assert!(
-            M4K::struct_ref::<F, FnManagerIdent>(&clean_memory)
-                == M4K::struct_ref::<F, FnManagerIdent>(&memory),
-            "X memory did not reset correctly"
-        );
+        assert!(clean_memory == memory, "X memory did not reset correctly");
     });
 }
