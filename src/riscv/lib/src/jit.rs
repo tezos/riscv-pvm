@@ -295,7 +295,6 @@ mod tests {
     use crate::parser::instruction::InstrWidth;
     use crate::parser::instruction::InstrWidth::*;
     use crate::state::NewState;
-    use crate::state_backend::FnManagerIdent;
 
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Normal>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
@@ -524,8 +523,7 @@ mod tests {
             // Finally check state equality. We do this last as the earlier checks provide better
             // clues for debugging when they fail.
             assert!(
-                interpreted_state.struct_ref::<FnManagerIdent>()
-                    == jitted_state.struct_ref::<FnManagerIdent>(),
+                Hash::from_foldable(&interpreted_state) == Hash::from_foldable(&jitted_state),
                 "Interpreted and Jitted states should be equal."
             );
             assert_eq!(
