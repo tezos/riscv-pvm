@@ -18,7 +18,6 @@ use super::leaf::BuddyLeafLayout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
-use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 
@@ -40,15 +39,6 @@ where
 
     fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
         <PickLayout<PAGES> as BuddyLayout>::bind(space)
-    }
-
-    fn struct_ref<'a, F, M: ManagerBase + 'a>(
-        space: &'a Self::Buddy<M>,
-    ) -> Self::Allocated<F::Output>
-    where
-        F: FnManager<'a, M>,
-    {
-        <PickLayout<PAGES> as BuddyLayout>::struct_ref::<F, M>(space)
     }
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {

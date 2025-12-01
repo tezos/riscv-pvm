@@ -75,7 +75,6 @@ pub mod normal_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
 mod region;
-mod trans;
 pub mod verify_backend;
 
 use std::convert::Infallible;
@@ -94,7 +93,6 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proof_layout::*;
 pub use region::*;
-pub use trans::*;
 
 use crate::machine_state::memory::MemoryConfig;
 use crate::state_context::projection::ApplyCons;
@@ -465,7 +463,6 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
-    use crate::state_backend::FnManagerIdent;
 
     #[test]
     fn test_example_normal() {
@@ -488,16 +485,12 @@ mod tests {
         instance.second.write_all(&second_value);
         assert_eq!(instance.second.read_all(), second_value);
 
-        let first_value_read = u64::from_le_bytes(
-            serialise(instance.first.struct_ref::<FnManagerIdent>())
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
+        let first_value_read =
+            u64::from_le_bytes(serialise(instance.first).unwrap().try_into().unwrap());
         assert_eq!(first_value_read, first_value);
 
         let second_value_read = unsafe {
-            let data = serialise(instance.second.struct_ref::<FnManagerIdent>()).unwrap();
+            let data = serialise(instance.second).unwrap();
             data.as_ptr().cast::<[u32; 4]>().read().map(u32::from_le)
         };
         assert_eq!(second_value_read, second_value);

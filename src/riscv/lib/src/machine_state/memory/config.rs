@@ -20,7 +20,6 @@ use crate::state::NewState;
 use crate::state_backend::AllocatedOf;
 use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 
@@ -91,20 +90,6 @@ where
             executable_pages: PagePermissions::bind(space.3),
             allocated_pages: <BuddyLayoutProxy<PAGES> as BuddyLayout>::bind(space.4),
         }
-    }
-
-    fn struct_ref<'a, M, F>(instance: &'a Self::State<M>) -> AllocatedOf<Self::Layout, F::Output>
-    where
-        M: ManagerBase,
-        F: FnManager<'a, M>,
-    {
-        (
-            instance.data.struct_ref::<F>(),
-            instance.readable_pages.struct_ref::<F>(),
-            instance.writable_pages.struct_ref::<F>(),
-            instance.executable_pages.struct_ref::<F>(),
-            <BuddyLayoutProxy<PAGES> as BuddyLayout>::struct_ref::<F, M>(&instance.allocated_pages),
-        )
     }
 
     fn state_from_proof<D: merkle_proof::Deserialiser>(

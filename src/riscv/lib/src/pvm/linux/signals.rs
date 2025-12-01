@@ -63,7 +63,6 @@ use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::Elem;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -461,29 +460,6 @@ impl<M: ManagerBase> SignalActions<M> {
             restorer: space.restorer,
             masks: space.masks,
             thread_mask: space.thread_mask,
-        }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(
-        &'a self,
-    ) -> AllocatedOf<SignalActionsLayout, F::Output> {
-        SignalActionsLayoutF {
-            actions: self
-                .actions
-                .each_ref()
-                .map(|sig_action| Cell::struct_ref::<F>(sig_action)),
-            flags: self
-                .flags
-                .each_ref()
-                .map(|flag| Cell::struct_ref::<F>(flag)),
-            restorer: self.restorer.struct_ref::<F>(),
-            masks: self
-                .masks
-                .each_ref()
-                .map(|mask| Cell::struct_ref::<F>(mask)),
-            thread_mask: self.thread_mask.struct_ref::<F>(),
         }
     }
 

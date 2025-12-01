@@ -176,24 +176,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub(crate) fn struct_ref<'a, F: state_backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> state_backend::AllocatedOf<PvmLayout<MC>, F::Output> {
-        PvmLayoutF {
-            machine_state: self.machine_state.struct_ref::<F>(),
-            reveal_request: self.reveal_request.struct_ref::<F>(),
-            system_state: self.system_state.struct_ref::<F>(),
-            version: self.version.struct_ref::<F>(),
-            tick: self.tick.struct_ref::<F>(),
-            message_counter: self.message_counter.struct_ref::<F>(),
-            level: self.level.struct_ref::<F>(),
-            level_is_set: self.level_is_set.struct_ref::<F>(),
-            status: self.status.struct_ref::<F>(),
-        }
-    }
-
     /// Reset the PVM.
     pub fn reset(&mut self)
     where

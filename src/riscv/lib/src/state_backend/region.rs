@@ -34,7 +34,6 @@ use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
-use super::FnManager;
 use super::ManagerAlloc;
 use super::ManagerBase;
 use super::ManagerClone;
@@ -82,14 +81,6 @@ impl<E: 'static, M: ManagerBase> Cell<E, M> {
     pub const fn bind(region: M::Region<E, 1>) -> Self {
         Self {
             region: Cells::bind(region),
-        }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> Cell<E, F::Output> {
-        Cell {
-            region: self.region.struct_ref::<F>(),
         }
     }
 
@@ -262,14 +253,6 @@ impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
     /// Bind this state to the given region.
     pub const fn bind(region: M::Region<E, LEN>) -> Self {
         Self { region }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> Cells<E, LEN, F::Output> {
-        Cells {
-            region: F::map_region(&self.region),
-        }
     }
 
     /// Obtain a reference to the underlying region.
@@ -533,14 +516,6 @@ impl<M: ManagerBase> DynCells<M> {
     /// Obtain a reference to the underlying dynamic region.
     pub fn region_ref(&self) -> &M::DynRegion {
         &self.region
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(&'a self) -> DynCells<F::Output> {
-        DynCells {
-            region: F::map_dyn_region(&self.region),
-        }
     }
 
     /// Is the dynamic region empty?

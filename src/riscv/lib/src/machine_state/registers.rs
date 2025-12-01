@@ -221,14 +221,6 @@ impl<M: backend::ManagerBase> XRegisters<M> {
         XRegisters { registers: space }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<XRegistersLayout, F::Output> {
-        self.registers.struct_ref::<F>()
-    }
-
     /// Try to read a 64-bit value from the registers and coerce it to another type.
     #[inline]
     pub fn try_read<T: TryFrom<XValue>>(&self, reg: XRegister) -> Result<T, T::Error>
@@ -681,14 +673,6 @@ impl<M: backend::ManagerBase> FRegisters<M> {
     /// Bind the floating-point register space to the allocated space.
     pub fn bind(space: backend::AllocatedOf<FRegistersLayout, M>) -> Self {
         FRegisters { registers: space }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<FRegistersLayout, F::Output> {
-        self.registers.struct_ref::<F>()
     }
 
     /// Reset the floating-point registers.

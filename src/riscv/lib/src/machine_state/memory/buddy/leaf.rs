@@ -26,7 +26,6 @@ use super::BuddyLayout;
 use crate::bits::ones;
 use crate::state::NewState;
 use crate::state_backend::Cell;
-use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -48,15 +47,6 @@ impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
 
     fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
         space
-    }
-
-    fn struct_ref<'a, F, M: ManagerBase>(space: &'a Self::Buddy<M>) -> Self::Allocated<F::Output>
-    where
-        F: FnManager<'a, M>,
-    {
-        BuddyLeaf {
-            set: space.set.struct_ref::<F>(),
-        }
     }
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {

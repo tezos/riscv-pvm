@@ -70,14 +70,6 @@ impl<M: backend::ManagerBase> ReservationSet<M> {
         Self { start_addr: space }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<ReservationSetLayout, F::Output> {
-        self.start_addr.struct_ref::<F>()
-    }
-
     /// Unset any reservation
     pub fn reset(&mut self)
     where

@@ -355,17 +355,6 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         }
     }
 
-    /// Given a manager morphism `f : &M -> N`, return the layout's allocated structure containing
-    /// the constituents of `N` that were produced from the constituents of `&M`.
-    pub fn struct_ref<'a, F: backend::FnManager<'a, M>>(
-        &'a self,
-    ) -> backend::AllocatedOf<CSRegistersLayout, F::Output> {
-        CSRegistersLayoutF {
-            fflags: self.fflags.struct_ref::<F>(),
-            frm: self.frm.struct_ref::<F>(),
-        }
-    }
-
     /// Reset the control and state registers.
     pub fn reset(&mut self)
     where

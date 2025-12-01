@@ -28,7 +28,6 @@ use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
-use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -55,15 +54,6 @@ impl<M: ManagerBase> RevealRequest<M> {
             bytes: space.0,
             size: space.1,
         }
-    }
-
-    /// Given a manager morphism `f : &M -> N`, return the reveal request layout's
-    /// allocated structure containing the constituents of `N` that were produced
-    /// from the constituents of `&M`.
-    pub fn struct_ref<'a, F: FnManager<'a, M>>(
-        &'a self,
-    ) -> AllocatedOf<RevealRequestLayout, F::Output> {
-        (self.bytes.struct_ref::<F>(), self.size.struct_ref::<F>())
     }
 
     pub fn to_vec(&self) -> Vec<u8>
