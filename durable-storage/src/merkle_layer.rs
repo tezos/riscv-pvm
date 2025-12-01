@@ -109,7 +109,7 @@ impl MerkleLayer {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&mut self) -> blake3::Hash {
+    pub fn hash(&self) -> blake3::Hash {
         self.tree.hash()
     }
 

@@ -32,7 +32,7 @@ impl Avl {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&mut self) -> blake3::Hash {
+    pub fn hash(&self) -> blake3::Hash {
         let encodable = self.root.as_deref().map(|node| node.to_encode());
         let mut hasher = blake3::Hasher::new();
         serialise_into(encodable, &mut hasher)
