@@ -21,7 +21,7 @@ use crate::persistence_layer::PersistenceLayer;
 pub struct CommitId;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Decode, Default, Encode, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Decode, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Key(Vec<u8>);
 
 impl Key {
@@ -121,6 +121,7 @@ impl MerkleLayer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -847,5 +848,44 @@ mod tests {
         assert_eq!(&get_node, &after_node.data());
 
         ml.tree.check(line!());
+    }
+
+    proptest! {
+        #[test]
+        fn test_mavl_get_mut_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+            let data = Bytes::from("get_mut_prop");
+            let mut ml = new_merkle_layer();
+
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml.set(&key, data.clone());
+            }
+
+            let data2 = Bytes::from("mutated");
+            let mut seen = HashSet::new();
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+
+                let before_hash = ml.hash();
+                let data_mut = ml.get_mut(&key).expect("The operation should succeed");
+                data_mut.clear();
+                data_mut.put_slice(&data2);
+
+                let before_node = MavlNode::new(key.clone(), data.clone());
+                let after_node = MavlNode::new(key.clone(), data2.clone());
+
+                let get_node = ml
+                    .get(&key)
+                    .expect("The node should be retrieved successfully");
+
+                assert_ne!(&get_node, &before_node.data());
+                assert_eq!(&get_node, &after_node.data());
+
+                prop_assert_eq!(before_hash == ml.hash(), seen.contains(&key));
+                seen.insert(key);
+            }
+
+            ml.tree.check(line!());
+        }
     }
 }
