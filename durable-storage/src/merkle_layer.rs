@@ -850,6 +850,42 @@ mod tests {
         ml.tree.check(line!());
     }
 
+    #[test]
+    fn test_mavl_get_mut_cow() {
+        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
+        let data = Bytes::from("get_mut_cow");
+
+        let mut ml = new_merkle_layer();
+
+        let empty_hash = ml.hash();
+        ml.set(&key, data.clone());
+        let before_hash = ml.hash();
+        assert_ne!(empty_hash, before_hash);
+
+        let ml2 = ml.clone();
+        assert_eq!(before_hash, ml2.hash());
+
+        let data2 = Bytes::from("mutated");
+
+        let data_mut = ml.get_mut(&key).expect("The operation should succeed");
+        data_mut.clear();
+        data_mut.put_slice(&data2);
+
+        assert_ne!(empty_hash, ml.hash());
+        assert_ne!(before_hash, ml.hash());
+        assert_ne!(ml2.hash(), ml.hash());
+
+        let before_node = MavlNode::new(key.clone(), data.clone());
+
+        let get_node = ml2
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(&get_node, &before_node.data());
+
+        ml.tree.check(line!());
+    }
+
     proptest! {
         #[test]
         fn test_mavl_get_mut_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
