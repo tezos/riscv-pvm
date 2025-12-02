@@ -44,6 +44,7 @@ zerocopy.workspace = true
 zerocopy-derive.workspace = true
 octez-riscv-data.workspace = true
 unty.workspace = true
+rangemap.workspace = true
 
 [dependencies.__tracing_do_not_use_directly]
 workspace = true
