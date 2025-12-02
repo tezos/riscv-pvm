@@ -21,6 +21,7 @@ pub(crate) mod code_page_entry;
 pub(crate) mod dispatch;
 pub(crate) mod interpreted;
 pub(crate) mod jitted;
+mod router;
 pub(crate) mod state;
 
 use std::sync::Arc;
