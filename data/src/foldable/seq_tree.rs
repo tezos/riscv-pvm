@@ -4,21 +4,21 @@
 
 //! Helpers for sequences that need to fold like trees
 
-use std::ops::Range;
-
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
-use crate::utils::next_power_of;
 
 /// Driver for `Foldable` that lets you turn an indexable sequence into a tree-like structure where
 /// the leaves are the items of the sequence
 pub struct IndexableSeqAsTree<'a, L, G> {
-    /// Range of indices for which the sequence has defined items
-    defined_range: Range<usize>,
+    /// Total length of the sequence (i.e. not just the number of items in the current chunk)
+    total_len: usize,
 
-    /// Range of indices being currently processed
-    range: Range<usize>,
+    /// Depth of the current chunk
+    current_depth: u32,
+
+    /// Index where the current chunk starts
+    current_start: usize,
 
     /// Maximum number of children per node
     arity: usize,
@@ -35,13 +35,14 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
     /// `len` is the length of the sequence. `arity` is the maximum number of children per node.
     /// `generator` is a function that, given an index, returns the corresponding item.
     pub fn new(len: usize, arity: usize, generator: &'a G) -> Self {
+        // This is the tree depth needed to cover `len` items with nodes of `arity` children each.
+        // We will gradually traverse down to depth 0, where the leaves are placed.
+        let depth = (len - 1).checked_ilog(arity).unwrap_or(0);
+
         Self {
-            defined_range: 0..len,
-            // Extending the range to the next power of `arity` gives us a simple way to make sure
-            // the leaves will always exist at the same depth. [`IndexableSeqAsTree::fold`] only
-            // needs to divide the range by `arity` to get chunk sizes which will eventually be cut
-            // down to the right size at the same recursion depth.
-            range: 0..next_power_of(len, arity),
+            total_len: len,
+            current_depth: depth,
+            current_start: 0,
             arity,
             generator,
             _leaf: std::marker::PhantomData,
@@ -58,18 +59,17 @@ where
     fn fold(&self, builder: F) -> F::Folded {
         // For compatibility with the previous Merklisation scheme, we treat single-item sequences
         // as just a leaf.
-        if self.defined_range.len() == 1 {
-            return (self.generator)(self.defined_range.start).fold(builder);
+        if self.total_len == 1 {
+            return (self.generator)(self.current_start).fold(builder);
         }
 
         let mut builder = builder.into_node_fold();
 
-        // When the range fits into the arity, we have reached the deepest level for this portion
-        // of the sequence.
-        if self.range.len() <= self.arity {
-            for idx in self.range.clone() {
-                if !self.defined_range.contains(&idx) {
-                    continue;
+        // Time to add leaves.
+        if self.current_depth == 0 {
+            for idx in self.current_start..self.current_start + self.arity {
+                if idx >= self.total_len {
+                    break;
                 }
 
                 let item = (self.generator)(idx);
@@ -79,19 +79,19 @@ where
             return builder.done();
         }
 
-        let chunk_len = self.range.len().div_ceil(self.arity);
-        let chunk_starts = self
-            .range
-            .clone()
-            .step_by(chunk_len)
-            .take_while(|&start| start < self.defined_range.end);
+        let next_chunk_len = self.arity.pow(self.current_depth);
 
-        for start in chunk_starts {
-            let end = start + chunk_len;
+        for child_no in 0..self.arity {
+            let next_start = self.current_start + child_no * next_chunk_len;
+
+            if next_start >= self.total_len {
+                break;
+            }
 
             builder.add(&IndexableSeqAsTree {
-                defined_range: self.defined_range.clone(),
-                range: start..end,
+                total_len: self.total_len,
+                current_depth: self.current_depth - 1,
+                current_start: next_start,
                 arity: self.arity,
                 generator: self.generator,
                 _leaf: std::marker::PhantomData,
