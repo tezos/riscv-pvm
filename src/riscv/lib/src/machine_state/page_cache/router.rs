@@ -62,15 +62,13 @@ pub struct Router<T: Clone + RouterEq> {
     internal: rangemap::RangeInclusiveMap<u64, RouterTarget<T>>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-821"))]
 impl<T: Clone + RouterEq> Router<T> {
     /// Inserts a new range without removing any existing ones it overlaps with. This involves
     /// creating new entries for the gaps and merging those into existing entries when the
     /// [`RouterEq`] implementation for `T` tells us to.
-    pub fn add_range(&mut self, new: RangeInclusive<u64>)
-    where
-        T: Default,
-    {
+    ///
+    /// We pass an explicit `constructor` method to handle the actual creation of new `T` values.
+    pub fn add_range(&mut self, new: RangeInclusive<u64>, constructor: impl Fn() -> T) {
         // We extend by one so that the `overlapping` iterator will give us touching entries as
         // well as overlapping ones.
         let extended = dilate_by_one(&new);
@@ -87,7 +85,7 @@ impl<T: Clone + RouterEq> Router<T> {
 
         // 'hot path' case with no touching entries is a single insert with no pre-existing target
         if entries_count == 0 {
-            self.insert_entry(RouterEntry::from_range(new));
+            self.insert_entry(RouterEntry::from_range(new), &constructor);
             return;
         }
 
@@ -97,7 +95,10 @@ impl<T: Clone + RouterEq> Router<T> {
 
         // gap at start, if it exists
         if overlapping_or_touching[0].range.start() > new.start() {
-            self.insert_entry(overlapping_or_touching[0].start_gap(*new.start()));
+            self.insert_entry(
+                overlapping_or_touching[0].start_gap(*new.start()),
+                &constructor,
+            );
         }
 
         for i in 0..(entries_count - 1) {
@@ -106,13 +107,16 @@ impl<T: Clone + RouterEq> Router<T> {
 
             // each middle gap, if it exists
             if !lhs.is_touching(rhs) {
-                self.insert_entry(lhs.gap(rhs));
+                self.insert_entry(lhs.gap(rhs), &constructor);
             }
         }
 
         // gap at end, if it exists
         if overlapping_or_touching[entries_count - 1].range.end() < new.end() {
-            self.insert_entry(overlapping_or_touching[entries_count - 1].end_gap(*new.end()));
+            self.insert_entry(
+                overlapping_or_touching[entries_count - 1].end_gap(*new.end()),
+                &constructor,
+            );
         }
     }
 
@@ -141,14 +145,13 @@ impl<T: Clone + RouterEq> Router<T> {
         ranges.into_iter()
     }
 
-    /// Utility method that inserts an entry, either with the given target or with a new default
-    /// target if `target == None`.
-    fn insert_entry(&mut self, entry: RouterEntry<T>)
-    where
-        T: Default,
-    {
-        self.internal
-            .insert(entry.range, entry.target.unwrap_or_default());
+    /// Utility method that inserts an entry, either with the given target or with a new
+    /// (created using `constructor`) target if `target == None`.
+    fn insert_entry(&mut self, entry: RouterEntry<T>, constructor: impl Fn() -> T) {
+        self.internal.insert(
+            entry.range,
+            entry.target.unwrap_or_else(|| RouterTarget(constructor())),
+        );
     }
 }
 
@@ -310,6 +313,13 @@ mod tests {
                 .map(|(r, _)| r.clone())
                 .collect::<Vec<_>>()
         }
+
+        fn add_range_default(&mut self, range: RangeInclusive<u64>)
+        where
+            T: Default,
+        {
+            self.add_range(range, T::default);
+        }
     }
 
     #[test]
@@ -323,28 +333,28 @@ mod tests {
     #[test]
     fn test_always_merge() {
         let mut r = Router::<AlwaysMergeTarget>::default();
-        r.add_range(0..=1);
-        r.add_range(3..=3);
-        r.add_range(7..=9);
-        r.add_range(11..=14);
+        r.add_range_default(0..=1);
+        r.add_range_default(3..=3);
+        r.add_range_default(7..=9);
+        r.add_range_default(11..=14);
         assert_eq!(r.ranges(), vec![0..=1, 3..=3, 7..=9, 11..=14]);
 
         // This final add will cause all the ranges to be merged.
-        r.add_range(2..=10);
+        r.add_range_default(2..=10);
         assert_eq!(r.ranges(), vec![0..=14]);
     }
 
     #[test]
     fn test_never_merge() {
         let mut r = Router::<NeverMergeTarget>::default();
-        r.add_range(0..=1);
-        r.add_range(3..=3);
-        r.add_range(7..=9);
-        r.add_range(11..=14);
+        r.add_range_default(0..=1);
+        r.add_range_default(3..=3);
+        r.add_range_default(7..=9);
+        r.add_range_default(11..=14);
         assert_eq!(r.ranges(), vec![0..=1, 3..=3, 7..=9, 11..=14]);
 
         // This final add will not cause any ranges to be merged.
-        r.add_range(2..=10);
+        r.add_range_default(2..=10);
         assert_eq!(r.ranges(), vec![
             0..=1,
             2..=2,
@@ -365,28 +375,28 @@ mod tests {
         #[test]
         fn test_merge_left_is_longer(a in 0..1000u64, b in 2..1000u64, c in 1..1000u64) {
             let mut r = TestRouter::default();
-            r.add_range(0..=(a + c));
-            r.add_range((a + b + c)..=(2 * a + b + c));
-            r.add_range((a + c + 1)..=(a + b + c - 1));
-            assert_eq!(r.ranges(), vec![0..=(a + b + c - 1), (a + b + c)..=(2 * a + b + c)]);
+            r.add_range_default(0..=(a + c));
+            r.add_range_default((a + b + c)..=(2 * a + b + c));
+            r.add_range_default((a + c + 1)..=(a + b + c - 1));
+            prop_assert_eq!(r.ranges(), vec![0..=(a + b + c - 1), (a + b + c)..=(2 * a + b + c)]);
         }
 
         #[test]
         fn test_merge_right_is_longer(a in 0..1000u64, b in 2..1000u64, c in 1..1000u64) {
             let mut r = TestRouter::default();
-            r.add_range(0..=a);
-            r.add_range((a + b)..=(2 * a + b + c));
-            r.add_range((a + 1)..=(a + b - 1));
-            assert_eq!(r.ranges(), vec![0..=a, (a + 1)..=(2 * a + b + c)]);
+            r.add_range_default(0..=a);
+            r.add_range_default((a + b)..=(2 * a + b + c));
+            r.add_range_default((a + 1)..=(a + b - 1));
+            prop_assert_eq!(r.ranges(), vec![0..=a, (a + 1)..=(2 * a + b + c)]);
         }
 
         #[test]
         fn test_merge_equal_length(a in 0..1000u64, b in 2..1000u64) {
             let mut r = TestRouter::default();
-            r.add_range(0..=a);
-            r.add_range((a + b)..=(2 * a + b));
-            r.add_range((a + 1)..=(a + b - 1));
-            assert_eq!(r.ranges(), vec![0..=(a + b - 1), (a + b)..=(2 * a + b)]);
+            r.add_range_default(0..=a);
+            r.add_range_default((a + b)..=(2 * a + b));
+            r.add_range_default((a + 1)..=(a + b - 1));
+            prop_assert_eq!(r.ranges(), vec![0..=(a + b - 1), (a + b)..=(2 * a + b)]);
         }
     }
 
@@ -394,12 +404,12 @@ mod tests {
     fn test_add_range_merge_multiple() {
         let mut r = TestRouter::default();
 
-        r.add_range(1..=3);
-        r.add_range(5..=6);
-        r.add_range(8..=8);
-        r.add_range(10..=10);
+        r.add_range_default(1..=3);
+        r.add_range_default(5..=6);
+        r.add_range_default(8..=8);
+        r.add_range_default(10..=10);
 
-        r.add_range(0..=11);
+        r.add_range_default(0..=11);
 
         assert_eq!(r.ranges(), vec![0..=4, 5..=7, 8..=9, 10..=11]);
     }
@@ -408,13 +418,13 @@ mod tests {
     fn test_get() {
         let mut r = TestRouter::default();
 
-        r.add_range(2..=5);
+        r.add_range_default(2..=5);
         r.append(&3, "hello");
 
-        r.add_range(7..=7);
+        r.add_range_default(7..=7);
         r.append(&7, "world");
 
-        r.add_range(0..=9);
+        r.add_range_default(0..=9);
         r.append(&5, "a");
         r.append(&8, "b");
 
@@ -445,7 +455,7 @@ mod tests {
 
             for range in ranges {
                 // these ranges may collide, that doesn't matter
-                r.add_range(range);
+                r.add_range_default(range);
             }
 
             let before = r.ranges();

@@ -95,10 +95,6 @@ pub trait PageCache<MC: MemoryConfig, M: ManagerBase>: MemoryGovernanceListener 
     fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
     where
         M: ManagerRead + ManagerWrite;
-
-    /// Invalidate a range of pages, usually due to the corresponding memory becoming write-able,
-    /// or no longer executable.
-    fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>);
 }
 
 /// A code page contains instructions that can be executed
