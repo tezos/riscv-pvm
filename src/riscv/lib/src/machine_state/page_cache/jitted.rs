@@ -20,6 +20,7 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
 use crate::machine_state::page_cache::DispatchTarget;
+use crate::machine_state::page_cache::router::RouterEq;
 
 /// A full-page of Jit-supporting entrypoints.
 pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>, D>>;
@@ -105,7 +106,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> From<Instruction> for Jitted<D, 
     }
 }
 
-impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal>
+impl<D: Clone + RouterEq + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal>
     for Jitted<D, MC>
 {
     type Compiler = D;
@@ -176,7 +177,7 @@ mod tests {
     #[test]
     fn test_jitted_entrypoint_called() {
         let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
-            InlineCompiler::default(),
+            InlineCompiler::default,
             |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
         );
 
@@ -201,7 +202,7 @@ mod tests {
             max_steps in 0usize..(DEFAULT_TEST_MAX_STEPS * 2)
         ) {
             let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
-                InlineCompiler::default(),
+                InlineCompiler::default,
                 |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
             );
 
@@ -229,7 +230,7 @@ mod tests {
     #[test]
     fn test_not_compiled_fallback_on_compilation_failure() {
         let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
-            InlineCompiler::default(),
+            InlineCompiler::default,
             |_| Ok(Instruction::new_fence_i()),
         );
 
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn test_compilation_request_respects_instruction_width() {
         let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
-            InlineCompiler::default(),
+            InlineCompiler::default,
             |index| {
                 let instruction = if index % 2 == 0 {
                     Instruction::new_nop(InstrWidth::Uncompressed)

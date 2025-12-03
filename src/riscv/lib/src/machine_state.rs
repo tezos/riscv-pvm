@@ -944,8 +944,9 @@ mod tests {
     use crate::machine_state::memory::M64M;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::Permissions;
+    use crate::machine_state::memory::listener::MemoryGovernanceListener;
     use crate::machine_state::page_cache::InterpretedCompiler;
-    use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::sp;
@@ -998,11 +999,14 @@ mod tests {
             state.core.main_memory.write_instruction_unchecked(init_pc_addr, (T2_ENC << 15) | (F3_0 << 12) | (T0_ENC << 7) | OP_JALR).unwrap();
 
             state.core.hart.xregisters.write(t2, jump_addr);
-             let page_index = crate::machine_state::memory::address_to_page_index(init_pc_addr) as u64;
+            let page_index = crate::machine_state::memory::address_to_page_index(init_pc_addr) as u64;
 
             // Since we've written a new instruction to the init_pc_addr - we need to
             // invalidate the page cache entry for that page.
-            state.page_cache.invalidate_pages(page_index..=page_index);
+            state.page_cache.handle_permissions_update(
+                page_index..=page_index,
+                Permissions::WRITE,
+            );
 
             state.core.hart.xregisters.write(t2, jump_addr);
 

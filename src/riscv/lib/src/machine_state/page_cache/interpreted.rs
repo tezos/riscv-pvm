@@ -17,6 +17,7 @@ use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::router::RouterEq;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -24,6 +25,17 @@ use crate::state_backend::ManagerWrite;
 /// Interpreted entrypoints are built automatically, and require no additional context.
 #[derive(Debug, Default, Clone)]
 pub struct InterpretedCompiler;
+
+/// Since [`InterpretedCompiler`] does no compilation at all, [`router_eq`] should always return
+/// false, so that the ranges in the router are kept as small as possible. This helps reduce the
+/// number of pages that could get unneccessarily dropped.
+///
+/// [`router_eq`]: crate::machine_state::page_cache::router::RouterEq::router_eq
+impl RouterEq for InterpretedCompiler {
+    fn router_eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
 
 /// Entrypoints that are interpreted only.
 #[derive(derive_more::Debug)]

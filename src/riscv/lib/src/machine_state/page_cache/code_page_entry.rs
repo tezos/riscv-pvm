@@ -15,6 +15,7 @@ use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::router::RouterEq;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -31,7 +32,7 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ///
     /// We require the compiler capable of doing so to be passed in when
     /// dispatching.
-    type Compiler: Clone;
+    type Compiler: Clone + RouterEq;
 
     /// In some cases, different compilers share a context. We want to instantiate the context
     /// once, rather than a new one for every compiler.

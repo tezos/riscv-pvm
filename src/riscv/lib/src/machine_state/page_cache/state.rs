@@ -16,6 +16,7 @@ use std::sync::Arc;
 use super::INSTRUCTION_ENTRIES;
 use super::PageCache;
 use super::code_page_entry::CodePageEntry;
+use super::router::Router;
 use crate::default::ConstDefault;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
@@ -60,13 +61,17 @@ pub struct PageEntry<CPE, C> {
 impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
     /// Construct a new [`PageEntry`].
     ///
+    /// `fetch_compiler` should return the compiler that will be attached to this `PageEntry`. This
+    /// argument is `FnOnce` because it may be necessary to create a new compiler and add it in the
+    /// router before returning it.
+    ///
     /// `fetch_instr` should return the instruction that will be placed into the entrypoint
     /// at `offset` in the `PageEntry`.
     ///
     /// This must be able to return an instruction for offsets from zero to [`INSTRUCTION_ENTRIES`].
     /// *NB* the offsets refer to the _halfwords_ of the page, rather than each byte themselves.
     pub(super) fn new<E>(
-        compiler: C,
+        fetch_compiler: impl FnOnce() -> C,
         fetch_instr: impl Fn(usize) -> Result<Instruction, E>,
     ) -> Result<Arc<Self>, E> {
         let mut page = Arc::<Self>::new_uninit();
@@ -96,7 +101,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
         // SAFETY: it is safe to construct a pointer to an uninitialised field of an uninitialised
         // struct and then write to it
         unsafe {
-            std::ptr::addr_of_mut!((*page_ptr).compiler).write(compiler);
+            std::ptr::addr_of_mut!((*page_ptr).compiler).write(fetch_compiler());
         }
 
         // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. The compiler field is
@@ -118,7 +123,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
         let instruction = parse_compressed_instruction(ZEROED_HALFWORD);
         let instruction = Instruction::from(&instruction);
 
-        let Ok(page) = Self::new::<std::convert::Infallible>(compiler, |_| Ok(instruction));
+        let Ok(page) = Self::new::<std::convert::Infallible>(|| compiler, |_| Ok(instruction));
 
         page
     }
@@ -159,7 +164,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
 impl<D, MC> PageCacheImpl<super::Jitted<D, MC>, MC, octez_riscv_data::mode::Normal>
 where
     MC: MemoryConfig,
-    D: Clone + super::dispatch::DispatchCompiler<MC>,
+    D: Clone + super::router::RouterEq + super::dispatch::DispatchCompiler<MC>,
 {
     /// TEST ONLY
     ///
@@ -186,7 +191,8 @@ type BoxedPages<CPE, C> = Box<[Option<Arc<PageEntry<CPE, C>>>]>;
 //              `Normal` mode, only.
 pub struct PageCacheImpl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> {
     pages: BoxedPages<CPE, CPE::Compiler>,
-    compiler: CPE::Compiler,
+    compiler_context: CPE::CompilerContext,
+    router: Router<CPE::Compiler>,
 }
 
 #[cfg(test)]
@@ -235,11 +241,10 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, 
         );
         let pages = MC::TOTAL_BYTES.get() >> memory::OFFSET_BITS.get();
 
-        let compiler_context = CPE::CompilerContext::default();
-
         Self {
             pages: vec![None; pages].into_boxed_slice(),
-            compiler: CPE::new_compiler(&compiler_context),
+            compiler_context: CPE::CompilerContext::default(),
+            router: Router::<CPE::Compiler>::default(),
         }
     }
 
@@ -264,8 +269,9 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, 
         M: ManagerRead + ManagerWrite,
     {
         let page_start = address & PAGE_MASK;
+        let page_index = address_to_page_index(page_start);
 
-        let Some(page_entry) = self.pages.get_mut(address_to_page_index(page_start)) else {
+        let Some(page_entry) = self.pages.get_mut(page_index) else {
             #[cfg(feature = "log")]
             crate::log::warning!(
                 "Failed to populated page at {page_start:x}: address {address:x} out of bounds of page cache"
@@ -278,7 +284,25 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, 
             return;
         }
 
-        *page_entry = PageEntry::new::<PopulationError>(self.compiler.clone(), |offset| {
+        let fetch_compiler = || {
+            let idx = page_index as u64;
+            if let Some(compiler) = self.router.get(&idx) {
+                compiler.clone()
+            } else {
+                #[cfg(feature = "log")]
+                crate::log::warning!(
+                    "Populating page requires ad-hoc single page range to be added in router: {page_index}"
+                );
+                self.router
+                    .add_range(idx..=idx, || CPE::new_compiler(&self.compiler_context));
+                self.router
+                    .get(&idx)
+                    .expect("Should find a page we just added to the router")
+                    .clone()
+            }
+        };
+
+        *page_entry = PageEntry::new::<PopulationError>(fetch_compiler, |offset| {
             let offset_bytes = (offset << 1) as u64;
 
             if offset_bytes < LAST_HALFWORD_PAGE_OFFSET {
@@ -318,13 +342,23 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, 
             crate::log::warning!("Failed to populated page at {page_start:x}: {_err:?}");
         }).ok()
     }
+}
 
-    /// Invalidate a range of pages corresponding to the provided range of memory.
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<CPE, MC, M> {
+    /// Invalidate the ranges of pages in the router which overlap the provided range of memory.
     fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>) {
-        let pages_len = self.pages.len();
-        for page_idx in pages.take_while(|idx| *idx < pages_len as u64) {
-            self.pages[page_idx as usize] = None;
+        for range in self.router.drain_overlapping(pages) {
+            for page_idx in range {
+                self.pages[page_idx as usize] = None;
+            }
         }
+    }
+
+    /// Instantiate a new range of pages in the router, either with a new compiler or by extending
+    /// existing ones.
+    fn instantiate_pages(&mut self, pages: std::ops::RangeInclusive<u64>) {
+        self.router
+            .add_range(pages, || CPE::new_compiler(&self.compiler_context));
     }
 }
 
@@ -345,9 +379,12 @@ where
         permissions: memory::Permissions,
     ) {
         let needs_invalidation = permissions.can_write() || !permissions.can_exec();
+        let needs_instantiation = !permissions.can_write() && permissions.can_exec();
 
         if needs_invalidation {
             self.invalidate_pages(pages);
+        } else if needs_instantiation {
+            self.instantiate_pages(pages);
         }
     }
 }
@@ -442,39 +479,47 @@ mod tests {
     fn test_page_invalidation_resets_pages() {
         let mut cache = PageCacheImpl::<Interpreted<_, _>, M1M, Normal>::new();
 
+        // In the router, we instantiate pages 4..=7 as a single range, and the other pages up to
+        // 14 as single-page ranges.
+        cache.instantiate_pages(4..=7);
+        for i in 0..14 {
+            cache.instantiate_pages(i..=i);
+        }
+
         for page in cache.pages.iter_mut().take(16) {
             *page = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
                 std::convert::Infallible,
-            >(InterpretedCompiler, |_| Ok(Instruction::DEFAULT))
+            >(|| InterpretedCompiler, |_| Ok(Instruction::DEFAULT))
             .ok()
         }
         assert_eq!(count_active_pages(&cache), 16);
 
-        // invalidate some pages
+        // invalidate some pages, the overlap with the 4..=7 range means those extra pages will be
+        // dropped too
         cache.invalidate_pages(1..=4);
-        assert_eq!(count_active_pages(&cache), 12);
+        assert_eq!(count_active_pages(&cache), 9);
         assert!(cache.get_code_page(0).is_some());
 
-        for i in 1..=4 {
+        for i in 1..=7 {
             assert!(cache.get_code_page(i * PAGE_SIZE.get()).is_none());
         }
 
-        assert!(cache.get_code_page(5 * PAGE_SIZE.get()).is_some());
+        assert!(cache.get_code_page(8 * PAGE_SIZE.get()).is_some());
 
         // invalidate another range
         cache.invalidate_pages(10..=11);
-        assert_eq!(count_active_pages(&cache), 10);
+        assert_eq!(count_active_pages(&cache), 7);
 
         // invalidating pages we already have does nothing
         cache.invalidate_pages(1..=3);
-        assert_eq!(count_active_pages(&cache), 10);
+        assert_eq!(count_active_pages(&cache), 7);
 
-        // invalidate all addresses clears all pages
+        // invalidate all addresses clears all pages that are in the router
         cache.invalidate_pages(0..=u64::MAX);
-        assert_eq!(count_active_pages(&cache), 0);
+        assert_eq!(count_active_pages(&cache), 2);
     }
 
-    backend_test!(test_populate_block_cache, F, {
+    backend_test!(test_populate_cache, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
         let mut cache = PageCacheImpl::<Interpreted<_, _>, M4K, F>::new();
 
@@ -632,16 +677,18 @@ mod tests {
     }
 
     backend_test!(page_dispatch_respects_max_steps_compressed, F, {
-        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
-            std::convert::Infallible,
-        >(InterpretedCompiler, |_| {
-            Ok(Instruction::new_addi(
-                nz::a0,
-                nz::a0,
-                5,
-                InstrWidth::Compressed,
-            ))
-        });
+        let Ok(mut page_entry) =
+            PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<std::convert::Infallible>(
+                || InterpretedCompiler,
+                |_| {
+                    Ok(Instruction::new_addi(
+                        nz::a0,
+                        nz::a0,
+                        5,
+                        InstrWidth::Compressed,
+                    ))
+                },
+            );
 
         let dispatch = &RefCell::new(super::CodePageImpl {
             page: &mut page_entry,
@@ -690,18 +737,20 @@ mod tests {
     });
 
     backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
-        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
-            std::convert::Infallible,
-        >(InterpretedCompiler, |idx| {
-            // we put uncompressed instructions on 4-byte aligned addresses
-            let instr = if idx % 2 == 0 {
-                Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
-            } else {
-                Instruction::new_nop(InstrWidth::Compressed)
-            };
+        let Ok(mut page_entry) =
+            PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<std::convert::Infallible>(
+                || InterpretedCompiler,
+                |idx| {
+                    // we put uncompressed instructions on 4-byte aligned addresses
+                    let instr = if idx % 2 == 0 {
+                        Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
+                    } else {
+                        Instruction::new_nop(InstrWidth::Compressed)
+                    };
 
-            Ok(instr)
-        });
+                    Ok(instr)
+                },
+            );
 
         let dispatch = &RefCell::new(super::CodePageImpl {
             page: &mut page_entry,
@@ -800,7 +849,9 @@ mod tests {
 
         let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
             std::convert::Infallible,
-        >(InterpretedCompiler, |offset| Ok(instructions[offset]));
+        >(
+            || InterpretedCompiler, |offset| Ok(instructions[offset])
+        );
 
         let dispatch = &RefCell::new(super::CodePageImpl {
             page: &mut page_entry,

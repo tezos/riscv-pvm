@@ -25,6 +25,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::address_to_halfword_index;
 use crate::machine_state::page_cache::jitted::Jitted;
 use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::router::RouterEq;
 
 /// The function signature for dispatching an entrypoint run.
 ///
@@ -173,6 +174,14 @@ impl Default for InlineCompiler {
     }
 }
 
+/// This lets the router know that it can merge `InlineCompiler` ranges as long as they point to
+/// the same underlying JIT instance.
+impl RouterEq for InlineCompiler {
+    fn router_eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.jit, &other.jit)
+    }
+}
+
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
     type Context = ();
 
@@ -298,6 +307,19 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // is allowed to lock the mutex and use the underlying JIT instance.
     _do_not_use_in_main_thread: Arc<LazyLock<Mutex<internal_corro::SendWrapper<JIT>>>>,
     sender: Sender<CompilationRequest<Self, MC>>,
+}
+
+/// The router should merge `OutlineCompiler` ranges if they point to the same underlying JIT
+/// instance.
+impl<MC: MemoryConfig> RouterEq for OutlineCompiler<MC> {
+    fn router_eq(&self, other: &Self) -> bool {
+        // The two `Arc`s are only 'used' here to check pointer equality, this cannot disturb the
+        // other thread.
+        Arc::ptr_eq(
+            &self._do_not_use_in_main_thread,
+            &other._do_not_use_in_main_thread,
+        )
+    }
 }
 
 impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
