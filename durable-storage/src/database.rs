@@ -51,11 +51,14 @@ impl Database {
         todo!()
     }
 
-    #[expect(dead_code, reason = "Implemented in RV-827")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Returns true if the provided key exists in the database, false if it does not.
-    pub(crate) fn exists(&self, _key: &Key) -> bool {
-        // TODO: Implement database reads in RV-827
-        todo!()
+    pub(crate) fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
+        match self.persistent.get(key.as_ref()) {
+            Ok(_) => Ok(true),
+            Err(PersistenceLayerError::KeyNotFound) => Ok(false),
+            Err(other_error) => Err(other_error.into()),
+        }
     }
 
     #[expect(dead_code, reason = "Implemented in RV-827")]
@@ -132,6 +135,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -162,6 +166,38 @@ mod tests {
             .expect("Creating a Merkle worker should succeed");
 
         Database { persistent, merkle }
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_exists(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let mut database = new_database(handle);
+
+            let mut seen = HashSet::new();
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+                let data: &[u8] = data;
+                let expected_written = data.len();
+
+                prop_assert_ne!(database.exists(&key)
+                        .expect("There should be no other `PersistenceLayerError`s"),
+                    seen.insert(key.clone()));
+
+                let result = database
+                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .expect("Writing should succeed");
+                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+
+                prop_assert_eq!(result, expected_written);
+            }
+        }
     }
 
     proptest! {
