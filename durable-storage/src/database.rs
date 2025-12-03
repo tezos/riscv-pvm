@@ -61,11 +61,10 @@ impl Database {
         }
     }
 
-    #[expect(dead_code, reason = "Implemented in RV-827")]
     /// Obtain, and possibly calculate, the root hash of the database>
+    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     pub(crate) fn hash(&self) -> blake3::Hash {
-        // TODO: Implement database root-hashing in RV-827
-        todo!()
+        self.merkle.hash()
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
@@ -198,6 +197,83 @@ mod tests {
                 prop_assert_eq!(result, expected_written);
             }
         }
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_hash(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
+
+            // Needs a thread for sending and a thread for receiving
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let mut database = new_database(handle);
+
+            let mut seen = HashSet::new();
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+                let data: &[u8] = data;
+                let expected_written = data.len();
+
+                let before = database.hash();
+
+                let result = database
+                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .expect("Writing should succeed");
+
+                prop_assert_eq!(result, expected_written);
+
+                let after = database.hash();
+
+                let existing_pair = !seen.insert((key, data));
+                // Avoid the edge case of an identical hash from a previously seen identical
+                // key-value pair, where no other keys were written to in between.
+                if !existing_pair {
+                    prop_assert_ne!(before, after);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_database_hash_revert() {
+        // Needs a thread for sending and a thread for receiving
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+        let original_data = [1, 2, 3];
+        let mutated_data = [3, 2, 1];
+
+        database
+            .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
+            .expect("Writing should succeed");
+
+        let before = database.hash();
+
+        // Mutate the same key
+        database
+            .write(key.clone(), 0, Bytes::copy_from_slice(&mutated_data))
+            .expect("Writing should succeed");
+
+        let after = database.hash();
+        assert_ne!(before, after);
+
+        // Revert the value of the same key to the original value and check the hash reverts to the
+        // same value.
+        database
+            .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
+            .expect("Writing should succeed");
+        let reverted = database.hash();
+        assert_eq!(before, reverted);
     }
 
     proptest! {
