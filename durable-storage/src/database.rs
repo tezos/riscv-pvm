@@ -46,11 +46,12 @@ pub enum DatabaseError {
 }
 
 impl Database {
-    #[expect(dead_code, reason = "Implemented in RV-827")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Added in RV-827"))]
     /// Remove a key from the database.
-    pub(crate) fn delete(&mut self, _key: &Key) -> Result<(), DatabaseError> {
-        // TODO: Implement database deletes in RV-827
-        todo!()
+    pub(crate) fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
+        self.persistent.delete(key.as_ref())?;
+        self.merkle.delete(key);
+        Ok(())
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
@@ -182,6 +183,80 @@ mod tests {
             DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
 
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_delete(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let mut database = new_database(handle);
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+                let expected_written = data.len();
+                let result = database
+                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .expect("Writing should succeed");
+                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+                prop_assert_eq!(result, expected_written);
+
+                let before = database.hash();
+                database.delete(key.clone()).expect("Deleting should succeed");
+                let after = database.hash();
+                assert_ne!(before, after);
+                prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_database_delete_nonexistent() {
+        // Receiving the hash requires a separate worker thread
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        // Populate a database and obtain a root hash
+        let keys: Vec<Key> = (1..=5)
+            .map(|k| Key::new(&[k]).expect("Size less than KEY_MAX_SIZE"))
+            .collect();
+
+        let data: Vec<[u8; 1]> = (1..=5).map(|i| [i * 42]).collect();
+
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let expected_written = data.len();
+            let result = database
+                .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                .expect("Writing should succeed");
+            assert!(
+                database
+                    .exists(key)
+                    .expect("There should be no other `PersistenceLayerError`s")
+            );
+            assert_eq!(result, expected_written);
+        }
+        let before = database.hash();
+
+        // Delete a nonexistent key
+        let nonexistent_key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+        assert!(
+            !database
+                .exists(&nonexistent_key)
+                .expect("There should be no other `PersistenceLayerError`s")
+        );
+        assert!(database.delete(nonexistent_key).is_ok());
+
+        // Ensure the root hash is unchanged
+        let after = database.hash();
+        assert_eq!(before, after);
     }
 
     proptest! {

@@ -167,7 +167,6 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::delete`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn delete(&self, key: Key) {
         self.sender
             .send(Command::Delete { key })
