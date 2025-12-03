@@ -5,10 +5,12 @@
 //!
 //! This module exposes wrappers for the style of dispatch and compilation that is done.
 
+use std::cell::LazyCell;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -158,15 +160,15 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Sized {
 /// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
 #[derive(Clone)]
 pub struct InlineCompiler {
-    jit: Rc<RefCell<JIT>>,
+    jit: Rc<LazyCell<RefCell<JIT>>>,
 }
 
 impl Default for InlineCompiler {
     fn default() -> Self {
         Self {
-            jit: Rc::new(RefCell::new(
-                JIT::new().expect("InlineCompiler should instantiate its `JIT`"),
-            )),
+            jit: Rc::new(LazyCell::new(|| {
+                RefCell::new(JIT::new().expect("InlineCompiler should instantiate its `JIT`"))
+            })),
         }
     }
 }
@@ -189,7 +191,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
         // The `InlineCompiler` is exclusively used in a single threaded context (compilation is
         // done in the same thread as execution). Therefore, this borrow should never panic as
         // there can be no other attempts to borrow concurrently.
-        let mut jit = target.compiler.jit.borrow_mut();
+        let mut jit = (**target.compiler.jit).borrow_mut();
 
         let offset = address_to_halfword_index(program_counter);
 
@@ -294,7 +296,7 @@ pub struct OutlineCompiler<MC: MemoryConfig> {
     // We must not touch the jit from the execution thread. On each compilation request it is
     // passed through to the background thread as part of the [`PageEntry`]. The background thread
     // is allowed to lock the mutex and use the underlying JIT instance.
-    _do_not_use_in_main_thread: Arc<Mutex<internal_corro::SendWrapper<JIT>>>,
+    _do_not_use_in_main_thread: Arc<LazyLock<Mutex<internal_corro::SendWrapper<JIT>>>>,
     sender: Sender<CompilationRequest<Self, MC>>,
 }
 
@@ -305,8 +307,10 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     /// Instantiate a new outline compiler with a fresh JIT instance and a clone of the sender to
     /// the background thread.
     fn new(context: &Self::Context) -> Self {
-        let jit_internal = JIT::new().expect("OutlineCompiler should instantiate its `JIT`");
-        let jit = Arc::new(Mutex::new(internal_corro::SendWrapper::new(jit_internal)));
+        let jit: Arc<LazyLock<_>> = Arc::new(LazyLock::new(|| {
+            let jit_internal = JIT::new().expect("OutlineCompiler should instantiate its `JIT`");
+            Mutex::new(internal_corro::SendWrapper::new(jit_internal))
+        }));
 
         Self {
             _do_not_use_in_main_thread: jit,
