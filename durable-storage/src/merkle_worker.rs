@@ -176,7 +176,6 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::hash`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn hash(&self) -> blake3::Hash {
         let (sender, receiver) = oneshot::channel();
 
