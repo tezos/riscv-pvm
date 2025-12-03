@@ -33,6 +33,12 @@ impl Key {
     }
 }
 
+impl AsRef<[u8]> for Key {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// Maximum size of a key in bytes
 pub(crate) const KEY_MAX_SIZE: usize = 256;
 
