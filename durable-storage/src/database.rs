@@ -30,7 +30,6 @@ pub struct Database {
 #[derive(Debug, thiserror::Error)]
 /// Errors that can occur during operations on a [`Database`].
 pub enum DatabaseError {
-    #[expect(dead_code, reason = "Implemented in RV-827")]
     #[error("The offset is too large")]
     OffsetTooLarge,
 
@@ -66,22 +65,32 @@ impl Database {
         todo!()
     }
 
-    #[expect(dead_code, reason = "Implemented in RV-827")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Read a portion of the value associated with the provided key. The read data will be written
-    /// into `_data`.
+    /// into `data`. `offset` specifies from where in the associated value to start reading.
     ///
     /// Fails if:
     ///  - The key does not exist.
-    ///  - The offset is larger than or equal to the length of the associated value.
+    ///  - The offset is larger than the length of the associated value.
     pub(crate) fn read(
         &self,
-        _key: &Key,
-        _offset: usize,
-        _data: &mut [u8],
+        key: &Key,
+        offset: usize,
+        data: &mut [u8],
     ) -> Result<usize, DatabaseError> {
-        let value = None; // TODO: Implement database reads in RV-827
-        //                       : Compare the offset and the size of the value in RV-827
-        value.ok_or(DatabaseError::KeyNotFound)
+        let value = self.persistent.get(key.as_ref())?;
+        let value_ref = value.as_ref();
+
+        if offset > value_ref.len() {
+            return Err(DatabaseError::OffsetTooLarge);
+        }
+
+        let source_slice = &value_ref[offset..];
+        let bytes_to_copy = std::cmp::min(data.len(), source_slice.len());
+
+        data[..bytes_to_copy].copy_from_slice(&source_slice[..bytes_to_copy]);
+
+        Ok(bytes_to_copy)
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
@@ -110,15 +119,14 @@ impl Database {
         }
     }
 
-    #[expect(dead_code, reason = "Implemented in RV-827")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Retrieve the length of the value associated with the provided key.
     ///
     /// Fails if:
     ///  - The key does not exist in the database.
-    pub(crate) fn value_length(&self, _key: &Key) -> Result<usize, DatabaseError> {
-        let value = None; // TODO: Implement database reads in RV-827
-        //                       : Compare the offset and the size of the value in RV-827
-        value.ok_or(DatabaseError::KeyNotFound)
+    pub(crate) fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
+        let value = self.persistent.get(key.as_ref())?;
+        Ok(value.as_ref().len())
     }
 }
 
@@ -158,6 +166,119 @@ mod tests {
 
     proptest! {
         #[test]
+        fn test_database_read(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100), ) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let mut database = new_database(handle);
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+                let mut read_data: [u8; 100] = [42; 100];
+
+                let read_data_before = read_data;
+
+                // Write the data
+                prop_assert_eq!(
+                    database
+                        .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                        .expect("Writing should succeed"),
+                    data.len()
+                );
+
+                // The offset is bigger than the value
+                prop_assert!(database.read(&key, data.len() + 1, &mut read_data).is_err());
+                prop_assert_eq!(read_data, read_data_before);
+
+                // Partial value write, where the output parameter is smaller than the data.
+                prop_assert_eq!(
+                    database
+                        .read(&key, 0, &mut read_data[1..data.len()])
+                        .expect(
+                            "Reading a value larger than the output parameter's size should succeed"
+                        ),
+                    data.len() - 1
+                );
+                prop_assert_ne!(read_data, read_data_before);
+                prop_assert_ne!(read_data, data.as_slice());
+                let read_data_before = read_data;
+
+                database
+                    .read(&key, data.len(), &mut read_data)
+                    .expect("A zero-sized write should succeed");
+                prop_assert_eq!(read_data, read_data_before);
+
+                // Whole value write
+                database
+                    .read(&key, 0, &mut read_data)
+                    .expect("Writing the whole value should succeed");
+                prop_assert_eq!(&read_data[..data.len()], data.as_slice());
+                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+
+                // Partial value write
+                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
+                database
+                    .read(&key, data.len() - 1, &mut read_data[1..2])
+                    .expect("A partial write should succeed");
+                prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
+                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
+                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_database_read_no_key() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let database = new_database(handle);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let mut read_data: [u8; 100] = [42; 100];
+        let read_data_before = read_data;
+
+        // The key doesn't exist
+        assert!(database.read(&key, 0, &mut read_data).is_err());
+        assert_eq!(read_data_before, read_data);
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_value_length(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+                                      data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100), ) {
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let mut database = new_database(handle);
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+                let data = Bytes::copy_from_slice(data);
+
+                prop_assert_eq!(
+                    database
+                        .write(key.clone(), 0, Bytes::copy_from_slice(&data))
+                        .expect("Writing should succeed"),
+                    data.len()
+                );
+                prop_assert_eq!(
+                    database
+                        .value_length(&key)
+                        .expect("Getting the value length should succeed"),
+                    data.len()
+                );
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
         fn test_database_write_zero_offset(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
                                            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
 
@@ -169,10 +290,10 @@ mod tests {
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data: &[u8] = data;
+                let data = Bytes::copy_from_slice(data);
                 let expected_written = data.len();
                 let result = database
-                    .write(key, 0, Bytes::copy_from_slice(data))
+                    .write(key, 0, data)
                     .expect("Writing should succeed");
 
                 prop_assert_eq!(result, expected_written);
