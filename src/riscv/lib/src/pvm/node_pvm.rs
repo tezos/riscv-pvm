@@ -279,10 +279,7 @@ impl PvmStorage {
 
     /// Create a new commit for `state` and  return the commit id.
     pub fn commit(&mut self, state: &NodePvm) -> Result<Hash, PvmStorageError> {
-        Ok(state.with_backend(|pvm| {
-            let struct_ref = pvm.struct_ref::<state_backend::FnManagerIdent>();
-            self.repo.commit_serialised(&struct_ref)
-        })?)
+        Ok(state.with_backend(|pvm| self.repo.commit_serialised(pvm))?)
     }
 
     /// Checkout the PVM state committed under `id`, if the commit exists.

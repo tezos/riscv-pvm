@@ -9,6 +9,9 @@ use std::slice::from_raw_parts;
 use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -61,6 +64,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -248,6 +252,17 @@ impl FromProof for SignalActions<Verify> {
             restorer,
             thread_mask,
         })
+    }
+}
+
+impl<M: ManagerSerialise> Encode for SignalActions<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.actions.encode(encoder)?;
+        self.flags.encode(encoder)?;
+        self.masks.encode(encoder)?;
+        self.restorer.encode(encoder)?;
+        self.thread_mask.encode(encoder)?;
+        Ok(())
     }
 }
 

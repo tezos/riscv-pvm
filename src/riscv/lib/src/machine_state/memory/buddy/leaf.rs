@@ -212,6 +212,13 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
             set: self.set.clone(),
         }
     }
+
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+    where
+        M: ManagerSerialise,
+    {
+        Encode::encode(self, encoder)
+    }
 }
 
 impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {

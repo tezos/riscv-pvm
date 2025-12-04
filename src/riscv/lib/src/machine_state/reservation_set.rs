@@ -9,6 +9,9 @@
 
 use std::ops::BitAnd;
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -162,5 +165,12 @@ impl FromProof for ReservationSet<Verify> {
         let result = Cell::from_proof(proof)?;
         let result = result.map(|start_addr| Self { start_addr });
         Ok(result)
+    }
+}
+
+impl<M: backend::ManagerSerialise> Encode for ReservationSet<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.start_addr.encode(encoder)?;
+        Ok(())
     }
 }

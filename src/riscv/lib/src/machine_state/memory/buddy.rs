@@ -21,6 +21,9 @@ mod branch;
 mod branch_combinations;
 mod leaf;
 mod proxy;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Normal;
@@ -34,6 +37,7 @@ use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Layout for a Buddy-style memory manager
@@ -98,6 +102,11 @@ pub trait Buddy<M: ManagerBase>: NewState<M> {
     fn clone_state(&self) -> Self
     where
         M: ManagerClone;
+
+    /// Serialise the memory manager state.
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+    where
+        M: ManagerSerialise;
 }
 
 #[cfg(test)]

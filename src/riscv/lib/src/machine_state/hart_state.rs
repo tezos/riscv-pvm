@@ -3,6 +3,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -174,6 +177,17 @@ impl FromProof for HartState<Verify> {
             pc,
             reservation_set,
         })
+    }
+}
+
+impl<M: backend::ManagerSerialise> Encode for HartState<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.xregisters.encode(encoder)?;
+        self.fregisters.encode(encoder)?;
+        self.csregisters.encode(encoder)?;
+        self.pc.encode(encoder)?;
+        self.reservation_set.encode(encoder)?;
+        Ok(())
     }
 }
 

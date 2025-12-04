@@ -20,6 +20,8 @@ use std::num::NonZeroUsize;
 use arbitrary_int::u5;
 use bincode::Decode;
 use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -38,6 +40,7 @@ use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
+use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -338,6 +341,12 @@ impl FromProof for XRegisters<Verify> {
         let result = backend::Cells::from_proof(proof)?;
         let result = result.map(|registers| Self { registers });
         Ok(result)
+    }
+}
+
+impl<M: ManagerSerialise> Encode for XRegisters<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.registers.encode(encoder)
     }
 }
 
@@ -737,6 +746,12 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
+    }
+}
+
+impl<M: ManagerSerialise> Encode for FRegisters<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.registers.encode(encoder)
     }
 }
 

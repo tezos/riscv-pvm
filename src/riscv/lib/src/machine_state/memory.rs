@@ -11,6 +11,9 @@ pub(crate) mod state;
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use listener::MemoryGovernanceListener;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::mode::Normal;
@@ -30,6 +33,7 @@ use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Number of bits needed so you can address every byte in a page
@@ -311,6 +315,11 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         self.deallocate_pages(address, length)?;
         self.protect_pages(address, length, Permissions::NONE, listener)
     }
+
+    /// Serialise the memory state.
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+    where
+        M: ManagerSerialise;
 }
 
 /// Memory configuration
