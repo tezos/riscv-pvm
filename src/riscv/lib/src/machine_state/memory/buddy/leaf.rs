@@ -219,6 +219,13 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
     {
         Encode::encode(self, encoder)
     }
+
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
+    where
+        M: ManagerDeserialise,
+    {
+        Decode::decode(decoder)
+    }
 }
 
 impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
@@ -227,8 +234,8 @@ impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
     }
 }
 
-impl<const PAGES: u64, M: ManagerDeserialise> Decode<()> for BuddyLeaf<PAGES, M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<C, const PAGES: u64, M: ManagerDeserialise> Decode<C> for BuddyLeaf<PAGES, M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let set = Decode::decode(decoder)?;
         Ok(Self { set })
     }

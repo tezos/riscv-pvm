@@ -176,10 +176,10 @@ impl<const PAGES: usize, M: ManagerClone> CloneState for PagePermissions<PAGES, 
     }
 }
 
-impl<const PAGES: usize, M: ManagerDeserialise> Decode<()> for PagePermissions<PAGES, M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let pages: AllocatedOf<PagePermissionsLayout<PAGES>, M> = Decode::decode(decoder)?;
-        Ok(Self::bind(pages))
+impl<C, const PAGES: usize, M: ManagerDeserialise> Decode<C> for PagePermissions<PAGES, M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let pages = Decode::decode(decoder)?;
+        Ok(Self { pages })
     }
 }
 

@@ -9,8 +9,11 @@ use std::slice::from_raw_parts;
 use std::slice::from_raw_parts_mut;
 
 use arbitrary_int::u7;
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -63,6 +66,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -263,6 +267,18 @@ impl<M: ManagerSerialise> Encode for SignalActions<M> {
         self.restorer.encode(encoder)?;
         self.thread_mask.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: ManagerDeserialise> Decode<C> for SignalActions<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            actions: Decode::decode(decoder)?,
+            flags: Decode::decode(decoder)?,
+            masks: Decode::decode(decoder)?,
+            restorer: Decode::decode(decoder)?,
+            thread_mask: Decode::decode(decoder)?,
+        })
     }
 }
 

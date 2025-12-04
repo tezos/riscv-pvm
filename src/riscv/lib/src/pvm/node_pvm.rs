@@ -284,8 +284,8 @@ impl PvmStorage {
 
     /// Checkout the PVM state committed under `id`, if the commit exists.
     pub fn checkout(&self, id: &Hash) -> Result<NodePvm, PvmStorageError> {
-        let allocated: AllocatedOf<NodePvmLayout, Normal> = self.repo.checkout_serialised(id)?;
-        Ok(NodePvm::bind(allocated))
+        let pvm = self.repo.checkout_serialised(id)?;
+        Ok(NodePvm::wrap(pvm))
     }
 
     /// A snapshot is a new repo to which only `id` has been committed.

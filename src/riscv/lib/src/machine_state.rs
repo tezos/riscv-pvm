@@ -16,8 +16,11 @@ use std::num::NonZeroUsize;
 use std::ops::Bound;
 use std::ops::ControlFlow;
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use hart_state::HartState;
 use hart_state::HartStateLayout;
@@ -279,6 +282,18 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerSerialise> Encode for MachineC
     }
 }
 
+impl<C, MC: memory::MemoryConfig, M: backend::ManagerDeserialise> Decode<C>
+    for MachineCoreState<MC, M>
+{
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            hart: Decode::decode(decoder)?,
+            main_memory: Memory::decode(decoder)?,
+            signal_actions: Decode::decode(decoder)?,
+        })
+    }
+}
+
 /// Layout for the machine state - everything required to fetch & run instructions.
 pub type MachineStateLayout<MC> = MachineCoreStateLayout<MC>;
 
@@ -352,6 +367,20 @@ where
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.core.encode(encoder)
+    }
+}
+
+impl<C, MC, CPE, M> Decode<C> for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerDeserialise,
+{
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            core: Decode::decode(decoder)?,
+            page_cache: MC::PageCache::new(),
+        })
     }
 }
 

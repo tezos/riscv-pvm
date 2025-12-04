@@ -118,17 +118,15 @@ macro_rules! combined_buddy_branch {
         #[perfect_derive::perfect_derive(PartialEq, Eq)]
         pub struct $name<B, M: ManagerBase>($buddy1<$buddy2<B, M>, M>);
 
-        // Passthrough implementation, default derive macro can't derive this ...
         impl<B: Buddy<M>, M: ManagerSerialise> Encode for $name<B, M> {
             fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
                 Buddy::encode(&self.0, encoder)
             }
         }
 
-        // Passthrough implementation, default derive macro can't derive this ...
-        impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for $name<B, M> {
-            fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-                Ok(Self(Decode::decode(decoder)?))
+        impl<C, B: Buddy<M>, M: ManagerDeserialise> Decode<C> for $name<B, M> {
+            fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+                Ok(Self(Buddy::decode(decoder)?))
             }
         }
 
@@ -205,7 +203,14 @@ macro_rules! combined_buddy_branch {
             where
                 M: ManagerSerialise,
             {
-                Buddy::encode(&self.0, encoder)
+                Encode::encode(self, encoder)
+            }
+
+            fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
+            where
+                M: ManagerDeserialise,
+            {
+                Decode::decode(decoder)
             }
         }
 

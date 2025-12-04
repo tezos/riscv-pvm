@@ -3,8 +3,11 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -188,6 +191,18 @@ impl<M: backend::ManagerSerialise> Encode for HartState<M> {
         self.pc.encode(encoder)?;
         self.reservation_set.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: backend::ManagerDeserialise> Decode<C> for HartState<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            xregisters: Decode::decode(decoder)?,
+            fregisters: Decode::decode(decoder)?,
+            csregisters: Decode::decode(decoder)?,
+            pc: Decode::decode(decoder)?,
+            reservation_set: Decode::decode(decoder)?,
+        })
     }
 }
 

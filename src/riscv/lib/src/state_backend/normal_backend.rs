@@ -135,7 +135,7 @@ impl ManagerSerialise for Normal {
 }
 
 impl ManagerDeserialise for Normal {
-    fn deserialise_region<T: Decode<()> + 'static, const LEN: usize, D: Decoder<Context = ()>>(
+    fn deserialise_region<T: Decode<D::Context> + 'static, const LEN: usize, D: Decoder>(
         mut decoder: D,
     ) -> Result<Self::Region<T, LEN>, DecodeError> {
         let mut items = array::from_fn(|_| MaybeUninit::<T>::uninit());

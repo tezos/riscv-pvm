@@ -17,8 +17,11 @@ use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -62,6 +65,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -1130,6 +1134,19 @@ impl<M: ManagerSerialise> Encode for SupervisorState<M> {
         self.heap.encode(encoder)?;
         self.stack_guard.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: ManagerDeserialise> Decode<C> for SupervisorState<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            tid_address: Decode::decode(decoder)?,
+            exited: false,
+            exit_code: 0,
+            program: Decode::decode(decoder)?,
+            heap: Decode::decode(decoder)?,
+            stack_guard: Decode::decode(decoder)?,
+        })
     }
 }
 
