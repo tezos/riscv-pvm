@@ -161,7 +161,6 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::set`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn set(&self, key: Key, value: Bytes) {
         self.sender
             .send(Command::Set { key, value })
