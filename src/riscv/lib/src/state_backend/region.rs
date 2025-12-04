@@ -148,8 +148,8 @@ impl<T: Encode, M: ManagerSerialise> Encode for Cell<T, M> {
     }
 }
 
-impl<E: Decode<()>, M: ManagerDeserialise> Decode<()> for Cell<E, M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<C, E: Decode<C>, M: ManagerDeserialise> Decode<C> for Cell<E, M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let region = Decode::decode(decoder)?;
         Ok(Self { region })
     }
@@ -362,8 +362,8 @@ impl<T: Encode, const LEN: usize, M: ManagerSerialise> Encode for Cells<T, LEN, 
     }
 }
 
-impl<E: Decode<()>, const LEN: usize, M: ManagerDeserialise> Decode<()> for Cells<E, LEN, M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<C, E: Decode<C>, const LEN: usize, M: ManagerDeserialise> Decode<C> for Cells<E, LEN, M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let region = M::deserialise_region(decoder)?;
         Ok(Self { region })
     }
@@ -618,8 +618,8 @@ impl<M: ManagerSerialise> Encode for DynCells<M> {
     }
 }
 
-impl<M: ManagerDeserialise> Decode<()> for DynCells<M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl<C, M: ManagerDeserialise> Decode<C> for DynCells<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let region = M::deserialise_dyn_region(decoder)?;
         Ok(DynCells { region })
     }

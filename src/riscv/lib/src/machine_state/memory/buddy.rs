@@ -23,6 +23,7 @@ mod leaf;
 mod proxy;
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
@@ -36,6 +37,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -63,7 +65,7 @@ pub trait BuddyLayout: Layout {
 }
 
 /// Buddy-style memory manager
-pub trait Buddy<M: ManagerBase>: NewState<M> {
+pub trait Buddy<M: ManagerBase>: NewState<M> + Sized {
     /// Number of pages being managed
     const PAGES: u64;
 
@@ -107,6 +109,11 @@ pub trait Buddy<M: ManagerBase>: NewState<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
         M: ManagerSerialise;
+
+    /// Deserialise the memory manager state.
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
+    where
+        M: ManagerDeserialise;
 }
 
 #[cfg(test)]

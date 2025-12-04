@@ -5,8 +5,11 @@
 use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -26,6 +29,7 @@ use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -424,6 +428,13 @@ where
     {
         Encode::encode(self, encoder)
     }
+
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
+    where
+        M: ManagerDeserialise,
+    {
+        Decode::decode(decoder)
+    }
 }
 
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
@@ -456,6 +467,20 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerSerial
         self.executable_pages.encode(encoder)?;
         self.allocated_pages.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerDeserialise> Decode<C>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+{
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            data: Decode::decode(decoder)?,
+            readable_pages: Decode::decode(decoder)?,
+            writable_pages: Decode::decode(decoder)?,
+            executable_pages: Decode::decode(decoder)?,
+            allocated_pages: Buddy::decode(decoder)?,
+        })
     }
 }
 

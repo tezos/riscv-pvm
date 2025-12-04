@@ -9,8 +9,11 @@
 
 use std::ops::BitAnd;
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -172,5 +175,13 @@ impl<M: backend::ManagerSerialise> Encode for ReservationSet<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.start_addr.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: backend::ManagerDeserialise> Decode<C> for ReservationSet<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            start_addr: Decode::decode(decoder)?,
+        })
     }
 }

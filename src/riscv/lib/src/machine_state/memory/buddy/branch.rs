@@ -331,6 +331,13 @@ where
     {
         Encode::encode(self, encoder)
     }
+
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
+    where
+        M: ManagerDeserialise,
+    {
+        Decode::decode(decoder)
+    }
 }
 
 impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
@@ -342,13 +349,12 @@ impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
     }
 }
 
-impl<B: Decode<()>, M: ManagerDeserialise> Decode<()> for BuddyBranch2<B, M> {
-    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let inner: BuddyBranch2LayoutF<_, _, _> = Decode::decode(decoder)?;
+impl<C, B: Buddy<M>, M: ManagerDeserialise> Decode<C> for BuddyBranch2<B, M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
-            free_info: inner.free_info,
-            left: inner.left,
-            right: inner.right,
+            free_info: Decode::decode(decoder)?,
+            left: Box::new(Buddy::decode(decoder)?),
+            right: Box::new(Buddy::decode(decoder)?),
         })
     }
 }

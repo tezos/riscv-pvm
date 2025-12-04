@@ -2,8 +2,11 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -29,6 +32,7 @@ use crate::state_backend::FnManager;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
+use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 
@@ -137,5 +141,14 @@ impl<M: ManagerSerialise> Encode for RevealRequest<M> {
         self.bytes.encode(encoder)?;
         self.size.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: ManagerDeserialise> Decode<C> for RevealRequest<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            bytes: Decode::decode(decoder)?,
+            size: Decode::decode(decoder)?,
+        })
     }
 }

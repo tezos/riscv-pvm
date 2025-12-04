@@ -9,7 +9,9 @@ use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -509,6 +511,27 @@ where
         self.level_is_set.encode(encoder)?;
         self.status.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, MC, CPE, M> Decode<C> for Pvm<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: state_backend::ManagerDeserialise,
+{
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            machine_state: Decode::decode(decoder)?,
+            reveal_request: Decode::decode(decoder)?,
+            system_state: Decode::decode(decoder)?,
+            version: Decode::decode(decoder)?,
+            tick: Decode::decode(decoder)?,
+            message_counter: Decode::decode(decoder)?,
+            level: Decode::decode(decoder)?,
+            level_is_set: Decode::decode(decoder)?,
+            status: Decode::decode(decoder)?,
+        })
     }
 }
 

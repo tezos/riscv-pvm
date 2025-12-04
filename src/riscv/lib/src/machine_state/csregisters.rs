@@ -9,7 +9,9 @@ use std::ops::Shr;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
 use bincode::enc::Encoder;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
@@ -439,6 +441,15 @@ impl<M: backend::ManagerSerialise> Encode for CSRegisters<M> {
         self.fflags.encode(encoder)?;
         self.frm.encode(encoder)?;
         Ok(())
+    }
+}
+
+impl<C, M: backend::ManagerDeserialise> bincode::Decode<C> for CSRegisters<M> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            fflags: bincode::Decode::decode(decoder)?,
+            frm: bincode::Decode::decode(decoder)?,
+        })
     }
 }
 

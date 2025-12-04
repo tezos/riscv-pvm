@@ -269,7 +269,7 @@ pub trait ManagerSerialise: ManagerRead {
 /// Manager with the ability to deserialise regions
 pub trait ManagerDeserialise: ManagerBase {
     /// Deserialise a region.
-    fn deserialise_region<T: Decode<()>, const LEN: usize, D: Decoder<Context = ()>>(
+    fn deserialise_region<T: Decode<D::Context>, const LEN: usize, D: Decoder>(
         decoder: D,
     ) -> Result<Self::Region<T, LEN>, DecodeError>;
 
