@@ -17,6 +17,9 @@ use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::ops::Range;
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -60,6 +63,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::struct_layout;
 
@@ -1116,6 +1120,16 @@ impl FromProof for SupervisorState<Verify> {
             heap,
             stack_guard,
         })
+    }
+}
+
+impl<M: ManagerSerialise> Encode for SupervisorState<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.tid_address.encode(encoder)?;
+        self.program.encode(encoder)?;
+        self.heap.encode(encoder)?;
+        self.stack_guard.encode(encoder)?;
+        Ok(())
     }
 }
 

@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -27,6 +30,7 @@ use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 
 /// Reveal request layout
 pub type RevealRequestLayout = (DynArray, Atom<u64>);
@@ -125,5 +129,13 @@ impl FromProof for RevealRequest<Verify> {
         let (proof, size) = proof.next_branch()?;
 
         proof.done(RevealRequest { bytes, size })
+    }
+}
+
+impl<M: ManagerSerialise> Encode for RevealRequest<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.bytes.encode(encoder)?;
+        self.size.encode(encoder)?;
+        Ok(())
     }
 }

@@ -9,6 +9,8 @@ use std::ops::Shr;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
@@ -429,6 +431,14 @@ impl FromProof for CSRegisters<Verify> {
         let (proof, frm) = proof.next_branch()?;
 
         proof.done(Self { fflags, frm })
+    }
+}
+
+impl<M: backend::ManagerSerialise> Encode for CSRegisters<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.fflags.encode(encoder)?;
+        self.frm.encode(encoder)?;
+        Ok(())
     }
 }
 

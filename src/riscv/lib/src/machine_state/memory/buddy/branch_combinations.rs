@@ -119,9 +119,9 @@ macro_rules! combined_buddy_branch {
         pub struct $name<B, M: ManagerBase>($buddy1<$buddy2<B, M>, M>);
 
         // Passthrough implementation, default derive macro can't derive this ...
-        impl<B: Encode, M: ManagerSerialise> Encode for $name<B, M> {
+        impl<B: Buddy<M>, M: ManagerSerialise> Encode for $name<B, M> {
             fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-                self.0.encode(encoder)
+                Buddy::encode(&self.0, encoder)
             }
         }
 
@@ -199,6 +199,13 @@ macro_rules! combined_buddy_branch {
                 M: ManagerClone,
             {
                 $name(self.0.clone_state())
+            }
+
+            fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+            where
+                M: ManagerSerialise,
+            {
+                Buddy::encode(&self.0, encoder)
             }
         }
 

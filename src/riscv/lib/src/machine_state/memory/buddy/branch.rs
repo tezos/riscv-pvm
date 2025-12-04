@@ -324,16 +324,21 @@ where
             right: Box::new(self.right.clone_state()),
         }
     }
+
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+    where
+        M: ManagerSerialise,
+    {
+        Encode::encode(self, encoder)
+    }
 }
 
-impl<B: Encode, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
+impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let values = BuddyBranch2LayoutF {
-            free_info: &self.free_info,
-            left: &self.left,
-            right: &self.right,
-        };
-        Encode::encode(&values, encoder)
+        self.free_info.encode(encoder)?;
+        self.left.encode(encoder)?;
+        self.right.encode(encoder)?;
+        Ok(())
     }
 }
 

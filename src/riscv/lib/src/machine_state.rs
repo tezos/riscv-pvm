@@ -16,6 +16,9 @@ use std::num::NonZeroUsize;
 use std::ops::Bound;
 use std::ops::ControlFlow;
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use hart_state::HartState;
 use hart_state::HartStateLayout;
 use instruction::Instruction;
@@ -267,6 +270,15 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineC
     }
 }
 
+impl<MC: memory::MemoryConfig, M: backend::ManagerSerialise> Encode for MachineCoreState<MC, M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.hart.encode(encoder)?;
+        self.main_memory.encode(encoder)?;
+        self.signal_actions.encode(encoder)?;
+        Ok(())
+    }
+}
+
 /// Layout for the machine state - everything required to fetch & run instructions.
 pub type MachineStateLayout<MC> = MachineCoreStateLayout<MC>;
 
@@ -329,6 +341,17 @@ where
             page_cache: MC::PageCache::new(),
         });
         Ok(result)
+    }
+}
+
+impl<MC, CPE, M> Encode for MachineState<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: backend::ManagerSerialise,
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.core.encode(encoder)
     }
 }
 

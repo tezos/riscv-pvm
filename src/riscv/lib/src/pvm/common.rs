@@ -9,6 +9,8 @@ use std::ops::ControlFlow;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -487,6 +489,26 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof for Pvm<MC, CPE
             level_is_set,
             status,
         })
+    }
+}
+
+impl<MC, CPE, M> Encode for Pvm<MC, CPE, M>
+where
+    MC: MemoryConfig,
+    CPE: CodePageEntry<MC, M>,
+    M: state_backend::ManagerSerialise,
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.machine_state.encode(encoder)?;
+        self.reveal_request.encode(encoder)?;
+        self.system_state.encode(encoder)?;
+        self.version.encode(encoder)?;
+        self.tick.encode(encoder)?;
+        self.message_counter.encode(encoder)?;
+        self.level.encode(encoder)?;
+        self.level_is_set.encode(encoder)?;
+        self.status.encode(encoder)?;
+        Ok(())
     }
 }
 

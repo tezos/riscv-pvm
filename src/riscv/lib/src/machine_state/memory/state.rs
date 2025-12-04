@@ -5,6 +5,9 @@
 use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
+use bincode::Encode;
+use bincode::enc::Encoder;
+use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -24,6 +27,7 @@ use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
+use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
@@ -413,6 +417,13 @@ where
 
         Ok(address)
     }
+
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
+    where
+        M: ManagerSerialise,
+    {
+        Encode::encode(self, encoder)
+    }
 }
 
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
@@ -432,6 +443,19 @@ where
         builder.add(&self.executable_pages);
         builder.add(&self.allocated_pages);
         builder.done()
+    }
+}
+
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerSerialise> Encode
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+{
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.data.encode(encoder)?;
+        self.readable_pages.encode(encoder)?;
+        self.writable_pages.encode(encoder)?;
+        self.executable_pages.encode(encoder)?;
+        self.allocated_pages.encode(encoder)?;
+        Ok(())
     }
 }
 
