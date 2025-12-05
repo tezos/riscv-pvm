@@ -46,9 +46,6 @@ pub struct ReservationSet<M: backend::ManagerBase> {
     pub(crate) start_addr: Cell<u64, M>,
 }
 
-/// Layout for [ReservationSet]
-pub type ReservationSetLayout = backend::Atom<u64>;
-
 /// The size of the reservation set is 8 bytes in order to accommodate
 /// LR.D/SC.D instructions which work on doubles.
 ///

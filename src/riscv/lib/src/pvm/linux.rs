@@ -58,7 +58,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -67,7 +66,6 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::struct_layout;
 
 /// Thread identifier for the main thread
 const MAIN_THREAD_ID: u64 = 1;
@@ -435,15 +433,6 @@ where
         }
 
         None
-    }
-}
-
-struct_layout! {
-    pub struct SupervisorStateLayout {
-        tid_address: Atom<VirtAddr>,
-        program: Atom<Range<VirtAddr>>,
-        heap: Atom<Range<VirtAddr>>,
-        stack_guard: Atom<Range<VirtAddr>>,
     }
 }
 

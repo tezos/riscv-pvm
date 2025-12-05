@@ -4,9 +4,9 @@
 
 //! Linux-style memory management
 //!
-//! # Layout
+//! # Address Space Layout
 //!
-//! For a memory config `MC`, the layout consists of the following areas:
+//! For a memory config `MC`, the address space consists of the following areas:
 //!
 //! - `0..program_start` is inaccessible
 //! - `program_start..program_end` is the program code and data area

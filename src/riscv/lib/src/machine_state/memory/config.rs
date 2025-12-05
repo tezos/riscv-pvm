@@ -13,11 +13,9 @@ use octez_riscv_data::mode::Verify;
 use super::buddy::BuddyLayout;
 use super::buddy::BuddyLayoutProxy;
 use super::protection::PagePermissions;
-use super::protection::PagePermissionsLayout;
 use super::state::MemoryImpl;
 use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::state::NewState;
-use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -52,14 +50,6 @@ where
 {
     const TOTAL_BYTES: NonZeroUsize = NonZeroUsize::new(TOTAL_BYTES)
         .expect("size of memory `TOTAL_BYTES` must be greater than zero");
-
-    type Layout = (
-        DynArray,
-        PagePermissionsLayout<PAGES>,
-        PagePermissionsLayout<PAGES>,
-        PagePermissionsLayout<PAGES>,
-        BuddyLayoutProxy<PAGES>,
-    );
 
     type State<M: ManagerBase> =
         MemoryImpl<PAGES, TOTAL_BYTES, <BuddyLayoutProxy<PAGES> as BuddyLayout>::Buddy<M>, M>;

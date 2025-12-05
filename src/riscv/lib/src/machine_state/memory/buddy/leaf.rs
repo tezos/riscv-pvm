@@ -26,7 +26,6 @@ use super::BuddyLayout;
 use crate::bits::ones;
 use crate::state::NewState;
 use crate::state_backend::Cell;
-use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -37,10 +36,6 @@ use crate::state_backend::ManagerWrite;
 
 /// Layout for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafLayout<const PAGES: u64>;
-
-impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
-    type Allocated<M: ManagerBase> = BuddyLeaf<PAGES, M>;
-}
 
 impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
     type Buddy<M: ManagerBase> = BuddyLeaf<PAGES, M>;

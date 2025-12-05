@@ -59,7 +59,6 @@ use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerAlloc;
@@ -69,7 +68,6 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::struct_layout;
 
 /// Errors relating to handling signals
 #[derive(Debug, Eq, thiserror::Error, PartialEq)]
@@ -279,17 +277,6 @@ impl<C, M: ManagerDeserialise> Decode<C> for SignalActions<M> {
             restorer: Decode::decode(decoder)?,
             thread_mask: Decode::decode(decoder)?,
         })
-    }
-}
-
-struct_layout! {
-    /// Layout for [SignalActions]
-    pub struct SignalActionsLayout {
-        actions: [Atom<VirtAddr>; SignalIndex::COUNT],
-        flags: [Atom<u32>; SignalIndex::COUNT],
-        masks: [Atom<u64>; SignalIndex::COUNT],
-        restorer: Atom<VirtAddr>,
-        thread_mask: Atom<u64>,
     }
 }
 

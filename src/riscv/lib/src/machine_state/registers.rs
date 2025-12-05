@@ -206,9 +206,6 @@ pub type XValue = u64;
 /// Integer value for 32-bit operations.
 pub type XValue32 = u32;
 
-/// Layout for [XRegisters]
-pub type XRegistersLayout = backend::Array<XValue, 31>;
-
 /// Integer registers
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct XRegisters<M: backend::ManagerBase> {
@@ -654,9 +651,6 @@ impl typed::Typed for FValue {
         typed::Type::Basic(cranelift::prelude::types::I64)
     };
 }
-
-/// Layout for [FRegisters]
-pub type FRegistersLayout = backend::Array<FValue, 32>;
 
 /// Floating-point number registers
 #[perfect_derive(Clone, PartialEq, Eq)]

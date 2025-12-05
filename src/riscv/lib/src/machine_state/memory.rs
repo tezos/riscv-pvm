@@ -28,7 +28,6 @@ use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
 use crate::state_backend::Elem;
-use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
@@ -331,9 +330,6 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
 pub trait MemoryConfig: Send + Sync + Sized + 'static {
     /// Number of bytes in the memory
     const TOTAL_BYTES: NonZeroUsize;
-
-    /// Layout for memory instance's state
-    type Layout: Layout;
 
     /// Memory instance
     type State<M: ManagerBase>: Memory<M>;
