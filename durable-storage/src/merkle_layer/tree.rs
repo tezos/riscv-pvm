@@ -18,18 +18,18 @@ use super::node::set;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
-pub(super) struct Avl {
+pub struct Avl {
     root: Option<Arc<MavlNode>>,
 }
 
 impl Avl {
     /// Delete the node in the tree with a given key.
-    pub(super) fn delete(&mut self, key: &Key) -> bool {
+    pub fn delete(&mut self, key: &Key) -> bool {
         delete(&mut self.root, key)
     }
 
     /// The data stored in a node in the tree with a given key.
-    pub(super) fn get(&self, key: &Key) -> Option<&BytesMut> {
+    pub fn get(&self, key: &Key) -> Option<&BytesMut> {
         get(&self.root, key)
     }
 
@@ -73,7 +73,7 @@ impl Avl {
     }
 
     /// Set the value of a node in the tree with a given key.
-    pub(super) fn set(&mut self, key: &Key, data: Bytes) {
+    pub fn set(&mut self, key: &Key, data: Bytes) {
         set(&mut self.root, key, data);
     }
 }

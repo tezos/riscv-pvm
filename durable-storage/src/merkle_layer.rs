@@ -8,7 +8,10 @@ use bytes::Bytes;
 use bytes::BytesMut;
 
 mod node;
+#[cfg(not(feature = "bench"))]
 mod tree;
+#[cfg(feature = "bench")]
+pub mod tree;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -48,7 +51,7 @@ impl AsRef<[u8]> for Key {
 }
 
 /// Maximum size of a key in bytes
-pub(crate) const KEY_MAX_SIZE: usize = 256;
+pub const KEY_MAX_SIZE: usize = 256;
 
 /// Errors for fallible [MerkleLayer] operations.
 #[derive(Debug, thiserror::Error)]
