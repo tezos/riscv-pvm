@@ -37,10 +37,6 @@ where
 {
     type Buddy<M: ManagerBase> = <PickLayout<PAGES> as BuddyLayout>::Buddy<M>;
 
-    fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
-        <PickLayout<PAGES> as BuddyLayout>::bind(space)
-    }
-
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         <PickLayout<PAGES> as BuddyLayout>::start_proof(instance)
     }

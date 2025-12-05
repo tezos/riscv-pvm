@@ -158,24 +158,6 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         }
     }
 
-    /// Bind the machine core state to the given allocated state and initialise the page cache.
-    pub(crate) fn bind(space: state_backend::AllocatedOf<PvmLayout<MC>, M>) -> Self
-    where
-        M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
-    {
-        Self {
-            machine_state: machine_state::MachineState::bind(space.machine_state),
-            reveal_request: RevealRequest::bind(space.reveal_request),
-            system_state: linux::SupervisorState::bind(space.system_state),
-            version: space.version,
-            tick: space.tick,
-            message_counter: space.message_counter,
-            level: space.level,
-            level_is_set: space.level_is_set,
-            status: space.status,
-        }
-    }
-
     /// Reset the PVM.
     pub fn reset(&mut self)
     where

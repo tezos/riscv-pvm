@@ -104,15 +104,6 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         self.hart.pc.write(pc);
     }
 
-    /// Bind the machine state to the given allocated space.
-    pub fn bind(space: backend::AllocatedOf<MachineCoreStateLayout<MC>, M>) -> Self {
-        Self {
-            hart: HartState::bind(space.0),
-            main_memory: MC::bind(space.1),
-            signal_actions: SignalActions::bind(space.2),
-        }
-    }
-
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
@@ -465,18 +456,6 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     {
         Self {
             core: MachineCoreState::new(),
-            page_cache: MC::PageCache::new(),
-        }
-    }
-
-    /// Bind the machine state to the given allocated state and initialise the
-    /// page cache.
-    pub fn bind(space: backend::AllocatedOf<MachineStateLayout<MC>, M>) -> Self
-    where
-        M::ManagerRoot: ManagerRead + ManagerWrite,
-    {
-        Self {
-            core: MachineCoreState::bind(space),
             page_cache: MC::PageCache::new(),
         }
     }

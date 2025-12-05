@@ -347,14 +347,6 @@ impl<M: backend::ManagerBase> CSRegisters<M> {
         old_value
     }
 
-    /// Bind the CSR state to the allocated space.
-    pub fn bind(space: backend::AllocatedOf<CSRegistersLayout, M>) -> Self {
-        Self {
-            fflags: space.fflags,
-            frm: space.frm,
-        }
-    }
-
     /// Reset the control and state registers.
     pub fn reset(&mut self)
     where

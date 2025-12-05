@@ -59,7 +59,6 @@ use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::Elem;
@@ -452,17 +451,6 @@ impl<M: ManagerAlloc> Default for SignalActions<M> {
 }
 
 impl<M: ManagerBase> SignalActions<M> {
-    /// Bind the given allocated regions to the supervisor state.
-    pub fn bind(space: AllocatedOf<SignalActionsLayout, M>) -> Self {
-        SignalActions::<M> {
-            actions: space.actions,
-            flags: space.flags,
-            restorer: space.restorer,
-            masks: space.masks,
-            thread_mask: space.thread_mask,
-        }
-    }
-
     /// Reset to the default state
     pub fn reset(&mut self)
     where

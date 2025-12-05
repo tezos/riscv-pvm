@@ -29,7 +29,6 @@ use super::Address;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
@@ -53,15 +52,6 @@ pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
 }
 
 impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
-    /// Bind the given allocated space as a page protections state value.
-    pub fn bind(space: AllocatedOf<PagePermissionsLayout<PAGES>, M>) -> Self {
-        Self {
-            pages: space.try_into().unwrap_or_else(|_| {
-                unreachable!("Converting a vector into an array of the same length always succeeds")
-            }),
-        }
-    }
-
     /// Check if the memory at `address..address+length` can be accessed.
     ///
     /// # Safety

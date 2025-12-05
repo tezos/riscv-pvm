@@ -15,7 +15,6 @@ use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
-use super::PvmLayout;
 use crate::machine_state::page_cache::interpreted::Interpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
@@ -24,7 +23,6 @@ use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::storage;
 use crate::storage::Repo;
@@ -36,8 +34,6 @@ pub enum PvmError {
 }
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
-
-pub(crate) type NodePvmLayout = PvmLayout<NodePvmMemConfig>;
 
 type NodePvmState<M> = Pvm<NodePvmMemConfig, Interpreted<NodePvmMemConfig, M>, M>;
 
@@ -51,16 +47,6 @@ pub struct NodePvm<M: state_backend::ManagerBase = Normal> {
 impl<M: state_backend::ManagerBase> NodePvm<M> {
     /// Wrap the given PVM state.
     pub fn wrap(state: NodePvmState<M>) -> Self {
-        Self {
-            state: Box::new(state),
-        }
-    }
-
-    pub fn bind(space: AllocatedOf<NodePvmLayout, M>) -> Self
-    where
-        M::ManagerRoot: state_backend::ManagerRead + state_backend::ManagerWrite,
-    {
-        let state = NodePvmState::<M>::bind(space);
         Self {
             state: Box::new(state),
         }

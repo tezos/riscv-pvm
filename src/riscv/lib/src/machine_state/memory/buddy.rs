@@ -46,9 +46,6 @@ pub trait BuddyLayout: Layout {
     /// Buddy-style memory manager implementation
     type Buddy<M: ManagerBase>: Buddy<M>;
 
-    /// Bind the allocated space.
-    fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M>;
-
     /// Return a proof-generating Buddy memory manager instance.
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
 

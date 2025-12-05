@@ -17,7 +17,6 @@ use super::protection::PagePermissionsLayout;
 use super::state::MemoryImpl;
 use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
@@ -69,28 +68,6 @@ where
         CPE: crate::machine_state::page_cache::code_page_entry::CodePageEntry<Self, M>,
         M: ManagerBase,
     > = PageCacheImpl<PAGES, CPE, Self, M>;
-
-    fn bind<M: ManagerBase>(space: AllocatedOf<Self::Layout, M>) -> Self::State<M> {
-        if TOTAL_BYTES == 0 {
-            panic!("Memory size must be positive");
-        }
-
-        if PAGES.checked_mul(super::PAGE_SIZE.get() as usize) != Some(TOTAL_BYTES) {
-            panic!(
-                "Memory size {} must be a non-overflowing multiple of the page size {}",
-                TOTAL_BYTES,
-                super::PAGE_SIZE
-            );
-        }
-
-        MemoryImpl {
-            data: space.0,
-            readable_pages: PagePermissions::bind(space.1),
-            writable_pages: PagePermissions::bind(space.2),
-            executable_pages: PagePermissions::bind(space.3),
-            allocated_pages: <BuddyLayoutProxy<PAGES> as BuddyLayout>::bind(space.4),
-        }
-    }
 
     fn state_from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
