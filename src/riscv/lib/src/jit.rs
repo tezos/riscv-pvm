@@ -285,7 +285,6 @@ mod tests {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
-    use crate::machine_state::page_cache::jitted::MAX_INSTR_COMPILED;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
@@ -323,23 +322,25 @@ mod tests {
     /// Machine state for test scenarios with a configurable [`Block`] type.
     type TestMachineState<CPE> = MachineState<M4K, CPE, Normal>;
 
+    #[derive(Debug, Clone, Copy)]
     enum ScenarioSteps {
         /// Steps equal to the instruction sequence.
         Sequence,
-
-        /// Steps equal to `MAX_INSTR_COMPILED`.
-        Max,
 
         /// A specific expected step count.
         Specific(usize),
     }
 
+    #[derive(derive_more::Debug)]
     struct Scenario {
         initial_pc: Option<u64>,
         expected_steps: ScenarioSteps,
+        step_budget: ScenarioSteps,
         instructions: Vec<Instruction>,
+        #[debug(skip)]
         setup_hook: Option<Box<SetupHook>>,
         xregisters: Vec<(NonZeroXRegister, u64)>,
+        #[debug(skip)]
         assert_hook: Option<Box<AssertHook>>,
         expected_exception: Option<Exception>,
     }
@@ -349,16 +350,18 @@ mod tests {
             Scenario {
                 initial_pc: None,
                 expected_steps: ScenarioSteps::Sequence,
+                step_budget: ScenarioSteps::Sequence,
                 instructions: instructions.to_vec(),
                 setup_hook: None,
                 xregisters: vec![],
                 assert_hook: None,
-                // TODO: RV-803:
-                //     due to the overestimate we are forced to make in terms of budget checks,
-                //     we expect most scenarios to move past the end of the instructions and encounter
-                //     this exception when running `Unknown`.
+                // Scenarios are setup to run from pages. These pages are pre-filled with
+                // `Opcode::Unknown` instructions - which will trigger an exception when
+                // run. There is no current mechanism to _restrict_ the input of the compilation
+                // request - and therefore we expect most scenarios to run beyond the 'defined'
+                // instructions, and therefore throw an exception.
                 //
-                //     We should revert to `None` once this is tackled
+                // TODO: RV-840: remove this workaround
                 expected_exception: Some(Exception::IllegalInstruction),
             }
         }
@@ -392,7 +395,6 @@ mod tests {
 
             if let ScenarioSteps::Specific(exp_steps) = self.expected_steps {
                 let new = exp_steps + self.xregisters.len();
-                assert!(new <= MAX_INSTR_COMPILED);
                 self.expected_steps = ScenarioSteps::Specific(new);
             }
 
@@ -468,21 +470,18 @@ mod tests {
             }
 
             // initialise starting parameters: pc and expected_steps
-
-            // TODO: RV-803:
-            //     we are forced to run for `MAX_INSTR_COMPILED` steps as the jitted code page
-            //     entry is extremely coarse in terms of the upper bound for size of entrypoints
-            //
-            //     Once we move the initial budget check into the JIT-compiled functions directly,
-            //     we can remove this coarse bound
-            //
-            //     As a result, by default we expect most scenarios to end with an
-            //     `Exception::IllegalInstruction` error as they move past the compiled entrypoint
-            let max_steps = self.instructions.len().max(MAX_INSTR_COMPILED);
             let expected_steps = match self.expected_steps {
                 ScenarioSteps::Sequence => self.instructions.len(),
                 ScenarioSteps::Specific(n) => n,
-                ScenarioSteps::Max => MAX_INSTR_COMPILED,
+            };
+
+            let max_steps = match self.step_budget {
+                // TODO: RV-840: remove sequence steps workaround
+                // we add an additional step by default for the exception outcome
+                // - as we run an `Unknown` instruction after we finish running all the
+                // instructions we specified.
+                ScenarioSteps::Sequence => self.instructions.len() + 1,
+                ScenarioSteps::Specific(n) => n,
             };
 
             interpreted_state.core.hart.pc.write(initial_pc);
@@ -542,6 +541,7 @@ mod tests {
     struct ScenarioBuilder {
         initial_pc: Option<u64>,
         expected_steps: ScenarioSteps,
+        step_budget: ScenarioSteps,
         instructions: Vec<Instruction>,
         setup_hook: Option<Box<SetupHook>>,
         xregisters: Vec<(NonZeroXRegister, u64)>,
@@ -565,11 +565,8 @@ mod tests {
             self
         }
 
-        fn set_expect_max_steps(mut self) -> Self {
-            self.expected_steps = ScenarioSteps::Max;
-            // TODO: RV-803: remove workaround for assuming exception by default once
-            //     JIT has better budget checks
-            self.expected_exception = None;
+        fn set_step_budget(mut self, step_budget: usize) -> Self {
+            self.step_budget = ScenarioSteps::Specific(step_budget);
             self
         }
 
@@ -593,10 +590,16 @@ mod tests {
             self
         }
 
+        fn no_exception(mut self) -> Self {
+            self.expected_exception = None;
+            self
+        }
+
         fn build(self) -> Scenario {
             Scenario {
                 initial_pc: self.initial_pc,
                 expected_steps: self.expected_steps,
+                step_budget: self.step_budget,
                 instructions: self.instructions,
                 setup_hook: self.setup_hook,
                 xregisters: self.xregisters,
@@ -611,16 +614,18 @@ mod tests {
             Self {
                 initial_pc: None,
                 expected_steps: ScenarioSteps::Sequence,
+                step_budget: ScenarioSteps::Sequence,
                 instructions: vec![],
                 setup_hook: None,
                 xregisters: vec![],
                 assert_hook: None,
-                // TODO: RV-803:
-                //     due to the overestimate we are forced to make in terms of budget checks,
-                //     we expect most scenarios to move past the end of the instructions and encounter
-                //     this exception when running `Unknown`.
+                // Scenarios are setup to run from pages. These pages are pre-filled with
+                // `Opcode::Unknown` instructions - which will trigger an exception when
+                // run. There is no current mechanism to _restrict_ the input of the compilation
+                // request - and therefore we expect most scenarios to run beyond the 'defined'
+                // instructions, and therefore throw an exception.
                 //
-                //     We should revert to `None` once this is tackled
+                // TODO: RV-840: remove this workaround
                 expected_exception: Some(Exception::IllegalInstruction),
             }
         }
@@ -1273,32 +1278,35 @@ mod tests {
                     I::new_jump_pc(0, Compressed),
                     I::new_nop(Uncompressed),
                 ])
+                .set_step_budget(3)
+                .set_expected_steps(3)
+                .no_exception()
                 .set_assert_hook(assert_hook!(|core| {
-                    // we jump, but repeatedly to the current jump instruction
-                    // this will run until the end of the scenario
+                    // we jump, but to the current jump instruction
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
             ScenarioBuilder::default()
-                // jumping to start of the instruction sequence should exit the instruction sequence in both interpreted and jitted world
-                //
-                // since we jump to the start of the instruction sequence, however, we will fallback to partial
-                // instruction sequence evaluation on the 4th step. Therefore, we do not expect an
+                // since we jump to the start of the instruction sequence, however, we will fallback to
+                // interpreted sequence evaluation on the 4th step. Therefore, we do not expect an
                 // IllegalInstruction for executing an `Unknown` instruction.
+                //
+                // TODO: RV-841: jumping to start of the instruction sequence should exit the instruction
+                //               sequence in interpreted and loop in jitted world. This would allow us to
+                //               set a larger step budget than 3
                 .set_instructions(&[
                     I::new_nop(Compressed),
                     I::new_nop(Compressed),
                     I::new_jump_pc(-4, Compressed),
                     I::new_nop(Uncompressed),
                 ])
+                .set_step_budget(3)
+                .set_expected_steps(3)
+                .no_exception()
                 .set_assert_hook(assert_hook!(|core| {
-                    // after 40 steps we will be executing the second no-op
-                    assert_eq!(core.hart.pc.read(), 2);
+                    // after 3 steps we will be executing the first instruction
+                    assert_eq!(core.hart.pc.read(), 0);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1322,12 +1330,12 @@ mod tests {
                 .build(),
             // JR to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
-                .with_xreg(x6, 0)
                 .set_instructions(&[I::new_jr(x6, Compressed), I::new_nop(Compressed)])
-                // after 40 steps we will be evaluating the jump for the second time
+                // after 1 steps we will be evaluating the jump for the second time
+                .set_expected_steps(1)
+                .set_step_budget(1)
+                .no_exception()
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1351,12 +1359,16 @@ mod tests {
                 .build(),
             // JR_IMM to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
-                .with_xreg(x6, 10)
-                .set_instructions(&[I::new_jr_imm(x6, -10, Uncompressed), I::new_nop(Compressed)])
-                // after 40 steps we will be evaluating the jump for the second time
+                .set_instructions(&[
+                    I::new_li(x6, 10, Uncompressed),
+                    I::new_jr_imm(x6, -10, Uncompressed),
+                    I::new_nop(Compressed),
+                ])
+                // after 2 steps we will be evaluating the li for the second time
+                .set_expected_steps(2)
+                .set_step_budget(2)
+                .no_exception()
                 .set_assert_hook(assert_hook!(|core| { assert_eq!(core.hart.pc.read(), 0) }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1391,13 +1403,14 @@ mod tests {
                     I::new_jalr(x3, x6, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 40 steps we will be evaluating the first instruction
+                // after 2 steps we will be evaluating the first instruction
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x3), 8);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
+                .set_expected_steps(2)
+                .set_step_budget(2)
+                .no_exception()
                 .build(),
         ];
 
@@ -1432,13 +1445,14 @@ mod tests {
                     I::new_jalr_imm(x6, x1, -1000, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 40 steps we will be evaluating the jump for the second time
+                .set_expected_steps(2)
+                .set_step_budget(2)
+                .no_exception()
+                // after 2 steps we will be evaluating the li for the second time
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x6), 8);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1473,13 +1487,14 @@ mod tests {
                     I::new_jalr_absolute(x3, 0, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 40 steps we will be evaluating the jump for the second time
+                .set_expected_steps(2)
+                .set_step_budget(2)
+                .no_exception()
+                // after 2 steps we will be evaluating the first no-op for the second time
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), 0);
                     assert_eq!(core.hart.xregisters.read_nz(x3), 6);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
@@ -1511,12 +1526,15 @@ mod tests {
                     I::new_j_absolute(0, Uncompressed),
                     I::new_nop(Compressed),
                 ])
-                // after 40 steps we will be evaluating first instruction
+                // *NB* absolute jump currently always exits the JIT context - hence we can't run for
+                // e.g. 4 steps as we'd run the jit function twice
+                .set_step_budget(2)
+                .set_expected_steps(2)
+                // after 2 steps we will be evaluating first instruction
+                .no_exception()
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), 0);
                 }))
-                // TODO: RV-803: remove workarounds once JIT budget no longer overestimated
-                .set_expect_max_steps()
                 .build(),
         ];
 
