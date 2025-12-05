@@ -68,14 +68,6 @@ struct_layout! {
 impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
     type Buddy<M: ManagerBase> = BuddyBranch2<B::Buddy<M>, M>;
 
-    fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
-        BuddyBranch2 {
-            free_info: space.free_info,
-            left: Box::new(B::bind(*space.left)),
-            right: Box::new(B::bind(*space.right)),
-        }
-    }
-
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         BuddyBranch2 {
             free_info: instance.free_info.start_proof(),

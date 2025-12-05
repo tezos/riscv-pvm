@@ -66,17 +66,6 @@ pub type HartStateLayout = (
 );
 
 impl<M: backend::ManagerBase> HartState<M> {
-    /// Bind the hart state to the given allocated space.
-    pub fn bind(space: backend::AllocatedOf<HartStateLayout, M>) -> Self {
-        Self {
-            xregisters: registers::XRegisters::bind(space.0),
-            fregisters: registers::FRegisters::bind(space.1),
-            csregisters: csregisters::CSRegisters::bind(space.2),
-            pc: space.3,
-            reservation_set: ReservationSet::bind(space.4),
-        }
-    }
-
     /// Reset the hart state.
     pub fn reset(&mut self, pc: Address)
     where

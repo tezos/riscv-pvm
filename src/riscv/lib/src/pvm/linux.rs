@@ -58,7 +58,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
@@ -483,18 +482,6 @@ impl<M: ManagerBase> SupervisorState<M> {
             program: Cell::new(),
             heap: Cell::new(),
             stack_guard: Cell::new(),
-        }
-    }
-
-    /// Bind the given allocated regions to the supervisor state.
-    pub fn bind(space: AllocatedOf<SupervisorStateLayout, M>) -> Self {
-        SupervisorState {
-            tid_address: space.tid_address,
-            exited: false,
-            exit_code: 0,
-            program: space.program,
-            stack_guard: space.stack_guard,
-            heap: space.heap,
         }
     }
 

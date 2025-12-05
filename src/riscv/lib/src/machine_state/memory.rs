@@ -27,7 +27,6 @@ use super::page_cache::code_page_entry::CodePageEntry;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Elem;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
@@ -341,9 +340,6 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
 
     /// Page Cache instance
     type PageCache<CPE: CodePageEntry<Self, M>, M: ManagerBase>: PageCache<CPE, Self, M>;
-
-    /// Bind the allocated regions to produce a memory instance.
-    fn bind<M: ManagerBase>(space: AllocatedOf<Self::Layout, M>) -> Self::State<M>;
 
     /// Parse the proof to obtain a memory instance.
     fn state_from_proof<D: merkle_proof::Deserialiser>(

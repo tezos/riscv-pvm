@@ -65,11 +65,6 @@ pub(crate) const RES_SET_BITMASK: u64 = !0b111;
 pub(crate) const UNSET_VALUE: u64 = u64::MAX;
 
 impl<M: backend::ManagerBase> ReservationSet<M> {
-    /// Bind the reservation set cell to the given allocated space
-    pub fn bind(space: backend::AllocatedOf<ReservationSetLayout, M>) -> Self {
-        Self { start_addr: space }
-    }
-
     /// Unset any reservation
     pub fn reset(&mut self)
     where

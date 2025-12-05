@@ -23,7 +23,6 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::DynArray;
@@ -48,14 +47,6 @@ pub struct RevealRequest<M: ManagerBase> {
 }
 
 impl<M: ManagerBase> RevealRequest<M> {
-    /// Bind the reveal request to the given allocated region.
-    pub fn bind(space: AllocatedOf<RevealRequestLayout, M>) -> Self {
-        Self {
-            bytes: space.0,
-            size: space.1,
-        }
-    }
-
     pub fn to_vec(&self) -> Vec<u8>
     where
         M: ManagerRead,

@@ -87,11 +87,6 @@ macro_rules! combined_buddy_branch {
             {
                 type Buddy<M: ManagerBase> = $name<B::Buddy<M>, M>;
 
-                fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::bind(space.0);
-                    $name(inner)
-                }
-
                 fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
                     let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::start_proof(&instance.0);
                     $name(inner)

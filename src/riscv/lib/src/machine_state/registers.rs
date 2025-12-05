@@ -216,11 +216,6 @@ pub struct XRegisters<M: backend::ManagerBase> {
 }
 
 impl<M: backend::ManagerBase> XRegisters<M> {
-    /// Bind the integer register state to the given allocated space.
-    pub fn bind(space: backend::AllocatedOf<XRegistersLayout, M>) -> Self {
-        XRegisters { registers: space }
-    }
-
     /// Try to read a 64-bit value from the registers and coerce it to another type.
     #[inline]
     pub fn try_read<T: TryFrom<XValue>>(&self, reg: XRegister) -> Result<T, T::Error>
@@ -670,11 +665,6 @@ pub struct FRegisters<M: backend::ManagerBase> {
 }
 
 impl<M: backend::ManagerBase> FRegisters<M> {
-    /// Bind the floating-point register space to the allocated space.
-    pub fn bind(space: backend::AllocatedOf<FRegistersLayout, M>) -> Self {
-        FRegisters { registers: space }
-    }
-
     /// Reset the floating-point registers.
     pub fn reset(&mut self)
     where

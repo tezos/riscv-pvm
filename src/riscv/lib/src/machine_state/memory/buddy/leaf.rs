@@ -45,10 +45,6 @@ impl<const PAGES: u64> Layout for BuddyLeafLayout<PAGES> {
 impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
     type Buddy<M: ManagerBase> = BuddyLeaf<PAGES, M>;
 
-    fn bind<M: ManagerBase>(space: Self::Allocated<M>) -> Self::Buddy<M> {
-        space
-    }
-
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         BuddyLeaf {
             set: instance.set.start_proof(),
