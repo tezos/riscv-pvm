@@ -47,6 +47,20 @@ impl Avl {
         hasher.finalize()
     }
 
+    /// Creates an in order iterator for the nodes in the tree
+    pub(super) fn iter(&self) -> AvlIterator {
+        match &self.root {
+            None => AvlIterator {
+                stack: vec![],
+                current: &None,
+            },
+            Some(_) => AvlIterator {
+                stack: vec![],
+                current: &self.root,
+            },
+        }
+    }
+
     /// The root node of the tree.
     #[cfg(test)]
     pub(super) fn root(&self) -> &Option<Arc<MavlNode>> {
@@ -61,6 +75,28 @@ impl Avl {
     /// Set the value of a node in the tree with a given key.
     pub(super) fn set(&mut self, key: &Key, data: Bytes) {
         set(&mut self.root, key, data);
+    }
+}
+
+/// Used for iterating through the nodes
+/// of the [`Avl`] tree in order.
+pub(super) struct AvlIterator<'a> {
+    stack: Vec<&'a Arc<MavlNode>>,
+    current: &'a Option<Arc<MavlNode>>,
+}
+
+impl<'a> Iterator for AvlIterator<'a> {
+    type Item = &'a Arc<MavlNode>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(node) = self.current {
+            self.stack.push(node);
+            self.current = node.left_ref();
+        }
+
+        let ret = self.stack.pop()?;
+        self.current = ret.right_ref();
+        Some(ret)
     }
 }
 
@@ -112,11 +148,6 @@ mod tests {
             })
     }
 
-    struct AvlIterator<'a> {
-        stack: Vec<&'a Arc<MavlNode>>,
-        current: &'a Option<Arc<MavlNode>>,
-    }
-
     fn height_and_balance_factor_sanity_check_helper(node: Arc<MavlNode>) -> (bool, usize) {
         let (left_good, left_height) = match node.left_ref() {
             None => (true, 0),
@@ -141,19 +172,6 @@ mod tests {
     }
 
     impl Avl {
-        fn iter(&self) -> AvlIterator {
-            match &self.root {
-                None => AvlIterator {
-                    stack: vec![],
-                    current: &None,
-                },
-                Some(_) => AvlIterator {
-                    stack: vec![],
-                    current: &self.root,
-                },
-            }
-        }
-
         pub fn height_and_balance_factor_sanity_check(&self) -> bool {
             match &self.root {
                 None => true,
@@ -162,21 +180,6 @@ mod tests {
                     ret
                 }
             }
-        }
-    }
-
-    impl<'a> Iterator for AvlIterator<'a> {
-        type Item = &'a Arc<MavlNode>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            while let Some(node) = self.current {
-                self.stack.push(node);
-                self.current = node.left_ref();
-            }
-
-            let ret = self.stack.pop()?;
-            self.current = ret.right_ref();
-            Some(ret)
         }
     }
 
