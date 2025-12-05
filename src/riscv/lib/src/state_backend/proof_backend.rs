@@ -458,7 +458,6 @@ mod tests {
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerAlloc;
-    use crate::state_backend::Ref;
 
     const CELLS_SIZE: usize = 32;
 
@@ -611,10 +610,10 @@ mod tests {
                     writes in array::uniform2(&address_range))| {
             let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
             cells.fill(byte_before);
-            let owned_dyn_cells: DynCells<Ref<'_, Normal>> = DynCells::bind(&cells);
+            let owned_dyn_cells: DynCells<Normal> = DynCells::bind(cells);
             let initial_root_hash = Hash::from_foldable(&owned_dyn_cells);
 
-            let mut proof_dyn_region: ProofDynRegion = ProofDynRegion::bind(&cells);
+            let mut proof_dyn_region: ProofDynRegion = owned_dyn_cells.start_proof().into_region();
 
             // Perform memory accesses
             let value_before = [byte_before; ELEM_SIZE];
