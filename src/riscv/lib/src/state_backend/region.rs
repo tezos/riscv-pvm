@@ -518,6 +518,11 @@ impl<M: ManagerBase> DynCells<M> {
         &self.region
     }
 
+    /// Obtain the underlying dynamic region.
+    pub fn into_region(self) -> M::DynRegion {
+        self.region
+    }
+
     /// Is the dynamic region empty?
     pub fn is_empty(&self) -> bool
     where
