@@ -30,8 +30,6 @@
 //!   Needs to be light on memory usage since it runs in the protocol.
 //! - [Prove]
 //!   Mode capable of generating a proof for running one step.
-//! - [Ref]
-//!   Helper mode to wrap another backend through a reference to it.
 //!
 //! [Normal]: octez_riscv_data::mode::Normal
 //! [Verify]: octez_riscv_data::mode::Verify
@@ -44,7 +42,6 @@ pub(crate) mod proof_layout;
 mod region;
 pub mod verify_backend;
 
-use std::convert::Infallible;
 use std::marker::PhantomData;
 
 use bincode::de::Decode;
@@ -71,13 +68,23 @@ pub trait ManagerBase: Sized {
     /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
     type DynRegion;
 
-    /// The root manager may either be itself, or occasionally the manager that this manager
-    /// wraps.
+    /// The `ManagerRoot` is the ultimate manager type used to run things.
     ///
-    /// For example, the [`Ref`] backend is often use to wrap the [`Normal`] mode to gain access
-    /// to its regions. In this case, the root state would be in [`Normal`] mode.
+    /// It is primarily used to defer trait bounds to a later point when the root manager type is
+    /// known.
     ///
-    /// [`Normal`]: octez_riscv_data::mode::Normal
+    /// You might need to refer to a function `foo<M: ManagerWrite>(...)`. Unless you're running
+    /// that function, the `M: ManagerWrite` bound is not needed. However, Rust does not let you
+    /// express that directly. The trait bound would be immediately needed, therefore granting the
+    /// function that refers to `foo` the same capabilities.
+    ///
+    /// The `ManagerRoot` is a utility that can be used to express that the function is only
+    /// callable when `M` is the root manager type. We instantiate `foo<M::ManagerRoot>`, so that
+    /// the trait bounds are imposed on the root manager type.
+    ///
+    /// This alone does not let us run `foo`. Fortunately, `ManagerWrite` requires that
+    /// `ManagerRoot = Self`. This in contexts with `M: ManagerWrite`, we can actually run
+    /// `foo<M::ManagerRoot>` as `foo<M>`.
     type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 }
 
@@ -247,59 +254,6 @@ pub trait ManagerClone: ManagerBase {
 
     /// Clone the dynamic region.
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
-}
-
-/// Manager wrapper around `M` whose regions are immutable references to regions of `M`
-pub struct Ref<'backend, M>(PhantomData<&'backend M>, Infallible);
-
-impl<'backend, M: ManagerBase + 'backend> ManagerBase for Ref<'backend, M> {
-    type Region<E: 'static, const LEN: usize> = &'backend M::Region<E, LEN>;
-
-    type DynRegion = &'backend M::DynRegion;
-
-    type ManagerRoot = M::ManagerRoot;
-}
-
-impl<'backend, M: ManagerSerialise + 'backend> ManagerSerialise for Ref<'backend, M> {
-    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
-        region: &Self::Region<T, LEN>,
-        encoder: E,
-    ) -> Result<(), EncodeError> {
-        M::serialise_region(region, encoder)
-    }
-
-    fn serialise_dyn_region<E: Encoder>(
-        region: &Self::DynRegion,
-        encoder: E,
-    ) -> Result<(), EncodeError> {
-        M::serialise_dyn_region(region, encoder)
-    }
-}
-
-impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
-    fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
-        M::region_read(region, index)
-    }
-
-    fn region_ref<E: 'static, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> &E {
-        M::region_ref(region, index)
-    }
-
-    fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E> {
-        M::region_read_all(region)
-    }
-
-    fn dyn_region_len(region: &Self::DynRegion) -> usize {
-        M::dyn_region_len(region)
-    }
-
-    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E {
-        unsafe { M::dyn_region_read(region, address) }
-    }
-
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
-        M::dyn_region_read_all(region, address, values)
-    }
 }
 
 /// Projection from [`ManagerBase::Region`] to the element type `E`
