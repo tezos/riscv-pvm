@@ -289,30 +289,23 @@ impl Drop for PersistenceLayer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod utils {
     use std::path::Path;
-    use std::path::PathBuf;
 
-    use proptest::prelude::Strategy;
-    use proptest::prelude::any;
-    use proptest::proptest;
-    use rocksdb::properties::ESTIMATE_NUM_KEYS;
     use tempfile::TempDir;
 
-    use super::*;
-
-    struct TestableTmpdir {
+    pub(crate) struct TestableTmpdir {
         tempdir: TempDir,
     }
 
     impl TestableTmpdir {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let tempdir = TempDir::new().expect("Should be able to create temp dir");
 
             Self { tempdir }
         }
 
-        fn path(&self) -> &Path {
+        pub(crate) fn path(&self) -> &Path {
             self.tempdir.path()
         }
     }
@@ -328,6 +321,20 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use proptest::prelude::Strategy;
+    use proptest::prelude::any;
+    use proptest::proptest;
+    use rocksdb::properties::ESTIMATE_NUM_KEYS;
+
+    use super::utils::TestableTmpdir;
+    use super::*;
 
     fn checkpoint_db_path(db: &PersistenceLayer) -> PathBuf {
         db.db_instance.path().to_path_buf()
