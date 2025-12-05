@@ -149,10 +149,7 @@ mod tests {
     use proptest::proptest;
 
     use super::*;
-    use crate::state_backend::AllocatedOf;
-    use crate::state_backend::Array;
     use crate::state_backend::Cells;
-    use crate::state_backend::DynArray;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerWrite;
     use crate::state_backend::proof_backend::ProofRegion;
@@ -169,7 +166,7 @@ mod tests {
     // state in `Verify` mode constructed from this proof.
     #[test]
     fn test_proof_blinding() {
-        type TestLayout = (Array<u64, CELLS_SIZE>, Array<u64, CELLS_SIZE>);
+        type TestState<M> = (Cells<u64, CELLS_SIZE, M>, Cells<u64, CELLS_SIZE, M>);
 
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
             // Bind `Prove` cells and write at one address
@@ -188,7 +185,7 @@ mod tests {
             let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
             let verifier_state =
-                deserialise_owned::deserialise::<AllocatedOf<TestLayout, Verify>>(
+                deserialise_owned::deserialise::<TestState<Verify>>(
                     ProofTree::Present(&merkle_proof),
                 ).unwrap();
 
@@ -250,10 +247,9 @@ mod tests {
 
         // Instantiating the verifier state allows us to replay the computation and verify it does
         // the right things.
-        let (mut verify_cell, out_proof) = deserialise_owned::deserialise::<
-            AllocatedOf<DynArray, Verify>,
-        >(ProofTree::Present(&proof_tree))
-        .unwrap();
+        let (mut verify_cell, out_proof) =
+            deserialise_owned::deserialise::<DynCells<Verify>>(ProofTree::Present(&proof_tree))
+                .unwrap();
 
         let OwnedProofPart::Present(out_tree) = &out_proof else {
             panic!("Expected present proof");
