@@ -14,11 +14,19 @@ use bincode::Decode;
 use bincode::Encode;
 use tree::Avl;
 
+use crate::persistence_layer::HashedData;
 use crate::persistence_layer::PersistenceLayer;
+use crate::persistence_layer::PersistenceLayerError;
 
 /// An identifier generated for a given commit.
 #[derive(Debug, PartialEq, Eq)]
-pub struct CommitId;
+pub struct CommitId(blake3::Hash);
+
+impl CommitId {
+    fn new(hash: blake3::Hash) -> Self {
+        Self(hash)
+    }
+}
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
 #[derive(Clone, Debug, Decode, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -49,17 +57,17 @@ pub enum MerkleLayerError {
     #[error("The provided key is too long")]
     KeyTooLong,
 
-    /// An error occurred when trying to make changes in the Merkle layer persist on disk.
-    #[expect(dead_code, reason = "Not yet implemented")]
-    #[error("An error occurred in the persistence layer")]
-    PersistenceError,
+    #[error("Some error happened while trying to encode the node {0}")]
+    EncodeError(#[from] bincode::error::EncodeError),
+
+    #[error("Some error happened during the interaction with the persistence layer {0}")]
+    PersistenceLayerError(#[from] PersistenceLayerError),
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
 pub struct MerkleLayer {
     tree: Avl,
-    #[expect(dead_code, reason = "To be used in RV-825")]
     persistence: Arc<PersistenceLayer>,
 }
 
@@ -96,7 +104,17 @@ impl MerkleLayer {
 
     /// Generates a commitment for the [MerkleLayer].
     pub fn commit(&self) -> Result<CommitId, MerkleLayerError> {
-        todo!()
+        // Note that although we're doing in order
+        // iteration of the nodes the hashes are
+        // calculated during the encoding of the node
+        // if necessary.
+        for node in self.tree.iter() {
+            let value = octez_riscv_data::serialisation::serialise(node.to_encode())?;
+            let blob = HashedData::from_value(value.as_slice());
+            self.persistence.blob_set(&blob)?;
+        }
+
+        Ok(CommitId::new(self.tree.hash()))
     }
 
     /// Delete the data associated with a given [Key].
@@ -141,6 +159,7 @@ mod tests {
     use super::Key;
     use super::MerkleLayer;
     use super::node::MavlNode;
+    use super::node::hash;
     use super::tree::Avl;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
@@ -929,5 +948,57 @@ mod tests {
 
             ml.tree.check(line!());
         }
+    }
+
+    /// - Add some data to the Merkle layer.
+    /// - Commit the data to relevant column family
+    /// - Check whether the data is persisted.
+    /// - Check whether the hash contained in the commit id
+    ///   is the same as the root hash
+    #[test]
+    fn test_merkle_layer_commit_persists_nodes() {
+        let mut merkle_layer = new_merkle_layer();
+
+        let keys = [
+            Key::new(&[12]).unwrap(),
+            Key::new(&[1]).unwrap(),
+            Key::new(&[72]).unwrap(),
+            Key::new(&[3]).unwrap(),
+            Key::new(&[4]).unwrap(),
+            Key::new(&[17]).unwrap(),
+            Key::new(&[8]).unwrap(),
+        ];
+
+        let data = [
+            Bytes::from_static(b"aasd"),
+            Bytes::from_static(b"aksdja"),
+            Bytes::from_static(b"agfgd"),
+            Bytes::from_static(b"45gfgdf"),
+            Bytes::from_static(b"sfdsdfsd"),
+            Bytes::from_static(b"asdfsfd"),
+            Bytes::from_static(b"asdfsdf"),
+        ];
+
+        for (key, data_elem) in keys.iter().zip(data.iter()) {
+            merkle_layer.set(key, data_elem.clone());
+        }
+
+        let commit_id = merkle_layer
+            .commit()
+            .expect("The commit operation should not fail");
+
+        for node in merkle_layer.tree.iter() {
+            let serialised = octez_riscv_data::serialisation::serialise(node.to_encode())
+                .expect("We should be able to serialise the node");
+            let node_hash: &[u8; 32] = hash(node).as_bytes();
+            let blob = merkle_layer
+                .persistence
+                .blob_get(node_hash)
+                .expect("The blob with the given key should be present");
+            assert_eq!(serialised, blob.as_ref());
+        }
+
+        let root_hash = merkle_layer.tree.hash();
+        assert_eq!(commit_id.0, root_hash);
     }
 }

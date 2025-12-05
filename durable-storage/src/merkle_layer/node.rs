@@ -208,7 +208,7 @@ pub(super) fn get_mut<'a>(
 ///
 /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
 /// cached.
-fn hash(node: &Arc<MavlNode>) -> &blake3::Hash {
+pub(super) fn hash(node: &Arc<MavlNode>) -> &blake3::Hash {
     node.hash.get_or_init(|| {
         let mut hasher = blake3::Hasher::new();
         serialise_into(node.to_encode(), &mut hasher)
