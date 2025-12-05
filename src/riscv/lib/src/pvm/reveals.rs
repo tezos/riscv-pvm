@@ -23,9 +23,7 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::state_backend::DynArray;
 use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -33,9 +31,6 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
-
-/// Reveal request layout
-pub type RevealRequestLayout = (DynArray, Atom<u64>);
 
 /// Request content of reveal
 #[perfect_derive(Clone, PartialEq, Eq)]

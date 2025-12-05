@@ -23,7 +23,6 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use hart_state::HartState;
-use hart_state::HartStateLayout;
 use instruction::Instruction;
 use memory::Address;
 use memory::BadMemoryAccess;
@@ -57,7 +56,6 @@ use crate::parser::parse_uncompressed_instruction;
 use crate::program::Program;
 use crate::pvm::linux::signals::Signal;
 use crate::pvm::linux::signals::SignalActions;
-use crate::pvm::linux::signals::SignalActionsLayout;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
@@ -65,14 +63,6 @@ use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
-
-/// Layout for the machine 'run state' - which contains everything required for the running of
-/// instructions.
-pub type MachineCoreStateLayout<MC> = (
-    HartStateLayout,
-    <MC as MemoryConfig>::Layout,
-    SignalActionsLayout,
-);
 
 /// The part of the machine state required to run (almost all) instructions.
 ///
@@ -276,9 +266,8 @@ impl<C, MC: memory::MemoryConfig, M: backend::ManagerDeserialise> Decode<C>
     }
 }
 
-/// Layout for the machine state - everything required to fetch & run instructions.
-pub type MachineStateLayout<MC> = MachineCoreStateLayout<MC>;
-
+/// RISC-V machine state
+///
 /// The machine state contains everything required to fetch & run instructions.
 pub struct MachineState<
     MC: memory::MemoryConfig,

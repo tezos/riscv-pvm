@@ -27,7 +27,6 @@ use super::BuddyLayout;
 use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
-use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -71,16 +70,8 @@ macro_rules! combined_buddy_branch {
                 }
             }
 
-            // NOTE: We can't use `struct_layout!` to help us define the type and impls below. The
-            // macro doesn't define new type aliases for the combined layouts which results in a
-            // massive type tree to traverse. This makes type checking super slow.
-
             /// Layout for a combined Buddy branch
             pub struct [<$name Layout>]<B>(B);
-
-            impl<B: BuddyLayout> Layout for [<$name Layout>]<B> {
-                type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
-            }
 
             impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B> {
                 type Buddy<M: ManagerBase> = $name<B::Buddy<M>, M>;

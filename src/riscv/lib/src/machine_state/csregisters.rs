@@ -33,9 +33,7 @@ use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
-use crate::struct_layout;
 
 /// CSR index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -168,14 +166,6 @@ const FRM_SHIFT: usize = 5;
 
 /// Bit mask for the flags
 const FFLAGS_MASK: CSRRepr = 0b11111;
-
-// Layout for [`CSRegisters`]
-struct_layout! {
-    pub struct CSRegistersLayout {
-        fflags: Atom<FloatExceptionFlags>,
-        frm: Atom<RoundingMode>,
-    }
-}
 
 /// Cntrol and State Registers (CSRs)
 #[perfect_derive(Clone, PartialEq, Eq)]

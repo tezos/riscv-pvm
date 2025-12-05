@@ -5,37 +5,6 @@
 
 //! Generic state backends
 //!
-//! # Layouts
-//!
-//! [Layouts] are structural descriptions of state types. We use types to
-//! describe [Layouts] as statically as possible. This shall help us in writing
-//! tests that ensure we don't accidentally change the layout of the machine
-//! state.
-//!
-//! ## Example
-//!
-//! Consider the following state.
-//!
-//! ```
-//! struct MyState {
-//!     foo: u64,
-//!     bar: [u8; 1024],
-//!     qux: u16,
-//! }
-//! ```
-//!
-//! We can describe the layout of this state using the following type.
-//!
-//! ```
-//! use octez_riscv::state_backend::{Atom, Array};
-//!
-//! type MyStateLayout = (
-//!     Atom<u64>,
-//!     Array<u8, 1024>,
-//!     Atom<u16>,
-//! );
-//! ```
-//!
 //! # Managers
 //!
 //! Different backends have different capabilities and they are described as `Manager<Capability>`.
@@ -64,7 +33,6 @@
 //! - [Ref]
 //!   Helper mode to wrap another backend through a reference to it.
 //!
-//! [Layouts]: layout::Layout
 //! [Normal]: octez_riscv_data::mode::Normal
 //! [Verify]: octez_riscv_data::mode::Verify
 //! [Prove]: octez_riscv_data::mode::Prove
@@ -87,7 +55,6 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use elems::*;
-pub use layout::*;
 pub use proof_layout::*;
 pub use region::*;
 

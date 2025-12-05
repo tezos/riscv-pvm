@@ -33,7 +33,6 @@ use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyLayoutProxy;
 
 use crate::state::NewState;
-use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerDeserialise;
@@ -42,7 +41,7 @@ use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Layout for a Buddy-style memory manager
-pub trait BuddyLayout: Layout {
+pub trait BuddyLayout: 'static {
     /// Buddy-style memory manager implementation
     type Buddy<M: ManagerBase>: Buddy<M>;
 

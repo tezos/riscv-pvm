@@ -18,18 +18,10 @@ use super::leaf::BuddyLeafLayout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
-use crate::state_backend::Layout;
 use crate::state_backend::ManagerBase;
 
 /// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
 pub struct BuddyLayoutProxy<const PAGES: usize>;
-
-impl<const PAGES: usize> Layout for BuddyLayoutProxy<PAGES>
-where
-    (): BuddyLayoutMatch<PAGES>,
-{
-    type Allocated<M: ManagerBase> = <PickLayout<PAGES> as Layout>::Allocated<M>;
-}
 
 impl<const PAGES: usize> BuddyLayout for BuddyLayoutProxy<PAGES>
 where

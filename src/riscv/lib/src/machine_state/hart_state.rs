@@ -26,11 +26,9 @@ use crate::machine_state::csregisters;
 use crate::machine_state::memory::Address;
 use crate::machine_state::registers;
 use crate::machine_state::registers::XValue;
-use crate::machine_state::reservation_set;
 use crate::machine_state::reservation_set::ReservationSet;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::CellProj;
 use crate::state_context::StateContext;
@@ -55,15 +53,6 @@ pub struct HartState<M: backend::ManagerBase> {
     /// Reservation set address
     pub reservation_set: ReservationSet<M>,
 }
-
-/// Layout of [HartState]
-pub type HartStateLayout = (
-    registers::XRegistersLayout,
-    registers::FRegistersLayout,
-    csregisters::CSRegistersLayout,
-    Atom<Address>,                         // Program counter layout
-    reservation_set::ReservationSetLayout, // Reservation set layout
-);
 
 impl<M: backend::ManagerBase> HartState<M> {
     /// Reset the hart state.

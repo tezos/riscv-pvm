@@ -4,6 +4,8 @@
 
 //! Branch of a tree that forms a Buddy-style memory manager
 
+use std::marker::PhantomData;
+
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -24,7 +26,6 @@ use perfect_derive::perfect_derive;
 use super::Buddy;
 use super::BuddyLayout;
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -33,7 +34,6 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::struct_layout;
 
 /// Information about what is free in each buddy
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
@@ -57,13 +57,8 @@ pub struct FreeInfo {
     right_free_end: u64,
 }
 
-struct_layout! {
-    pub struct BuddyBranch2Layout<B> {
-        free_info: Atom<FreeInfo>,
-        left: Box<B>,
-        right: Box<B>,
-    }
-}
+/// Config for a branch in a Buddy-style memory manager tree with 2 children
+pub struct BuddyBranch2Layout<B>(PhantomData<B>);
 
 impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
     type Buddy<M: ManagerBase> = BuddyBranch2<B::Buddy<M>, M>;

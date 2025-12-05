@@ -35,7 +35,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::linux;
 use super::reveals::RevealRequest;
-use super::reveals::RevealRequestLayout;
 use crate::default::ConstDefault;
 use crate::machine_state;
 use crate::machine_state::csregisters::CSRegister;
@@ -48,7 +47,6 @@ use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -56,7 +54,6 @@ use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
-use crate::struct_layout;
 
 /// Type of input that can be passed to the PVM
 pub enum PvmInput<'a> {
@@ -66,20 +63,6 @@ pub enum PvmInput<'a> {
         payload: &'a [u8],
     },
     Reveal(&'a [u8]),
-}
-
-struct_layout! {
-    pub struct PvmLayout<MC> {
-        machine_state: machine_state::MachineStateLayout<MC>,
-        reveal_request: RevealRequestLayout,
-        system_state: linux::SupervisorStateLayout,
-        version: Atom<u64>,
-        tick: Atom<u64>,
-        message_counter: Atom<u64>,
-        level: Atom<u32>,
-        level_is_set: Atom<bool>,
-        status: Atom<PvmStatus>,
-    }
 }
 
 /// PVM status

@@ -29,7 +29,6 @@ use super::Address;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
 use crate::state::NewState;
-use crate::state_backend::Atom;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -38,12 +37,8 @@ use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
-use crate::state_backend::Many;
 use crate::state_backend::NarrowlySized;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
-
-/// State layout for page permissions
-pub type PagePermissionsLayout<const PAGES: usize> = Many<Atom<bool>, PAGES>;
 
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
