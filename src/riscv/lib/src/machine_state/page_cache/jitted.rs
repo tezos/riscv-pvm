@@ -26,7 +26,7 @@ use crate::machine_state::page_cache::DispatchTarget;
 ///
 /// Doubles as a coarse upper-bound for the minimum number of steps required to safely dispatch
 /// the entrypoints.
-pub(crate) const MAX_INSTR_COMPILED: usize = 40;
+const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
 pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>>>;
@@ -175,10 +175,6 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal> for Ji
         instr_pc: Address,
         max_steps: usize,
     ) -> StepManyResult<Exception> {
-        if max_steps < MAX_INSTR_COMPILED {
-            return super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
-        }
-
         let page_offset = address_to_page_offset(instr_pc);
 
         // Since we know the instruction pc to always be halfword-aligned, there are half
@@ -264,15 +260,20 @@ mod tests {
         let result =
             unsafe { CodePageEntry::run_entrypoint(&page, &mut core, &mut jit, 100, max_steps) };
 
-        assert!(result.error.is_none());
-        assert_eq!(result.steps, max_steps);
+        assert_eq!(
+            Some(Exception::ForceFetchRun),
+            result.error,
+            "Expected fallback to interpreted"
+        );
+        assert_eq!(result.steps, 0);
 
         assert_eq!(
             core.hart.pc.read(),
-            100 + max_steps as u64 * InstrWidth::Compressed as u64
+            100,
+            "No progress should have been made"
         );
 
-        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 0);
+        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
     }
 
     #[test]
