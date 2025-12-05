@@ -19,9 +19,6 @@ impl<T: Layout> Layout for Box<T> {
     type Allocated<M: super::ManagerBase> = Box<T::Allocated<M>>;
 }
 
-/// `L::Allocated`
-pub type AllocatedOf<L, M> = <L as Layout>::Allocated<M>;
-
 /// Layout for a single value
 #[repr(transparent)]
 pub struct Atom<T> {
@@ -226,18 +223,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::foldable::Fold;
+    use octez_riscv_data::foldable::Foldable;
+    use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::mode::Verify;
 
-    use super::*;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::state::NewState;
     use crate::state_backend::Cell;
     use crate::state_backend::Cells;
+    use crate::state_backend::ManagerBase;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -264,16 +263,27 @@ mod tests {
     });
 
     #[test]
-    fn test_struct_layout() {
-        struct_layout! {
-            pub struct Foo {
-                bar: Atom<u64>,
-                qux: Array<u8, 64>,
+    fn test_struct_example() {
+        struct Foo<M: ManagerBase> {
+            bar: Cell<u64, M>,
+            qux: Cells<u8, 64, M>,
+        }
+
+        impl<F: Fold, M: ManagerBase> Foldable<F> for Foo<M>
+        where
+            Cell<u64, M>: Foldable<F>,
+            Cells<u8, 64, M>: Foldable<F>,
+        {
+            fn fold(&self, builder: F) -> <F as Fold>::Folded {
+                let mut builder = builder.into_node_fold();
+                builder.add(&self.bar);
+                builder.add(&self.qux);
+                builder.done()
             }
         }
 
         fn inner(bar: u64, qux: [u8; 64]) {
-            let mut foo = AllocatedOf::<Foo, Normal> {
+            let mut foo = Foo::<Normal> {
                 bar: Cell::new(),
                 qux: Cells::new(),
             };
@@ -282,14 +292,10 @@ mod tests {
             foo.qux.write_all(&qux);
 
             // Obtain the state hash
-            let refs = FooF {
-                bar: &foo.bar,
-                qux: &foo.qux,
-            };
-            let hash = Hash::from_foldable(&refs);
+            let hash = Hash::from_foldable(&foo);
 
             // Obtain the Merkle tree via the `Prove` mode
-            let mut proof_foo = FooF {
+            let mut proof_foo = Foo {
                 bar: foo.bar.start_proof(),
                 qux: foo.qux.start_proof(),
             };
@@ -303,12 +309,7 @@ mod tests {
             proof_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
-            let proof_foo_refs = FooF {
-                bar: &proof_foo.bar,
-                qux: &proof_foo.qux,
-            };
-
-            let tree = MerkleTree::from_foldable(&proof_foo_refs);
+            let tree = MerkleTree::from_foldable(&proof_foo);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -321,11 +322,7 @@ mod tests {
             // the final state hash
             foo.bar.write(bar.wrapping_add(1));
             foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
-            let refs = FooF {
-                bar: &foo.bar,
-                qux: &foo.qux,
-            };
-            let final_hash = Hash::from_foldable(&refs);
+            let final_hash = Hash::from_foldable(&foo);
 
             // Verify the proof and check the final hash
             handle_stepper_panics(|| {
@@ -333,7 +330,7 @@ mod tests {
                     let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof))
                         .unwrap()
                         .0;
-                    AllocatedOf::<Foo, Verify> { bar, qux }
+                    Foo { bar, qux }
                 };
 
                 assert_eq!(bar, verify_foo.bar.read());

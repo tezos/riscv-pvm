@@ -88,9 +88,6 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use elems::*;
 pub use layout::*;
-use octez_riscv_data::mode::Normal;
-use octez_riscv_data::mode::Prove;
-use octez_riscv_data::mode::Verify;
 pub use proof_layout::*;
 pub use region::*;
 
@@ -338,20 +335,6 @@ impl<'backend, M: ManagerRead + 'backend> ManagerRead for Ref<'backend, M> {
         M::dyn_region_read_all(region, address, values)
     }
 }
-
-/// Alias for the allocated structure with references to regions in
-/// the [Normal] mode
-///
-/// [Normal]: octez_riscv_data::mode::Normal
-pub type RefNormalAlloc<'a, L> = AllocatedOf<L, Ref<'a, Normal>>;
-
-/// Alias for the allocated structure with references to a proof-generating backend
-pub type RefProveAlloc<'outer, 'inner, L> = AllocatedOf<L, Ref<'outer, Prove<'inner>>>;
-
-/// Alias for the allocated structure with references to regions in [Verify] mode
-///
-/// [Verify]: Verify
-pub type RefVerifyAlloc<'a, L> = AllocatedOf<L, Ref<'a, Verify>>;
 
 /// Projection from [`ManagerBase::Region`] to the element type `E`
 pub struct RegionProj<E, const LEN: usize>(PhantomData<E>);

@@ -27,7 +27,6 @@ use super::BuddyLayout;
 use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Layout;
 use crate::state::NewState;
-use crate::state_backend::AllocatedOf;
 use crate::state_backend::Layout;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -43,28 +42,29 @@ macro_rules! combined_buddy_branch {
         paste::paste! {
             /// Allocated combined Buddy branch
             #[perfect_derive::perfect_derive(PartialEq, Eq)]
-            pub struct [<$name Alloc>]<B: Layout, M: ManagerBase>(AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>);
+            pub struct [<$name Alloc>]<B: BuddyLayout, M: ManagerBase>(
+                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>
+            );
 
             // Passthrough implementation, default derive macro can't derive this ...
             impl<B, M> Encode for [<$name Alloc>]<B, M>
             where
-                B: Layout,
+                B: BuddyLayout,
                 M: ManagerSerialise,
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Encode,
+                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>: Encode,
             {
 
                 fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-                    self.0.encode(encoder)
+                    Encode::encode(&self.0, encoder)
                 }
             }
-
 
             // Passthrough implementation, default derive macro can't derive this ...
             impl<B, M> Decode<()> for [<$name Alloc>]<B, M>
             where
-                B: Layout,
+                B: BuddyLayout,
                 M: ManagerDeserialise,
-                AllocatedOf<[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>, M>: Decode<()>,
+                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>: Decode<()>,
             {
                 fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
                     Ok(Self(Decode::decode(decoder)?))
@@ -78,13 +78,11 @@ macro_rules! combined_buddy_branch {
             /// Layout for a combined Buddy branch
             pub struct [<$name Layout>]<B>(B);
 
-            impl<B: Layout> Layout for [<$name Layout>]<B> {
+            impl<B: BuddyLayout> Layout for [<$name Layout>]<B> {
                 type Allocated<M: ManagerBase> = [<$name Alloc>]<B, M>;
             }
 
-            impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B>
-                where [<$buddy1 Layout>]<[<$buddy2 Layout>]<B>>: 'static,
-            {
+            impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B> {
                 type Buddy<M: ManagerBase> = $name<B::Buddy<M>, M>;
 
                 fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {

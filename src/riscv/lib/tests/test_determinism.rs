@@ -7,9 +7,7 @@ use std::ops::Bound;
 
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
-use octez_riscv::pvm::PvmLayout;
 use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::state_backend::RefNormalAlloc;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
@@ -57,7 +55,6 @@ fn run_steps_ladder<MC, F>(make_stepper: F, ladder: &[usize], expected_hash: has
 where
     MC: MemoryConfig,
     MC::State<Normal>: Foldable<HashFold>,
-    for<'a> RefNormalAlloc<'a, PvmLayout<MC>>: PartialEq,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();
