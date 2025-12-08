@@ -24,7 +24,7 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
-use super::BuddyLayout;
+use super::BuddyConfig;
 use crate::state::NewState;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
@@ -58,9 +58,9 @@ pub struct FreeInfo {
 }
 
 /// Config for a branch in a Buddy-style memory manager tree with 2 children
-pub struct BuddyBranch2Layout<B>(PhantomData<B>);
+pub struct BuddyBranch2Config<B>(PhantomData<B>);
 
-impl<B: BuddyLayout> BuddyLayout for BuddyBranch2Layout<B> {
+impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
     type Buddy<M: ManagerBase> = BuddyBranch2<B::Buddy<M>, M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {

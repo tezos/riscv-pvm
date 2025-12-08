@@ -22,7 +22,7 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use super::Buddy;
-use super::BuddyLayout;
+use super::BuddyConfig;
 use crate::bits::ones;
 use crate::state::NewState;
 use crate::state_backend::Cell;
@@ -34,10 +34,10 @@ use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
-/// Layout for a leaf of a tree that forms a Buddy-style memory manager
-pub struct BuddyLeafLayout<const PAGES: u64>;
+/// Config for a leaf of a tree that forms a Buddy-style memory manager
+pub struct BuddyLeafConfig<const PAGES: u64>;
 
-impl<const PAGES: u64> BuddyLayout for BuddyLeafLayout<PAGES> {
+impl<const PAGES: u64> BuddyConfig for BuddyLeafConfig<PAGES> {
     type Buddy<M: ManagerBase> = BuddyLeaf<PAGES, M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
