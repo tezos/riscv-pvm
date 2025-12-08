@@ -146,7 +146,6 @@ impl MerkleLayer {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::Path;
     use std::sync::Arc;
 
     use bytes::BufMut;
@@ -162,6 +161,7 @@ mod tests {
     use super::node::hash;
     use super::tree::Avl;
     use crate::persistence_layer::PersistenceLayer;
+    use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
     impl Avl {
@@ -248,11 +248,16 @@ mod tests {
     }
 
     fn new_merkle_layer() -> MerkleLayer {
-        let directory_manager =
-            DirectoryManager::new(Path::new("/tmp")).expect("Should be a valid directory");
-        let persistence_layer =
-            PersistenceLayer::new(&directory_manager).expect("Should be a valid directory");
-        MerkleLayer::new(persistence_layer.into())
+        let tmpdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+
+        let persistence_layer = PersistenceLayer::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+
+        MerkleLayer::new(persistence_layer)
     }
 
     #[test]
