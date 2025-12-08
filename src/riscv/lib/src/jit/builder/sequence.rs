@@ -28,7 +28,6 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use octez_riscv_data::mode::Normal;
 
-use crate::exceptions::Exception;
 use crate::jit::builder::control_flow_graph::ControlFlowGraph;
 use crate::jit::builder::control_flow_graph::NodeInfo;
 use crate::jit::builder::control_flow_graph::OutcomeData;
@@ -45,6 +44,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::write_pc;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::jitted::JittedPage;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
@@ -52,7 +52,7 @@ use crate::state_context::projection::MachineCoreProjection;
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
 /// Builder for an instruction sequence
-pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
+pub struct SequenceBuilder<'jit, D, MC: MemoryConfig> {
     /// Target configuration for the JIT module
     target_config: TargetFrontendConfig,
 
@@ -67,6 +67,12 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
 
     /// Standard exit block to jump to when finishing the sequence
     exit_block: Block,
+
+    /// Exit block to jump to when falling back to interpreted mode.
+    fallback_interpreted_block: Block,
+
+    /// Parameter pointing to the code page
+    page_param: Pointer<JittedPage<D, MC>>,
 
     /// Parameter pointing to the `MachineCoreState`
     core_param: Pointer<MachineCoreState<MC, Normal>>,
@@ -87,7 +93,7 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     steps_remaining: Variable,
 }
 
-impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
+impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
     /// Create a new sequence builder.
     pub fn new(
         module: &'jit mut JITModule,
@@ -134,6 +140,12 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         builder.append_block_params_for_function_params(param_block);
         builder.switch_to_block(param_block);
 
+        // SAFETY: `JitFn` accepts a `&JittedPage` as the 1st parameter.
+        let page_param = unsafe {
+            let raw_value = builder.block_params(param_block)[0];
+            Pointer::<JittedPage<D, MC>>::from_raw(raw_value)
+        };
+
         // SAFETY: `JitFn` accepts a `&mut MachineCoreState<MC, Normal>` as the 2nd parameter.
         let core_param = unsafe {
             let raw_value = builder.block_params(param_block)[1];
@@ -165,14 +177,22 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         builder.ins().jump(entry_block, []);
 
         let target_config = module.target_config();
-
         let exit_block = builder.create_block();
+
+        // The fallback exit block is used when we need to switch to interpreted mode and then exit.
+        // It requires two parameters: the current PC and the remaining steps.
+        let fallback_interpreted_block = builder.create_block();
+        builder.append_block_param(fallback_interpreted_block, I64);
+        builder.append_block_param(fallback_interpreted_block, I64);
+
         Self {
             target_config,
             builder,
             ext_calls,
             entry_block,
             exit_block,
+            fallback_interpreted_block,
+            page_param,
             core_param,
             program_counter,
             program_counter_offset: 0,
@@ -184,7 +204,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
     /// The exit block is used to write the program counter back to the machine core state, as
     /// well as returning from the JIT function.
+    ///
+    /// This function should be called once all blocks leading to the exit block have been built.
     fn fill_exit_block(&mut self) {
+        self.builder.seal_block(self.exit_block);
         self.builder.switch_to_block(self.exit_block);
 
         // SAFETY: We're declaring the value as a `I64` which has the same representation of
@@ -200,6 +223,56 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         let max_steps = self.max_steps_param.to_value();
         let steps = self.builder.ins().isub(max_steps, steps_remaining);
 
+        self.builder.ins().return_(&[steps]);
+    }
+
+    /// IR for calling the interpreted mode fallback function when unable to continue in JIT mode.
+    /// This exit block writes the current PC back to the machine core state before calling the
+    /// interpreter, and returns the total number of steps executed in JIT and interpreted mode.
+    ///
+    /// This function should be called once all blocks leading to this exiting block have been built.
+    // TODO RV-842: Introduce counter update here for number of calls to fallback to interpreter.
+    fn fill_fallback_interpreted_block(&mut self) {
+        self.builder.seal_block(self.fallback_interpreted_block);
+        self.builder
+            .switch_to_block(self.fallback_interpreted_block);
+        self.builder.set_cold_block(self.fallback_interpreted_block);
+
+        // Before calling the fallback function, we must commit the current PC to the machine core state.
+
+        // SAFETY: The first parameter of the block is the `current_pc`, which is an `Address`.
+        let current_pc = unsafe {
+            let raw_value = self.builder.block_params(self.fallback_interpreted_block)[0];
+            Value::<Address>::from_raw(raw_value)
+        };
+
+        write_pc(self, current_pc);
+
+        // SAFETY: The second parameter of the block is the `steps_remaining` value, which is a `usize`.
+        let fallback_max_steps = unsafe {
+            let raw_value = self.builder.block_params(self.fallback_interpreted_block)[1];
+            Value::<usize>::from_raw(raw_value)
+        };
+
+        // Call the interpreter fallback function. This will continue up to `fallback_max_steps` steps
+        // in interpreted mode. This syncs the PC to the `machine_core_state` as it executes.
+        let final_steps_remaining = self
+            .ext_calls
+            .run_interpreter_fallback(
+                &mut self.builder,
+                self.page_param,
+                self.core_param,
+                fallback_max_steps,
+                self.result_param,
+            )
+            .to_value();
+
+        let steps = self
+            .builder
+            .ins()
+            .isub(self.max_steps_param.to_value(), final_steps_remaining);
+
+        // Exit the JIT function without writing the PC, as it will already be synced.
         self.builder.ins().return_(&[steps]);
     }
 
@@ -251,18 +324,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         instr_builder
     }
 
-    /// Update the `steps_remaining` variable and jump to the exit block.
-    ///
-    /// `final_program_counter` is the program counter that we want to commit back to the
-    /// machine core state when exiting the sequence.
-    fn jump_to_exit(&mut self, steps_completed: u64, final_program_counter: Value<Address>) {
-        self.insert_step_update_ir(steps_completed as i64);
-
-        self.builder.ins().jump(self.exit_block, &[BlockArg::Value(
-            final_program_counter.to_value(),
-        )]);
-    }
-
     /// Decrement 'steps_remaining' by the number of steps taken in the sequence.
     fn insert_step_update_ir(&mut self, step_delta: i64) {
         if step_delta == 0 {
@@ -279,13 +340,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
     }
 
     /// Insert a budget-check into the control flow IR for the current block being built.
-    fn insert_budget_check_ir(
-        &mut self,
-        budget: u64,
-        exit_delta: i64,
-        exit_pc: Value<u64>,
-        is_entry: bool,
-    ) {
+    fn insert_budget_check_ir(&mut self, budget: u64, exit_delta: i64, exit_pc: Value<Address>) {
         let steps_remaining = self.builder.use_var(self.steps_remaining);
 
         let steps_remaining = self.builder.ins().iadd_imm(steps_remaining, -exit_delta);
@@ -296,37 +351,19 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                 .icmp(UnsignedGreaterThanOrEqual, steps_remaining, budget);
 
         let continue_block = self.builder.create_block();
-        let out_of_budget_block = self.builder.create_block();
 
         self.builder.ins().brif(
             is_enough_budget,
             continue_block,
             &[],
-            out_of_budget_block,
-            &[],
+            self.fallback_interpreted_block,
+            &[
+                BlockArg::Value(exit_pc.to_value()),
+                BlockArg::Value(steps_remaining),
+            ],
         );
 
-        self.builder.seal_block(out_of_budget_block);
-        self.builder.switch_to_block(out_of_budget_block);
-
-        // If we are in the entry block budget-check, write the ForceFetchRun exception
-        // to the result in the out-of-budget case.
-
-        // TODO: RV-812: failing the budget check should fall back to
-        //       interpreted mode in general - we can unify entry and other budget check
-        //       code at that point.
-        if is_entry {
-            let exception_val =
-                ExceptionCode::build_exception_code(&mut self.builder, Exception::ForceFetchRun);
-            self.result_param.write(&mut self.builder, exception_val);
-        }
-
-        // We expect to almost always have budget remaining - therefore we
-        // ensure that the failure case is not placed in the hot path of
-        // execution
-        self.builder.set_cold_block(out_of_budget_block);
-        self.jump_to_exit(exit_delta as u64, exit_pc);
-
+        self.builder.seal_block(continue_block);
         self.builder.switch_to_block(continue_block);
     }
 
@@ -347,7 +384,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             )
         };
 
-        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr, true);
+        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr);
         entry_node.run_instruction(&mut self.builder);
     }
 
@@ -370,7 +407,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             let exit_delta = outcome_data
                 .get_exit_delta()
                 .expect("Any budget check must have an exit delta.");
-            self.insert_budget_check_ir(budget as u64, exit_delta as i64, exit_pc, false);
+            self.insert_budget_check_ir(budget as u64, exit_delta as i64, exit_pc);
         }
 
         match outcome_target {
@@ -389,8 +426,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
     /// Finish building the sequence.
     pub fn finish(mut self, instrs: &[LoweredInstruction]) {
-        self.fill_exit_block();
-
         let node_infos: Vec<NodeInfo<OutcomeData, Block>> = instrs
             .iter()
             .enumerate()
@@ -450,12 +485,15 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             self.build_outcome_ir(outcome_data, outcome.to(), &cfg);
         }
 
+        self.fill_exit_block();
+        self.fill_fallback_interpreted_block();
+
         self.builder.seal_all_blocks();
         self.builder.finalize();
     }
 }
 
-impl<MC: MemoryConfig> StateContext for SequenceBuilder<'_, MC> {
+impl<D, MC: MemoryConfig> StateContext for SequenceBuilder<'_, D, MC> {
     type Value<R> = Value<R>;
 
     fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>

@@ -40,6 +40,8 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::run_code_page_interpreted;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
@@ -196,6 +198,26 @@ extern "C" fn csr_read<MC: MemoryConfig>(
     csr: CSRegister,
 ) -> XValue {
     core.hart.csregisters.read(csr)
+}
+
+/// Wrapper around [`run_code_page_interpreted`] for fallback to the interpreter
+/// from the JIT context. Returns the steps remaining after interpreter execution.
+extern "C" fn run_interpreter_fallback<D, MC: MemoryConfig>(
+    page: &JittedPage<D, MC>,
+    core: &mut MachineCoreState<MC, Normal>,
+    max_steps: usize,
+    result: &mut ExceptionCode,
+) -> usize {
+    let instr_pc = core.hart.pc.read();
+
+    let interpreted_result = run_code_page_interpreted(&page.entries, core, instr_pc, max_steps);
+
+    *result = interpreted_result
+        .error
+        .map(ExceptionCode::from_exception)
+        .unwrap_or(ExceptionCode::NoException);
+
+    max_steps - interpreted_result.steps
 }
 
 /// External function call registry for state accesses
@@ -375,6 +397,26 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             self::csr_read,
             unsafe { core_ptr.as_ref() },
             reg_value,
+        )
+    }
+
+    /// Fallback to interpreter execution when JIT-compiled code cannot proceed.
+    pub(super) fn run_interpreter_fallback<D>(
+        &self,
+        builder: &mut FunctionBuilder,
+        page: Pointer<JittedPage<D, MC>>,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
+        max_steps: Value<usize>,
+        result_ptr: Pointer<ExceptionCode>,
+    ) -> Value<usize> {
+        ext_calls::call4(
+            &self.target_config,
+            builder,
+            self::run_interpreter_fallback::<D, MC>,
+            unsafe { page.as_ref() },
+            unsafe { core_ptr.as_mut() },
+            max_steps,
+            unsafe { result_ptr.as_mut() },
         )
     }
 }

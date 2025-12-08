@@ -159,6 +159,7 @@ impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal
 
         let fun = entrypoint.dispatch.get();
 
+        // TODO RV-843: Move the called_times recording into the dispatch mechanism itself.
         #[cfg(test)]
         entrypoint.dispatch.record_called();
 
@@ -182,6 +183,8 @@ impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal
 
 #[cfg(test)]
 mod tests {
+    use proptest::prop_assert_eq;
+
     use super::Jitted;
     use super::MAX_INSTR_COMPILED;
     use crate::exceptions::Exception;
@@ -216,33 +219,35 @@ mod tests {
         assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
     }
 
-    #[test]
-    fn test_interpreted_fallback_on_insufficient_steps() {
-        let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
-            InlineCompiler::default(),
-            |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
-        );
+    proptest::proptest! {
+        #[test]
+        fn test_interpreted_fallback_on_insufficient_steps(
+            max_steps in 0usize..(MAX_INSTR_COMPILED * 2)
+        ) {
+            let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
+                InlineCompiler::default(),
+                |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
+            );
 
-        let mut core = MachineCoreState::new();
+            let mut core = MachineCoreState::new();
 
-        let max_steps = MAX_INSTR_COMPILED - 1;
+            let expected_steps = usize::min(max_steps, MAX_INSTR_COMPILED);
+            let start_pc = 100;
+            let start_entry = (start_pc >> 1) as usize;
 
-        let result = CodePageEntry::run_entrypoint(&page, &mut core, 100, max_steps);
+            // Safety: we only ever use the above JIT instance
+            let result = CodePageEntry::run_entrypoint(&page, &mut core, start_pc, max_steps);
 
-        assert_eq!(
-            Some(Exception::ForceFetchRun),
-            result.error,
-            "Expected fallback to interpreted"
-        );
-        assert_eq!(result.steps, 0);
+            prop_assert_eq!(result.error, None);
+            prop_assert_eq!(result.steps, expected_steps);
 
-        assert_eq!(
-            core.hart.pc.read(),
-            100,
-            "No progress should have been made"
-        );
+            prop_assert_eq!(
+                core.hart.pc.read(),
+                start_pc + (expected_steps as u64) * InstrWidth::Compressed as u64
+            );
 
-        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
+            prop_assert_eq!(page.entries[start_entry].dispatch.called_times(), 1);
+        }
     }
 
     #[test]

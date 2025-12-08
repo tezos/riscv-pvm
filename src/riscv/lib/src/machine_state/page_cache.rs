@@ -118,7 +118,9 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, M
     }
 }
 
-fn run_code_page_interpreted<I, MC, M>(
+/// In interpreted mode, run up to `max_steps` instructions starting from `instr_pc` in the
+/// given `code_page`.
+pub(crate) fn run_code_page_interpreted<I, MC, M>(
     code_page: &[I; INSTRUCTION_ENTRIES],
     core: &mut MachineCoreState<MC, M>,
     mut instr_pc: Address,

@@ -34,7 +34,7 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 ///
 /// This is used in-turn by the entrypoint dispatch mechanism in the page cache.
 ///
-/// Functions produced by the JIT do not inspect the first and third parameters here.
+/// Functions produced by the JIT do not inspect the third parameter here.
 /// These parameters are needed, however, by the initial dispatch mechanism to enable
 /// JIT-compilation & hot-swapping.
 ///
@@ -43,7 +43,6 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 /// The rust compiler has no way of checking if function pointers returned by the JIT
 /// compiler are still valid, so any function pointer it returns must be marked `unsafe`.
 pub type JitFn<D, MC> = unsafe extern "C" fn(
-    // ignored
     &JittedPage<D, MC>,
     &mut MachineCoreState<MC, Normal>,
     // ignored - address hardcoded in instruction building
@@ -129,7 +128,7 @@ impl JIT {
             return None;
         };
 
-        let mut builder = self.start::<MC>(program_counter);
+        let mut builder = self.start::<D, MC>(program_counter);
         let mut lowered_instrs = Vec::with_capacity(instr.len());
 
         // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
@@ -169,7 +168,10 @@ impl JIT {
     }
 
     /// Start building a new sequence of instructions.
-    fn start<MC: MemoryConfig>(&mut self, program_counter: Address) -> SequenceBuilder<'_, MC> {
+    fn start<D, MC: MemoryConfig>(
+        &mut self,
+        program_counter: Address,
+    ) -> SequenceBuilder<'_, D, MC> {
         SequenceBuilder::new(
             &mut self.module,
             &mut self.ctx,
@@ -1272,7 +1274,7 @@ mod tests {
                 .set_assert_hook(assert_hook!(|core| {
                     let expected =
                         (PAGE_SIZE.get() - 18 - 1 + 2 * Uncompressed as u64).wrapping_add(u64::MAX);
-                    assert_eq!(core.hart.pc.read(), expected);
+                    assert_eq!(core.hart.pc.read(), expected, "PC after jump is incorrect.");
                 }))
                 .set_expected_steps(3)
                 // we jump, back to the page but outside of instructions we pushed.
@@ -1298,21 +1300,17 @@ mod tests {
                 // since we jump to the start of the instruction sequence, however, we will fallback to
                 // interpreted sequence evaluation on the 4th step. Therefore, we do not expect an
                 // IllegalInstruction for executing an `Unknown` instruction.
-                //
-                // TODO: RV-841: jumping to start of the instruction sequence should exit the instruction
-                //               sequence in interpreted and loop in jitted world. This would allow us to
-                //               set a larger step budget than 3
                 .set_instructions(&[
                     I::new_nop(Compressed),
                     I::new_nop(Compressed),
                     I::new_jump_pc(-4, Compressed),
                     I::new_nop(Uncompressed),
                 ])
-                .set_step_budget(3)
-                .set_expected_steps(3)
+                .set_step_budget(6)
+                .set_expected_steps(6)
                 .no_exception()
                 .set_assert_hook(assert_hook!(|core| {
-                    // after 3 steps we will be executing the first instruction
+                    // after 6 steps we will be executing the first instruction
                     assert_eq!(core.hart.pc.read(), 0);
                 }))
                 .build(),
@@ -1339,7 +1337,7 @@ mod tests {
             // JR to start of instruction sequence should continue with evaluating the same instruction sequence
             ScenarioBuilder::default()
                 .set_instructions(&[I::new_jr(x6, Compressed), I::new_nop(Compressed)])
-                // after 1 steps we will be evaluating the jump for the second time
+                // after 1 step we will be evaluating the jump for the second time
                 .set_expected_steps(1)
                 .set_step_budget(1)
                 .no_exception()
