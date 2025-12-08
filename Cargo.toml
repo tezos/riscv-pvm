@@ -74,7 +74,7 @@ try-blocks = "0.1.4"
 tuples = "1.16.0"
 unty = "0.0.4"
 vm-fdt = "0.3.0"
-zerocopy = "0.8.30"
+zerocopy = "0.8.31"
 zerocopy-derive = "0.8.27"
 
 [workspace.dependencies.tezos-smart-rollup-constants]
