@@ -17,7 +17,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::ops::Deref;
 
 use bincode::enc::Encode;
 use bincode::enc::Encoder;
@@ -25,6 +24,7 @@ use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::utils::Source;
 
 use super::ManagerBase;
 use super::ManagerRead;
@@ -50,7 +50,7 @@ impl<'normal> ManagerAlloc for Prove<'normal> {
     fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
         let source = Normal::allocate_region::<E, LEN>(init_value);
         ProofRegion {
-            source: Source::Owned(source),
+            source: Source::from(source),
             writes: BTreeMap::new(),
             access: Cell::new(false),
         }
@@ -59,7 +59,7 @@ impl<'normal> ManagerAlloc for Prove<'normal> {
     fn allocate_dyn_region(len: usize) -> Self::DynRegion {
         let source = Normal::allocate_dyn_region(len);
         ProofDynRegion {
-            source: Source::Owned(source),
+            source: Source::from(source),
             reads: RefCell::default(),
             writes: BTreeMap::new(),
             did_access_length: Cell::new(false),
@@ -214,57 +214,6 @@ impl<'normal> ManagerClone for Prove<'normal> {
     }
 }
 
-/// Source for a region or dynamic region, either borrowed or owned
-///
-/// We use this type to store the source version of the underlying proof data. Merkle tree proofs
-/// usually encode the initial state. Hence we need to figure out what parts of the initial state
-/// need to go into the proof.
-///
-/// Normally the source is borrowed from state in [`Normal`] mode. In those cases, it is enough to
-/// obtain a reference to the source.
-///
-/// However, there are cases when no source can be borrowed, because it is owned. During the
-/// proof generation, we might create a new region. This can happen when a dynamic state
-/// component holds regions. E.g. it can grow and therefore create new regions. During proof
-/// generation we don't differentiate between modes, hence you can't create a region in [`Normal`]
-/// mode and then borrow it.
-///
-/// Wherever newly created regions are allowed, the upstream state which allows this to happen is in
-/// charge of preventing those regions from being included in the Merkle tree proof. In the example
-/// above, that would be the growable state component. It needs to differentiate between regions that
-/// existed before the proof generation started, and those that were created during proof.
-///
-/// It is possible to override regions when we allow region creation. Overriding isn't the same as
-/// writing the underlying values from one region to the other as it would override the region state
-/// that is specific to the mode. This would be caught by producing an invalid Merkle tree proof in
-/// our test suite. In such cases, the claimed initial state hash of the Merkle tree would not match
-/// that of the actual initial state in [`Normal`] mode.
-///
-/// Another benefit of allowing regions to be created from an owned source is that it simplifies our
-/// test suite where we want to instantiate a state using the [`Prove`] mode without a previous
-/// state in [`Normal`] mode. This simplifies the API for tests and allows us to write one test and
-/// test it against 3 different backends.
-///
-/// It is possible to simplify this type by only allowing owned regions. This has some downsides,
-/// as it would require all [`Normal`] regions to be cloned when wrapping them into [`Prove`]. This
-/// could be costly and unnecessary if the region isn't even used.
-#[derive(Clone)]
-enum Source<'a, T> {
-    Borrowed(&'a T),
-    Owned(T),
-}
-
-impl<T> Deref for Source<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Source::Borrowed(value) => value,
-            Source::Owned(value) => value,
-        }
-    }
-}
-
 /// Proof region which wraps a region managed by another manager.
 ///
 /// A [`ManagerBase::Region`] is never split across multiple leaves when Merkleised.
@@ -410,7 +359,7 @@ impl<'normal> Clone for ProofDynRegion<'normal> {
         Self {
             source: match &self.source {
                 Source::Borrowed(source) => Source::Borrowed(source),
-                Source::Owned(source) => Source::Owned(Normal::clone_dyn_region(source)),
+                Source::Owned(source) => Source::from(Normal::clone_dyn_region(source)),
             },
             reads: self.reads.clone(),
             writes: self.writes.clone(),
