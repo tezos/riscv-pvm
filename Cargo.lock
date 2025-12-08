@@ -1847,6 +1847,7 @@ dependencies = [
  "blake3",
  "derive_more",
  "hex",
+ "perfect-derive",
  "proptest",
  "thiserror 2.0.17",
 ]

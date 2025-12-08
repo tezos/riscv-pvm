@@ -13,6 +13,7 @@ blake3.workspace = true
 derive_more.workspace = true
 hex.workspace = true
 thiserror.workspace = true
+perfect-derive.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

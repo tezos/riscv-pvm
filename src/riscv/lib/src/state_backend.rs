@@ -48,6 +48,9 @@ use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 pub use elems::*;
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::mode::Mode;
 pub use proof_layout::*;
 pub use region::*;
@@ -99,7 +102,7 @@ pub trait ManagerAlloc: ManagerRead + ManagerWrite {
 }
 
 /// Manager with read capabilities
-pub trait ManagerRead: ManagerBase {
+pub trait ManagerRead: ManagerBase + AtomMode {
     /// Read an element in the region.
     fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E;
 
@@ -156,7 +159,7 @@ pub trait ManagerRead: ManagerBase {
 }
 
 /// Manager with write capabilities
-pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
+pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
     /// Update an element in the region.
     fn region_write<E: 'static, const LEN: usize>(
         region: &mut Self::Region<E, LEN>,
@@ -218,7 +221,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> {
 }
 
 /// Manager with the ability to serialise regions
-pub trait ManagerSerialise: ManagerRead {
+pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
     /// Serialise the contents of the region.
     fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
         region: &Self::Region<T, LEN>,
@@ -233,7 +236,7 @@ pub trait ManagerSerialise: ManagerRead {
 }
 
 /// Manager with the ability to clone regions
-pub trait ManagerClone: ManagerBase {
+pub trait ManagerClone: ManagerBase + CloneAtomMode {
     /// Clone the region.
     fn clone_region<E: Clone, const LEN: usize>(
         region: &Self::Region<E, LEN>,
