@@ -65,6 +65,9 @@ pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
     /// Function entry block
     entry_block: Block,
 
+    /// Standard exit block to jump to when finishing the sequence
+    exit_block: Block,
+
     /// Parameter pointing to the `MachineCoreState`
     core_param: Pointer<MachineCoreState<MC, Normal>>,
 
@@ -163,11 +166,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
 
         let target_config = module.target_config();
 
+        let exit_block = builder.create_block();
         Self {
             target_config,
             builder,
             ext_calls,
             entry_block,
+            exit_block,
             core_param,
             program_counter,
             program_counter_offset: 0,
@@ -175,6 +180,27 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             result_param,
             steps_remaining,
         }
+    }
+
+    /// The exit block is used to write the program counter back to the machine core state, as
+    /// well as returning from the JIT function.
+    fn fill_exit_block(&mut self) {
+        self.builder.switch_to_block(self.exit_block);
+
+        // SAFETY: We're declaring the value as a `I64` which has the same representation of
+        // `Address`.
+        let final_program_counter = unsafe {
+            let final_program_counter = self.builder.append_block_param(self.exit_block, I64);
+            Value::<Address>::from_raw(final_program_counter)
+        };
+
+        write_pc(self, final_program_counter);
+
+        let steps_remaining = self.builder.use_var(self.steps_remaining);
+        let max_steps = self.max_steps_param.to_value();
+        let steps = self.builder.ins().isub(max_steps, steps_remaining);
+
+        self.builder.ins().return_(&[steps]);
     }
 
     /// Abandon building the sequence.
@@ -229,15 +255,10 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
     ///
     /// `final_program_counter` is the program counter that we want to commit back to the
     /// machine core state when exiting the sequence.
-    fn jump_to_exit(
-        &mut self,
-        steps_completed: u64,
-        final_program_counter: Value<Address>,
-        exit_block: Block,
-    ) {
+    fn jump_to_exit(&mut self, steps_completed: u64, final_program_counter: Value<Address>) {
         self.insert_step_update_ir(steps_completed as i64);
 
-        self.builder.ins().jump(exit_block, &[BlockArg::Value(
+        self.builder.ins().jump(self.exit_block, &[BlockArg::Value(
             final_program_counter.to_value(),
         )]);
     }
@@ -263,7 +284,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         budget: u64,
         exit_delta: i64,
         exit_pc: Value<u64>,
-        exit_block: Block,
         is_entry: bool,
     ) {
         let steps_remaining = self.builder.use_var(self.steps_remaining);
@@ -305,7 +325,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         // ensure that the failure case is not placed in the hot path of
         // execution
         self.builder.set_cold_block(out_of_budget_block);
-        self.jump_to_exit(exit_delta as u64, exit_pc, exit_block);
+        self.jump_to_exit(exit_delta as u64, exit_pc);
 
         self.builder.switch_to_block(continue_block);
     }
@@ -315,7 +335,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         &mut self,
         entry_node: &NodeInfo<OutcomeData, Block>,
         seq_min_budget: u64,
-        exit_block: Block,
     ) {
         self.builder.switch_to_block(self.entry_block);
 
@@ -328,7 +347,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             )
         };
 
-        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr, exit_block, true);
+        self.insert_budget_check_ir(seq_min_budget, 0, entry_node_addr, true);
         entry_node.run_instruction(&mut self.builder);
     }
 
@@ -339,7 +358,6 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         outcome_data: &OutcomeData,
         outcome_target: TargetInstrLoc,
         cfg: &ControlFlowGraph<OutcomeData, Block>,
-        exit_block: Block,
     ) {
         self.builder.switch_to_block(outcome_data.hook());
 
@@ -352,13 +370,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             let exit_delta = outcome_data
                 .get_exit_delta()
                 .expect("Any budget check must have an exit delta.");
-            self.insert_budget_check_ir(
-                budget as u64,
-                exit_delta as i64,
-                exit_pc,
-                exit_block,
-                false,
-            );
+            self.insert_budget_check_ir(budget as u64, exit_delta as i64, exit_pc, false);
         }
 
         match outcome_target {
@@ -370,35 +382,14 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                 let exit_pc = outcome_data.exit_pc(&mut self.builder, &self.target_config);
                 self.builder
                     .ins()
-                    .jump(exit_block, &[BlockArg::Value(exit_pc.to_value())]);
+                    .jump(self.exit_block, &[BlockArg::Value(exit_pc.to_value())]);
             }
         }
     }
 
     /// Finish building the sequence.
     pub fn finish(mut self, instrs: &[LoweredInstruction]) {
-        let exit_block = self.builder.create_block();
-
-        // The exit block is used to write the program counter back to the machine core state, as
-        // well as returning from the JIT function.
-        {
-            self.builder.switch_to_block(exit_block);
-
-            // SAFETY: We're declaring the value as a `I64` which has the same representation of
-            // `Address`.
-            let final_program_counter = unsafe {
-                let final_program_counter = self.builder.append_block_param(exit_block, I64);
-                Value::<Address>::from_raw(final_program_counter)
-            };
-
-            write_pc(&mut self, final_program_counter);
-
-            let steps_remaining = self.builder.use_var(self.steps_remaining);
-            let max_steps = self.max_steps_param.to_value();
-            let steps = self.builder.ins().isub(max_steps, steps_remaining);
-
-            self.builder.ins().return_(&[steps]);
-        }
+        self.fill_exit_block();
 
         let node_infos: Vec<NodeInfo<OutcomeData, Block>> = instrs
             .iter()
@@ -450,17 +441,13 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
                     .as_internal()
                     .expect("Entry outcomes must go to a node.");
                 let entry_node = cfg.nodes[entry_node_id];
-                self.build_entry_outcome_ir(
-                    entry_node,
-                    sequence_budget.min_budget() as u64,
-                    exit_block,
-                );
+                self.build_entry_outcome_ir(entry_node, sequence_budget.min_budget() as u64);
 
                 continue;
             };
 
             let outcome_data = &edge.info;
-            self.build_outcome_ir(outcome_data, outcome.to(), &cfg, exit_block);
+            self.build_outcome_ir(outcome_data, outcome.to(), &cfg);
         }
 
         self.builder.seal_all_blocks();
