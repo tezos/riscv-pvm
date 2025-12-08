@@ -38,7 +38,6 @@
 //! [Prove]: octez_riscv_data::mode::Prove
 
 mod elems;
-mod layout;
 pub mod normal_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
