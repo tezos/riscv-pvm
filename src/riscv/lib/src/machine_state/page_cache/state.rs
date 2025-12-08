@@ -52,7 +52,7 @@ const LAST_HALFWORD_PAGE_OFFSET: u64 = PAGE_SIZE
 /// [page cache]: super::PageCache
 #[derive(Debug)]
 pub struct PageEntry<CPE, C> {
-    pub(super) entries: [CPE; INSTRUCTION_ENTRIES],
+    pub entries: [CPE; INSTRUCTION_ENTRIES],
     pub(super) compiler: C,
 }
 

@@ -89,6 +89,10 @@ impl Typed for i64 {
     const TYPE: Type = Type::Basic(I64);
 }
 
+impl Typed for usize {
+    const TYPE: Type = Type::Basic(I64);
+}
+
 impl<T> Typed for NonNull<T> {
     const TYPE: Type = Type::Pointer;
 }
