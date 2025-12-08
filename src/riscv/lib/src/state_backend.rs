@@ -51,6 +51,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use elems::*;
+use octez_riscv_data::mode::Mode;
 pub use proof_layout::*;
 pub use region::*;
 
@@ -61,7 +62,7 @@ use crate::state_context::projection::ProjectionOffset;
 use crate::state_context::projection::RegionCons;
 
 /// Manager of the state backend storage
-pub trait ManagerBase: Sized {
+pub trait ManagerBase: Mode + Sized {
     /// Region that has been allocated in the state storage
     type Region<E: 'static, const LEN: usize>;
 
