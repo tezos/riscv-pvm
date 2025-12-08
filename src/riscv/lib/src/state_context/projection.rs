@@ -19,6 +19,7 @@ use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
 use cranelift::prelude::isa::TargetFrontendConfig;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::mode::Normal;
 
 use crate::machine_state::MachineCoreState;
@@ -50,6 +51,13 @@ pub trait TypeCons {
 /// Apply a type constructor `TC` to memory config `MC` and manager `M`.
 pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
 
+/// Constructor for a fully instantiated type `T`
+pub struct ConstCons<T>(PhantomData<T>);
+
+impl<T> TypeCons for ConstCons<T> {
+    type Applied<MC: MemoryConfig, M: ManagerBase> = T;
+}
+
 /// Type constructor [`Box`]
 pub struct BoxCons<T>(PhantomData<T>);
 
@@ -76,6 +84,13 @@ pub struct CellCons<E>(PhantomData<E>);
 
 impl<E: 'static> TypeCons for CellCons<E> {
     type Applied<MC: MemoryConfig, M: ManagerBase> = Cell<E, M>;
+}
+
+/// Type constructor [`Atom`]
+pub struct AtomCons<T>(PhantomData<T>);
+
+impl<T: 'static> TypeCons for AtomCons<T> {
+    type Applied<MC: MemoryConfig, M: ManagerBase> = Atom<T, M>;
 }
 
 /// Type constructor [`crate::state_backend::Cells`]
@@ -275,6 +290,49 @@ impl<P: Projection> Projection for BoxProj<P> {
     }
 }
 
+/// Projection from [`Atom`] to the type contained within it
+pub struct AtomProj<P>(PhantomData<P>);
+
+impl<T: Clone + 'static, P: Projection<Subject = ConstCons<T>>> Projection for AtomProj<P> {
+    type Subject = AtomCons<T>;
+
+    type Target = P::Target;
+
+    type Parameter = P::Parameter;
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a Atom<T, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        P::project_ref::<MC, M>(state.deref(), param)
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a Atom<T, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        P::project_read::<MC, M>(state.deref(), param)
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut Atom<T, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        P::project_write::<MC, M>(state.deref_mut(), param, value);
+    }
+
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        P::normal_pointer_offset::<MC>(param) + Atom::<T, Normal>::FIELD_OFFSET
+    }
+}
+
 /// Parameter for an array projection
 pub struct ArrayProjParam<T> {
     /// Index of the element to project
@@ -339,6 +397,62 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
             .expect("Array index overflow");
 
         inner_offset + offset
+    }
+}
+
+/// Like [`ArrayProj`] but does not allow for deeper projections
+pub struct ConstArrayProj<T, const LEN: usize>(PhantomData<T>);
+
+impl<T: 'static, const LEN: usize> Projection for ConstArrayProj<T, LEN> {
+    type Subject = ConstCons<[T; LEN]>;
+
+    type Target = T;
+
+    type Parameter = ArrayProjParam<()>;
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> &'a Self::Target {
+        &state[param.index]
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        state[param.index]
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut ApplyCons<Self::Subject, MC, M>,
+        param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        state[param.index] = value;
+    }
+
+    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
+        assert!(
+            param.index < LEN,
+            "Array index out of bounds: {} >= {}",
+            param.index,
+            LEN
+        );
+
+        let elem_size = std::mem::size_of::<T>();
+        let offset = param
+            .index
+            .checked_mul(elem_size)
+            .expect("Array index overflow");
+
+        ProjectionOffset::direct(offset)
     }
 }
 
