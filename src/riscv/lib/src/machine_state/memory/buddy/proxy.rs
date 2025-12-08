@@ -2,108 +2,108 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Simplified [`BuddyLayout`] selection using const-generics
+//! Simplified [`BuddyConfig`] selection using const-generics
 
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
-use super::BuddyLayout;
-use super::branch_combinations::BuddyBranch1KiLayout;
-use super::branch_combinations::BuddyBranch4Layout;
-use super::branch_combinations::BuddyBranch16Layout;
-use super::branch_combinations::BuddyBranch256Layout;
-use super::leaf::BuddyLeafLayout;
-use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Layout;
-use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Layout;
-use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Layout;
+use super::BuddyConfig;
+use super::branch_combinations::BuddyBranch1KiConfig;
+use super::branch_combinations::BuddyBranch4Config;
+use super::branch_combinations::BuddyBranch16Config;
+use super::branch_combinations::BuddyBranch256Config;
+use super::leaf::BuddyLeafConfig;
+use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Config;
+use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Config;
+use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Config;
 use crate::state_backend::ManagerBase;
 
-/// Proxy for a [`BuddyLayout`] that manages the specified number of `PAGES`
-pub struct BuddyLayoutProxy<const PAGES: usize>;
+/// Proxy for a [`BuddyConfig`] that manages the specified number of `PAGES`
+pub struct BuddyConfigProxy<const PAGES: usize>;
 
-impl<const PAGES: usize> BuddyLayout for BuddyLayoutProxy<PAGES>
+impl<const PAGES: usize> BuddyConfig for BuddyConfigProxy<PAGES>
 where
-    (): BuddyLayoutMatch<PAGES>,
+    (): BuddyConfigMatch<PAGES>,
 {
-    type Buddy<M: ManagerBase> = <PickLayout<PAGES> as BuddyLayout>::Buddy<M>;
+    type Buddy<M: ManagerBase> = <PickConfig<PAGES> as BuddyConfig>::Buddy<M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
-        <PickLayout<PAGES> as BuddyLayout>::start_proof(instance)
+        <PickConfig<PAGES> as BuddyConfig>::start_proof(instance)
     }
 
     fn buddy_from_proof<D: merkle_proof::Deserialiser>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::Buddy<Verify>> {
-        <PickLayout<PAGES> as BuddyLayout>::buddy_from_proof(proof)
+        <PickConfig<PAGES> as BuddyConfig>::buddy_from_proof(proof)
     }
 }
 
-/// Picks a [`BuddyLayout`] given a number of pages
-type PickLayout<const PAGES: usize, T = ()> = <T as BuddyLayoutMatch<PAGES>>::AssocLayout;
+/// Picks a [`BuddyConfig`] given a number of pages
+type PickConfig<const PAGES: usize, T = ()> = <T as BuddyConfigMatch<PAGES>>::AssocConfig;
 
-/// Link between a number of pages and a specific [`BuddyLayout`]
-pub trait BuddyLayoutMatch<const PAGES: usize> {
-    type AssocLayout: BuddyLayout;
+/// Link between a number of pages and a specific [`BuddyConfig`]
+pub trait BuddyConfigMatch<const PAGES: usize> {
+    type AssocConfig: BuddyConfig;
 }
 
-impl<T> BuddyLayoutMatch<1> for T {
-    type AssocLayout = BuddyLeafLayout<1>;
+impl<T> BuddyConfigMatch<1> for T {
+    type AssocConfig = BuddyLeafConfig<1>;
 }
 
-impl<T> BuddyLayoutMatch<2> for T {
-    type AssocLayout = BuddyLeafLayout<2>;
+impl<T> BuddyConfigMatch<2> for T {
+    type AssocConfig = BuddyLeafConfig<2>;
 }
 
-impl<T> BuddyLayoutMatch<64> for T {
-    type AssocLayout = BuddyLeafLayout<64>;
+impl<T> BuddyConfigMatch<64> for T {
+    type AssocConfig = BuddyLeafConfig<64>;
 }
 
-impl<T> BuddyLayoutMatch<256> for T {
-    type AssocLayout = BuddyBranch4Layout<BuddyLeafLayout<64>>;
+impl<T> BuddyConfigMatch<256> for T {
+    type AssocConfig = BuddyBranch4Config<BuddyLeafConfig<64>>;
 }
 
-impl<T> BuddyLayoutMatch<1024> for T {
-    type AssocLayout = BuddyBranch4Layout<BuddyLayoutProxy<256>>;
+impl<T> BuddyConfigMatch<1024> for T {
+    type AssocConfig = BuddyBranch4Config<BuddyConfigProxy<256>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 16 * 1024 }> for T {
-    type AssocLayout = BuddyBranch16Layout<BuddyLayoutProxy<1024>>;
+impl<T> BuddyConfigMatch<{ 16 * 1024 }> for T {
+    type AssocConfig = BuddyBranch16Config<BuddyConfigProxy<1024>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 256 * 1024 }> for T {
-    type AssocLayout = BuddyBranch256Layout<BuddyLayoutProxy<1024>>;
+impl<T> BuddyConfigMatch<{ 256 * 1024 }> for T {
+    type AssocConfig = BuddyBranch256Config<BuddyConfigProxy<1024>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch1KiLayout<BuddyLayoutProxy<1024>>;
+impl<T> BuddyConfigMatch<{ 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch1KiConfig<BuddyConfigProxy<1024>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 4 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch4Layout<BuddyLayoutProxy<{ 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 4 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch4Config<BuddyConfigProxy<{ 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 8 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch8Layout<BuddyLayoutProxy<{ 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 8 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch8Config<BuddyConfigProxy<{ 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 16 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch16Layout<BuddyLayoutProxy<{ 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 16 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch16Config<BuddyConfigProxy<{ 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 1024 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch1KiLayout<BuddyLayoutProxy<{ 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 1024 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch1KiConfig<BuddyConfigProxy<{ 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 16 * 1024 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch16Layout<BuddyLayoutProxy<{ 1024 * 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 16 * 1024 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch16Config<BuddyConfigProxy<{ 1024 * 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 32 * 1024 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch32Layout<BuddyLayoutProxy<{ 1024 * 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 32 * 1024 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch32Config<BuddyConfigProxy<{ 1024 * 1024 * 1024 }>>;
 }
 
-impl<T> BuddyLayoutMatch<{ 64 * 1024 * 1024 * 1024 }> for T {
-    type AssocLayout = BuddyBranch64Layout<BuddyLayoutProxy<{ 1024 * 1024 * 1024 }>>;
+impl<T> BuddyConfigMatch<{ 64 * 1024 * 1024 * 1024 }> for T {
+    type AssocConfig = BuddyBranch64Config<BuddyConfigProxy<{ 1024 * 1024 * 1024 }>>;
 }

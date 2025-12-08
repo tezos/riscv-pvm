@@ -10,8 +10,8 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
-use super::buddy::BuddyLayout;
-use super::buddy::BuddyLayoutProxy;
+use super::buddy::BuddyConfig;
+use super::buddy::BuddyConfigProxy;
 use super::protection::PagePermissions;
 use super::state::MemoryImpl;
 use crate::machine_state::page_cache::state::PageCacheImpl;
@@ -46,13 +46,13 @@ where
 impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
     for MemoryConfig<PAGES, TOTAL_BYTES>
 where
-    BuddyLayoutProxy<PAGES>: BuddyLayout + 'static,
+    BuddyConfigProxy<PAGES>: BuddyConfig + 'static,
 {
     const TOTAL_BYTES: NonZeroUsize = NonZeroUsize::new(TOTAL_BYTES)
         .expect("size of memory `TOTAL_BYTES` must be greater than zero");
 
     type State<M: ManagerBase> =
-        MemoryImpl<PAGES, TOTAL_BYTES, <BuddyLayoutProxy<PAGES> as BuddyLayout>::Buddy<M>, M>;
+        MemoryImpl<PAGES, TOTAL_BYTES, <BuddyConfigProxy<PAGES> as BuddyConfig>::Buddy<M>, M>;
 
     type PageCache<
         CPE: crate::machine_state::page_cache::code_page_entry::CodePageEntry<Self, M>,
@@ -69,7 +69,7 @@ where
         let (proof, writable_pages) = proof.next_branch()?;
         let (proof, executable_pages) = proof.next_branch()?;
         let (proof, allocated_pages) =
-            proof.next_branch_with(<BuddyLayoutProxy<PAGES>>::buddy_from_proof)?;
+            proof.next_branch_with(<BuddyConfigProxy<PAGES>>::buddy_from_proof)?;
 
         proof.done(MemoryImpl {
             data,
@@ -86,7 +86,7 @@ where
             readable_pages: instance.readable_pages.start_proof(),
             writable_pages: instance.writable_pages.start_proof(),
             executable_pages: instance.executable_pages.start_proof(),
-            allocated_pages: <BuddyLayoutProxy<PAGES> as BuddyLayout>::start_proof(
+            allocated_pages: <BuddyConfigProxy<PAGES> as BuddyConfig>::start_proof(
                 &instance.allocated_pages,
             ),
         }

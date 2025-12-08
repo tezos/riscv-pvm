@@ -4,7 +4,7 @@
 
 //! Like [`super::branch`] but for various branch sizes
 //!
-//! Introducing more types instead of composing [`BuddyBranch2`]/[`BuddyBranch2Layout`] makes type
+//! Introducing more types instead of composing [`BuddyBranch2`]/[`BuddyBranch2Config`] makes type
 //! checking much faster.
 
 use bincode::Decode;
@@ -23,9 +23,9 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
 use super::Buddy;
-use super::BuddyLayout;
+use super::BuddyConfig;
 use super::branch::BuddyBranch2;
-use super::branch::BuddyBranch2Layout;
+use super::branch::BuddyBranch2Config;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -41,16 +41,16 @@ macro_rules! combined_buddy_branch {
         paste::paste! {
             /// Allocated combined Buddy branch
             #[perfect_derive::perfect_derive(PartialEq, Eq)]
-            pub struct [<$name Alloc>]<B: BuddyLayout, M: ManagerBase>(
-                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>
+            pub struct [<$name Alloc>]<B: BuddyConfig, M: ManagerBase>(
+                <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>
             );
 
             // Passthrough implementation, default derive macro can't derive this ...
             impl<B, M> Encode for [<$name Alloc>]<B, M>
             where
-                B: BuddyLayout,
+                B: BuddyConfig,
                 M: ManagerSerialise,
-                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>: Encode,
+                <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>: Encode,
             {
 
                 fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
@@ -61,28 +61,28 @@ macro_rules! combined_buddy_branch {
             // Passthrough implementation, default derive macro can't derive this ...
             impl<B, M> Decode<()> for [<$name Alloc>]<B, M>
             where
-                B: BuddyLayout,
+                B: BuddyConfig,
                 M: ManagerDeserialise,
-                <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::Buddy<M>: Decode<()>,
+                <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>: Decode<()>,
             {
                 fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
                     Ok(Self(Decode::decode(decoder)?))
                 }
             }
 
-            /// Layout for a combined Buddy branch
-            pub struct [<$name Layout>]<B>(B);
+            /// Config for a combined Buddy branch
+            pub struct [<$name Config>]<B>(B);
 
-            impl<B: BuddyLayout> BuddyLayout for [<$name Layout>]<B> {
+            impl<B: BuddyConfig> BuddyConfig for [<$name Config>]<B> {
                 type Buddy<M: ManagerBase> = $name<B::Buddy<M>, M>;
 
                 fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
-                    let inner = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::start_proof(&instance.0);
+                    let inner = <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::start_proof(&instance.0);
                     $name(inner)
                 }
 
                 fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
-                    let result = <[<$buddy1 Layout>]<[<$buddy2 Layout>]<B>> as BuddyLayout>::buddy_from_proof(proof)?;
+                    let result = <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::buddy_from_proof(proof)?;
                     let result = result.map(|inner| $name(inner));
                     Ok(result)
                 }
