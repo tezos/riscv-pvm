@@ -25,12 +25,17 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -44,6 +49,9 @@ use crate::state::NewState;
 use crate::state_backend::CellsProj;
 use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
+use crate::state_context::projection::ArrayProjParam;
+use crate::state_context::projection::AtomProj;
+use crate::state_context::projection::ConstArrayProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
@@ -206,73 +214,53 @@ pub type XValue = u64;
 pub type XValue32 = u32;
 
 /// Integer registers
-#[perfect_derive(Clone, PartialEq, Eq)]
-pub struct XRegisters<M: backend::ManagerBase> {
-    registers: backend::Cells<XValue, 31, M>,
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
+pub struct XRegisters<M: Mode> {
+    registers: Atom<[XValue; 31], M>,
 }
 
-impl<M: backend::ManagerBase> XRegisters<M> {
+impl<M: AtomMode> XRegisters<M> {
     /// Try to read a 64-bit value from the registers and coerce it to another type.
     #[inline]
-    pub fn try_read<T: TryFrom<XValue>>(&self, reg: XRegister) -> Result<T, T::Error>
-    where
-        M: backend::ManagerRead,
-    {
+    pub fn try_read<T: TryFrom<XValue>>(&self, reg: XRegister) -> Result<T, T::Error> {
         self.read(reg).try_into()
     }
 
     /// Read an integer from the registers.
     #[inline]
-    pub fn read(&self, reg: XRegister) -> XValue
-    where
-        M: backend::ManagerRead,
-    {
+    pub fn read(&self, reg: XRegister) -> XValue {
         if reg.is_zero() {
             return 0;
         }
 
-        self.registers.read(reg as usize)
+        self.registers[reg as usize]
     }
 
     /// Write an integer to the registers.
     #[inline]
-    pub fn write(&mut self, reg: XRegister, val: XValue)
-    where
-        M: backend::ManagerWrite,
-    {
+    pub fn write(&mut self, reg: XRegister, val: XValue) {
         if reg.is_zero() {
             return;
         }
 
-        self.registers.write(reg as usize, val)
+        self.registers[reg as usize] = val
     }
 
     /// Read an integer from the registers without checking if it is 0 first.
     #[inline]
-    pub fn read_nz(&self, reg: NonZeroXRegister) -> XValue
-    where
-        M: backend::ManagerRead,
-    {
-        self.registers.read(reg as usize)
+    pub fn read_nz(&self, reg: NonZeroXRegister) -> XValue {
+        self.registers[reg as usize]
     }
 
     /// Write an integer to the registers without checking if it is 0 first.
     #[inline]
-    pub fn write_nz(&mut self, reg: NonZeroXRegister, val: XValue)
-    where
-        M: backend::ManagerWrite,
-    {
-        self.registers.write(reg as usize, val)
+    pub fn write_nz(&mut self, reg: NonZeroXRegister, val: XValue) {
+        self.registers[reg as usize] = val;
     }
 
     /// Reset the integer registers.
-    pub fn reset(&mut self)
-    where
-        M: backend::ManagerWrite,
-    {
-        for i in 0..31 {
-            self.registers.write(i, XValue::default());
-        }
+    pub fn reset(&mut self) {
+        self.registers.write(Default::default());
     }
 }
 
@@ -292,18 +280,7 @@ impl XRegisters<Normal> {
     }
 }
 
-impl<M: backend::ManagerBase> NewState<M> for XRegisters<M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        XRegisters {
-            registers: backend::Cells::new(),
-        }
-    }
-}
-
-impl<M: backend::ManagerClone> CloneState for XRegisters<M> {
+impl<M: CloneAtomMode> CloneState for XRegisters<M> {
     fn clone_state(&self) -> Self {
         Self {
             registers: self.registers.clone_state(),
@@ -315,7 +292,7 @@ impl<M, F> Foldable<F> for XRegisters<M>
 where
     M: backend::ManagerBase,
     F: Fold,
-    backend::Cells<u64, 31, M>: Foldable<F>,
+    Atom<[u64; 31], M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
@@ -324,13 +301,13 @@ where
 
 impl FromProof for XRegisters<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = backend::Cells::from_proof(proof)?;
-        let result = result.map(|registers| Self { registers });
+        let result = Atom::from_proof(proof)?;
+        let result = result.map(|registers| XRegisters { registers });
         Ok(result)
     }
 }
 
-impl<M: ManagerSerialise> Encode for XRegisters<M> {
+impl<M: EncodeAtomMode> Encode for XRegisters<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.registers.encode(encoder)
     }
@@ -338,8 +315,9 @@ impl<M: ManagerSerialise> Encode for XRegisters<M> {
 
 impl<C> Decode<C> for XRegisters<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let registers = Decode::decode(decoder)?;
-        Ok(Self { registers })
+        Ok(Self {
+            registers: Decode::decode(decoder)?,
+        })
     }
 }
 
@@ -750,7 +728,7 @@ impl FromProof for FRegisters<Verify> {
 impl_projection! {
     projection XRegisterProj {
         subject = MachineCoreCons,
-        target_projection = CellsProj<XValue, 31>,
+        target_projection = AtomProj<ConstArrayProj<XValue, 31>>,
         path = hart.xregisters.registers,
     }
 }
@@ -761,7 +739,10 @@ pub fn read_xregister_nz<SC: StateContext + ?Sized>(
     state: &mut SC,
     reg: NonZeroXRegister,
 ) -> SC::Value<XValue> {
-    state.read_proj::<XRegisterProj>((reg as usize,))
+    state.read_proj::<XRegisterProj>(ArrayProjParam {
+        index: reg as usize,
+        inner_param: (),
+    })
 }
 
 /// Write to a non-zero integer register.
@@ -771,7 +752,13 @@ pub fn write_xregister_nz<SC: StateContext + ?Sized>(
     reg: NonZeroXRegister,
     value: SC::Value<XValue>,
 ) {
-    state.write_proj::<XRegisterProj>((reg as usize,), value)
+    state.write_proj::<XRegisterProj>(
+        ArrayProjParam {
+            index: reg as usize,
+            inner_param: (),
+        },
+        value,
+    )
 }
 
 /// Read from an integer register.
@@ -781,7 +768,10 @@ pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue
         return icb.xvalue_of_imm(0);
     }
 
-    icb.read_proj::<XRegisterProj>((reg as usize,))
+    icb.read_proj::<XRegisterProj>(ArrayProjParam {
+        index: reg as usize,
+        inner_param: (),
+    })
 }
 
 /// Write to an integer register.
@@ -791,7 +781,13 @@ pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::X
         return;
     }
 
-    icb.write_proj::<XRegisterProj>((reg as usize,), value)
+    icb.write_proj::<XRegisterProj>(
+        ArrayProjParam {
+            index: reg as usize,
+            inner_param: (),
+        },
+        value,
+    )
 }
 
 impl_projection! {
@@ -821,10 +817,9 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
-    use crate::state_backend::ManagerRead;
 
     backend_test!(test_zero, F, {
-        let mut registers = XRegisters::<F>::new();
+        let mut registers = XRegisters::<F>::default();
 
         // x0 should always read 0.
         assert_eq!(registers.read(x0), 0);
@@ -840,7 +835,7 @@ mod tests {
     ];
 
     backend_test!(test_arbitrary_register, F, {
-        let mut registers = XRegisters::<F>::new();
+        let mut registers = XRegisters::<F>::default();
 
         // Initialise the registers with something.
         for reg in NONZERO_REGISTERS {
@@ -866,7 +861,7 @@ mod tests {
     });
 
     backend_test!(test_try_read_u32, F, {
-        let mut registers = XRegisters::<F>::new();
+        let mut registers = XRegisters::<F>::default();
 
         // Reading an integer that is too large should fail
         registers.write(x1, 1 << 32);
@@ -924,12 +919,12 @@ mod tests {
 
     #[test]
     fn test_xregister_offsets() {
-        let registers = XRegisters::<Normal>::new();
+        let registers = XRegisters::<Normal>::default();
         let registers_ptr = (&registers) as *const XRegisters<Normal>;
 
         for reg in NonZeroXRegister::iter() {
             let offset = XRegisters::<Normal>::xregister_offset(reg);
-            let val: &XValue = Normal::region_ref(registers.registers.region_ref(), reg as usize);
+            let val: &XValue = &registers.registers[reg as usize];
 
             // Safety: both pointers are valid
             let offset_refs = unsafe { (val as *const XValue).byte_offset_from(registers_ptr) };

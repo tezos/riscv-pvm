@@ -87,7 +87,7 @@ impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
         M: backend::ManagerAlloc,
     {
         Self {
-            xregisters: registers::XRegisters::new(),
+            xregisters: registers::XRegisters::default(),
             fregisters: registers::FRegisters::new(),
             csregisters: csregisters::CSRegisters::new(),
             pc: Cell::new(),
