@@ -10,6 +10,8 @@
 //! - [`Prove`]
 //! - [`Verify`]
 
+pub mod utils;
+
 use std::convert::Infallible;
 use std::marker::PhantomData;
 
