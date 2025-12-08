@@ -34,9 +34,7 @@ use zerocopy::IntoBytes;
 use zerocopy::byteorder::LittleEndian;
 use zerocopy::byteorder::U32;
 use zerocopy::byteorder::U64;
-use zerocopy_derive::FromBytes;
 use zerocopy_derive::Immutable;
-use zerocopy_derive::IntoBytes;
 use zerocopy_derive::KnownLayout;
 
 use super::MachineError;
@@ -87,7 +85,9 @@ pub enum SignalError {
 /// Linux sigaction struct, see <https://man7.org/linux/man-pages/man2/sigaction.2.html>
 /// and <https://github.com/torvalds/linux/blob/155a3c003e555a7300d156a5252c004c392ec6b0/include/linux/signal_types.h#L37>
 #[repr(C)]
-#[derive(Clone, Debug, FromBytes, Immutable, IntoBytes, KnownLayout)]
+#[derive(
+    Clone, Debug, zerocopy_derive::FromBytes, Immutable, zerocopy_derive::IntoBytes, KnownLayout,
+)]
 #[cfg_attr(test, derive(Default, PartialEq))]
 pub struct LinuxSigAction {
     pub sa_sigaction: U64<LittleEndian>,

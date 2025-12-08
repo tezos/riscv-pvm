@@ -27,16 +27,7 @@
 //!   operations on disk.
 
 mod database;
-#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 mod merkle_layer;
 mod merkle_worker;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Database will use the persistence layer in RV-808"
-    )
-)]
 pub(crate) mod persistence_layer;
-#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 mod repo;
