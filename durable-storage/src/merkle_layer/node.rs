@@ -125,33 +125,25 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
         return false;
     };
     match node.key.cmp(key) {
-        Ordering::Equal => {
-            let node_mut = Arc::make_mut(node);
-            match (
-                node_mut.left_ref().is_some(),
-                node_mut.right_ref().is_some(),
-            ) {
-                (false, false) => {
-                    *root = None;
-                    true
-                }
-                (true, false) => {
-                    let left = node_mut.left_mut().as_mut().expect("Checked is_some()");
-                    *node_mut = Arc::make_mut(left).clone();
-                    true
-                }
-                (false, true) => {
-                    let right = node_mut.right_mut().as_mut().expect("Checked is_some()");
-                    *node_mut = Arc::make_mut(right).clone();
-                    true
-                }
-                (true, true) => {
-                    let (new_node, shrank) = replace_with_successor(node);
-                    *node = new_node;
-                    shrank
-                }
+        Ordering::Equal => match (node.left_ref(), node.right_ref()) {
+            (None, None) => {
+                *root = None;
+                true
             }
-        }
+            (Some(left), None) => {
+                *node = left.clone();
+                true
+            }
+            (None, Some(right)) => {
+                *node = right.clone();
+                true
+            }
+            (Some(_), Some(_)) => {
+                let (new_node, shrank) = replace_with_successor(node);
+                *node = new_node;
+                shrank
+            }
+        },
         Ordering::Greater => {
             let node_mut = Arc::make_mut(node);
             let old_balance_factor = node_mut.balance_factor;
