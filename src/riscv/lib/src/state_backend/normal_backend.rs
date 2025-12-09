@@ -144,34 +144,32 @@ impl ManagerClone for Normal {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
-    use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::proof_backend::ProofDynRegion;
     use crate::state_backend::proof_backend::ProofRegion;
 
-    /// Ensure [`Cell`] can be serialised and deserialised in a consistent way.
+    /// Ensure [`Atom`] can be serialised and deserialised in a consistent way.
     #[test]
-    fn cell_serialise() {
+    fn atom_serialise() {
         proptest::proptest!(|(value: u64)|{
-            let region = [value; 1];
-            let cell: Cell<u64, Normal> = Cell::bind(region);
+            let cell: Atom<u64, Normal> = Atom::new(value);
             let bytes = serialise(&cell).unwrap();
 
-            let cell_after: Cell<u64, Normal> = deserialise(&bytes).unwrap();
+            let cell_after: Atom<u64, Normal> = deserialise(&bytes).unwrap();
             assert_eq!(cell.read(), cell_after.read());
 
             let bytes_after = serialise(&cell_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cell: Cell<u64, Prove> =
-                Cell::bind(ProofRegion::bind(&region));
+            let proof_cell: Atom<u64, Prove> = cell.start_proof();
             let proof_bytes = serialise(&proof_cell).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
@@ -234,11 +232,11 @@ pub(crate) mod test_helpers {
         });
     }
 
-    /// Ensure that [`Cell`] serialises in a way that represents the underlying element
+    /// Ensure that [`Atom`] serialises in a way that represents the underlying element
     /// directly instead of wrapping it into an array (as it is an array under the hood).
     #[test]
-    fn cell_direct_serialise() {
-        let cell: Cell<u64, Normal> = Cell::bind([42]);
+    fn atom_direct_serialise() {
+        let cell: Atom<u64, Normal> = Atom::new(42);
         let binary_value = serialise(cell).unwrap();
         let expected_binary_value = serialise(42u64).unwrap();
         assert_eq!(binary_value, expected_binary_value);

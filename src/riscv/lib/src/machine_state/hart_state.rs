@@ -10,6 +10,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -29,9 +30,8 @@ use crate::machine_state::registers::XValue;
 use crate::machine_state::reservation_set::ReservationSet;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_backend::Cell;
-use crate::state_backend::CellProj;
 use crate::state_context::StateContext;
+use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
@@ -48,7 +48,7 @@ pub struct HartState<M: backend::ManagerBase> {
     pub csregisters: csregisters::CSRegisters<M>,
 
     /// Program counter
-    pub pc: Cell<Address, M>,
+    pub pc: Atom<Address, M>,
 
     /// Reservation set address
     pub reservation_set: ReservationSet<M>,
@@ -90,7 +90,7 @@ impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
             xregisters: registers::XRegisters::default(),
             fregisters: registers::FRegisters::new(),
             csregisters: csregisters::CSRegisters::new(),
-            pc: Cell::new(),
+            pc: Atom::default(),
             reservation_set: ReservationSet::new(),
         }
     }
@@ -113,7 +113,7 @@ where
     registers::XRegisters<M>: Foldable<F>,
     registers::FRegisters<M>: Foldable<F>,
     csregisters::CSRegisters<M>: Foldable<F>,
-    Cell<Address, M>: Foldable<F>,
+    Atom<Address, M>: Foldable<F>,
     ReservationSet<M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
@@ -173,7 +173,7 @@ impl<C> Decode<C> for HartState<Normal> {
 impl_projection! {
     projection ProgramCounterProj {
         subject = MachineCoreCons,
-        target_projection = CellProj<XValue>,
+        target_projection = AtomProj<XValue>,
         path = hart.pc,
     }
 }

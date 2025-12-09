@@ -14,6 +14,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -47,7 +48,6 @@ use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofTree;
@@ -78,6 +78,12 @@ impl ConstDefault for PvmStatus {
     const DEFAULT: Self = Self::Evaluating;
 }
 
+impl Default for PvmStatus {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 impl fmt::Display for PvmStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status = match self {
@@ -103,12 +109,12 @@ pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
     pub(crate) machine_state: machine_state::MachineState<MC, CPE, M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
-    version: Cell<u64, M>,
-    pub(crate) tick: Cell<u64, M>,
-    pub(crate) message_counter: Cell<u64, M>,
-    pub(crate) level: Cell<u32, M>,
-    pub(crate) level_is_set: Cell<bool, M>,
-    pub(crate) status: Cell<PvmStatus, M>,
+    version: Atom<u64, M>,
+    pub(crate) tick: Atom<u64, M>,
+    pub(crate) message_counter: Atom<u64, M>,
+    pub(crate) level: Atom<u32, M>,
+    pub(crate) level_is_set: Atom<bool, M>,
+    pub(crate) status: Atom<PvmStatus, M>,
 }
 
 impl<MC, CPE, M> Default for Pvm<MC, CPE, M>
@@ -132,12 +138,12 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
             machine_state: machine_state::MachineState::new(),
             reveal_request: RevealRequest::new(),
             system_state: linux::SupervisorState::new(),
-            version: Cell::new_with(INITIAL_VERSION),
-            status: Cell::new(),
-            tick: Cell::new(),
-            message_counter: Cell::new(),
-            level: Cell::new(),
-            level_is_set: Cell::new(),
+            version: Atom::new(INITIAL_VERSION),
+            status: Atom::default(),
+            tick: Atom::default(),
+            message_counter: Atom::default(),
+            level: Atom::default(),
+            level_is_set: Atom::default(),
         }
     }
 
@@ -219,7 +225,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
                 )
             })
             .steps;
-        self.tick.write(self.tick.read().wrapping_add(steps as u64));
+
+        let tick = self.tick.read().wrapping_add(steps as u64);
+        self.tick.write(tick);
+
         steps
     }
 
@@ -254,7 +263,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         ) {
             return false;
         }
-        self.tick.write(self.tick.read().wrapping_add(1u64));
+
+        let tick = self.tick.read().wrapping_add(1u64);
+        self.tick.write(tick);
+
         self.message_counter.write(counter as u64);
         self.level_is_set.write(true);
         self.level.write(level);
@@ -274,7 +286,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
         ) {
             return false;
         }
-        self.tick.write(self.tick.read().wrapping_add(1u64));
+
+        let tick = self.tick.read().wrapping_add(1u64);
+        self.tick.write(tick);
+
         true
     }
 
@@ -296,7 +311,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
             .hart
             .xregisters
             .write(a0, SbiError::InvalidParam as u64);
-        self.tick.write(self.tick.read().wrapping_add(1u64));
+
+        let tick = self.tick.read().wrapping_add(1u64);
+        self.tick.write(tick);
+
         self.status.write(PvmStatus::Evaluating);
     }
 
@@ -393,10 +411,10 @@ where
     machine_state::MachineState<MC, CPE, M>: Foldable<F>,
     RevealRequest<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
-    Cell<PvmStatus, M>: Foldable<F>,
-    Cell<bool, M>: Foldable<F>,
-    Cell<u32, M>: Foldable<F>,
-    Cell<u64, M>: Foldable<F>,
+    Atom<PvmStatus, M>: Foldable<F>,
+    Atom<bool, M>: Foldable<F>,
+    Atom<u32, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
@@ -507,7 +525,7 @@ pub enum InputRequest {
 pub(crate) fn handle_system_call<MC, CPE, M>(
     machine: &mut machine_state::MachineState<MC, CPE, M>,
     system_state: &mut linux::SupervisorState<M>,
-    status: &mut Cell<PvmStatus, M>,
+    status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
 ) -> ControlFlow<()>

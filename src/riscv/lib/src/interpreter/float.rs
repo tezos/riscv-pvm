@@ -529,6 +529,12 @@ impl ConstDefault for RoundingMode {
     const DEFAULT: Self = Self::RNE;
 }
 
+impl Default for RoundingMode {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 impl Display for RoundingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let res = match self {
@@ -642,6 +648,12 @@ impl ConstDefault for FloatExceptionFlags {
         divide_by_zero: false,
         invalid_operation: false,
     };
+}
+
+impl Default for FloatExceptionFlags {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 impl<M> CSRegisters<M>

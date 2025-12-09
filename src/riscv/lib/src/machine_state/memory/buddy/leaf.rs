@@ -10,6 +10,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -25,7 +26,6 @@ use super::Buddy;
 use super::BuddyConfig;
 use crate::bits::ones;
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -46,7 +46,7 @@ impl<const PAGES: u64> BuddyConfig for BuddyLeafConfig<PAGES> {
     }
 
     fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
-        let result = Cell::from_proof(proof)?;
+        let result = Atom::from_proof(proof)?;
         let result = result.map(|set| BuddyLeaf { set });
         Ok(result)
     }
@@ -57,7 +57,7 @@ impl<const PAGES: u64> BuddyConfig for BuddyLeafConfig<PAGES> {
 pub struct BuddyLeaf<const PAGES: u64, M: ManagerBase> {
     /// Each bit of the `u64` represents a page.
     /// The least significant bit is the page with index 0.
-    set: Cell<u64, M>,
+    set: Atom<u64, M>,
 }
 
 impl<const PAGES: u64, M: ManagerBase> NewState<M> for BuddyLeaf<PAGES, M> {
@@ -65,7 +65,9 @@ impl<const PAGES: u64, M: ManagerBase> NewState<M> for BuddyLeaf<PAGES, M> {
     where
         M: ManagerAlloc,
     {
-        Self { set: Cell::new() }
+        Self {
+            set: Atom::default(),
+        }
     }
 }
 
@@ -218,7 +220,7 @@ impl<const PAGES: u64, M, F> Foldable<F> for BuddyLeaf<PAGES, M>
 where
     M: ManagerBase,
     F: Fold,
-    Cell<u64, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.set.fold(builder)

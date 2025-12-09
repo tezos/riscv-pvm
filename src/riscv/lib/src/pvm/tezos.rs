@@ -13,6 +13,7 @@ use ed25519_dalek::VerifyingKey;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
+use octez_riscv_data::components::atom::Atom;
 use sha3::Digest;
 use sha3::Keccak256;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
@@ -43,7 +44,6 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -82,7 +82,7 @@ where
 /// Provide input information to the machine. Returns `false` in case the
 /// machine wasn't expecting any input, otherwise returns `true`.
 pub fn provide_input<MC, M>(
-    status: &mut Cell<PvmStatus, M>,
+    status: &mut Atom<PvmStatus, M>,
     machine: &mut MachineCoreState<MC, M>,
     level: u32,
     counter: u32,
@@ -133,7 +133,7 @@ where
 /// Provide reveal data in response to a reveal request. Returns `false`
 /// if the machine is not expecting reveal.
 pub fn provide_reveal_response<MC, M>(
-    status: &mut Cell<PvmStatus, M>,
+    status: &mut Atom<PvmStatus, M>,
     machine: &mut MachineCoreState<MC, M>,
     reveal_data: &[u8],
 ) -> bool
@@ -171,7 +171,7 @@ where
 
 /// Handle a [SBI_TEZOS_INBOX_NEXT] call.
 #[inline]
-fn handle_tezos_inbox_next<M>(status: &mut Cell<PvmStatus, M>)
+fn handle_tezos_inbox_next<M>(status: &mut Atom<PvmStatus, M>)
 where
     M: ManagerWrite,
 {
@@ -315,7 +315,7 @@ where
 fn handle_tezos_reveal<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     reveal_request: &mut RevealRequest<M>,
-    status: &mut Cell<PvmStatus, M>,
+    status: &mut Atom<PvmStatus, M>,
 ) where
     MC: MemoryConfig,
     M: ManagerRead + ManagerWrite,
@@ -353,7 +353,7 @@ where
 /// Handle a Tezos SBI call.
 pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
-    status: &mut Cell<PvmStatus, M>,
+    status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
 ) where
     MC: MemoryConfig,

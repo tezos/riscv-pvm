@@ -632,13 +632,13 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
                 // We have no caches/state that is sensitive to a `fence.i` instruction.
 
                 // We need to advance pc by width of the Fence.I instruction because raising the exception does not do it for us.
-                self.core.hart.pc.write(
-                    self.core
-                        .hart
-                        .pc
-                        .read()
-                        .wrapping_add(InstrWidth::Uncompressed as u64),
-                );
+                let pc = self
+                    .core
+                    .hart
+                    .pc
+                    .read()
+                    .wrapping_add(InstrWidth::Uncompressed as u64);
+                self.core.hart.pc.write(pc);
             }
 
             Exception::ForceFetchRun => return self.handle_force_fetch_run(handle),

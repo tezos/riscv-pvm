@@ -15,6 +15,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -33,7 +34,6 @@ use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_backend::Cell;
 
 /// CSR index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -171,10 +171,10 @@ const FFLAGS_MASK: CSRRepr = 0b11111;
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct CSRegisters<M: backend::ManagerBase> {
     /// Floating-point exception flags
-    pub fflags: Cell<FloatExceptionFlags, M>,
+    pub fflags: Atom<FloatExceptionFlags, M>,
 
     /// Floating-point dynamic rounding mode
-    pub frm: Cell<RoundingMode, M>,
+    pub frm: Atom<RoundingMode, M>,
 }
 
 impl<M: backend::ManagerBase> CSRegisters<M> {
@@ -366,8 +366,8 @@ impl<M: backend::ManagerBase> NewState<M> for CSRegisters<M> {
         M: backend::ManagerAlloc,
     {
         Self {
-            fflags: Cell::new(),
-            frm: Cell::new(),
+            fflags: Atom::default(),
+            frm: Atom::default(),
         }
     }
 }
@@ -385,8 +385,8 @@ impl<M, F> Foldable<F> for CSRegisters<M>
 where
     M: backend::ManagerBase,
     F: Fold,
-    Cell<FloatExceptionFlags, M>: Foldable<F>,
-    Cell<RoundingMode, M>: Foldable<F>,
+    Atom<FloatExceptionFlags, M>: Foldable<F>,
+    Atom<RoundingMode, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
