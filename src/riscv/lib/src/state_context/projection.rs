@@ -51,13 +51,6 @@ pub trait TypeCons {
 /// Apply a type constructor `TC` to memory config `MC` and manager `M`.
 pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
 
-/// Constructor for a fully instantiated type `T`
-pub struct ConstCons<T>(PhantomData<T>);
-
-impl<T> TypeCons for ConstCons<T> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = T;
-}
-
 /// Type constructor [`Box`]
 pub struct BoxCons<T>(PhantomData<T>);
 
@@ -290,49 +283,6 @@ impl<P: Projection> Projection for BoxProj<P> {
     }
 }
 
-/// Projection from [`Atom`] to the type contained within it
-pub struct AtomProj<P>(PhantomData<P>);
-
-impl<T: Clone + 'static, P: Projection<Subject = ConstCons<T>>> Projection for AtomProj<P> {
-    type Subject = AtomCons<T>;
-
-    type Target = P::Target;
-
-    type Parameter = P::Parameter;
-
-    #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a Atom<T, M>,
-        param: Self::Parameter,
-    ) -> &'a Self::Target {
-        P::project_ref::<MC, M>(state.deref(), param)
-    }
-
-    #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a Atom<T, M>,
-        param: Self::Parameter,
-    ) -> Self::Target
-    where
-        Self::Target: Copy,
-    {
-        P::project_read::<MC, M>(state.deref(), param)
-    }
-
-    #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
-        state: &'a mut Atom<T, M>,
-        param: Self::Parameter,
-        value: Self::Target,
-    ) {
-        P::project_write::<MC, M>(state.deref_mut(), param, value);
-    }
-
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        P::normal_pointer_offset::<MC>(param) + Atom::<T, Normal>::FIELD_OFFSET
-    }
-}
-
 /// Parameter for an array projection
 pub struct ArrayProjParam<T> {
     /// Index of the element to project
@@ -400,59 +350,95 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
     }
 }
 
-/// Like [`ArrayProj`] but does not allow for deeper projections
-pub struct ConstArrayProj<T, const LEN: usize>(PhantomData<T>);
+/// Projection from [`Atom`] to the type contained within it
+pub struct AtomProj<T>(PhantomData<T>);
 
-impl<T: 'static, const LEN: usize> Projection for ConstArrayProj<T, LEN> {
-    type Subject = ConstCons<[T; LEN]>;
+impl<T: 'static> Projection for AtomProj<T> {
+    type Subject = AtomCons<T>;
 
     type Target = T;
 
-    type Parameter = ArrayProjParam<()>;
+    type Parameter = ();
+
+    #[inline]
+    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a Atom<T, M>,
+        _param: Self::Parameter,
+    ) -> &'a Self::Target {
+        state.deref()
+    }
+
+    #[inline]
+    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+        state: &'a Atom<T, M>,
+        _param: Self::Parameter,
+    ) -> Self::Target
+    where
+        Self::Target: Copy,
+    {
+        state.read()
+    }
+
+    #[inline]
+    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+        state: &'a mut Atom<T, M>,
+        _param: Self::Parameter,
+        value: Self::Target,
+    ) {
+        state.write(value);
+    }
+
+    fn normal_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
+        let offset = Atom::<T, Normal>::FIELD_OFFSET;
+        ProjectionOffset::direct(offset)
+    }
+}
+
+/// Projection from an [`Atom`] containing an array to one of its elements
+pub struct AtomArrayProj<T, const LEN: usize>(PhantomData<T>);
+
+impl<T: Clone + 'static, const LEN: usize> Projection for AtomArrayProj<T, LEN> {
+    type Subject = AtomCons<[T; LEN]>;
+
+    type Target = T;
+
+    type Parameter = usize;
 
     #[inline]
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        index: Self::Parameter,
     ) -> &'a Self::Target {
-        &state[param.index]
+        &state[index]
     }
 
     #[inline]
     fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        index: Self::Parameter,
     ) -> Self::Target
     where
         Self::Target: Copy,
     {
-        state[param.index]
+        state[index]
     }
 
     #[inline]
     fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
+        index: Self::Parameter,
         value: Self::Target,
     ) {
-        state[param.index] = value;
+        state[index] = value;
     }
 
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        assert!(
-            param.index < LEN,
-            "Array index out of bounds: {} >= {}",
-            param.index,
-            LEN
-        );
+    fn normal_pointer_offset<MC: MemoryConfig>(index: Self::Parameter) -> ProjectionOffset {
+        assert!(index < LEN, "Array index out of bounds: {index} >= {LEN}");
 
         let elem_size = std::mem::size_of::<T>();
-        let offset = param
-            .index
-            .checked_mul(elem_size)
-            .expect("Array index overflow");
+        let elem_offset = index.checked_mul(elem_size).expect("Array offset overflow");
 
-        ProjectionOffset::direct(offset)
+        ProjectionOffset::direct(elem_offset) + Atom::<[T; LEN], Normal>::FIELD_OFFSET
     }
 }
 
