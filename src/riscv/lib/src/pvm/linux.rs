@@ -24,6 +24,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -57,8 +58,6 @@ use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
-use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -439,7 +438,7 @@ where
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct SupervisorState<M: ManagerBase> {
     /// Thread lock address
-    tid_address: Cell<VirtAddr, M>,
+    tid_address: Atom<VirtAddr, M>,
 
     /// Has the process exited?
     exited: bool,
@@ -448,13 +447,13 @@ pub struct SupervisorState<M: ManagerBase> {
     exit_code: u64,
 
     /// Program in memory
-    program: Cell<Range<VirtAddr>, M>,
+    program: Atom<Range<VirtAddr>, M>,
 
     /// Heap memory
-    heap: Cell<Range<VirtAddr>, M>,
+    heap: Atom<Range<VirtAddr>, M>,
 
     /// Stack guard
-    stack_guard: Cell<Range<VirtAddr>, M>,
+    stack_guard: Atom<Range<VirtAddr>, M>,
 }
 
 impl<M: ManagerBase> SupervisorState<M> {
@@ -464,12 +463,12 @@ impl<M: ManagerBase> SupervisorState<M> {
         M: ManagerAlloc,
     {
         SupervisorState {
-            tid_address: Cell::new(),
+            tid_address: Atom::default(),
             exited: false,
             exit_code: 0,
-            program: Cell::new(),
-            heap: Cell::new(),
-            stack_guard: Cell::new(),
+            program: Atom::default(),
+            heap: Atom::default(),
+            stack_guard: Atom::default(),
         }
     }
 
@@ -1055,8 +1054,8 @@ impl<M, F> Foldable<F> for SupervisorState<M>
 where
     M: ManagerBase,
     F: Fold,
-    Cell<VirtAddr, M>: Foldable<F>,
-    Cell<Range<VirtAddr>, M>: Foldable<F>,
+    Atom<VirtAddr, M>: Foldable<F>,
+    Atom<Range<VirtAddr>, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();

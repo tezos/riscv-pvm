@@ -9,6 +9,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -23,7 +24,6 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -37,7 +37,7 @@ pub struct RevealRequest<M: ManagerBase> {
     /// Reveal request payload
     pub bytes: DynCells<M>,
     /// Size of reveal request payload
-    pub size: Cell<u64, M>,
+    pub size: Atom<u64, M>,
 }
 
 impl<M: ManagerBase> RevealRequest<M> {
@@ -71,7 +71,7 @@ impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
     {
         Self {
             bytes: DynCells::new(REVEAL_REQUEST_MAX_SIZE),
-            size: Cell::new(),
+            size: Atom::default(),
         }
     }
 }
@@ -90,7 +90,7 @@ where
     M: ManagerBase,
     F: Fold,
     DynCells<M>: Foldable<F>,
-    Cell<u64, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();

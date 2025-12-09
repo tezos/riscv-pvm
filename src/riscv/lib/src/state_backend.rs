@@ -349,18 +349,18 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
     use crate::state::NewState;
-    use crate::state_backend::Cell;
     use crate::state_backend::Cells;
 
     #[test]
     fn test_example_normal() {
         struct Example<M: ManagerBase> {
-            first: Cell<u64, M>,
+            first: Atom<u64, M>,
             second: Cells<u32, 4, M>,
         }
 
@@ -368,7 +368,7 @@ mod tests {
         let second_value: [u32; 4] = rand::random();
 
         let mut instance: Example<Normal> = Example {
-            first: Cell::new(),
+            first: Atom::default(),
             second: Cells::new(),
         };
 

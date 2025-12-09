@@ -24,7 +24,6 @@ use octez_riscv_data::mode::Normal;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::Cell;
 use crate::state_backend::Cells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
@@ -70,13 +69,6 @@ pub struct RegionCons<E, const LEN: usize>(PhantomData<E>);
 
 impl<E: 'static, const LEN: usize> TypeCons for RegionCons<E, LEN> {
     type Applied<MC: MemoryConfig, M: ManagerBase> = M::Region<E, LEN>;
-}
-
-/// Type constructor [`crate::state_backend::Cell`]
-pub struct CellCons<E>(PhantomData<E>);
-
-impl<E: 'static> TypeCons for CellCons<E> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = Cell<E, M>;
 }
 
 /// Type constructor [`Atom`]

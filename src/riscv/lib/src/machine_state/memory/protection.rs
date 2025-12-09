@@ -12,6 +12,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
@@ -29,7 +30,6 @@ use super::Address;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -42,7 +42,7 @@ use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
-    pages: Box<[Cell<bool, M>; PAGES]>,
+    pages: Box<[Atom<bool, M>; PAGES]>,
 }
 
 impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
@@ -118,7 +118,7 @@ impl<const PAGES: usize> PagePermissions<PAGES, Normal> {
         let Ok(pages) = self
             .pages
             .iter()
-            .map(Cell::start_proof)
+            .map(Atom::start_proof)
             .collect::<Vec<_>>()
             .try_into()
         else {
@@ -135,7 +135,7 @@ impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, 
         M: ManagerAlloc,
     {
         PagePermissions {
-            pages: boxed_from_fn(|| Cell::new()),
+            pages: boxed_from_fn(Atom::default),
         }
     }
 }
@@ -165,7 +165,7 @@ impl<const PAGES: usize, M, F> Foldable<F> for PagePermissions<PAGES, M>
 where
     M: ManagerBase,
     F: Fold,
-    Cell<bool, M>: Foldable<F>,
+    Atom<bool, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let page_generator = |idx| self.pages.index(idx);

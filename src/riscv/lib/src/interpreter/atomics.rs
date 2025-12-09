@@ -15,8 +15,8 @@ use crate::machine_state::registers::read_xregister;
 use crate::machine_state::registers::write_xregister;
 use crate::machine_state::reservation_set::RES_SET_BITMASK;
 use crate::machine_state::reservation_set::UNSET_VALUE;
-use crate::state_backend::CellProj;
 use crate::state_context::StateContext;
+use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
@@ -665,7 +665,7 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
 impl_projection! {
     projection ReservationSetProj {
         subject = MachineCoreCons,
-        target_projection = CellProj<u64>,
+        target_projection = AtomProj<u64>,
         path = hart.reservation_set.start_addr,
     }
 }

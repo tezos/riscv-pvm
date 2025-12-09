@@ -16,6 +16,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -38,12 +39,11 @@ use crate::machine_state::backend;
 /// that a hart can only hold one reservation at a time, and that an SC can only
 /// pair with the most recent LR, and LR with the next following SC, in program
 /// order."
-use crate::machine_state::backend::Cell;
 use crate::state::NewState;
 
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct ReservationSet<M: backend::ManagerBase> {
-    pub(crate) start_addr: Cell<u64, M>,
+    pub(crate) start_addr: Atom<u64, M>,
 }
 
 /// The size of the reservation set is 8 bytes in order to accommodate
@@ -123,7 +123,7 @@ impl<M: backend::ManagerBase> NewState<M> for ReservationSet<M> {
         M: backend::ManagerAlloc,
     {
         ReservationSet {
-            start_addr: Cell::new(),
+            start_addr: Atom::default(),
         }
     }
 }
@@ -140,7 +140,7 @@ impl<M, F> Foldable<F> for ReservationSet<M>
 where
     M: backend::ManagerBase,
     F: Fold,
-    Cell<u64, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.start_addr.fold(builder)
@@ -149,7 +149,7 @@ where
 
 impl FromProof for ReservationSet<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = Cell::from_proof(proof)?;
+        let result = Atom::from_proof(proof)?;
         let result = result.map(|start_addr| Self { start_addr });
         Ok(result)
     }

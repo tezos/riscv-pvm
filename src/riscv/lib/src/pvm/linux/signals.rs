@@ -16,6 +16,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -56,7 +57,6 @@ use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
@@ -145,7 +145,7 @@ impl Elem for LinuxSigAction {
     }
 }
 
-// For [Cell]<E, _>, `E` must be 'static. For this reason, each field of the [LinuxSigAction]
+// For [Atom]<E, _>, `E` must be 'static. For this reason, each field of the [LinuxSigAction]
 // struct will have its own array of the primitives or wrappers around primitives (e.g. [VirtAddr])
 // used for the member's type.
 
@@ -153,18 +153,18 @@ impl Elem for LinuxSigAction {
 #[perfect_derive(PartialEq, Eq)]
 pub struct SignalActions<M: ManagerBase> {
     /// An array of [VirtAddr]s, one action for each supported signal
-    actions: [Cell<VirtAddr, M>; SignalIndex::COUNT],
+    actions: [Atom<VirtAddr, M>; SignalIndex::COUNT],
     /// An array of bitmasks, one set of flags for each supported signal
-    flags: [Cell<u32, M>; SignalIndex::COUNT],
+    flags: [Atom<u32, M>; SignalIndex::COUNT],
     /// An array of bitmasks, one mask for each supported signal
-    masks: [Cell<u64, M>; SignalIndex::COUNT],
+    masks: [Atom<u64, M>; SignalIndex::COUNT],
     /// A pointer to a restorer address to jump to after returning from a signal handler. A
     /// function to call `rt_sigreturn` should be loaded into here.
     ///
     /// <https://www.man7.org/linux/man-pages/man2/sigreturn.2.html>
-    restorer: Cell<VirtAddr, M>,
+    restorer: Atom<VirtAddr, M>,
     /// A per-thread mask for all signals
-    thread_mask: Cell<u64, M>,
+    thread_mask: Atom<u64, M>,
 }
 
 impl<M: ManagerRead> SignalActions<M> {
@@ -218,9 +218,9 @@ impl<M, F> Foldable<F> for SignalActions<M>
 where
     M: ManagerBase,
     F: Fold,
-    Cell<VirtAddr, M>: Foldable<F>,
-    Cell<u32, M>: Foldable<F>,
-    Cell<u64, M>: Foldable<F>,
+    Atom<VirtAddr, M>: Foldable<F>,
+    Atom<u32, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
@@ -465,11 +465,11 @@ impl<M: ManagerBase> NewState<M> for SignalActions<M> {
         M: ManagerAlloc,
     {
         SignalActions::<M> {
-            actions: core::array::from_fn(|_| Cell::new_with(VirtAddr::new(0))),
-            flags: core::array::from_fn(|_| Cell::new_with(0u32)),
-            restorer: Cell::new_with(VirtAddr::new(0)),
-            masks: core::array::from_fn(|_| Cell::new_with(0u64)),
-            thread_mask: Cell::new_with(0u64),
+            actions: core::array::from_fn(|_| Atom::new(VirtAddr::new(0))),
+            flags: core::array::from_fn(|_| Atom::new(0u32)),
+            restorer: Atom::new(VirtAddr::new(0)),
+            masks: core::array::from_fn(|_| Atom::new(0u64)),
+            thread_mask: Atom::new(0u64),
         }
     }
 }

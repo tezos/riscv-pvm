@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: MIT
 
 use std::marker::PhantomData;
-use std::ops::Deref;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -33,7 +32,6 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
-use perfect_derive::perfect_derive;
 
 use super::ManagerAlloc;
 use super::ManagerBase;
@@ -52,186 +50,9 @@ use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::verify_backend;
 use crate::state_context::projection::ApplyCons;
-use crate::state_context::projection::CellCons;
 use crate::state_context::projection::CellsCons;
 use crate::state_context::projection::Projection;
 use crate::state_context::projection::ProjectionOffset;
-
-/// Single element of type `E`
-#[perfect_derive(Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Cell<E: 'static, M: ManagerBase> {
-    region: Cells<E, 1, M>,
-}
-
-impl<E: 'static, M: ManagerBase> Cell<E, M> {
-    /// Allocate a new cell with the given value.
-    pub fn new_with(value: E) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        let region = M::allocate_region([value]);
-        Self {
-            region: Cells::bind(region),
-        }
-    }
-
-    /// Bind this state to the single element region.
-    pub const fn bind(region: M::Region<E, 1>) -> Self {
-        Self {
-            region: Cells::bind(region),
-        }
-    }
-
-    /// Obtain the underlying region.
-    pub fn into_region(self) -> M::Region<E, 1> {
-        self.region.into_region()
-    }
-
-    /// Read the value managed by the cell.
-    #[inline(always)]
-    pub fn read(&self) -> E
-    where
-        E: Copy,
-        M: ManagerRead,
-    {
-        self.region.read(0)
-    }
-
-    /// Write the value managed by the cell.
-    #[inline(always)]
-    pub fn write(&mut self, value: E)
-    where
-        M: ManagerWrite,
-    {
-        self.region.write(0, value)
-    }
-}
-
-impl<E: 'static> Cell<E, Normal> {
-    /// Return a proof-generating version of this Cell.
-    pub fn start_proof(&self) -> Cell<E, Prove<'_>> {
-        Cell {
-            region: self.region.start_proof(),
-        }
-    }
-}
-
-impl<E: ConstDefault, M: ManagerBase> NewState<M> for Cell<E, M> {
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self::new_with(E::DEFAULT)
-    }
-}
-
-impl<E: 'static, M: ManagerBase> From<Cells<E, 1, M>> for Cell<E, M> {
-    fn from(region: Cells<E, 1, M>) -> Self {
-        Self { region }
-    }
-}
-
-impl<T: Encode, M: ManagerSerialise> Encode for Cell<T, M> {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        self.region.encode(encoder)
-    }
-}
-
-impl<C, E: Decode<C>> Decode<C> for Cell<E, Normal> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let region = Decode::decode(decoder)?;
-        Ok(Self { region })
-    }
-}
-
-impl<E, M: ManagerRead> AsRef<E> for Cell<E, M> {
-    #[inline]
-    fn as_ref(&self) -> &E {
-        self.region.read_ref(0)
-    }
-}
-
-impl<E, M: ManagerRead> Deref for Cell<E, M> {
-    type Target = E;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.as_ref()
-    }
-}
-
-impl<E: Clone, M: ManagerClone> CloneState for Cell<E, M> {
-    fn clone_state(&self) -> Self {
-        self.clone()
-    }
-}
-
-impl<T, M, F> Foldable<F> for Cell<T, M>
-where
-    M: ManagerBase,
-    F: Fold,
-    Cells<T, 1, M>: Foldable<F>,
-{
-    fn fold(&self, builder: F) -> F::Folded {
-        self.region.fold(builder)
-    }
-}
-
-impl<E: Decode<()>> FromProof for Cell<E, Verify> {
-    fn from_proof<D: merkle_proof::Deserialiser>(
-        proof: D,
-    ) -> merkle_proof::SuspendedResult<D, Self> {
-        let result = Cells::from_proof(proof)?;
-        let result = result.map(|region| Cell { region });
-        Ok(result)
-    }
-}
-
-/// Projection from [`Cell`] to its value type `E`
-pub struct CellProj<E>(PhantomData<E>);
-
-impl<E: 'static> Projection for CellProj<E> {
-    type Subject = CellCons<E>;
-
-    type Target = E;
-
-    type Parameter = ();
-
-    #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
-    ) -> &'a Self::Target {
-        state.as_ref()
-    }
-
-    #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
-    ) -> Self::Target
-    where
-        Self::Target: Copy,
-    {
-        state.read()
-    }
-
-    #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
-        state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        _param: Self::Parameter,
-        value: Self::Target,
-    ) {
-        state.write(value);
-    }
-
-    fn normal_pointer_offset<MC: MemoryConfig>(_param: Self::Parameter) -> ProjectionOffset {
-        let field_offset = std::mem::offset_of!(Cell<E, Normal>, region.region);
-
-        RegionProj::<E, 1>::normal_pointer_offset::<MC>((0,)) + field_offset
-    }
-}
 
 /// Multiple elements of type `E`
 #[repr(transparent)]
@@ -818,6 +639,7 @@ pub(crate) mod tests {
     use bincode::Encode;
     use bincode::enc::Encoder;
     use bincode::error::EncodeError;
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::foldable::Fold;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::foldable::NodeFold;
@@ -830,7 +652,6 @@ pub(crate) mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::state::NewState;
-    use crate::state_backend::Cell;
     use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::Elem;
@@ -923,29 +744,29 @@ pub(crate) mod tests {
         }
     });
 
-    backend_test!(test_cell_overlap, F, {
-        let mut cell1: Cell<[u64; 4], F> = Cell::new();
-        let mut cell2: Cell<[u64; 4], F> = Cell::new();
+    backend_test!(test_atom_overlap, F, {
+        let mut atom1: Atom<[u64; 4], F> = Atom::default();
+        let mut atom2: Atom<[u64; 4], F> = Atom::default();
 
-        // Cell should be zero-initialised.
-        assert_eq!(cell1.read(), [0; 4]);
-        assert_eq!(cell2.read(), [0; 4]);
+        // Atom should be zero-initialised.
+        assert_eq!(atom1.read(), [0; 4]);
+        assert_eq!(atom2.read(), [0; 4]);
 
-        // Write something to cell 1 and check.
-        let cell1_value: [u64; 4] = rand::random();
-        cell1.write(cell1_value);
-        assert_eq!(cell1.read(), cell1_value);
+        // Write something to atom 1 and check.
+        let atom1_value: [u64; 4] = rand::random();
+        atom1.write(atom1_value);
+        assert_eq!(atom1.read(), atom1_value);
 
-        // Second cell should still be zero-initialised
-        assert_eq!(cell2.read(), [0; 4]);
+        // Second atom should still be zero-initialised
+        assert_eq!(atom2.read(), [0; 4]);
 
-        // Write something to cell 2 and check.
-        let cell2_value: [u64; 4] = rand::random();
-        cell2.write(cell2_value);
-        assert_eq!(cell2.read(), cell2_value);
+        // Write something to atom 2 and check.
+        let atom2_value: [u64; 4] = rand::random();
+        atom2.write(atom2_value);
+        assert_eq!(atom2.read(), atom2_value);
 
-        // Cell 1 should not have its value changed.
-        assert_eq!(cell1.read(), cell1_value);
+        // Atom 1 should not have its value changed.
+        assert_eq!(atom1.read(), atom1_value);
     });
 
     backend_test!(
@@ -1005,9 +826,15 @@ pub(crate) mod tests {
         const DEFAULT: Self = MyFoo(42);
     }
 
-    // Test that the Atom layout initialises the underlying Cell correctly.
-    backend_test!(test_cell_init, F, {
-        assert_eq!(Cell::<MyFoo, F>::new().read(), MyFoo::DEFAULT);
+    impl Default for MyFoo {
+        fn default() -> Self {
+            Self::DEFAULT
+        }
+    }
+
+    // Test that the Atom initialises correctly.
+    backend_test!(test_atom_init, F, {
+        assert_eq!(Atom::<MyFoo, F>::default().read(), MyFoo::DEFAULT);
     });
 
     // Test that the Array layout initialises the underlying Cells correctly.
@@ -1021,13 +848,13 @@ pub(crate) mod tests {
     #[test]
     fn test_struct_example() {
         struct Foo<M: ManagerBase> {
-            bar: Cell<u64, M>,
+            bar: Atom<u64, M>,
             qux: Cells<u8, 64, M>,
         }
 
         impl<F: Fold, M: ManagerBase> Foldable<F> for Foo<M>
         where
-            Cell<u64, M>: Foldable<F>,
+            Atom<u64, M>: Foldable<F>,
             Cells<u8, 64, M>: Foldable<F>,
         {
             fn fold(&self, builder: F) -> <F as Fold>::Folded {
@@ -1040,7 +867,7 @@ pub(crate) mod tests {
 
         fn inner(bar: u64, qux: [u8; 64]) {
             let mut foo = Foo::<Normal> {
-                bar: Cell::new(),
+                bar: Atom::default(),
                 qux: Cells::new(),
             };
 

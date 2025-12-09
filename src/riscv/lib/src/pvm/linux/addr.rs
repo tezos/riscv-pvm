@@ -28,7 +28,6 @@ use crate::machine_state;
     derive_more::Display,
 )]
 #[repr(transparent)]
-#[cfg_attr(test, derive(Default))]
 #[debug("{}", self)]
 #[display("{:#x}", self.0)]
 pub struct VirtAddr(u64);
@@ -80,6 +79,12 @@ impl VirtAddr {
 
 impl ConstDefault for VirtAddr {
     const DEFAULT: Self = VirtAddr(u64::MAX);
+}
+
+impl Default for VirtAddr {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 impl Add<u64> for VirtAddr {

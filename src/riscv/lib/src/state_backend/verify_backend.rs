@@ -11,14 +11,12 @@ use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
 use octez_riscv_data::mode::utils::NotFound;
 use octez_riscv_data::mode::utils::not_found;
 use range_collections::RangeSet2;
 
-use super::Cell;
 use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
@@ -490,22 +488,9 @@ impl<const LEAF_SIZE: usize> Default for DynRegion<LEAF_SIZE> {
     }
 }
 
-impl<E> Cell<E, Verify> {
-    /// Construct an absent verifier cell.
-    pub const fn absent() -> Self {
-        Cell::bind(Region::Absent)
-    }
-
-    /// Construct a verifier cell with a value.
-    pub fn from_owned(cell: Cell<E, Normal>) -> Self {
-        let values = Box::new(cell.into_region().map(Some));
-        let region = Region::Partial(values);
-        Cell::bind(region)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::mode::utils::NotFound;
     use octez_riscv_data::mode::utils::catch_not_found;
@@ -758,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_partial_hash_absent() {
-        let verify_cell: Cell<u64, Verify> = Cell::bind(Region::Absent);
+        let verify_cell: Atom<u64, Verify> = Atom::absent();
         let proof = None;
 
         let hash = PartialHash::from_foldable(proof, &verify_cell);
@@ -767,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_partial_hash_absent_written() {
-        let mut verify_cell: Cell<u64, Verify> = Cell::bind(Region::Absent);
+        let mut verify_cell: Atom<u64, Verify> = Atom::absent();
         let proof = None;
 
         let written_value = 1337;
@@ -781,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_partial_hash_present_written() {
-        let mut verify_cell: Cell<u64, Verify> = Cell::bind(Region::Partial(Box::new([Some(42)])));
+        let mut verify_cell: Atom<u64, Verify> = Atom::new(42);
         let proof = None;
 
         let written_value = 1337;

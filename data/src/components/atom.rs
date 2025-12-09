@@ -102,6 +102,15 @@ impl<T: 'static> Atom<T, Normal> {
     }
 }
 
+impl<T: 'static> Atom<T, Verify> {
+    /// Construct an [`Atom`] in [`Verify`] mode that represents an absent value.
+    pub fn absent() -> Self {
+        Atom {
+            atom: Partial::Absent,
+        }
+    }
+}
+
 impl<A, B, M, N> PartialEq<Atom<B, N>> for Atom<A, M>
 where
     A: PartialEq<B> + 'static,

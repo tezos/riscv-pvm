@@ -12,6 +12,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -26,7 +27,6 @@ use perfect_derive::perfect_derive;
 use super::Buddy;
 use super::BuddyConfig;
 use crate::state::NewState;
-use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -88,7 +88,7 @@ impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
 /// Branch in a Buddy-style memory manager tree
 #[perfect_derive(PartialEq, Eq)]
 pub struct BuddyBranch2<B, M: ManagerBase> {
-    free_info: Cell<FreeInfo, M>,
+    free_info: Atom<FreeInfo, M>,
     left: Box<B>,
     right: Box<B>,
 }
@@ -119,7 +119,7 @@ where
         M: ManagerAlloc,
     {
         Self {
-            free_info: Cell::new_with(FreeInfo {
+            free_info: Atom::new(FreeInfo {
                 left_longest_free_sequence: B::PAGES,
                 left_free_start: B::PAGES,
                 left_free_end: B::PAGES,
@@ -331,7 +331,7 @@ where
     B: Foldable<F>,
     M: ManagerBase,
     F: Fold,
-    Cell<FreeInfo, M>: Foldable<F>,
+    Atom<FreeInfo, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
