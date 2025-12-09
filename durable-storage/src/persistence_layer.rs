@@ -325,25 +325,32 @@ impl Drop for PersistenceLayer {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod utils {
+/// Utilities for testing or benchmarking the persistence layer.
+#[cfg(any(test, feature = "bench"))]
+pub mod utils {
     use std::path::Path;
 
     use tempfile::TempDir;
 
-    pub(crate) struct TestableTmpdir {
+    pub struct TestableTmpdir {
         tempdir: TempDir,
     }
 
     impl TestableTmpdir {
-        pub(crate) fn new() -> Self {
+        pub fn new() -> Self {
             let tempdir = TempDir::new().expect("Should be able to create temp dir");
 
             Self { tempdir }
         }
 
-        pub(crate) fn path(&self) -> &Path {
+        pub fn path(&self) -> &Path {
             self.tempdir.path()
+        }
+    }
+
+    impl Default for TestableTmpdir {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
