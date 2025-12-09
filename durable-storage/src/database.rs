@@ -134,6 +134,20 @@ impl Database {
         }
     }
 
+    #[expect(dead_code, reason = "Used in RV-828 and integration of the registry")]
+    /// Try to create a cheap clone of the Database.
+    pub fn try_clone_with(
+        &self,
+        handle: &Handle,
+        repo: &DirectoryManager,
+    ) -> Result<Self, DatabaseError> {
+        let persistent: Arc<PersistenceLayer> = self.persistent.try_clone(repo)?.into();
+        Ok(Self {
+            persistent: persistent.clone(),
+            merkle: self.merkle.clone_with(handle, persistent)?,
+        })
+    }
+
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
     /// Retrieve the length of the value associated with the provided key.
     ///

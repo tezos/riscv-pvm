@@ -97,7 +97,6 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::clone_with`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn clone_with(
         &self,
         handle: &Handle,
