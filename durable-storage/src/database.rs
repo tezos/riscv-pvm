@@ -10,12 +10,14 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tokio::runtime::Handle;
 
 use crate::merkle_layer::Key;
 use crate::merkle_worker::MerkleWorker;
 use crate::merkle_worker::MerkleWorkerError;
 use crate::persistence_layer::PersistenceLayer;
 use crate::persistence_layer::PersistenceLayerError;
+use crate::repo::DirectoryManager;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
@@ -93,6 +95,14 @@ impl Database {
         data[..bytes_to_copy].copy_from_slice(&source_slice[..bytes_to_copy]);
 
         Ok(bytes_to_copy)
+    }
+
+    #[expect(dead_code, reason = "Used in RV-828 and integration of the registry")]
+    /// Try to construct a new Database
+    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
+        let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
+        let merkle = MerkleWorker::new(handle, persistent.clone())?;
+        Ok(Self { persistent, merkle })
     }
 
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]

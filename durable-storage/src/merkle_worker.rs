@@ -70,7 +70,6 @@ impl MerkleWorker {
     /// Create a new Merkle worker with an empty Merkle tree.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn new(
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
