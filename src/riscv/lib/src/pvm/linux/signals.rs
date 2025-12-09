@@ -34,10 +34,7 @@ use zerocopy::IntoBytes;
 use zerocopy::byteorder::LittleEndian;
 use zerocopy::byteorder::U32;
 use zerocopy::byteorder::U64;
-use zerocopy_derive::FromBytes;
-use zerocopy_derive::Immutable;
-use zerocopy_derive::IntoBytes;
-use zerocopy_derive::KnownLayout;
+use zerocopy_derive::*;
 
 use super::MachineError;
 use super::PAGE_SIZE;
