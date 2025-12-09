@@ -74,6 +74,7 @@ pub(crate) trait StackAddressable {
         kind: StackSlotKind::ExplicitSlot,
         size: Self::SIZE,
         align_shift: Self::ALIGN_SHIFT,
+        key: None,
     };
 }
 

@@ -16,7 +16,6 @@ use cranelift::codegen::Context;
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::AbiParam;
 use cranelift::prelude::Block;
-use cranelift::prelude::EntityRef;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::FunctionBuilderContext;
 use cranelift::prelude::InstBuilder;
@@ -48,8 +47,6 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
-
-const STEPS_REMAINING_VAR_ID: usize = 0;
 
 /// Builder for an instruction sequence
 pub struct SequenceBuilder<'jit, MC: MemoryConfig> {
@@ -151,8 +148,7 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
             Pointer::<ExceptionCode>::from_raw(raw_value)
         };
 
-        let steps_remaining = Variable::new(STEPS_REMAINING_VAR_ID);
-        builder.declare_var(steps_remaining, I64);
+        let steps_remaining = builder.declare_var(I64);
 
         // Assign the passed in `max_steps` to the `steps_remaining` variable.
         builder.def_var(steps_remaining, max_steps_param.to_value());

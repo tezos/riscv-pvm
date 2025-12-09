@@ -173,14 +173,14 @@ impl<'t> DeserialiserNode for OwnedBranchComb<ProofTreeDeserialiser<'t>> {
     }
 
     fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>> {
-        if let Partial::Present(branches) = self.node_data {
-            if !branches.is_empty() {
-                let length = branches.len();
-                return Err(ProofError::BadNumberOfBranches {
-                    expected: 0,
-                    got: length,
-                });
-            }
+        if let Partial::Present(branches) = self.node_data
+            && !branches.is_empty()
+        {
+            let length = branches.len();
+            return Err(ProofError::BadNumberOfBranches {
+                expected: 0,
+                got: length,
+            });
         }
 
         Ok(OwnedParserComb {

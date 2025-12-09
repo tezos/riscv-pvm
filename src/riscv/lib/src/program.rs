@@ -42,13 +42,13 @@ impl<MC> kernel_loader::Memory for Program<'_, MC> {
 
         // If there is a chunk before [paddr] then we need to check if that
         // chunk potentially overlaps with the location we want to write.
-        if let Some((&prev_paddr, prev_bytes)) = self.segments.range_mut(..paddr).last() {
-            if (paddr as usize) < (prev_paddr as usize) + prev_bytes.len() {
-                // If there is an overlap, we simply shrink the existing chunk.
-                // This eliminates the overlap on the left side given we would
-                // have overridden that section anyway.
-                prev_bytes.to_mut().resize((paddr - prev_paddr) as usize, 0);
-            }
+        if let Some((&prev_paddr, prev_bytes)) = self.segments.range_mut(..paddr).last()
+            && (paddr as usize) < (prev_paddr as usize) + prev_bytes.len()
+        {
+            // If there is an overlap, we simply shrink the existing chunk.
+            // This eliminates the overlap on the left side given we would
+            // have overridden that section anyway.
+            prev_bytes.to_mut().resize((paddr - prev_paddr) as usize, 0);
         }
 
         // If there is a chunk at or after [paddr] then we need to check if that
@@ -80,17 +80,17 @@ impl<MC> kernel_loader::Memory for Program<'_, MC> {
         // This means there either is or isn't a chunk to be written to at the
         // exact address `paddr` and no overlaps would occur.
 
-        if let Some(chunk) = self.segments.get_mut(&paddr) {
-            if chunk.len() >= bytes.len() {
-                // There is a chunk at this exact address, and it has space to
-                // be written to.
-                chunk.to_mut()[..bytes.len()].copy_from_slice(bytes);
-                return Ok(());
-            }
-
-            // We don't need an else case here because the code below deals with
-            // overriding the entire chunk already.
+        if let Some(chunk) = self.segments.get_mut(&paddr)
+            && chunk.len() >= bytes.len()
+        {
+            // There is a chunk at this exact address, and it has space to
+            // be written to.
+            chunk.to_mut()[..bytes.len()].copy_from_slice(bytes);
+            return Ok(());
         }
+
+        // We don't need an else case here because the code below deals with
+        // overriding the entire chunk already.
 
         self.segments.insert(paddr, Cow::Owned(bytes.to_owned()));
 

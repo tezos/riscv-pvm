@@ -48,7 +48,7 @@ impl Avl {
     }
 
     /// Creates an in order iterator for the nodes in the tree
-    pub(super) fn iter(&self) -> AvlIterator {
+    pub(super) fn iter(&self) -> AvlIterator<'_> {
         match &self.root {
             None => AvlIterator {
                 stack: vec![],
