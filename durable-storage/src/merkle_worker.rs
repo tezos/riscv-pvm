@@ -100,6 +100,7 @@ impl MerkleWorker {
     #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn clone_with(
         &self,
+        handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
     ) -> Result<Self, MerkleWorkerError> {
         let (sender, receiver) = oneshot::channel();
@@ -115,7 +116,7 @@ impl MerkleWorker {
             .blocking_recv()
             .expect("Merkle worker should be alive")?;
 
-        let worker = Self::from_layer(&Handle::current(), layer);
+        let worker = Self::from_layer(handle, layer);
         Ok(worker)
     }
 
@@ -211,6 +212,7 @@ mod tests {
     use proptest::prelude::Just;
     use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
+    use tokio::runtime::Handle;
 
     use crate::merkle_layer::KEY_MAX_SIZE;
     use crate::merkle_layer::Key;
@@ -243,6 +245,7 @@ mod tests {
     impl TestCommand {
         fn run(
             self,
+            handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
             layer: &mut MerkleLayer,
@@ -282,7 +285,7 @@ mod tests {
                         .expect("Creating a persistence layer should succeed");
                     let persistence_worker = Arc::new(persistence_worker);
                     *worker = worker
-                        .clone_with(persistence_worker)
+                        .clone_with(handle, persistence_worker)
                         .expect("Cloning a Merkle worker should succeed");
                 }
             }
@@ -334,7 +337,7 @@ mod tests {
             let mut merkle_worker = MerkleWorker::new(handle, persistence_worker).expect("Creating a Merkle worker should succeed");
 
             for command in commands {
-                command.run(&dir_manager, &mut merkle_worker, &mut merkle_layer);
+                command.run(handle, &dir_manager, &mut merkle_worker, &mut merkle_layer);
             }
 
             let layer_hash = merkle_layer.hash();
