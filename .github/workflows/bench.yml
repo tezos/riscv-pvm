@@ -12,6 +12,8 @@ on:
   push:
     branches: [main]
 
+  workflow_dispatch:
+
 # Only one job may reserve the reference machine at a time
 concurrency:
   group: ${{ github.workflow }}
