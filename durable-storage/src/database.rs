@@ -97,7 +97,10 @@ impl Database {
         Ok(bytes_to_copy)
     }
 
-    #[expect(dead_code, reason = "Used in RV-828 and integration of the registry")]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Used in RV-828 and integration of the registry")
+    )]
     /// Try to construct a new Database
     pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
         let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
@@ -145,7 +148,6 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::sync::Arc;
 
     use bytes::Bytes;
     use proptest::prelude::*;
@@ -156,8 +158,6 @@ mod tests {
     use super::Database;
     use crate::merkle_layer::KEY_MAX_SIZE;
     use crate::merkle_layer::Key;
-    use crate::merkle_worker::MerkleWorker;
-    use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
@@ -167,14 +167,7 @@ mod tests {
         let repo =
             DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
 
-        let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(&repo)
-            .expect("Creating a persistence layer should succeed")
-            .into();
-
-        let merkle = MerkleWorker::new(handle, persistent.clone())
-            .expect("Creating a Merkle worker should succeed");
-
-        Database { persistent, merkle }
+        Database::try_new(handle, &repo).expect("Creating a test database should succeed")
     }
 
     proptest! {
