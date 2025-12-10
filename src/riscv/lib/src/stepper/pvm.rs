@@ -18,6 +18,7 @@ use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::mode::utils::catch_not_found_and_more;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -48,7 +49,6 @@ use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
-use crate::state_backend::verify_backend::handle_stepper_panics;
 
 /// Error during PVM stepping
 #[derive(Debug, derive_more::From, thiserror::Error, derive_more::Display)]
@@ -327,17 +327,14 @@ impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H,
 
 impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> PvmStepper<H, MC, Verify, CPE> {
     /// Try to take one step. Stepping in the [`Verify`] mode may panic
-    /// when attempting to access absent data. Return [`NotFound`] panics, which
-    /// are expected in the case of verifying an invalid proof, as
+    /// when attempting to access absent data. Catches the case of verifying an invalid proof, as
     /// [`ProofVerificationFailure::AbsentDataAccess`] and all other panics
     /// as [`ProofVerificationFailure::StepperPanic`].
-    ///
-    /// [`NotFound`]: crate::state_backend::verify_backend::NotFound
     fn try_step_partial(self) -> Result<Self, ProofVerificationFailure> {
         // Wrapping the stepper in a Mutex, which implements poisoning, in order to pass it
         // across the unwind boundary.
         let mutex = std::sync::Mutex::new(self);
-        handle_stepper_panics(move || {
+        catch_not_found_and_more(move || {
             {
                 let mut stepper = mutex.lock().expect("Mutex was poisoned on initialisation");
                 if !stepper.try_step() {

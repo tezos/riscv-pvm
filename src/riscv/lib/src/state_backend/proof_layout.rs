@@ -144,6 +144,7 @@ mod tests {
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -155,7 +156,6 @@ mod tests {
     use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
-    use crate::state_backend::verify_backend::handle_stepper_panics;
 
     const CELLS_SIZE: usize = 32;
 
@@ -196,7 +196,7 @@ mod tests {
             // The second component of the state is fully blinded: no values can
             // be read from the array.
             for i in 0..CELLS_SIZE {
-                prop_assert!(handle_stepper_panics(|| verifier_state.0.1.read(i)).is_err());
+                prop_assert!(catch_not_found(|| verifier_state.0.1.read(i)).is_err());
             };
 
             let partial_hash = PartialHash::from_foldable(

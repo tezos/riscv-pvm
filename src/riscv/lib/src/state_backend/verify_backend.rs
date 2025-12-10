@@ -6,7 +6,6 @@
 use std::array;
 use std::collections::BTreeMap;
 use std::ops::Index;
-use std::panic::resume_unwind;
 
 use bincode::Encode;
 use bincode::enc::Encoder;
@@ -14,6 +13,9 @@ use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
+use octez_riscv_data::mode::utils::NotFound;
+use octez_riscv_data::mode::utils::not_found;
 use range_collections::RangeSet2;
 
 use super::Cell;
@@ -25,31 +27,6 @@ use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::elem_bytes;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
-
-/// Panic payload that is raised when a value isn't present when running in `Verify` mode.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]
-pub struct NotFound;
-
-/// Raise a [`NotFound`] panic.
-fn not_found() -> ! {
-    // We use [`resume_unwind`] over [`panic_any`] to avoid calling the panic hook.
-    // XXX: This fails without a message when there is no matching [`handle_stepper_panics`] wrapper.
-    resume_unwind(Box::new(NotFound))
-}
-
-/// Catch errors that the verifier backend may raise during the invocation of `f` and return them
-/// as [`Err`].
-pub(crate) fn handle_stepper_panics<R, F: FnOnce() -> R + std::panic::UnwindSafe>(
-    f: F,
-) -> Result<R, ProofVerificationFailure> {
-    match std::panic::catch_unwind(f) {
-        Ok(res) => Ok(res),
-        Err(err) => match err.downcast::<NotFound>() {
-            Ok(not_found) => Err(ProofVerificationFailure::AbsentDataAccess(*not_found)),
-            Err(other) => Err(ProofVerificationFailure::StepperPanic(other)),
-        },
-    }
-}
 
 /// Error during proof verification
 #[derive(Debug, thiserror::Error)]
@@ -71,6 +48,15 @@ pub enum ProofVerificationFailure {
 
     #[error("Final state hash mismatch (expected {expected}, computed {computed})")]
     FinalHashMismatch { expected: Hash, computed: Hash },
+}
+
+impl From<CaughtNotFoundOrPanic> for ProofVerificationFailure {
+    fn from(error: CaughtNotFoundOrPanic) -> Self {
+        match error {
+            CaughtNotFoundOrPanic::NotFound(not_found) => Self::AbsentDataAccess(not_found),
+            CaughtNotFoundOrPanic::Other(panic_info) => Self::StepperPanic(panic_info),
+        }
+    }
 }
 
 impl ManagerBase for Verify {
@@ -263,12 +249,16 @@ impl<E, const LEN: usize> Index<usize> for Region<E, LEN> {
     type Output = E;
 
     fn index(&self, index: usize) -> &Self::Output {
-        match self {
-            Region::Absent => not_found(),
-            Region::Partial(region) => match region.get(index).and_then(Option::as_ref) {
-                Some(value) => value,
-                None => not_found(),
-            },
+        // SAFETY: `not_found` is safe to call because we're in `Verify` mode where `not_found`
+        // panics can be caught and converted into an error upstream.
+        unsafe {
+            match self {
+                Region::Absent => not_found(),
+                Region::Partial(region) => match region.get(index).and_then(Option::as_ref) {
+                    Some(value) => value,
+                    None => not_found(),
+                },
+            }
         }
     }
 }
@@ -377,7 +367,10 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
     fn len(&self) -> usize {
         match self.length {
             Some(len) => len,
-            None => not_found(),
+            None => {
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
+            }
         }
     }
 
@@ -406,25 +399,29 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         }
 
         if buffer.len() > self.len().saturating_sub(address) {
-            not_found()
+            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+            unsafe { not_found() }
         }
 
         while !buffer.is_empty() {
             let page_index = PageId::from_address(address);
 
             let Some(page) = self.pages.get(&page_index) else {
-                not_found()
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
             };
 
             let Some(offset) = page_index.offset(address) else {
-                not_found()
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
             };
 
             let chunk_length = buffer.len().min(LEAF_SIZE.saturating_sub(offset));
 
             let dst = &mut buffer[..chunk_length];
             let Some(src) = page.get(offset, chunk_length) else {
-                not_found()
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
             };
             dst.copy_from_slice(src);
 
@@ -440,7 +437,8 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         }
 
         if buffer.len() > self.len().saturating_sub(address) {
-            not_found()
+            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+            unsafe { not_found() }
         }
 
         while !buffer.is_empty() {
@@ -448,14 +446,16 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
             let page = self.pages.entry(page_index).or_default();
 
             let Some(offset) = page_index.offset(address) else {
-                not_found()
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
             };
 
             let chunk_length = buffer.len().min(LEAF_SIZE.saturating_sub(offset));
 
             let src = &buffer[..chunk_length];
             if !page.put(offset, src) {
-                not_found()
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
             };
 
             address = address.saturating_add(chunk_length);
@@ -507,6 +507,8 @@ impl<E> Cell<E, Verify> {
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::mode::utils::NotFound;
+    use octez_riscv_data::mode::utils::catch_not_found;
 
     use super::*;
     use crate::state_backend::Cells;
@@ -578,7 +580,7 @@ mod tests {
             let mut cells: Cells<_, 32, Verify> = arb_to_cells(Some(reg.clone()));
 
             for i in 0..32 {
-                let value = handle_stepper_panics(|| cells.read(i)).ok();
+                let value = catch_not_found(|| cells.read(i)).ok();
                 proptest::prop_assert_eq!(value, reg[i]);
 
                 let new_value = rand::random();
@@ -596,24 +598,21 @@ mod tests {
         let cells: Cells<u64, 32, Verify> = arb_to_cells(None);
 
         for i in 0..32 {
-            let value = handle_stepper_panics(|| cells.read(i)).ok();
+            let value = catch_not_found(|| cells.read(i)).ok();
             assert_eq!(value, None);
         }
     }
 
     macro_rules! assert_eq_found {
         ( $left:expr, $right:expr ) => {
-            assert!(handle_stepper_panics(|| { $left }).is_ok_and(|v| v == $right))
+            assert!(catch_not_found(|| { $left }).is_ok_and(|v| v == $right))
         };
     }
 
     macro_rules! assert_not_found {
         ( $body:expr ) => {{
-            let result = handle_stepper_panics(|| $body).expect_err("computation should fail");
-            assert!(
-                matches!(result, ProofVerificationFailure::AbsentDataAccess(_)),
-                "unexpected error: {result:?}"
-            );
+            let result = catch_not_found(|| $body).expect_err("computation should fail");
+            assert!(matches!(result, NotFound), "unexpected error: {result:?}");
         }};
     }
 
@@ -678,7 +677,7 @@ mod tests {
         }
 
         // Add more to the third leaf.
-        let dyn_cells = handle_stepper_panics(move || unsafe {
+        let dyn_cells = catch_not_found(move || unsafe {
             dyn_cells.write(LEAF_SIZE * 2, [255u8, 0]);
             dyn_cells
         })
@@ -739,7 +738,7 @@ mod tests {
         }
 
         // Write within the gap.
-        let dyn_cells = handle_stepper_panics(move || unsafe {
+        let dyn_cells = catch_not_found(move || unsafe {
             dyn_cells.write(LEAF_SIZE - 1, [1u8, 1, 3]);
             dyn_cells
         })

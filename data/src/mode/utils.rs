@@ -5,6 +5,7 @@
 //! Utilities for modal components
 
 use std::ops::Deref;
+use std::panic::resume_unwind;
 
 /// Source for a state component, either borrowed or owned
 ///
@@ -63,5 +64,65 @@ impl<T> Deref for Source<'_, T> {
 impl<T> From<T> for Source<'_, T> {
     fn from(value: T) -> Self {
         Source::from(Box::new(value))
+    }
+}
+
+/// Panic payload that is raised when a value isn't present when running in [`Verify`] mode
+///
+/// [`Verify`]: crate::mode::Verify
+#[derive(Copy, Clone, Debug, Eq, PartialEq, derive_more::Display, thiserror::Error)]
+pub struct NotFound;
+
+/// Indicate that a value isn't present but should be when running in [`Verify`] mode.
+///
+/// # Safety
+///
+/// This function must only be called in the implementations of [`Verify`] mode. Calling this
+/// function outside of that context is undefined behavior as there may not be any panic handlers
+/// such as [`catch_not_found`] installed which can catch the panic and convert it into an
+/// error.
+///
+/// [`Verify`]: crate::mode::Verify
+pub unsafe fn not_found() -> ! {
+    // We use [`resume_unwind`] over [`panic_any`] to avoid calling the panic hook.
+    // XXX: This fails without a message when there is no matching [`catch_not_found`] wrapper.
+    resume_unwind(Box::new(NotFound))
+}
+
+/// Run the given closure and catch calls to `not_found`.
+///
+/// If `not_found` is called, this function returns `Err(NotFound)`. Otherwise, it returns `Ok` with
+/// the result of the closure.
+///
+/// [`Verify`]: crate::mode::Verify
+pub fn catch_not_found<R, F: FnOnce() -> R + std::panic::UnwindSafe>(f: F) -> Result<R, NotFound> {
+    match std::panic::catch_unwind(f) {
+        Ok(res) => Ok(res),
+        Err(err) => match err.downcast::<NotFound>() {
+            Ok(not_found) => Err(*not_found),
+            Err(other) => resume_unwind(other),
+        },
+    }
+}
+
+/// Result of catching either a `NotFound` or any other panic
+pub enum CaughtNotFoundOrPanic {
+    /// `not_found` was called
+    NotFound(NotFound),
+
+    /// A panic occurred
+    Other(Box<dyn std::any::Any + Send>),
+}
+
+/// Like [`catch_not_found`] but also catches other panics.
+pub fn catch_not_found_and_more<R, F: FnOnce() -> R + std::panic::UnwindSafe>(
+    f: F,
+) -> Result<R, CaughtNotFoundOrPanic> {
+    match std::panic::catch_unwind(f) {
+        Ok(res) => Ok(res),
+        Err(err) => Err(match err.downcast::<NotFound>() {
+            Ok(not_found) => CaughtNotFoundOrPanic::NotFound(*not_found),
+            Err(other) => CaughtNotFoundOrPanic::Other(other),
+        }),
     }
 }
