@@ -44,11 +44,8 @@ pub mod verify_backend;
 
 use std::marker::PhantomData;
 
-use bincode::de::Decode;
-use bincode::de::Decoder;
 use bincode::enc::Encode;
 use bincode::enc::Encoder;
-use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 pub use elems::*;
 use octez_riscv_data::mode::Mode;
@@ -233,17 +230,6 @@ pub trait ManagerSerialise: ManagerRead {
         region: &Self::DynRegion,
         encoder: E,
     ) -> Result<(), EncodeError>;
-}
-
-/// Manager with the ability to deserialise regions
-pub trait ManagerDeserialise: ManagerBase {
-    /// Deserialise a region.
-    fn deserialise_region<T: Decode<D::Context>, const LEN: usize, D: Decoder>(
-        decoder: D,
-    ) -> Result<Self::Region<T, LEN>, DecodeError>;
-
-    /// Deserialise the dynamic region.
-    fn deserialise_dyn_region<D: Decoder>(decoder: D) -> Result<Self::DynRegion, DecodeError>;
 }
 
 /// Manager with the ability to clone regions

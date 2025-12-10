@@ -158,7 +158,7 @@ impl<M: backend::ManagerSerialise> Encode for HartState<M> {
     }
 }
 
-impl<C, M: backend::ManagerDeserialise> Decode<C> for HartState<M> {
+impl<C> Decode<C> for HartState<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             xregisters: Decode::decode(decoder)?,

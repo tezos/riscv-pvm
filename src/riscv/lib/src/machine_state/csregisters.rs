@@ -415,7 +415,7 @@ impl<M: backend::ManagerSerialise> Encode for CSRegisters<M> {
     }
 }
 
-impl<C, M: backend::ManagerDeserialise> bincode::Decode<C> for CSRegisters<M> {
+impl<C> bincode::Decode<C> for CSRegisters<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             fflags: bincode::Decode::decode(decoder)?,

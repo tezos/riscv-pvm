@@ -3,17 +3,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::array;
-use std::mem::MaybeUninit;
 use std::ops::Deref;
 
 use bincode::Encode;
-use bincode::de::Decode;
-use bincode::de::Decoder;
-use bincode::de::read::Reader;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
-use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
 
@@ -21,7 +15,6 @@ use super::Elem;
 use super::ManagerAlloc;
 use super::ManagerBase;
 use super::ManagerClone;
-use super::ManagerDeserialise;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
@@ -131,33 +124,6 @@ impl ManagerSerialise for Normal {
         len.encode(&mut encoder)?;
 
         encoder.writer().write(region)
-    }
-}
-
-impl ManagerDeserialise for Normal {
-    fn deserialise_region<T: Decode<D::Context> + 'static, const LEN: usize, D: Decoder>(
-        mut decoder: D,
-    ) -> Result<Self::Region<T, LEN>, DecodeError> {
-        let mut items = array::from_fn(|_| MaybeUninit::<T>::uninit());
-
-        for item in items.iter_mut() {
-            item.write(T::decode(&mut decoder)?);
-        }
-
-        // SAFETY: We have iterated through all items and initialised them.
-        let values = items.map(|value| unsafe { value.assume_init() });
-        Ok(values)
-    }
-
-    fn deserialise_dyn_region<'de, D: Decoder>(
-        mut decoder: D,
-    ) -> Result<Self::DynRegion, DecodeError> {
-        let len = u64::decode(&mut decoder)? as usize;
-
-        let mut target = Normal::allocate_dyn_region(len);
-        decoder.reader().read(&mut target)?;
-
-        Ok(target)
     }
 }
 

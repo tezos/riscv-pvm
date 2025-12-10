@@ -28,7 +28,6 @@ use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 
@@ -120,7 +119,7 @@ impl<M: ManagerSerialise> Encode for RevealRequest<M> {
     }
 }
 
-impl<C, M: ManagerDeserialise> Decode<C> for RevealRequest<M> {
+impl<C> Decode<C> for RevealRequest<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             bytes: Decode::decode(decoder)?,

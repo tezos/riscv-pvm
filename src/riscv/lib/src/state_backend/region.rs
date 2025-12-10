@@ -9,6 +9,7 @@ use std::ops::Deref;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
+use bincode::de::read::Reader;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
@@ -37,7 +38,6 @@ use perfect_derive::perfect_derive;
 use super::ManagerAlloc;
 use super::ManagerBase;
 use super::ManagerClone;
-use super::ManagerDeserialise;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
@@ -139,7 +139,7 @@ impl<T: Encode, M: ManagerSerialise> Encode for Cell<T, M> {
     }
 }
 
-impl<C, E: Decode<C>, M: ManagerDeserialise> Decode<C> for Cell<E, M> {
+impl<C, E: Decode<C>> Decode<C> for Cell<E, Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let region = Decode::decode(decoder)?;
         Ok(Self { region })
@@ -345,10 +345,11 @@ impl<T: Encode, const LEN: usize, M: ManagerSerialise> Encode for Cells<T, LEN, 
     }
 }
 
-impl<C, E: Decode<C>, const LEN: usize, M: ManagerDeserialise> Decode<C> for Cells<E, LEN, M> {
+impl<C, T: Decode<C>, const LEN: usize> Decode<C> for Cells<T, LEN, Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let region = M::deserialise_region(decoder)?;
-        Ok(Self { region })
+        Ok(Self {
+            region: Decode::decode(decoder)?,
+        })
     }
 }
 
@@ -600,9 +601,13 @@ impl<M: ManagerSerialise> Encode for DynCells<M> {
     }
 }
 
-impl<C, M: ManagerDeserialise> Decode<C> for DynCells<M> {
+impl<C> Decode<C> for DynCells<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let region = M::deserialise_dyn_region(decoder)?;
+        let len = u64::decode(decoder)? as usize;
+
+        let mut region = Normal::allocate_dyn_region(len);
+        decoder.reader().read(&mut region)?;
+
         Ok(DynCells { region })
     }
 }
