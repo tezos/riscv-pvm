@@ -33,7 +33,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -149,7 +148,7 @@ impl<const PAGES: usize, M: ManagerClone> CloneState for PagePermissions<PAGES, 
     }
 }
 
-impl<C, const PAGES: usize, M: ManagerDeserialise> Decode<C> for PagePermissions<PAGES, M> {
+impl<C, const PAGES: usize> Decode<C> for PagePermissions<PAGES, Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let pages = Decode::decode(decoder)?;
         Ok(Self { pages })

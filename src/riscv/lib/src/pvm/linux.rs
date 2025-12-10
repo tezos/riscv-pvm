@@ -62,7 +62,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -1099,7 +1098,7 @@ impl<M: ManagerSerialise> Encode for SupervisorState<M> {
     }
 }
 
-impl<C, M: ManagerDeserialise> Decode<C> for SupervisorState<M> {
+impl<C> Decode<C> for SupervisorState<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             tid_address: Decode::decode(decoder)?,

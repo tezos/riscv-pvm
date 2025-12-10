@@ -30,7 +30,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -306,13 +305,6 @@ where
     {
         Encode::encode(self, encoder)
     }
-
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
-    where
-        M: ManagerDeserialise,
-    {
-        Decode::decode(decoder)
-    }
 }
 
 impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
@@ -324,12 +316,12 @@ impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
     }
 }
 
-impl<C, B: Buddy<M>, M: ManagerDeserialise> Decode<C> for BuddyBranch2<B, M> {
+impl<C, B: Decode<C>> Decode<C> for BuddyBranch2<B, Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             free_info: Decode::decode(decoder)?,
-            left: Box::new(Buddy::decode(decoder)?),
-            right: Box::new(Buddy::decode(decoder)?),
+            left: Box::new(Decode::decode(decoder)?),
+            right: Box::new(Decode::decode(decoder)?),
         })
     }
 }

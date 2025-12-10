@@ -254,13 +254,14 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerSerialise> Encode for MachineC
     }
 }
 
-impl<C, MC: memory::MemoryConfig, M: backend::ManagerDeserialise> Decode<C>
-    for MachineCoreState<MC, M>
+impl<C, MC: memory::MemoryConfig> Decode<C> for MachineCoreState<MC, Normal>
+where
+    MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             hart: Decode::decode(decoder)?,
-            main_memory: Memory::decode(decoder)?,
+            main_memory: Decode::decode(decoder)?,
             signal_actions: Decode::decode(decoder)?,
         })
     }
@@ -341,11 +342,11 @@ where
     }
 }
 
-impl<C, MC, CPE, M> Decode<C> for MachineState<MC, CPE, M>
+impl<C, MC, CPE> Decode<C> for MachineState<MC, CPE, Normal>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
-    M: backend::ManagerDeserialise,
+    CPE: CodePageEntry<MC, Normal>,
+    MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {

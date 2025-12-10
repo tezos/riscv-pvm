@@ -11,9 +11,7 @@ pub(crate) mod state;
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
-use bincode::de::Decoder;
 use bincode::enc::Encoder;
-use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use listener::MemoryGovernanceListener;
 use octez_riscv_data::merkle_proof;
@@ -30,7 +28,6 @@ use crate::state::NewState;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -319,11 +316,6 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
         M: ManagerSerialise;
-
-    /// Deserialise the memory state.
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
-    where
-        M: ManagerDeserialise;
 }
 
 /// Memory configuration

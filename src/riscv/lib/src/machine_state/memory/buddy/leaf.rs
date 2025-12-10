@@ -29,7 +29,6 @@ use crate::state_backend::Cell;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -200,13 +199,6 @@ impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
     {
         Encode::encode(self, encoder)
     }
-
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
-    where
-        M: ManagerDeserialise,
-    {
-        Decode::decode(decoder)
-    }
 }
 
 impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
@@ -215,7 +207,7 @@ impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
     }
 }
 
-impl<C, const PAGES: u64, M: ManagerDeserialise> Decode<C> for BuddyLeaf<PAGES, M> {
+impl<C, const PAGES: u64> Decode<C> for BuddyLeaf<PAGES, Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let set = Decode::decode(decoder)?;
         Ok(Self { set })

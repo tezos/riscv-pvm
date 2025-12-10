@@ -461,11 +461,11 @@ where
     }
 }
 
-impl<C, MC, CPE, M> Decode<C> for Pvm<MC, CPE, M>
+impl<C, MC, CPE> Decode<C> for Pvm<MC, CPE, Normal>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
-    M: state_backend::ManagerDeserialise,
+    CPE: CodePageEntry<MC, Normal>,
+    MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {

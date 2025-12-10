@@ -42,7 +42,6 @@ use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
 use crate::state_backend::CellsProj;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreCons;
@@ -337,7 +336,7 @@ impl<M: ManagerSerialise> Encode for XRegisters<M> {
     }
 }
 
-impl<C, M: ManagerDeserialise> Decode<C> for XRegisters<M> {
+impl<C> Decode<C> for XRegisters<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let registers = Decode::decode(decoder)?;
         Ok(Self { registers })
@@ -733,7 +732,7 @@ impl<M: ManagerSerialise> Encode for FRegisters<M> {
     }
 }
 
-impl<C, M: ManagerDeserialise> Decode<C> for FRegisters<M> {
+impl<C> Decode<C> for FRegisters<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let registers = Decode::decode(decoder)?;
         Ok(Self { registers })

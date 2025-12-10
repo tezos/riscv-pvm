@@ -162,7 +162,7 @@ impl<M: backend::ManagerSerialise> Encode for ReservationSet<M> {
     }
 }
 
-impl<C, M: backend::ManagerDeserialise> Decode<C> for ReservationSet<M> {
+impl<C> Decode<C> for ReservationSet<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             start_addr: Decode::decode(decoder)?,

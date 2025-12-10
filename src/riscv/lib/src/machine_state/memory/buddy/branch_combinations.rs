@@ -30,7 +30,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -59,11 +58,10 @@ macro_rules! combined_buddy_branch {
             }
 
             // Passthrough implementation, default derive macro can't derive this ...
-            impl<B, M> Decode<()> for [<$name Alloc>]<B, M>
+            impl<B> Decode<()> for [<$name Alloc>]<B, Normal>
             where
                 B: BuddyConfig,
-                M: ManagerDeserialise,
-                <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>: Decode<()>,
+                <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<Normal>: Decode<()>,
             {
                 fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
                     Ok(Self(Decode::decode(decoder)?))
@@ -99,9 +97,9 @@ macro_rules! combined_buddy_branch {
             }
         }
 
-        impl<C, B: Buddy<M>, M: ManagerDeserialise> Decode<C> for $name<B, M> {
+        impl<C, B: Decode<C>> Decode<C> for $name<B, Normal> {
             fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-                Ok(Self(Buddy::decode(decoder)?))
+                Ok(Self(Decode::decode(decoder)?))
             }
         }
 
@@ -179,13 +177,6 @@ macro_rules! combined_buddy_branch {
                 M: ManagerSerialise,
             {
                 Encode::encode(self, encoder)
-            }
-
-            fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
-            where
-                M: ManagerDeserialise,
-            {
-                Decode::decode(decoder)
             }
         }
 

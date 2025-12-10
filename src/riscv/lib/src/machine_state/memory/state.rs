@@ -15,6 +15,7 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::mode::Normal;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -30,7 +31,6 @@ use crate::state_backend::DynCells;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::ManagerDeserialise;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
@@ -430,13 +430,6 @@ where
     {
         Encode::encode(self, encoder)
     }
-
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError>
-    where
-        M: ManagerDeserialise,
-    {
-        Decode::decode(decoder)
-    }
 }
 
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
@@ -472,8 +465,8 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerSerial
     }
 }
 
-impl<C, const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerDeserialise> Decode<C>
-    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+impl<C, const PAGES: usize, const TOTAL_BYTES: usize, B: Decode<C>> Decode<C>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, Normal>
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
@@ -481,7 +474,7 @@ impl<C, const PAGES: usize, const TOTAL_BYTES: usize, B: Buddy<M>, M: ManagerDes
             readable_pages: Decode::decode(decoder)?,
             writable_pages: Decode::decode(decoder)?,
             executable_pages: Decode::decode(decoder)?,
-            allocated_pages: Buddy::decode(decoder)?,
+            allocated_pages: Decode::decode(decoder)?,
         })
     }
 }
