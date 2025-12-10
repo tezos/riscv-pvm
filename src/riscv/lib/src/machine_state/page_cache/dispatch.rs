@@ -134,7 +134,14 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug for DispatchTarg
 
 /// A compiler that can JIT-compile sequences of instructions, and hot-swap the execution of
 /// said entrypoint in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig>: Default + Sized {
+pub trait DispatchCompiler<MC: MemoryConfig>: Sized {
+    /// In some implementations there are shared resources that we don't want to recreate for every
+    /// new compiler. These are stored in the compiler context.
+    type Context: Default;
+
+    /// A new compiler is created, given a context.
+    fn new(context: &Self::Context) -> Self;
+
     /// Whether compilation should be attempted for the instruction sequence.
     fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool;
 
@@ -165,6 +172,12 @@ impl Default for InlineCompiler {
 }
 
 impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
+    type Context = ();
+
+    fn new(_: &()) -> Self {
+        Self::default()
+    }
+
     #[inline]
     fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
         // every entrypoint must be compiled immediately for inline jit, as it's used for testing
@@ -221,37 +234,31 @@ mod internal_corro {
     unsafe impl<T> Send for SendWrapper<T> {}
 }
 
-/// JIT compiler for entrypoints that performs compilation in a
-/// background thread.
-#[perfect_derive(Clone)]
-pub struct OutlineCompiler<MC: MemoryConfig> {
-    // We will not touch the jit from the execution thread, however we must maintain
-    // a reference to it - to ensure it is not dropped before we are done with execution,
-    // even if the background compilation thread panics.
-    _do_not_use_this_is_for_drop_only: Arc<Mutex<internal_corro::SendWrapper<JIT>>>,
-    sender: Sender<CompilationRequest<Self, MC>>,
+/// We want all outline compilers to share one background thread. So the context needed to create a
+/// new outline compiler is the sender end of a channel pointing to the thread
+pub struct OutlineCompilerContext<MC: MemoryConfig> {
+    sender: Sender<CompilationRequest<OutlineCompiler<MC>, MC>>,
 }
 
-impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
+impl<MC: MemoryConfig + Send> Default for OutlineCompilerContext<MC> {
+    /// Creating a new `OutlineCompilerContext` spawns the background thread.
     fn default() -> Self {
-        let (sender, receiver) = mpsc::channel();
-
-        let jit_internal = JIT::new().expect("OutlineCompiler should instantiate its `JIT`");
-        let jit = Arc::new(Mutex::new(internal_corro::SendWrapper::new(jit_internal)));
-
-        let compiler = Self {
-            _do_not_use_this_is_for_drop_only: jit.clone(),
-            sender,
-        };
+        let (sender, receiver) = mpsc::channel::<CompilationRequest<OutlineCompiler<MC>, MC>>();
 
         std::thread::spawn(move || {
             {
-                let mut jit_guard = jit.lock().expect("Only this thread locks the JIT");
-
-                // SAFETY: We are the only thread that may access the JIT compilation state.
-                let jit = unsafe { jit_guard.as_mut() };
-
                 while let Ok(msg) = receiver.recv() {
+                    let mut jit_guard = msg
+                        .page
+                        .compiler
+                        ._do_not_use_in_main_thread
+                        .lock()
+                        .expect("Only this thread locks the JIT");
+
+                    // SAFETY: Only this thread touches this so it is safe to get a mutable
+                    // reference to it.
+                    let jit = unsafe { jit_guard.as_mut() };
+
                     if Arc::strong_count(&msg.page) == 1 {
                         // The main thread already dropped the page (we are the only reference)
                         // - possibly because the memory the page corresponds to is now writable.
@@ -261,9 +268,7 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
 
                     let offset = address_to_halfword_index(msg.program_counter);
 
-                    if let Some(jitfn) =
-                        jit.compile_page::<Self, MC>(&msg.page, offset, msg.program_counter)
-                    {
+                    if let Some(jitfn) = jit.compile_page(&msg.page, offset, msg.program_counter) {
                         let dispatch = &msg.page.entries[offset].dispatch;
 
                         debug_assert_eq!(
@@ -276,18 +281,39 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
                     };
                 }
             }
-            // because we used blocking recv with an asynchronous channel, this only fails when the
-            // other end of the channel has been dropped.
-            //
-            // This means the Compiler has been dropped - and thus execution has stopped.
-            // We are therefore safe to drop the JIT.
         });
 
-        compiler
+        Self { sender }
     }
 }
 
+/// JIT compiler for entrypoints that performs compilation in the shared
+/// background thread.
+#[perfect_derive(Clone)]
+pub struct OutlineCompiler<MC: MemoryConfig> {
+    // We must not touch the jit from the execution thread. On each compilation request it is
+    // passed through to the background thread as part of the [`PageEntry`]. The background thread
+    // is allowed to lock the mutex and use the underlying JIT instance.
+    _do_not_use_in_main_thread: Arc<Mutex<internal_corro::SendWrapper<JIT>>>,
+    sender: Sender<CompilationRequest<Self, MC>>,
+}
+
 impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
+    /// This contains the sender pointing to the shared background thread.
+    type Context = OutlineCompilerContext<MC>;
+
+    /// Instantiate a new outline compiler with a fresh JIT instance and a clone of the sender to
+    /// the background thread.
+    fn new(context: &Self::Context) -> Self {
+        let jit_internal = JIT::new().expect("OutlineCompiler should instantiate its `JIT`");
+        let jit = Arc::new(Mutex::new(internal_corro::SendWrapper::new(jit_internal)));
+
+        Self {
+            _do_not_use_in_main_thread: jit,
+            sender: context.sender.clone(),
+        }
+    }
+
     fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool {
         target.remaining_calls.fetch_sub(1, Ordering::SeqCst) == 1
     }
@@ -320,7 +346,8 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 
 /// Compilation request sent to the background JIT-thread of the [`OutlineCompiler`].
 struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
-    /// Reference to the page containing the entrypoint to compile.
+    /// Reference to the page containing the entrypoint to compile. This carries the compiler
+    /// itself, which the background thread uses to access the JIT instance.
     page: Arc<super::state::PageEntry<Jitted<D, MC>, D>>,
     /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,

@@ -38,6 +38,12 @@ pub struct Interpreted<MC, M> {
 impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, M> {
     type Compiler = InterpretedCompiler;
 
+    type CompilerContext = ();
+
+    fn new_compiler(_context: &()) -> Self::Compiler {
+        InterpretedCompiler
+    }
+
     /// Run an entrypoint in a purely interpreted manner.
     fn run_entrypoint(
         page: &Arc<super::state::PageEntry<Self, InterpretedCompiler>>,

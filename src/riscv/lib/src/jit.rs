@@ -328,10 +328,16 @@ mod tests {
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
 
     /// Dummy compiler used as a generic parameter to `compile`.
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct DummyCompiler;
 
     impl<MC: MemoryConfig> DispatchCompiler<MC> for DummyCompiler {
+        type Context = ();
+
+        fn new(_: &()) -> Self {
+            DummyCompiler
+        }
+
         fn should_compile(
             &self,
             _target: &crate::machine_state::page_cache::DispatchTarget<Self, MC>,

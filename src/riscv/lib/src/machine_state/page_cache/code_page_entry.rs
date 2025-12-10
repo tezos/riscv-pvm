@@ -31,7 +31,19 @@ pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
     ///
     /// We require the compiler capable of doing so to be passed in when
     /// dispatching.
-    type Compiler: Clone + Default;
+    type Compiler: Clone;
+
+    /// In some cases, different compilers share a context. We want to instantiate the context
+    /// once, rather than a new one for every compiler.
+    type CompilerContext: Default;
+
+    /// To create a new compiler we use a compiler context.
+    ///
+    /// TODO RV-847: It isn't great the way this compiler-creation functionality is present both
+    /// here and in the `DispatchCompiler` trait. We plan to unify the different compilers to all
+    /// implement something like `DispatchCompiler`, which will mean this can certainly be removed
+    /// from here; possibly the whole `CodePageEntry` trait can be removed.
+    fn new_compiler(context: &Self::CompilerContext) -> Self::Compiler;
 
     /// Run a code-page entrypoint against the [`MachineCoreState`].
     ///

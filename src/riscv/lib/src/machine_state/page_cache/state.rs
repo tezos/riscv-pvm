@@ -241,9 +241,11 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
 {
     /// Construct a new page cache, which will be entirely unpopulated.
     fn new() -> Self {
+        let compiler_context = CPE::CompilerContext::default();
+
         Self {
             pages: boxed_from_fn(|| None),
-            compiler: CPE::Compiler::default(),
+            compiler: CPE::new_compiler(&compiler_context),
         }
     }
 
