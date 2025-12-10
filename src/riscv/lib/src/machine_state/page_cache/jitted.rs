@@ -110,6 +110,12 @@ impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry<MC, Normal
 {
     type Compiler = D;
 
+    type CompilerContext = D::Context;
+
+    fn new_compiler(context: &D::Context) -> D {
+        D::new(context)
+    }
+
     /// Run from an entrypoint, using the currently selected dispatch mechanism
     fn run_entrypoint(
         page: &Arc<super::state::PageEntry<Self, D>>,
