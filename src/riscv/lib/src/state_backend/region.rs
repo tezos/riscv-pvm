@@ -829,6 +829,7 @@ pub(crate) mod tests {
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::utils::catch_not_found;
 
     use crate::backend_test;
     use crate::default::ConstDefault;
@@ -841,7 +842,6 @@ pub(crate) mod tests {
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
-    use crate::state_backend::verify_backend::handle_stepper_panics;
 
     /// Dummy type that helps us implement custom normalisation via [`Elem`]
     #[repr(C, packed)]
@@ -1085,7 +1085,7 @@ pub(crate) mod tests {
             let final_hash = Hash::from_foldable(&foo);
 
             // Verify the proof and check the final hash
-            handle_stepper_panics(|| {
+            catch_not_found(|| {
                 let mut verify_foo = {
                     let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof))
                         .unwrap()
