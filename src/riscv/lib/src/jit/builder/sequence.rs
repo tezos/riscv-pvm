@@ -106,14 +106,12 @@ impl<'jit, MC: MemoryConfig> SequenceBuilder<'jit, MC> {
         //   - `program_counter`: Program counter at the start of the sequence
         //   - `max_steps`: Maximum number of steps that can be executed in the sequence
         //   - `result`: Pointer to the result of the sequence
-        //   - `compiler`: Pointer to the `BlockBuilder` that is used to build the sequence
         // Returns:
         //   - `steps`: Number of steps executed in the sequence
         context.func.signature.params.push(AbiParam::new(ptr_type));
         context.func.signature.params.push(AbiParam::new(ptr_type));
         context.func.signature.params.push(AbiParam::new(I64));
         context.func.signature.params.push(AbiParam::new(I64));
-        context.func.signature.params.push(AbiParam::new(ptr_type));
         context.func.signature.params.push(AbiParam::new(ptr_type));
 
         context.func.signature.returns.push(AbiParam::new(I64));
