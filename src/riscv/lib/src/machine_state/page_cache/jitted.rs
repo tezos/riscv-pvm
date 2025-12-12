@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use octez_riscv_data::mode::Normal;
 
-use super::INSTRUCTION_ENTRIES;
 use super::code_page_entry::CodePageEntry;
 use super::dispatch::DispatchCompiler;
 use crate::exceptions::Exception;
@@ -21,12 +20,6 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
 use crate::machine_state::page_cache::DispatchTarget;
-
-/// Maximum number of instructions we pass to a compilation request
-///
-/// Doubles as a coarse upper-bound for the minimum number of steps required to safely dispatch
-/// the entrypoints.
-const MAX_INSTR_COMPILED: usize = 40;
 
 /// A full-page of Jit-supporting entrypoints.
 pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>, D>>;
@@ -101,31 +94,6 @@ impl<D, MC> Jitted<D, MC> {
 
         block_result.steps
     }
-
-    /// Returns up to [MAX_INSTR_COMPILED] instructions, that would be contiguous in memory,
-    /// starting from the page offset given by `instr_pc`.
-    ///
-    /// These instructions can be passed to the JIT compiler for entrypoint dispatch optimisation.
-    pub(super) fn compilation_request_instructions(
-        page: &[Self; INSTRUCTION_ENTRIES],
-        instr_pc: Address,
-    ) -> Vec<Instruction> {
-        let page_offset = address_to_page_offset(instr_pc);
-
-        // instr_pc is always halfword aligned
-        let mut offset = page_offset >> 1;
-
-        let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
-        while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
-            let entry = &page[offset];
-
-            offset += (entry.instruction.width() as usize) >> 1;
-
-            instructions.push(entry.instruction);
-        }
-
-        instructions
-    }
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> From<Instruction> for Jitted<D, MC> {
@@ -186,7 +154,6 @@ mod tests {
     use proptest::prop_assert_eq;
 
     use super::Jitted;
-    use super::MAX_INSTR_COMPILED;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::instruction::Instruction;
@@ -197,6 +164,9 @@ mod tests {
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
 
+    /// An arbitrary number of steps to use for testing.
+    const DEFAULT_TEST_MAX_STEPS: usize = 40;
+
     #[test]
     fn test_jitted_entrypoint_called() {
         let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
@@ -206,14 +176,14 @@ mod tests {
 
         let mut core = MachineCoreState::new();
 
-        let result = CodePageEntry::run_entrypoint(&page, &mut core, 100, MAX_INSTR_COMPILED);
+        let result = CodePageEntry::run_entrypoint(&page, &mut core, 100, DEFAULT_TEST_MAX_STEPS);
 
         assert!(result.error.is_none());
-        assert_eq!(result.steps, MAX_INSTR_COMPILED);
+        assert_eq!(result.steps, DEFAULT_TEST_MAX_STEPS);
 
         assert_eq!(
             core.hart.pc.read(),
-            100 + (MAX_INSTR_COMPILED as u64) * InstrWidth::Compressed as u64
+            100 + (DEFAULT_TEST_MAX_STEPS as u64) * InstrWidth::Compressed as u64
         );
 
         assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
@@ -222,7 +192,7 @@ mod tests {
     proptest::proptest! {
         #[test]
         fn test_interpreted_fallback_on_insufficient_steps(
-            max_steps in 0usize..(MAX_INSTR_COMPILED * 2)
+            max_steps in 0usize..(DEFAULT_TEST_MAX_STEPS * 2)
         ) {
             let Ok(page) = PageEntry::<Jitted<_, M4K>, InlineCompiler>::new::<std::convert::Infallible>(
                 InlineCompiler::default(),
@@ -231,7 +201,7 @@ mod tests {
 
             let mut core = MachineCoreState::new();
 
-            let expected_steps = usize::min(max_steps, MAX_INSTR_COMPILED);
+            let expected_steps = max_steps;
             let start_pc = 100;
             let start_entry = (start_pc >> 1) as usize;
 
@@ -259,7 +229,7 @@ mod tests {
 
         let mut core = MachineCoreState::new();
 
-        let max_steps = MAX_INSTR_COMPILED;
+        let max_steps = DEFAULT_TEST_MAX_STEPS;
 
         let result = CodePageEntry::run_entrypoint(&page, &mut core, 100, max_steps);
 
@@ -301,20 +271,20 @@ mod tests {
         let mut core = MachineCoreState::new();
 
         // Run Noops only
-        let result = CodePageEntry::run_entrypoint(&page, &mut core, 0, MAX_INSTR_COMPILED);
+        let result = CodePageEntry::run_entrypoint(&page, &mut core, 0, DEFAULT_TEST_MAX_STEPS);
 
         assert!(result.error.is_none());
-        assert_eq!(result.steps, MAX_INSTR_COMPILED);
+        assert_eq!(result.steps, DEFAULT_TEST_MAX_STEPS);
 
         assert_eq!(
             core.hart.pc.read(),
-            (MAX_INSTR_COMPILED as u64) * InstrWidth::Uncompressed as u64
+            (DEFAULT_TEST_MAX_STEPS as u64) * InstrWidth::Uncompressed as u64
         );
 
         assert_eq!(page.entries[0].dispatch.called_times(), 1);
 
         // This time, start with a `Unknown` instruction
-        let result = CodePageEntry::run_entrypoint(&page, &mut core, 2, MAX_INSTR_COMPILED);
+        let result = CodePageEntry::run_entrypoint(&page, &mut core, 2, DEFAULT_TEST_MAX_STEPS);
 
         assert_eq!(result.error, Some(Exception::IllegalInstruction));
         assert_eq!(result.steps, 0);
