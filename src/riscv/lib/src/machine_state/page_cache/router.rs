@@ -239,8 +239,17 @@ fn dilate_by_one(range: &RangeInclusive<u64>) -> RangeInclusive<u64> {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::collections::HashSet;
     use std::ops::RangeInclusive;
     use std::sync::Arc;
+
+    use proptest::arbitrary::any;
+    use proptest::collection::vec;
+    use proptest::prop_assert;
+    use proptest::prop_assert_eq;
+    use proptest::proptest;
+    use proptest::strategy::Just;
+    use proptest::strategy::Strategy;
 
     use super::Router;
     use super::RouterEq;
@@ -347,37 +356,38 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_merge_longer() {
-        // left is longer
-        let mut r = TestRouter::default();
-        r.add_range(0..=1);
-        r.add_range(3..=3);
-        r.add_range(0..=3);
-        assert_eq!(r.as_vec(), vec![
-            (0..=2, "".to_string()),
-            (3..=3, "".to_string())
-        ]);
+    proptest! {
+        // In these three tests:
+        //
+        // - `a` is the length of the shorter range minus 1
+        // - `b` is the length of the gap plus 1
+        // - `c` is the difference in length between the two ranges
+        #[test]
+        fn test_merge_left_is_longer(a in 0..1000u64, b in 2..1000u64, c in 1..1000u64) {
+            let mut r = TestRouter::default();
+            r.add_range(0..=(a + c));
+            r.add_range((a + b + c)..=(2 * a + b + c));
+            r.add_range((a + c + 1)..=(a + b + c - 1));
+            assert_eq!(r.ranges(), vec![0..=(a + b + c - 1), (a + b + c)..=(2 * a + b + c)]);
+        }
 
-        // right is longer
-        let mut r = TestRouter::default();
-        r.add_range(0..=0);
-        r.add_range(2..=3);
-        r.add_range(0..=3);
-        assert_eq!(r.as_vec(), vec![
-            (0..=0, "".to_string()),
-            (1..=3, "".to_string())
-        ]);
+        #[test]
+        fn test_merge_right_is_longer(a in 0..1000u64, b in 2..1000u64, c in 1..1000u64) {
+            let mut r = TestRouter::default();
+            r.add_range(0..=a);
+            r.add_range((a + b)..=(2 * a + b + c));
+            r.add_range((a + 1)..=(a + b - 1));
+            assert_eq!(r.ranges(), vec![0..=a, (a + 1)..=(2 * a + b + c)]);
+        }
 
-        // equal length case, defaults to left
-        let mut r = TestRouter::default();
-        r.add_range(0..=1);
-        r.add_range(3..=4);
-        r.add_range(0..=4);
-        assert_eq!(r.as_vec(), vec![
-            (0..=2, "".to_string()),
-            (3..=4, "".to_string())
-        ]);
+        #[test]
+        fn test_merge_equal_length(a in 0..1000u64, b in 2..1000u64) {
+            let mut r = TestRouter::default();
+            r.add_range(0..=a);
+            r.add_range((a + b)..=(2 * a + b));
+            r.add_range((a + 1)..=(a + b - 1));
+            assert_eq!(r.ranges(), vec![0..=(a + b - 1), (a + b)..=(2 * a + b)]);
+        }
     }
 
     #[test]
@@ -391,13 +401,7 @@ mod tests {
 
         r.add_range(0..=11);
 
-        assert_eq!(
-            r.as_vec(),
-            [0..=4, 5..=7, 8..=9, 10..=11]
-                .into_iter()
-                .map(|r| (r, "".to_string()))
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(r.ranges(), vec![0..=4, 5..=7, 8..=9, 10..=11]);
     }
 
     #[test]
@@ -430,17 +434,46 @@ mod tests {
         ]);
     }
 
-    #[test]
-    fn test_remove_range() {
-        let mut r = TestRouter::default();
+    proptest! {
+        #[test]
+        fn test_drain_overlapping(
+            ranges in vec(any::<RangeInclusive<u64>>(), 0..100),
+            (to_drain, idx) in any::<RangeInclusive<u64>>()
+                .prop_flat_map(|r| (Just(r.clone()), r)),
+        ) {
+            let mut r = TestRouter::default();
 
-        r.add_range(0..=4);
-        r.add_range(9..=9);
-        r.add_range(6..=7);
+            for range in ranges {
+                // these ranges may collide, that doesn't matter
+                r.add_range(range);
+            }
 
-        let removed = r.drain_overlapping(4..=7).collect::<Vec<_>>();
+            let before = r.ranges();
 
-        assert_eq!(r.as_vec(), vec![(9..=9, "".to_string())]);
-        assert_eq!(removed, vec![0..=4, 6..=7]);
+            let drained = r.drain_overlapping(to_drain.clone()).collect::<Vec<_>>();
+
+            let after = r.ranges();
+
+            let again = r.drain_overlapping(to_drain.clone()).collect::<Vec<_>>();
+
+            // `drain_overlapping` is idempotent; it returns nothing the second time
+            prop_assert_eq!(after.clone(), r.ranges());
+            prop_assert_eq!(again, vec![]);
+
+            prop_assert_eq!(None, r.get(to_drain.start()));
+            prop_assert_eq!(None, r.get(to_drain.end()));
+            prop_assert_eq!(None, r.get(&idx));
+
+            let after = after.iter().collect::<HashSet<_>>();
+            let drained = drained.iter().collect::<HashSet<_>>();
+            let before = before.iter().collect::<HashSet<_>>();
+
+            // `after` and `drained` are disjoint
+            prop_assert!(after.is_disjoint(&drained));
+
+            // as a set, `before` is the union of `after` and `drained`
+            let union = after.union(&drained).cloned();
+            prop_assert_eq!(before, union.collect::<HashSet<_>>());
+        }
     }
 }
