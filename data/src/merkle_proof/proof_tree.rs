@@ -98,9 +98,9 @@ impl MerkleProof {
             },
             |leaf| match leaf {
                 MerkleProofLeaf::Blind(hash) => *hash,
-                MerkleProofLeaf::Read(data) => Hash::blake3_hash_bytes(data.as_slice()),
+                MerkleProofLeaf::Read(data) => Hash::hash_bytes(data.as_slice()),
             },
-            |(), leaves| Hash::combine(leaves),
+            |(), leaves| Hash::combine_hashes(leaves),
         )
     }
 }
@@ -127,11 +127,11 @@ mod tests {
     fn merkle_proofs_can_be_encoded() {
         let merkle_proofs = [
             MerkleProof::leaf_read([1, 2, 3].to_vec()),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
             Tree::Node(
                 [
                     MerkleProof::leaf_read([1, 2, 3].to_vec()),
-                    MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
+                    MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
                 ]
                 .to_vec(),
             ),
@@ -147,7 +147,7 @@ mod tests {
         let node = Tree::Node(
             [
                 MerkleProof::leaf_read([1, 2, 3].to_vec()),
-                MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[1, 3, 4])),
+                MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
             ]
             .to_vec(),
         );

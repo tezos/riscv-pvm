@@ -203,7 +203,8 @@ impl<M: ManagerClone> CloneState for DynCells<M> {
 impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
     fn fold(&self, builder: HashFold) -> Hash {
         let length = self.len();
-        let length_node = Hash::blake3_hash(length as u64).expect("Hashing length should not fail");
+        let length_node =
+            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
 
         let generator = |idx: usize| {
             let address = MERKLE_LEAF_SIZE
@@ -214,7 +215,7 @@ impl<M: ManagerSerialise> Foldable<HashFold> for DynCells<M> {
             // SAFETY: The chunk writer will only request data within the bounds that we specified.
             // Given we provided the correct length, this is safe.
             let data = unsafe { self.read::<[u8; MERKLE_LEAF_SIZE.get()]>(address) };
-            Hash::blake3_hash_bytes(&data)
+            Hash::hash_bytes(&data)
         };
 
         let pages = length.div_ceil(MERKLE_LEAF_SIZE.get());
@@ -339,7 +340,7 @@ impl Foldable<PartialHashFold<'_>> for DynCells<Verify> {
         let Some(len) = self.region.len_opt() else {
             return PartialHash::InvalidProof;
         };
-        let length_hash = Hash::blake3_hash(len as u64).expect("Hashing length should not fail");
+        let length_hash = Hash::hash_encodable(len as u64).expect("Hashing length should not fail");
 
         let page_hash_generator = |idx| {
             let address = MERKLE_LEAF_SIZE
@@ -353,7 +354,7 @@ impl Foldable<PartialHashFold<'_>> for DynCells<Verify> {
                 verify_backend::PartialState::Incomplete => PartialHash::InvalidProof,
                 verify_backend::PartialState::Absent => PartialHash::Previous,
                 verify_backend::PartialState::Complete(data) => {
-                    let hash = Hash::blake3_hash(data).expect("Hashing page should not fail");
+                    let hash = Hash::hash_encodable(data).expect("Hashing page should not fail");
                     PartialHash::Present(hash)
                 }
             }
@@ -466,21 +467,27 @@ pub(crate) mod tests {
         assert_eq!(buffer, [37, 13]);
 
         // Writing to the entire region must convert properly to stored format.
-        region.write_all::<Flipper>(0, &[
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
+        region.write_all::<Flipper>(
+            0,
+            &[
+                Flipper { a: 11, b: 22 },
+                Flipper { a: 13, b: 24 },
+                Flipper { a: 15, b: 26 },
+                Flipper { a: 17, b: 28 },
+            ],
+        );
 
         let mut buff = [Flipper::default(); 4];
         region.read_all::<Flipper>(0, &mut buff);
-        assert_eq!(buff, [
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
+        assert_eq!(
+            buff,
+            [
+                Flipper { a: 11, b: 22 },
+                Flipper { a: 13, b: 24 },
+                Flipper { a: 15, b: 26 },
+                Flipper { a: 17, b: 28 },
+            ]
+        );
 
         let buffer = unsafe { region.read::<[u8; 8]>(0) };
         assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);

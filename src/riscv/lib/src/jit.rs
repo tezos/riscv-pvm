@@ -172,7 +172,7 @@ impl JIT {
             return None;
         }
 
-        let Ok(hash) = Hash::blake3_hash((instr_for_hash.as_slice(), program_counter)) else {
+        let Ok(hash) = Hash::hash_encodable((instr_for_hash.as_slice(), program_counter)) else {
             builder.abandon();
             self.clear();
             return None;

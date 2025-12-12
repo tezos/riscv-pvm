@@ -145,8 +145,8 @@ mod tests {
 
         // We expect to get the Absent case since the father of the nested node is blinded
         let merkle_proof = MerkleProof::Node(vec![
-            MerkleProof::leaf_read(Hash::blake3_hash_bytes(&[0, 1, 2]).as_ref().to_vec()),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[3, 4, 5])),
+            MerkleProof::leaf_read(Hash::hash_bytes(&[0, 1, 2]).as_ref().to_vec()),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[3, 4, 5])),
         ]);
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_i16(proof).unwrap();
@@ -162,7 +162,7 @@ mod tests {
 
         // Expect absent case in the computed result
         let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
-        let leaf_blind: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).into();
+        let leaf_blind: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
         let proof_bytes = [
             [TAG_NODE, TAG_READ].as_ref(),
             leaf_read.as_ref(),
@@ -178,7 +178,7 @@ mod tests {
     fn test_not_enough_bytes_error() {
         // For the streaming case if the data is incomplete we will actually get a bincode::Error
         // due to eof being reached. So to test for NotEnoughBytes we are just going to provide less tags
-        let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
         // Note the truncated hash
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_bad_bincode() {
-        let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let bad_bool_bincode = [42_u8; 1];
 
         let raw_bytes_content = [
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_too_many_bytes_error() {
         let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
-        let hash_read: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
         // Note the extra byte at the end
@@ -307,10 +307,8 @@ mod tests {
     fn test_blind_computation() {
         // The nested leaf is blinded
         let absent_shape = MerkleProof::Node(vec![
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2])),
-            MerkleProof::Node(vec![MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[
-                0, 1, 2,
-            ]))]),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2])),
+            MerkleProof::Node(vec![MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2]))]),
         ]);
         let comp_fn =
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&absent_shape).into());
@@ -319,7 +317,7 @@ mod tests {
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
-        let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
+        let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
@@ -328,8 +326,8 @@ mod tests {
     #[test]
     fn test_blind_computation_stream() {
         // The nested leaf is blinded
-        let b1: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
-        let b2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
+        let b1: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let b2: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let raw_bytes_content = [
             [TAG_NODE, TAG_BLIND].as_ref(),
             b1.as_ref(),
@@ -346,7 +344,7 @@ mod tests {
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
-        let merkle_proof = MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[6, 7, 8]));
+        let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
         let comp_fn = computation_leaves(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
@@ -356,15 +354,15 @@ mod tests {
     fn test_bad_structure() {
         let bad_shape_1 = MerkleProof::Node(vec![]);
         let bad_shape_2 = MerkleProof::Node(vec![
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2])),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2])),
             MerkleProof::Node(vec![]),
             MerkleProof::Node(vec![]),
             MerkleProof::Node(vec![]),
         ]);
         let bad_shape_3 = MerkleProof::Node(vec![
             MerkleProof::Node(vec![]),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[0, 1, 2])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2])),
         ]);
         let bad_shape_4 = MerkleProof::Node(vec![
             MerkleProof::leaf_read([42_u8; 32].to_vec()),
@@ -383,10 +381,13 @@ mod tests {
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
         assert!(comp_fn.is_err_and(|e| {
             println!("{e:?}");
-            matches!(e, ProofError::BadNumberOfBranches {
-                expected: 0,
-                got: 3
-            })
+            matches!(
+                e,
+                ProofError::BadNumberOfBranches {
+                    expected: 0,
+                    got: 3
+                }
+            )
         }));
 
         // The first child is a node, but is expected to be a leaf
@@ -402,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_bad_structure_stream() {
-        let hash: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[0, 1, 2]).into();
+        let hash: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         // Place an invalid second tag
         // Bad tag introduced after the first node
         let res = run_stream_deserialiser(computation_i16, [TAG_NODE, 0b01].as_ref());
@@ -453,9 +454,9 @@ mod tests {
     fn test_valid_computation() {
         let merkleproof = MerkleProof::Node(vec![
             MerkleProof::leaf_read(0x140A_0000_i32.to_le_bytes().to_vec()),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[3, 4, 5])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[3, 4, 5])),
             MerkleProof::leaf_read(0xC0005_i32.to_le_bytes().to_vec()),
-            MerkleProof::leaf_blind(Hash::blake3_hash_bytes(&[9, 10, 11])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[9, 10, 11])),
         ]);
 
         let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
@@ -466,9 +467,9 @@ mod tests {
     #[test]
     fn test_valid_computation_stream() {
         let h1 = 0x140A_0000_i32.to_le_bytes();
-        let h2: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[3, 4, 5]).into();
+        let h2: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
         let h3 = 0xC0005_i32.to_le_bytes();
-        let h4: [u8; DIGEST_SIZE] = Hash::blake3_hash_bytes(&[9, 10, 11]).into();
+        let h4: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[9, 10, 11]).into();
 
         let res = run_stream_deserialiser(
             computation_leaves,
