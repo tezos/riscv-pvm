@@ -6,6 +6,7 @@ use octez_riscv::pvm::node_pvm::NodePvm;
 use octez_riscv::pvm::node_pvm::PvmStorage;
 use octez_riscv::storage::Repo;
 use octez_riscv::storage::StorageError;
+use octez_riscv_data::hash::Hash;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
@@ -56,8 +57,9 @@ fn test_repo() {
     }
 
     // Check that an unknown commit returns a `NotFound` error
+    let unknown_hash: Hash = [0u8; Hash::DIGEST_SIZE].into();
     assert!(matches!(
-        repo.checkout(&[0; 32].into()),
+        repo.checkout(&unknown_hash),
         Err(StorageError::NotFound(_))
     ));
 
@@ -120,8 +122,9 @@ fn test_repo_serialised() {
     }
 
     // Check that an unknown commit returns a `NotFound` error
+    let unknown_hash: Hash = [0u8; Hash::DIGEST_SIZE].into();
     assert!(matches!(
-        repo.checkout_serialised::<Vec<u8>>(&[0; 32].into()),
+        repo.checkout_serialised::<Vec<u8>>(&unknown_hash),
         Err(StorageError::NotFound(_))
     ));
 

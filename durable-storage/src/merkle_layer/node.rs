@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use std::sync::OnceLock;
 use bincode::Encode;
 use bytes::Bytes;
 use bytes::BytesMut;
-use octez_riscv_data::serialisation::serialise_into;
+use octez_riscv_data::hash::Hash;
 
 use super::Key;
 
@@ -26,7 +27,7 @@ pub(super) struct MavlNode {
     /// non-mutating operation.
     ///
     /// An uninitialised hash is a hash that has not been set or has been dirtied.
-    hash: OnceLock<blake3::Hash>,
+    hash: OnceLock<Hash>,
 
     /// The difference in heights between child branches (right - left).
     balance_factor: i64,
@@ -38,9 +39,9 @@ struct MavlNodeHashRepresentation<'a> {
     key: &'a Key,
     data: &'a [u8],
     // The bytes of the hash of an optional left child
-    left: Option<&'a [u8; blake3::OUT_LEN]>,
+    left: Option<&'a [u8; Hash::DIGEST_SIZE]>,
     // The bytes of the hash of an optional right child
-    right: Option<&'a [u8; blake3::OUT_LEN]>,
+    right: Option<&'a [u8; Hash::DIGEST_SIZE]>,
     balance_factor: i64,
 }
 
@@ -101,10 +102,16 @@ impl MavlNode {
             data: &self.data,
 
             // Recursively hashes any left child and its children
-            left: self.left.as_ref().map(hash).map(|h| h.as_bytes()),
+            left: self.left.as_ref().map(hash).map(|h| {
+                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
+                digest
+            }),
 
             // Recursively hashes any right child and its children
-            right: self.right.as_ref().map(hash).map(|h| h.as_bytes()),
+            right: self.right.as_ref().map(hash).map(|h| {
+                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
+                digest
+            }),
 
             balance_factor: self.balance_factor,
         }
@@ -200,12 +207,9 @@ pub(super) fn get_mut<'a>(
 ///
 /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
 /// cached.
-pub(super) fn hash(node: &Arc<MavlNode>) -> &blake3::Hash {
+pub(super) fn hash(node: &Arc<MavlNode>) -> &Hash {
     node.hash.get_or_init(|| {
-        let mut hasher = blake3::Hasher::new();
-        serialise_into(node.to_encode(), &mut hasher)
-            .expect("None of the `EncodeError`s can be triggered by this encoding");
-        hasher.finalize()
+        Hash::hash_encodable(node.to_encode()).expect("The hashing should not fail")
     })
 }
 

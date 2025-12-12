@@ -15,7 +15,6 @@
 //! - Convert [`octez_riscv_data::merkle_tree::MerkleTree`] to [`MerkleProof`]
 
 use bincode::Encode;
-use octez_riscv_data::hash::DIGEST_SIZE;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
@@ -97,14 +96,14 @@ pub struct NotEnoughBytesError;
 fn deserialise_final_hash(
     bytes: &mut impl Iterator<Item = u8>,
 ) -> Result<Hash, NotEnoughBytesError> {
-    let mut digest = [0; DIGEST_SIZE];
-    for b in digest.iter_mut() {
+    let mut digest_bytes: [u8; Hash::DIGEST_SIZE] = [0; Hash::DIGEST_SIZE];
+    for b in digest_bytes.iter_mut() {
         match bytes.next() {
             None => return Err(NotEnoughBytesError),
             Some(byte) => *b = byte,
         }
     }
-    Ok(Hash::from(digest))
+    Ok(Hash::from(digest_bytes))
 }
 
 /// Deserialise a [`Proof`] from an iterator of bytes.
@@ -129,7 +128,6 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::DIGEST_SIZE;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
@@ -168,7 +166,7 @@ mod tests {
         }
 
         fn expected_serialisation_length(&self) -> usize {
-            let hashes_size = 2 * DIGEST_SIZE as u64;
+            let hashes_size: u64 = (2 * Hash::DIGEST_SIZE) as u64;
 
             // Each node tag occupies 1 byte.
             let tags_size = self.nodes_count;

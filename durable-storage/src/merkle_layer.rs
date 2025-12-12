@@ -15,6 +15,7 @@ pub mod tree;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::hash::Hash;
 use tree::Avl;
 
 use crate::persistence_layer::HashedData;
@@ -23,10 +24,10 @@ use crate::persistence_layer::PersistenceLayerError;
 
 /// An identifier generated for a given commit.
 #[derive(Debug, PartialEq, Eq)]
-pub struct CommitId(blake3::Hash);
+pub struct CommitId(Hash);
 
 impl CommitId {
-    fn new(hash: blake3::Hash) -> Self {
+    fn new(hash: Hash) -> Self {
         Self(hash)
     }
 }
@@ -87,7 +88,7 @@ impl MerkleLayer {
     /// Persist the data stored in the [MerkleLayer] to durable storage via the [PersistenceLayer].
     pub fn checkout(
         _persistence: Arc<PersistenceLayer>,
-        _root: blake3::Hash,
+        _root: Hash,
     ) -> Result<Self, MerkleLayerError> {
         todo!()
     }
@@ -136,7 +137,7 @@ impl MerkleLayer {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&self) -> blake3::Hash {
+    pub fn hash(&self) -> Hash {
         self.tree.hash()
     }
 
@@ -998,7 +999,7 @@ mod tests {
         for node in merkle_layer.tree.iter() {
             let serialised = octez_riscv_data::serialisation::serialise(node.to_encode())
                 .expect("We should be able to serialise the node");
-            let node_hash: &[u8; 32] = hash(node).as_bytes();
+            let node_hash = hash(node);
             let blob = merkle_layer
                 .persistence
                 .blob_get(node_hash)

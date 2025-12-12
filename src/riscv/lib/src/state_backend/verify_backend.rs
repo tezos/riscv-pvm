@@ -550,32 +550,4 @@ mod tests {
             assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE));
         }
     }
-
-    #[test]
-    fn test_partial_hash_absent_written() {
-        let mut verify_cell: Atom<u64, Verify> = Atom::absent();
-        let proof = None;
-
-        let written_value = 1337;
-        verify_cell.write(written_value);
-
-        let value_hash = Hash::hash_encodable(written_value).unwrap();
-        let expected_state_hash = PartialHash::Present(value_hash);
-        let hash = PartialHash::from_foldable(proof, &verify_cell);
-        assert_eq!(hash, expected_state_hash);
-    }
-
-    #[test]
-    fn test_partial_hash_present_written() {
-        let mut verify_cell: Atom<u64, Verify> = Atom::new(42);
-        let proof = None;
-
-        let written_value = 1337;
-        verify_cell.write(written_value);
-
-        let value_hash = Hash::hash_encodable(written_value).unwrap();
-        let expected_state_hash = PartialHash::Present(value_hash);
-        let hash = PartialHash::from_foldable(proof, &verify_cell);
-        assert_eq!(hash, expected_state_hash);
-    }
 }

@@ -45,13 +45,10 @@ fn merkle_tree_to_compressed_merkle_tree(merkle_tree: MerkleTree) -> CompressedM
                 .map(|child| {
                     use CompressedAccessInfo::*;
                     match child {
-                        CompressedLeaf(hash, access_info) => (
-                            hash,
-                            match access_info {
-                                NoAccess => Some(access_info.clone()),
-                                ReadWrite(_) => None,
-                            },
-                        ),
+                        CompressedLeaf(hash, access_info) => (hash, match access_info {
+                            NoAccess => Some(access_info.clone()),
+                            ReadWrite(_) => None,
+                        }),
                         CompressedNode(hash, _) => (hash, None),
                     }
                 })

@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use octez_riscv_data::hash::Hash;
 use tokio::runtime::Handle;
 
 use crate::merkle_layer::Key;
@@ -66,7 +67,7 @@ impl Database {
 
     /// Obtain, and possibly calculate, the root hash of the database>
     #[cfg_attr(not(test), expect(dead_code, reason = "Implemented in RV-827"))]
-    pub(crate) fn hash(&self) -> blake3::Hash {
+    pub(crate) fn hash(&self) -> Hash {
         self.merkle.hash()
     }
 

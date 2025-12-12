@@ -155,7 +155,7 @@ impl<T: Default + 'static, M: AtomMode> Default for Atom<T, M> {
 
 impl<T: Encode + 'static> Foldable<HashFold> for Atom<T, Normal> {
     fn fold(&self, _builder: HashFold) -> Hash {
-        Hash::blake3_hash(&self.atom).expect("Hashing should not fail")
+        Hash::hash_encodable(&self.atom).expect("Hashing should not fail")
     }
 }
 
@@ -166,7 +166,7 @@ impl<'normal, T: Encode + 'static> Foldable<HashFold> for Atom<T, Prove<'normal>
             .current
             .as_deref()
             .unwrap_or_else(|| &self.atom.previous);
-        Hash::blake3_hash(value).expect("Hashing should not fail")
+        Hash::hash_encodable(value).expect("Hashing should not fail")
     }
 }
 
@@ -187,7 +187,9 @@ impl<T: Encode + 'static> Foldable<PartialHashFold<'_>> for Atom<T, Verify> {
         let hash = match &self.atom {
             Partial::Absent => return builder.previous(),
             Partial::Blinded(hash) => *hash,
-            Partial::Present(value) => Hash::blake3_hash(value).expect("Hashing should not fail"),
+            Partial::Present(value) => {
+                Hash::hash_encodable(value).expect("Hashing should not fail")
+            }
         };
         PartialHash::Present(hash)
     }

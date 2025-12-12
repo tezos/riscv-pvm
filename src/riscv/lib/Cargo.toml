@@ -38,7 +38,6 @@ range-collections.workspace = true
 elf.workspace = true
 trait-set.workspace = true
 memmap2.workspace = true
-blake3.workspace = true
 perfect-derive.workspace = true
 zerocopy.workspace = true
 zerocopy-derive.workspace = true
