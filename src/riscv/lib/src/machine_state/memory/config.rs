@@ -57,7 +57,7 @@ where
     type PageCache<
         CPE: crate::machine_state::page_cache::code_page_entry::CodePageEntry<Self, M>,
         M: ManagerBase,
-    > = PageCacheImpl<PAGES, CPE, Self, M>;
+    > = PageCacheImpl<CPE, Self, M>;
 
     fn state_from_proof<D: merkle_proof::Deserialiser>(
         proof: D,

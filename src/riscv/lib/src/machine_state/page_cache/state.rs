@@ -16,7 +16,6 @@ use std::sync::Arc;
 use super::INSTRUCTION_ENTRIES;
 use super::PageCache;
 use super::code_page_entry::CodePageEntry;
-use crate::array_utils::boxed_from_fn;
 use crate::default::ConstDefault;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::instruction::Instruction;
@@ -155,8 +154,7 @@ impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
 }
 
 #[cfg(test)]
-impl<const PAGES: usize, D, MC>
-    PageCacheImpl<PAGES, super::Jitted<D, MC>, MC, octez_riscv_data::mode::Normal>
+impl<D, MC> PageCacheImpl<super::Jitted<D, MC>, MC, octez_riscv_data::mode::Normal>
 where
     MC: MemoryConfig,
     D: Clone + super::dispatch::DispatchCompiler<MC>,
@@ -177,32 +175,20 @@ where
 }
 
 /// Type alias to simplify the [`PageCacheImpl`] struct.
-type BoxedPages<const PAGES: usize, CPE, C> = Box<[Option<Arc<PageEntry<CPE, C>>>; PAGES]>;
+type BoxedPages<CPE, C> = Box<[Option<Arc<PageEntry<CPE, C>>>]>;
 
 /// Default implementor of [`PageCache`].
 ///
-/// This separation mainly to allow us to work around rust's restrictions w.r.t.
-/// const-generics. We require the number of `PAGES` to match that passed to the
-/// memory config. Rust will not allow us to expose this on the [`MemoryConfig`]
-/// and consume it here, however. Therefore, we avoid specifying the const-generic
-/// on the trait level, where it's easy to tie everything together - and make the
-/// connection with the concrete types that implement these traits.
-///
 /// [`PageCache`]: super::PageCache
-pub struct PageCacheImpl<
-    const PAGES: usize,
-    CPE: CodePageEntry<MC, M>,
-    MC: MemoryConfig,
-    M: ManagerBase,
-> {
-    pages: BoxedPages<PAGES, CPE, CPE::Compiler>,
+// TODO RV-775: this will change to be the default implementor of `PageCache` for
+//              `Normal` mode, only.
+pub struct PageCacheImpl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> {
+    pages: BoxedPages<CPE, CPE::Compiler>,
     compiler: CPE::Compiler,
 }
 
 #[cfg(test)]
-impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
-    PageCacheImpl<PAGES, CPE, MC, M>
-{
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<CPE, MC, M> {
     /// TEST ONLY
     ///
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
@@ -236,15 +222,21 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
     }
 }
 
-impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
-    PageCache<CPE, MC, M> for PageCacheImpl<PAGES, CPE, MC, M>
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE, MC, M>
+    for PageCacheImpl<CPE, MC, M>
 {
     /// Construct a new page cache, which will be entirely unpopulated.
     fn new() -> Self {
+        assert!(
+            MC::TOTAL_BYTES.get() % memory::PAGE_SIZE.get() as usize == 0,
+            "PageCache relies on memory being an exact number of pages in length"
+        );
+        let pages = MC::TOTAL_BYTES.get() >> memory::OFFSET_BITS.get();
+
         let compiler_context = CPE::CompilerContext::default();
 
         Self {
-            pages: boxed_from_fn(|| None),
+            pages: vec![None; pages].into_boxed_slice(),
             compiler: CPE::new_compiler(&compiler_context),
         }
     }
@@ -327,13 +319,14 @@ impl<const PAGES: usize, CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Manager
 
     /// Invalidate a range of pages corresponding to the provided range of memory.
     fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>) {
-        for page_idx in pages.take_while(|idx| *idx < PAGES as u64) {
+        let pages_len = self.pages.len();
+        for page_idx in pages.take_while(|idx| *idx < pages_len as u64) {
             self.pages[page_idx as usize] = None;
         }
     }
 }
 
-impl<const PAGES: usize, CPE, MC, M> MemoryGovernanceListener for PageCacheImpl<PAGES, CPE, MC, M>
+impl<CPE, MC, M> MemoryGovernanceListener for PageCacheImpl<CPE, MC, M>
 where
     CPE: CodePageEntry<MC, M>,
     MC: MemoryConfig,
@@ -395,13 +388,8 @@ mod tests {
     use crate::state::NewState;
     use crate::state_backend::ManagerBase;
 
-    fn count_active_pages<
-        const PAGES: usize,
-        CPE: CodePageEntry<MC, M>,
-        MC: MemoryConfig,
-        M: ManagerBase,
-    >(
-        cache: &PageCacheImpl<PAGES, CPE, MC, M>,
+    fn count_active_pages<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>(
+        cache: &PageCacheImpl<CPE, MC, M>,
     ) -> usize {
         cache.pages.iter().fold(
             0,
@@ -411,9 +399,7 @@ mod tests {
 
     #[test]
     fn test_page_invalidation_resets_pages() {
-        const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
-
-        let mut cache = PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, Normal>::new();
+        let mut cache = PageCacheImpl::<Interpreted<_, _>, M1M, Normal>::new();
 
         for page in cache.pages.iter_mut().take(16) {
             *page = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
@@ -449,7 +435,7 @@ mod tests {
 
     backend_test!(test_populate_block_cache, F, {
         let mut state = MachineCoreState::<M4K, F>::new();
-        let mut cache = PageCacheImpl::<1, Interpreted<_, _>, M4K, F>::new();
+        let mut cache = PageCacheImpl::<Interpreted<_, _>, M4K, F>::new();
 
         // populating a non R+X page should fail
         cache.populate_page(15, &state);
@@ -508,13 +494,10 @@ mod tests {
     });
 
     backend_test!(populate_from_memory, F, {
-        const PAGES: usize = M1M::TOTAL_BYTES.get() / PAGE_SIZE.get() as usize;
-
         let state = MachineCoreState::<M1M, F>::new();
         let state = &std::cell::RefCell::new(state);
 
-        let cache =
-            &std::cell::RefCell::new(PageCacheImpl::<PAGES, Interpreted<_, _>, M1M, F>::new());
+        let cache = &std::cell::RefCell::new(PageCacheImpl::<Interpreted<_, _>, M1M, F>::new());
 
         proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get() as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
