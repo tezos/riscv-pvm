@@ -198,7 +198,7 @@ mod tests {
 
         let mut raw_array = vec![0; length];
         Fill::fill(raw_array.as_mut_slice(), &mut rand::rng());
-        let blind_hash: Hash = Hash::blake3_hash_bytes(&raw_array);
+        let blind_hash: Hash = Hash::hash_bytes(&raw_array);
 
         match is_leaf_read {
             true => MerkleProof::Leaf(MerkleProofLeaf::Read(raw_array)),
@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn check_serialisation(tree: MerkleProof, tree_correct_bytes: &[u8]) {
-        let final_state_hash = Hash::blake3_hash_bytes(&rand::random::<[u8; 10]>());
+        let final_state_hash = Hash::hash_bytes(&rand::random::<[u8; 10]>());
         let proof = Proof::new(tree, final_state_hash);
 
         let ser_bytes: Vec<u8> = serialise_proof(&proof);
@@ -226,7 +226,7 @@ mod tests {
         let rleaf = MerkleProof::Leaf(MerkleProofLeaf::Read(raw_array.to_vec()));
         check_serialisation(rleaf, &[&[TAG_READ], raw_array.as_slice()].concat());
 
-        let hash = Hash::blake3_hash_bytes(&raw_array);
+        let hash = Hash::hash_bytes(&raw_array);
         check_serialisation(
             MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)),
             &[&[TAG_BLIND], hash.as_ref()].concat(),
@@ -237,8 +237,8 @@ mod tests {
     fn serialise_1_level() {
         // Check serialisation of a node containing some leaves.
 
-        let h1 = Hash::blake3_hash_bytes(&[1, 2, 3]);
-        let h2 = Hash::blake3_hash_bytes(&[20, 30, 1, 5, 6]);
+        let h1 = Hash::hash_bytes(&[1, 2, 3]);
+        let h2 = Hash::hash_bytes(&[20, 30, 1, 5, 6]);
 
         let n1 = MerkleProof::Leaf(MerkleProofLeaf::Read(vec![12, 15, 30, 40]));
         let n2 = MerkleProof::Leaf(MerkleProofLeaf::Blind(h1));
@@ -295,7 +295,7 @@ mod tests {
     }
 
     fn check_bounds(tree: MerkleProof, bound: &SerialisationBound) {
-        let final_state_hash = Hash::blake3_hash_bytes(&rand::random::<[u8; 10]>());
+        let final_state_hash = Hash::hash_bytes(&rand::random::<[u8; 10]>());
         let proof = Proof::new(tree, final_state_hash);
 
         let serialisation: Vec<_> = super::serialise_proof(&proof);

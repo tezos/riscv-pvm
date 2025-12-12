@@ -45,10 +45,13 @@ fn merkle_tree_to_compressed_merkle_tree(merkle_tree: MerkleTree) -> CompressedM
                 .map(|child| {
                     use CompressedAccessInfo::*;
                     match child {
-                        CompressedLeaf(hash, access_info) => (hash, match access_info {
-                            NoAccess => Some(access_info.clone()),
-                            ReadWrite(_) => None,
-                        }),
+                        CompressedLeaf(hash, access_info) => (
+                            hash,
+                            match access_info {
+                                NoAccess => Some(access_info.clone()),
+                                ReadWrite(_) => None,
+                            },
+                        ),
                         CompressedNode(hash, _) => (hash, None),
                     }
                 })
@@ -62,7 +65,7 @@ fn merkle_tree_to_compressed_merkle_tree(merkle_tree: MerkleTree) -> CompressedM
                 .flatten();
 
             match compression {
-                Some(access) => CompressedLeaf(Hash::combine(hashes), access),
+                Some(access) => CompressedLeaf(Hash::combine_hashes(hashes), access),
                 None => CompressedNode(hash, compact_children),
             }
         },
@@ -166,16 +169,14 @@ mod tests {
                 let is_valid_hash = match node {
                     Self::Leaf(hash, access_info) => match access_info {
                         CompressedAccessInfo::NoAccess => true,
-                        CompressedAccessInfo::ReadWrite(data) => {
-                            &Hash::blake3_hash_bytes(data) == hash
-                        }
+                        CompressedAccessInfo::ReadWrite(data) => &Hash::hash_bytes(data) == hash,
                     },
                     Self::Node(hash, children) => {
                         let children_hashes = children.iter().map(|child| {
                             deque.push_back(child);
                             child.root_hash()
                         });
-                        &Hash::combine(children_hashes) == hash
+                        &Hash::combine_hashes(children_hashes) == hash
                     }
                 };
                 if !is_valid_hash {
@@ -187,7 +188,7 @@ mod tests {
     }
 
     fn m_l(data: &[u8], access: bool) -> Result<MerkleTree, HashError> {
-        let hash = Hash::blake3_hash_bytes(data);
+        let hash = Hash::hash_bytes(data);
         Ok(MerkleTree::Leaf(hash, access, data.to_vec()))
     }
 
@@ -241,7 +242,7 @@ mod tests {
 
             let merkle_proof_leaf =
                 |data: &Vec<u8>, access: bool| -> Result<MerkleProof, HashError> {
-                    let hash = Hash::blake3_hash_bytes(data);
+                    let hash = Hash::hash_bytes(data);
                     Ok(MerkleProof::Leaf(if access {
                         MerkleProofLeaf::Read(data.clone())
                     } else {
@@ -255,13 +256,11 @@ mod tests {
             ]);
 
             // The structure of the original subtree is compressed into a single leaf.
-            let proof_no_access = MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                Hash::blake3_hash_bytes(&l[2]),
-                Hash::combine([
-                    Hash::blake3_hash_bytes(&l[3]),
-                    Hash::blake3_hash_bytes(&l[4]),
-                ]),
-            ])));
+            let proof_no_access =
+                MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine_hashes([
+                    Hash::hash_bytes(&l[2]),
+                    Hash::combine_hashes([Hash::hash_bytes(&l[3]), Hash::hash_bytes(&l[4])]),
+                ])));
 
             let proof_read_write_3 = MerkleProof::Node(vec![
                 MerkleProof::Node(vec![
@@ -289,22 +288,19 @@ mod tests {
 
             let proof_mix = MerkleProof::Node(vec![
                 // The structure of the original subtree is compressed into a single leaf.
-                MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                    Hash::blake3_hash_bytes(&l[12]),
-                    Hash::combine([
-                        Hash::blake3_hash_bytes(&l[13]),
-                        Hash::combine([
-                            Hash::blake3_hash_bytes(&l[14]),
-                            Hash::blake3_hash_bytes(&l[15]),
-                        ]),
+                MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine_hashes([
+                    Hash::hash_bytes(&l[12]),
+                    Hash::combine_hashes([
+                        Hash::hash_bytes(&l[13]),
+                        Hash::combine_hashes([Hash::hash_bytes(&l[14]), Hash::hash_bytes(&l[15])]),
                     ]),
                 ]))),
                 MerkleProof::Node(vec![
                     MerkleProof::Node(vec![
                         merkle_proof_leaf(&l[16], true)?,
-                        MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine([
-                            Hash::blake3_hash_bytes(&l[17]),
-                            Hash::blake3_hash_bytes(&l[18]),
+                        MerkleProof::Leaf(MerkleProofLeaf::Blind(Hash::combine_hashes([
+                            Hash::hash_bytes(&l[17]),
+                            Hash::hash_bytes(&l[18]),
                         ]))),
                     ]),
                     merkle_proof_leaf(&l[19], true)?,
@@ -351,7 +347,7 @@ mod tests {
 
         let gen_hash_data = || {
             let data = rand::random::<[u8; 12]>().to_vec();
-            let hash = Hash::blake3_hash_bytes(&data);
+            let hash = Hash::hash_bytes(&data);
             (data, hash)
         };
 

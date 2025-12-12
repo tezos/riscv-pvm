@@ -18,7 +18,7 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::MerkleProofLeaf;
-use crate::serialisation as binary;
+use crate::serialisation::serialise_into;
 use crate::tree::Tree;
 
 /// Errors that can occur during hashing operations
@@ -60,27 +60,26 @@ pub struct Hash {
 }
 
 impl Hash {
-    /// Hash a slice of bytes
-    pub fn blake3_hash_bytes(bytes: &[u8]) -> Self {
+    /// Hashes a byte slice into a [`Hash`] object.
+    pub fn hash_bytes(bytes: &[u8]) -> Self {
         let digest = blake3::hash(bytes).into();
         Hash { digest }
     }
 
-    /// Get the hash of a value that can be serialised by hashing its serialisation
-    pub fn blake3_hash<T: Encode>(data: T) -> Result<Self, EncodeError> {
+    /// Creates a [`Hash`] object from something that implements the
+    /// [`bincode::enc::Encode`] trait.
+    pub fn hash_encodable<T: Encode>(data: T) -> Result<Self, EncodeError> {
         let mut hasher = blake3::Hasher::new();
-        binary::serialise_into(&data, &mut hasher)?;
+        serialise_into(&data, &mut hasher)?;
 
         let digest = hasher.finalize().into();
         Ok(Hash { digest })
     }
 
-    /// Combine multiple [`struct@Hash`] values into a single one.
-    ///
-    /// The hashes are combined by concatenating them, then hashing the result.
-    /// Pre-image resistance is not compromised because the concatenation is not
-    /// ambiguous, with hashes having a fixed size ([`DIGEST_SIZE`]).
-    pub fn combine<H: Borrow<Hash>, HS: IntoIterator<Item = H>>(hashes: HS) -> Hash {
+    /// Creates a [`Hash`] object from a collection of iterables
+    /// that can be [`Borrow`]ed as a [`Hash`]. Note that this
+    /// method  is rehashing the hashes!
+    pub fn combine_hashes<H: Borrow<Hash>, HS: IntoIterator<Item = H>>(hashes: HS) -> Hash {
         let mut hasher = blake3::Hasher::new();
 
         for hash in hashes {
@@ -90,21 +89,6 @@ impl Hash {
 
         let digest = hasher.finalize().into();
         Hash { digest }
-    }
-
-    /// Like [`Self::combine`], but the iterator can yield errors.
-    pub fn try_combine<H: Borrow<Hash>, E, HS: IntoIterator<Item = Result<H, E>>>(
-        hashes: HS,
-    ) -> Result<Hash, E> {
-        let mut hasher = blake3::Hasher::new();
-
-        for hash in hashes {
-            let hash = hash?;
-            hasher.update(hash.borrow().as_ref());
-        }
-
-        let digest = hasher.finalize().into();
-        Ok(Hash { digest })
     }
 
     /// Hash the underlying state of a foldable structure.
@@ -134,6 +118,36 @@ impl AsRef<[u8]> for Hash {
 impl Foldable<HashFold> for Hash {
     fn fold(&self, _builder: HashFold) -> Hash {
         *self
+    }
+}
+
+pub struct Hasher {
+    hasher: blake3::Hasher,
+}
+
+impl Hasher {
+    /// Creates a new [`Hasher`] object
+    pub fn new() -> Self {
+        Self {
+            hasher: blake3::Hasher::new(),
+        }
+    }
+
+    /// Updates the [`Hasher`] with some bytes
+    pub fn update_with_bytes(&mut self, bytes: &[u8]) {
+        self.hasher.update(bytes);
+    }
+
+    /// Updates the [`Hasher`] with the digest of a [`Hash`]
+    pub fn update_with_hash(&mut self, hash: Hash) {
+        let digest: [u8; DIGEST_SIZE] = hash.into();
+        self.hasher.update(digest.as_slice());
+    }
+
+    /// Turns the [`Hasher`] into a [`Hash`]
+    pub fn to_hash(self) -> Hash {
+        let digest: [u8; DIGEST_SIZE] = self.hasher.finalize().into();
+        Hash { digest }
     }
 }
 
@@ -372,5 +386,116 @@ impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
         let digest: [u8; 32] = hasher.finalize().into();
         let hash = Hash::from(digest);
         PartialHash::Present(hash)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DIGEST_SIZE;
+    use super::Hash;
+    use super::Hasher;
+    use crate::serialisation::bincode_default_config;
+    use bincode::Encode;
+    use std::borrow::Borrow;
+
+    #[derive(Clone, Encode)]
+    struct Encodable {
+        a: u32,
+    }
+
+    impl Encodable {
+        fn new(a: u32) -> Self {
+            Self { a }
+        }
+    }
+
+    #[derive(Clone)]
+    struct Borrowable {
+        hash: Hash,
+    }
+
+    impl Borrow<Hash> for Borrowable {
+        fn borrow(&self) -> &Hash {
+            &self.hash
+        }
+    }
+
+    impl Borrowable {
+        fn new(hash: Hash) -> Self {
+            Self { hash }
+        }
+    }
+
+    #[test]
+    fn hash_bytes_works_as_blake3_hashing() {
+        let bytes = [1, 2, 3];
+        let hash = Hash::hash_bytes(&bytes);
+        let hash_digest: [u8; DIGEST_SIZE] = hash.into();
+        let blake3_digest: [u8; DIGEST_SIZE] = blake3::hash(&bytes).into();
+        assert_eq!(hash_digest, blake3_digest);
+    }
+
+    #[test]
+    fn hash_encodable_can_hash_encodable_objects() {
+        let object = Encodable::new(12);
+        let bytes =
+            bincode::encode_to_vec(object.clone(), bincode_default_config()).expect("Should work");
+        let object_hash_digest: [u8; DIGEST_SIZE] = blake3::hash(bytes.as_slice()).into();
+        let hash_digest: [u8; DIGEST_SIZE] =
+            Hash::hash_encodable(object).expect("Should work").into();
+        assert_eq!(object_hash_digest, hash_digest);
+    }
+
+    #[test]
+    fn hash_combines_can_combine_hashes_to_a_new_hash() {
+        let coll = vec![
+            Borrowable::new(Hash::hash_bytes(&[1, 2, 3])),
+            Borrowable::new(Hash::hash_bytes(&[4, 5, 6])),
+        ];
+        let hash = Hash::combine_hashes(coll.clone());
+        let hash_digest: [u8; DIGEST_SIZE] = hash.into();
+
+        let mut hasher = blake3::Hasher::new();
+        let mut borrowed_hash: &Hash = coll[0].borrow();
+        hasher.update(borrowed_hash.as_ref());
+        borrowed_hash = coll[1].borrow();
+        hasher.update(borrowed_hash.as_ref());
+        let hasher_digest: [u8; DIGEST_SIZE] = hasher.finalize().into();
+
+        assert_eq!(hash_digest, hasher_digest);
+
+        let hash_from_combined = Hash::hash_bytes(&[1, 2, 3, 4, 5, 6]);
+
+        assert_ne!(hash, hash_from_combined);
+    }
+
+    #[test]
+    fn hasher_update_with_bytes_is_the_same_as_hash_bytes() {
+        let elems: Vec<Vec<u8>> = vec![vec![1, 2, 3], vec![4, 5, 6]];
+        let mut hasher: Hasher = Hasher::new();
+
+        for elem in elems.iter() {
+            hasher.update_with_bytes(elem.as_slice());
+        }
+
+        let flattened_elems: Vec<u8> = elems.into_iter().flatten().collect();
+        let hash = Hash::hash_bytes(flattened_elems.as_slice());
+
+        assert_eq!(hasher.to_hash(), hash);
+    }
+
+    #[test]
+    fn combine_hashes_is_the_same_as_update_with_hash() {
+        let elems: Vec<Hash> = vec![Hash::hash_bytes(&[1, 2, 3]), Hash::hash_bytes(&[4, 5, 6])];
+
+        let hash = Hash::combine_hashes(elems.clone());
+
+        let mut hasher = Hasher::new();
+
+        for elem in elems.into_iter() {
+            hasher.update_with_hash(elem);
+        }
+
+        assert_eq!(hash, hasher.to_hash());
     }
 }

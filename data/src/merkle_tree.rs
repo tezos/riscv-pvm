@@ -31,7 +31,7 @@ impl MerkleTree {
     /// let data = vec![1, 2, 3];
     /// let merkle_tree = MerkleTree::make_merkle_leaf(data.clone(), false);
     /// let root_hash = merkle_tree.root_hash();
-    /// let hash = Hash::blake3_hash_bytes(&data);
+    /// let hash = Hash::hash_bytes(&data);
     ///
     /// assert_eq!(hash, root_hash);
     /// ```
@@ -44,7 +44,7 @@ impl MerkleTree {
 
     /// Creates a merkle tree which is a single leaf
     pub fn make_merkle_leaf(data: Vec<u8>, access_info: bool) -> Self {
-        let hash = Hash::blake3_hash_bytes(&data);
+        let hash = Hash::hash_bytes(&data);
         MerkleTree::Leaf(hash, access_info, data)
     }
 
@@ -52,7 +52,7 @@ impl MerkleTree {
     /// new parent node on top of them.
     pub fn make_merkle_node(children: Vec<Self>) -> Self {
         let children_hashes = children.iter().map(|t| t.root_hash());
-        let node_hash = Hash::combine(children_hashes);
+        let node_hash = Hash::combine_hashes(children_hashes);
         MerkleTree::Node(node_hash, children)
     }
 
@@ -65,7 +65,7 @@ impl MerkleTree {
 
         while let Some(node) = deque.pop_front() {
             let is_valid_hash = match node {
-                Self::Leaf(hash, _, data) => &Hash::blake3_hash_bytes(data) == hash,
+                Self::Leaf(hash, _, data) => &Hash::hash_bytes(data) == hash,
                 Self::Node(hash, children) => {
                     let children_hashes: Vec<Hash> = children
                         .iter()
@@ -75,7 +75,7 @@ impl MerkleTree {
                         })
                         .collect();
 
-                    &Hash::combine(children_hashes) == hash
+                    &Hash::combine_hashes(children_hashes) == hash
                 }
             };
             if !is_valid_hash {
