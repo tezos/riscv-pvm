@@ -79,7 +79,7 @@ fn partial_hash_absent_written() {
     let written_value = 1337;
     verify_cell.write(written_value);
 
-    let value_hash = Hash::blake3_hash(written_value).unwrap();
+    let value_hash = Hash::hash_encodable(written_value).unwrap();
     let expected_state_hash = PartialHash::Present(value_hash);
     let hash = PartialHash::from_foldable(proof, &verify_cell);
     assert_eq!(hash, expected_state_hash);
@@ -93,7 +93,7 @@ fn partial_hash_present_written() {
     let written_value = 1337;
     verify_cell.write(written_value);
 
-    let value_hash = Hash::blake3_hash(written_value).unwrap();
+    let value_hash = Hash::hash_encodable(written_value).unwrap();
     let expected_state_hash = PartialHash::Present(value_hash);
     let hash = PartialHash::from_foldable(proof, &verify_cell);
     assert_eq!(hash, expected_state_hash);

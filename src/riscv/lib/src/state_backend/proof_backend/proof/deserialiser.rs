@@ -23,7 +23,6 @@ pub type Result<T, E = ProofError> = std::result::Result<T, E>;
 #[cfg(test)]
 mod tests {
     use bincode::Decode;
-    use octez_riscv_data::hash::DIGEST_SIZE;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_proof::Deserialiser;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
@@ -161,8 +160,8 @@ mod tests {
         assert_eq!(comp_fn.into_result().unwrap().0, 0);
 
         // Expect absent case in the computed result
-        let leaf_read: [u8; DIGEST_SIZE] = [12; 32];
-        let leaf_blind: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
+        let leaf_read: [u8; Hash::DIGEST_SIZE] = [12; Hash::DIGEST_SIZE];
+        let leaf_blind: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
         let proof_bytes = [
             [TAG_NODE, TAG_READ].as_ref(),
             leaf_read.as_ref(),
@@ -178,13 +177,14 @@ mod tests {
     fn test_not_enough_bytes_error() {
         // For the streaming case if the data is incomplete we will actually get a bincode::Error
         // due to eof being reached. So to test for NotEnoughBytes we are just going to provide less tags
-        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let hash_read_raw: [u8; Hash::DIGEST_SIZE] = hash_read;
         let bool_read = [1u8];
 
         // Note the truncated hash
         let raw_bytes_content = [
             [TAG_NODE, TAG_READ].as_ref(),
-            hash_read[0..5].as_ref(),
+            hash_read_raw[0..5].as_ref(),
             [TAG_NODE, TAG_READ].as_ref(),
             bool_read.as_ref(),
         ]
@@ -237,7 +237,7 @@ mod tests {
 
         // the same test for the OwnedDeserialiser
         let merkle_proof = MerkleProof::Node(vec![
-            MerkleProof::leaf_read(hash_read[0..5].to_vec()),
+            MerkleProof::leaf_read(hash_read_raw[0..5].to_vec()),
             MerkleProof::Node(vec![MerkleProof::leaf_read(bool_read.to_vec())]),
         ]);
 
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_bad_bincode() {
-        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let bad_bool_bincode = [42_u8; 1];
 
         let raw_bytes_content = [
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_too_many_bytes_error() {
         let tag_bytes = [TAG_NODE, TAG_READ, TAG_NODE, TAG_READ];
-        let hash_read: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let hash_read: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let bool_read = [1u8];
 
         // Note the extra byte at the end
@@ -326,8 +326,8 @@ mod tests {
     #[test]
     fn test_blind_computation_stream() {
         // The nested leaf is blinded
-        let b1: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
-        let b2: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let b1: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let b2: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         let raw_bytes_content = [
             [TAG_NODE, TAG_BLIND].as_ref(),
             b1.as_ref(),
@@ -381,13 +381,10 @@ mod tests {
             computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
         assert!(comp_fn.is_err_and(|e| {
             println!("{e:?}");
-            matches!(
-                e,
-                ProofError::BadNumberOfBranches {
-                    expected: 0,
-                    got: 3
-                }
-            )
+            matches!(e, ProofError::BadNumberOfBranches {
+                expected: 0,
+                got: 3
+            })
         }));
 
         // The first child is a node, but is expected to be a leaf
@@ -403,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_bad_structure_stream() {
-        let hash: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
+        let hash: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
         // Place an invalid second tag
         // Bad tag introduced after the first node
         let res = run_stream_deserialiser(computation_i16, [TAG_NODE, 0b01].as_ref());
@@ -467,9 +464,9 @@ mod tests {
     #[test]
     fn test_valid_computation_stream() {
         let h1 = 0x140A_0000_i32.to_le_bytes();
-        let h2: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
+        let h2: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[3, 4, 5]).into();
         let h3 = 0xC0005_i32.to_le_bytes();
-        let h4: [u8; DIGEST_SIZE] = Hash::hash_bytes(&[9, 10, 11]).into();
+        let h4: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[9, 10, 11]).into();
 
         let res = run_stream_deserialiser(
             computation_leaves,

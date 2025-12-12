@@ -30,23 +30,21 @@
 use std::mem::ManuallyDrop;
 use std::path::Path;
 
+use octez_riscv_data::hash::Hash;
 use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
 use crate::repo::DirectoryManager;
 use crate::repo::DirectoryManagerError;
 
-/// Type alias for a 32-byte hash used for identifying key-value blobs & commits.
-type Hash = [u8; 32];
-
 /// [`CommitId`]'s are used to generate [`PersistenceLayer`] commits & to checkout specific commits
 /// from a [`DirectoryManager`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitId(Hash);
 
-impl From<blake3::Hash> for CommitId {
-    fn from(hash: blake3::Hash) -> Self {
-        Self(hash.into())
+impl From<Hash> for CommitId {
+    fn from(hash: Hash) -> Self {
+        Self(hash)
     }
 }
 
@@ -75,7 +73,7 @@ pub struct HashedData<'d> {
 impl<'d> HashedData<'d> {
     /// Create a new [`HashedData`] instance from the given byte-array.
     pub fn from_value(value: &'d [u8]) -> Self {
-        let hash = blake3::hash(value).into();
+        let hash = Hash::hash_bytes(value);
         Self { hash, value }
     }
 }
@@ -367,6 +365,7 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
+    use octez_riscv_data::hash::Hash;
     use proptest::prelude::Strategy;
     use proptest::prelude::any;
     use proptest::proptest;
@@ -640,7 +639,7 @@ mod tests {
         let blob = &HashedData::from_value(b"some_value");
         db_a.blob_set(blob).expect("Failed to set blob in A");
 
-        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
         let path_a = checkpoint_db_path(&db_a);
@@ -656,7 +655,9 @@ mod tests {
                 .blob_get(&blob.hash)
                 .expect("Failed to get blob from B");
             assert_eq!(retrieved_b.as_ref(), blob.value);
-            let retrieved_nonexistent = db_b.blob_get(&[0u8; 32]);
+            let zero_digest: [u8; Hash::DIGEST_SIZE] = [0u8; 32];
+            let hash_zero_digest: Hash = zero_digest.into();
+            let retrieved_nonexistent = db_b.blob_get(&hash_zero_digest);
             assert!(matches!(
                 retrieved_nonexistent,
                 Err(PersistenceLayerError::KeyNotFound)
@@ -680,7 +681,7 @@ mod tests {
         let repo =
             DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
 
-        let commit_id: CommitId = blake3::hash(b"nonexistent_commit").into();
+        let commit_id: CommitId = Hash::hash_bytes(b"nonexistent_commit").into();
         let db_result = PersistenceLayer::checkout(&repo, &commit_id);
         assert!(matches!(
             db_result,
@@ -708,7 +709,7 @@ mod tests {
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
         db_b.blob_set(blob_b).expect("Failed to set blob in B");
 
-        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
         db_b.commit(&repo, &commit_id)
             .expect("Failed to commit DB B");
 
@@ -753,8 +754,8 @@ mod tests {
 
         let blob_a = &HashedData::from_value(b"some_value");
         let blob_b = &HashedData::from_value(b"another_value");
-        let commit_id_1: CommitId = blake3::hash(b"commit_1").into();
-        let commit_id_2: CommitId = blake3::hash(b"commit_2").into();
+        let commit_id_1: CommitId = Hash::hash_bytes(b"commit_1").into();
+        let commit_id_2: CommitId = Hash::hash_bytes(b"commit_2").into();
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         db_a.blob_set(blob_a).expect("Failed to set blob in A");
         db_a.commit(&repo, &commit_id_1)
@@ -812,7 +813,7 @@ mod tests {
         let blob = &HashedData::from_value(b"some_value");
         db_a.blob_set(blob).expect("Failed to set blob in A");
 
-        let commit_id: CommitId = blake3::hash(b"commit_1").into();
+        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
 

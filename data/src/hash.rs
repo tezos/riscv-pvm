@@ -7,6 +7,7 @@
 
 use std::borrow::Borrow;
 use std::collections::VecDeque;
+use std::ops::Deref;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -34,39 +35,27 @@ pub enum HashError {
     NonEmptyBufferExpected,
 }
 
-/// Size of digest produced by the underlying hash function
-pub const DIGEST_SIZE: usize = 32;
-
 /// A value of type [struct@Hash] indicates that the enclosed array is a digest
 /// produced by a preset hash function, currently BLAKE3. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Encode,
-    Decode,
-    Hash,
-    PartialOrd,
-    Ord,
-    derive_more::From,
-    derive_more::Debug,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord, derive_more::Debug)]
 #[debug("{}", self)]
 pub struct Hash {
-    digest: [u8; DIGEST_SIZE],
+    digest: [u8; Hash::DIGEST_SIZE],
 }
 
 impl Hash {
-    /// Hashes a byte slice into a [`Hash`] object.
+    /// Size of digest produced by the underlying hash function
+    pub const DIGEST_SIZE: usize = 32;
+
+    /// Hashes a byte slice into a [`struct@Hash`].
     pub fn hash_bytes(bytes: &[u8]) -> Self {
         let digest = blake3::hash(bytes).into();
         Hash { digest }
     }
 
-    /// Creates a [`Hash`] object from something that implements the
+    /// Creates a [`struct@Hash`] from something that implements the
     /// [`bincode::enc::Encode`] trait.
     pub fn hash_encodable<T: Encode>(data: T) -> Result<Self, EncodeError> {
         let mut hasher = blake3::Hasher::new();
@@ -76,14 +65,15 @@ impl Hash {
         Ok(Hash { digest })
     }
 
-    /// Creates a [`Hash`] object from a collection of iterables
-    /// that can be [`Borrow`]ed as a [`Hash`]. Note that this
-    /// method  is rehashing the hashes!
+    /// Creates a [`struct@Hash`] from a collection of iterables that can be
+    /// [`Deref`]ed as a [`struct@Hash`]. Note that this method  is rehashing the
+    /// hashes.
     pub fn combine_hashes<H: Borrow<Hash>, HS: IntoIterator<Item = H>>(hashes: HS) -> Hash {
         let mut hasher = blake3::Hasher::new();
 
         for hash in hashes {
             let hash: &Hash = hash.borrow();
+            // Pre-image resistence is guaranteed by the constant hash digest length.
             hasher.update(hash.as_ref());
         }
 
@@ -103,7 +93,13 @@ impl std::fmt::Display for Hash {
     }
 }
 
-impl From<Hash> for [u8; DIGEST_SIZE] {
+impl From<[u8; Hash::DIGEST_SIZE]> for Hash {
+    fn from(value: [u8; Hash::DIGEST_SIZE]) -> Self {
+        Self { digest: value }
+    }
+}
+
+impl From<Hash> for [u8; Hash::DIGEST_SIZE] {
     fn from(value: Hash) -> Self {
         value.digest
     }
@@ -121,33 +117,41 @@ impl Foldable<HashFold> for Hash {
     }
 }
 
+impl Deref for Hash {
+    type Target = [u8; Hash::DIGEST_SIZE];
+
+    fn deref(&self) -> &Self::Target {
+        &self.digest
+    }
+}
+
+/// [struct@Hasher] can be dynamically updated with byte arrays and [`struct@Hash`]s and
+/// can be turned into a [`struct@Hash`].
+#[derive(Default)]
 pub struct Hasher {
     hasher: blake3::Hasher,
 }
 
 impl Hasher {
-    /// Creates a new [`Hasher`] object
-    pub fn new() -> Self {
-        Self {
-            hasher: blake3::Hasher::new(),
-        }
-    }
-
     /// Updates the [`Hasher`] with some bytes
-    pub fn update_with_bytes(&mut self, bytes: &[u8]) {
+    pub fn update(&mut self, bytes: &[u8]) {
         self.hasher.update(bytes);
     }
 
-    /// Updates the [`Hasher`] with the digest of a [`Hash`]
-    pub fn update_with_hash(&mut self, hash: Hash) {
-        let digest: [u8; DIGEST_SIZE] = hash.into();
-        self.hasher.update(digest.as_slice());
+    /// Updates the [`Hasher`] with the digest of a [`struct@Hash`]
+    pub fn update_with_hash(&mut self, hash: &Hash) {
+        self.hasher.update(hash.deref());
     }
 
-    /// Turns the [`Hasher`] into a [`Hash`]
+    /// Turns the [`Hasher`] into a [`struct@Hash`]
     pub fn to_hash(self) -> Hash {
-        let digest: [u8; DIGEST_SIZE] = self.hasher.finalize().into();
+        let digest: [u8; Hash::DIGEST_SIZE] = self.hasher.finalize().into();
         Hash { digest }
+    }
+
+    /// Returns the number of bytes hashed so far.
+    pub fn count(&self) -> u64 {
+        self.hasher.count()
     }
 }
 
@@ -171,7 +175,7 @@ impl Fold for HashFold {
 #[derive(Default)]
 pub struct HashNodeFold {
     /// Hasher used to combine children's hashes
-    hasher: blake3::Hasher,
+    hasher: Hasher,
 }
 
 impl NodeFold for HashNodeFold {
@@ -183,8 +187,7 @@ impl NodeFold for HashNodeFold {
     }
 
     fn done(self) -> Hash {
-        let digest = self.hasher.finalize().into();
-        Hash { digest }
+        self.hasher.to_hash()
     }
 }
 
@@ -343,7 +346,7 @@ impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
 
     fn done(self) -> PartialHash {
         let mut saw_absent_child = false;
-        let mut hasher = blake3::Hasher::new();
+        let mut hasher = Hasher::default();
 
         for child_hash in self.child_hashes {
             match child_hash {
@@ -365,7 +368,7 @@ impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
                         return PartialHash::InvalidProof;
                     }
 
-                    hasher.update(hash.as_ref());
+                    hasher.update_with_hash(&hash);
                 }
 
                 PartialHash::InvalidProof => {
@@ -383,20 +386,17 @@ impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
                 .unwrap_or(PartialHash::Previous);
         }
 
-        let digest: [u8; 32] = hasher.finalize().into();
-        let hash = Hash::from(digest);
-        PartialHash::Present(hash)
+        PartialHash::Present(hasher.to_hash())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::DIGEST_SIZE;
+    use bincode::Encode;
+
     use super::Hash;
     use super::Hasher;
     use crate::serialisation::bincode_default_config;
-    use bincode::Encode;
-    use std::borrow::Borrow;
 
     #[derive(Clone, Encode)]
     struct Encodable {
@@ -409,59 +409,36 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct Borrowable {
-        hash: Hash,
-    }
-
-    impl Borrow<Hash> for Borrowable {
-        fn borrow(&self) -> &Hash {
-            &self.hash
-        }
-    }
-
-    impl Borrowable {
-        fn new(hash: Hash) -> Self {
-            Self { hash }
-        }
-    }
-
     #[test]
-    fn hash_bytes_works_as_blake3_hashing() {
+    fn test_hash_bytes_works_as_blake3_hashing() {
         let bytes = [1, 2, 3];
         let hash = Hash::hash_bytes(&bytes);
-        let hash_digest: [u8; DIGEST_SIZE] = hash.into();
-        let blake3_digest: [u8; DIGEST_SIZE] = blake3::hash(&bytes).into();
+        let hash_digest: [u8; Hash::DIGEST_SIZE] = hash.into();
+        let blake3_digest: [u8; 32] = blake3::hash(&bytes).into();
         assert_eq!(hash_digest, blake3_digest);
     }
 
     #[test]
-    fn hash_encodable_can_hash_encodable_objects() {
-        let object = Encodable::new(12);
-        let bytes =
-            bincode::encode_to_vec(object.clone(), bincode_default_config()).expect("Should work");
-        let object_hash_digest: [u8; DIGEST_SIZE] = blake3::hash(bytes.as_slice()).into();
-        let hash_digest: [u8; DIGEST_SIZE] =
-            Hash::hash_encodable(object).expect("Should work").into();
-        assert_eq!(object_hash_digest, hash_digest);
+    fn test_hash_encodable_can_hash_encodables() {
+        let encodable = Encodable::new(12);
+        let bytes = bincode::encode_to_vec(encodable.clone(), bincode_default_config())
+            .expect("Should work");
+        let encodable_hash_digest: blake3::Hash = blake3::hash(bytes.as_slice());
+        let hash_digest: [u8; Hash::DIGEST_SIZE] =
+            Hash::hash_encodable(encodable).expect("Should work").into();
+        assert_eq!(encodable_hash_digest, hash_digest);
     }
 
     #[test]
-    fn hash_combines_can_combine_hashes_to_a_new_hash() {
-        let coll = vec![
-            Borrowable::new(Hash::hash_bytes(&[1, 2, 3])),
-            Borrowable::new(Hash::hash_bytes(&[4, 5, 6])),
-        ];
-        let hash = Hash::combine_hashes(coll.clone());
-        let hash_digest: [u8; DIGEST_SIZE] = hash.into();
-
+    fn test_hash_combines_can_combine_hashes_to_a_new_hash() {
+        let coll = vec![Hash::hash_bytes(&[1, 2, 3]), Hash::hash_bytes(&[4, 5, 6])];
         let mut hasher = blake3::Hasher::new();
-        let mut borrowed_hash: &Hash = coll[0].borrow();
-        hasher.update(borrowed_hash.as_ref());
-        borrowed_hash = coll[1].borrow();
-        hasher.update(borrowed_hash.as_ref());
-        let hasher_digest: [u8; DIGEST_SIZE] = hasher.finalize().into();
-
+        for elem in coll.iter() {
+            hasher.update(elem.as_slice());
+        }
+        let hasher_digest: [u8; Hash::DIGEST_SIZE] = hasher.finalize().into();
+        let hash = Hash::combine_hashes(coll);
+        let hash_digest: [u8; Hash::DIGEST_SIZE] = hash.into();
         assert_eq!(hash_digest, hasher_digest);
 
         let hash_from_combined = Hash::hash_bytes(&[1, 2, 3, 4, 5, 6]);
@@ -470,12 +447,12 @@ mod tests {
     }
 
     #[test]
-    fn hasher_update_with_bytes_is_the_same_as_hash_bytes() {
+    fn test_hasher_update_with_bytes_is_the_same_as_hash_bytes() {
         let elems: Vec<Vec<u8>> = vec![vec![1, 2, 3], vec![4, 5, 6]];
-        let mut hasher: Hasher = Hasher::new();
+        let mut hasher: Hasher = Hasher::default();
 
         for elem in elems.iter() {
-            hasher.update_with_bytes(elem.as_slice());
+            hasher.update(elem.as_slice());
         }
 
         let flattened_elems: Vec<u8> = elems.into_iter().flatten().collect();
@@ -485,15 +462,15 @@ mod tests {
     }
 
     #[test]
-    fn combine_hashes_is_the_same_as_update_with_hash() {
+    fn test_combine_hashes_is_the_same_as_update_with_hash() {
         let elems: Vec<Hash> = vec![Hash::hash_bytes(&[1, 2, 3]), Hash::hash_bytes(&[4, 5, 6])];
 
         let hash = Hash::combine_hashes(elems.clone());
 
-        let mut hasher = Hasher::new();
+        let mut hasher = Hasher::default();
 
         for elem in elems.into_iter() {
-            hasher.update_with_hash(elem);
+            hasher.update_with_hash(&elem);
         }
 
         assert_eq!(hash, hasher.to_hash());

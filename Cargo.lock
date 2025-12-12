@@ -1794,7 +1794,6 @@ version = "0.0.0"
 dependencies = [
  "arbitrary-int",
  "bincode",
- "blake3",
  "cranelift",
  "cranelift-jit",
  "cranelift-module",
@@ -1858,7 +1857,6 @@ name = "octez-riscv-durable-storage"
 version = "0.0.0"
 dependencies = [
  "bincode",
- "blake3",
  "bytes",
  "cfg-if",
  "criterion",

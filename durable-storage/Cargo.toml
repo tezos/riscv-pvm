@@ -8,7 +8,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-blake3.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 cfg-if.workspace = true
@@ -21,7 +20,6 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-blake3.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 rand.workspace = true

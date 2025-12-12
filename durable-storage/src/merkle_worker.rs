@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use octez_riscv_data::hash::Hash;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -32,7 +33,7 @@ enum Command {
     /// Obtain the root hash of the Merkle tree.
     Hash {
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<blake3::Hash>,
+        response: oneshot::Sender<Hash>,
     },
 
     /// Flush the current Merkle state to the persistence layer and obtain a commit ID.
@@ -89,7 +90,7 @@ impl MerkleWorker {
     pub(crate) fn checkout(
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
-        hash: blake3::Hash,
+        hash: Hash,
     ) -> Result<Self, MerkleWorkerError> {
         let layer = MerkleLayer::checkout(persistence_layer, hash)?;
         let worker = MerkleWorker::from_layer(async_handle, layer);
@@ -174,7 +175,7 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> blake3::Hash {
+    pub(crate) fn hash(&self) -> Hash {
         let (sender, receiver) = oneshot::channel();
 
         self.sender

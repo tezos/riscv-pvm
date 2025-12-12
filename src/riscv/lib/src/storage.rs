@@ -14,7 +14,6 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-use octez_riscv_data::hash::DIGEST_SIZE;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::serialisation;
@@ -135,7 +134,7 @@ impl Repo {
 
     /// Create a new commit for `bytes` and  return the commit id.
     pub fn commit(&mut self, bytes: &[u8]) -> Result<Hash, StorageError> {
-        let mut commit = Vec::with_capacity(bytes.len().div_ceil(CHUNK_SIZE) * DIGEST_SIZE);
+        let mut commit = Vec::with_capacity(bytes.len().div_ceil(CHUNK_SIZE) * Hash::DIGEST_SIZE);
 
         for chunk in bytes.chunks(CHUNK_SIZE) {
             let chunk_hash = self.backend.store(chunk)?;
