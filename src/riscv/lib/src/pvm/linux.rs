@@ -1519,10 +1519,10 @@ mod tests {
             machine_state
                 .core
                 .main_memory
-                .write_all(mask_address.to_machine_address(), &vec![
-                    0xFF_u8;
-                    i as usize
-                ])
+                .write_all(
+                    mask_address.to_machine_address(),
+                    &vec![0xFF_u8; i as usize],
+                )
                 .unwrap();
 
             // System call number

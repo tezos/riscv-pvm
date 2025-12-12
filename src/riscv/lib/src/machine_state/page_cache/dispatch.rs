@@ -173,19 +173,18 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
     }
 
     fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
-        let instr = Jitted::compilation_request_instructions(&target.entries, program_counter);
+        let offset = memory::address_to_page_offset(program_counter) >> 1;
 
         // The `InlineCompiler` is exclusively used in a single threaded context (compilation is
         // done in the same thread as execution). Therefore, this borrow should never panic as
         // there can be no other attempts to borrow concurrently.
         let mut jit = target.compiler.jit.borrow_mut();
 
-        let fun: DispatchFn<Self, MC> = match jit.compile(&instr, program_counter) {
+        let fun: DispatchFn<Self, MC> = match jit.compile_page(target, offset, program_counter) {
             Some(jitfn) => jitfn,
             None => Jitted::run_entrypoint_not_compiled,
         };
 
-        let offset = memory::address_to_page_offset(program_counter) >> 1;
         target.entries[offset].dispatch.set(fun);
 
         fun
@@ -260,13 +259,11 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
                         continue;
                     }
 
-                    let instr = Jitted::compilation_request_instructions(
-                        &msg.page.entries,
-                        msg.program_counter,
-                    );
+                    let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
 
-                    if let Some(jitfn) = jit.compile::<Self, MC>(&instr, msg.program_counter) {
-                        let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
+                    if let Some(jitfn) =
+                        jit.compile_page::<Self, MC>(&msg.page, offset, msg.program_counter)
+                    {
                         let dispatch = &msg.page.entries[offset].dispatch;
 
                         debug_assert_eq!(

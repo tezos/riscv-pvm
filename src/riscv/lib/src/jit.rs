@@ -21,6 +21,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use thiserror::Error;
 
+use crate::jit::builder::instruction::InstructionOutcomes;
 use crate::jit::builder::sequence::SequenceBuilder;
 use crate::jit::state_access::ExceptionCode;
 use crate::log;
@@ -115,40 +116,63 @@ impl JIT {
         })
     }
 
-    /// Compile a sequence of instructions to a callable native function.
-    ///
-    /// Not all instructions are currently supported. For blocks containing
-    /// unsupported instructions, `None` will be returned.
-    pub fn compile<D, MC: MemoryConfig>(
+    pub fn compile_page<D, MC: MemoryConfig>(
         &mut self,
-        instr: &[Instruction],
+        page: &JittedPage<D, MC>,
+        mut offset: usize,
         program_counter: Address,
     ) -> Option<JitFn<D, MC>> {
-        let Ok(hash) = Hash::blake3_hash((instr, program_counter)) else {
-            return None;
-        };
-
         let mut builder = self.start::<D, MC>(program_counter);
-        let mut lowered_instrs = Vec::with_capacity(instr.len());
+        let mut lowered_instrs = Vec::new();
+        let mut instr_for_hash = Vec::new();
 
-        // Check if the opcode of the instruction is supported in JIT and stop compilation in JIT if not.
-        for i in instr {
-            let Some(lower) = i.opcode.to_lowering() else {
+        if offset >= page.entries.len() {
+            builder.abandon();
+            self.clear();
+            return None;
+        }
+
+        // Compile instructions starting at the given offset until we encounter an instruction that
+        // does not continue with either a `Next` or `Branch` outcome.
+        loop {
+            let instr = page.entries[offset].as_ref();
+
+            let Some(lower) = instr.opcode.to_lowering() else {
                 builder.abandon();
                 self.clear();
                 return None;
             };
 
-            let mut instr_builder = builder.build_next_instruction(i.width());
+            let mut instr_builder = builder.build_next_instruction(instr.width());
 
             let instr_result = unsafe {
                 // # SAFETY: lower is called with args from the same instruction that it
                 // was derived
-                (lower)(i.args(), &mut instr_builder)
+                (lower)(instr.args(), &mut instr_builder)
             };
 
             let lowered_instr = instr_builder.finish(instr_result);
+            let should_continue = matches!(
+                lowered_instr.outcomes(),
+                InstructionOutcomes::Next { .. } | InstructionOutcomes::Branch { .. }
+            );
+
             lowered_instrs.push(lowered_instr);
+
+            instr_for_hash.push(*instr);
+
+            if !should_continue {
+                break;
+            }
+
+            let width = instr.width() as usize;
+            let next_offset = offset + (width >> 1);
+
+            if next_offset >= page.entries.len() {
+                break;
+            }
+
+            offset = next_offset;
         }
 
         if lowered_instrs.is_empty() {
@@ -157,11 +181,17 @@ impl JIT {
             return None;
         }
 
+        let Ok(hash) = Hash::blake3_hash((instr_for_hash.as_slice(), program_counter)) else {
+            builder.abandon();
+            self.clear();
+            return None;
+        };
+
         builder.finish(&lowered_instrs);
 
         self.produce_function(&hash)
             .inspect_err(|error| {
-                let opcodes = instr.iter().map(|i| i.opcode).collect::<Vec<_>>();
+                let opcodes = instr_for_hash.iter().map(|i| i.opcode).collect::<Vec<_>>();
                 log::warning!("Failed to compile {:?}: {:?}", opcodes, error);
             })
             .ok()
@@ -285,6 +315,7 @@ mod tests {
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
+    use crate::machine_state::memory::address_to_page_offset;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::Interpreted;
@@ -374,11 +405,21 @@ mod tests {
         fn check_compilable(&self) {
             // Ensure the set of instructions can be compiled in JIT.
             let mut test_jit = JIT::new().unwrap();
+            let initial_pc = self.initial_pc.unwrap_or_default();
+
+            let mut jitted_page =
+                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+
+            PageEntry::push_instructions(
+                &mut jitted_page,
+                initial_pc,
+                self.instructions.iter().cloned(),
+            );
+
+            let offset = address_to_page_offset(initial_pc) >> 1;
+
             test_jit
-                .compile::<DummyCompiler, M4K>(
-                    &self.instructions,
-                    self.initial_pc.unwrap_or_default(),
-                )
+                .compile_page::<DummyCompiler, M4K>(&jitted_page, offset, initial_pc)
                 .expect("JIT compilation should succeed.");
         }
 
@@ -2020,17 +2061,26 @@ mod tests {
             jitted.hart.pc.write(initial_pc);
 
             jitted.hart.xregisters.write_nz(x1, 1);
+            let offset = address_to_page_offset(initial_pc) >> 1;
+
+            let mut failure_page =
+                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+            PageEntry::push_instructions(&mut failure_page, initial_pc, failure.iter().cloned());
 
             // Act
-            let res = jit.compile::<DummyCompiler, M4K>(failure, initial_pc);
+            let res = jit.compile_page::<DummyCompiler, M4K>(&failure_page, offset, initial_pc);
 
             assert!(
                 res.is_none(),
                 "Compilation of unsupported instruction should fail"
             );
 
+            let mut success_page =
+                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+            PageEntry::push_instructions(&mut success_page, initial_pc, success.iter().cloned());
+
             let fun = jit
-                .compile::<DummyCompiler, _>(success, initial_pc)
+                .compile_page::<DummyCompiler, _>(&success_page, offset, initial_pc)
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_err = ExceptionCode::NoException;
@@ -2038,7 +2088,7 @@ mod tests {
             // SAFETY: `jit` is still alive so the function pointer is safe to call.
             let jitted_steps = unsafe {
                 (fun)(
-                    &PageEntry::zeroed(DummyCompiler),
+                    &success_page,
                     &mut jitted,
                     initial_pc,
                     max_steps,

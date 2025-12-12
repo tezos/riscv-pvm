@@ -22,7 +22,7 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::address_to_page_offset;
 use crate::machine_state::page_cache::DispatchTarget;
 
-/// Maximum number of instructions we pass to a compilation request
+/// Maximum number of instructions executed when dispatching a single entrypoint in tests.
 ///
 /// Doubles as a coarse upper-bound for the minimum number of steps required to safely dispatch
 /// the entrypoints.
@@ -100,31 +100,6 @@ impl<D, MC> Jitted<D, MC> {
             .unwrap_or(ExceptionCode::NoException);
 
         block_result.steps
-    }
-
-    /// Returns up to [MAX_INSTR_COMPILED] instructions, that would be contiguous in memory,
-    /// starting from the page offset given by `instr_pc`.
-    ///
-    /// These instructions can be passed to the JIT compiler for entrypoint dispatch optimisation.
-    pub(super) fn compilation_request_instructions(
-        page: &[Self; INSTRUCTION_ENTRIES],
-        instr_pc: Address,
-    ) -> Vec<Instruction> {
-        let page_offset = address_to_page_offset(instr_pc);
-
-        // instr_pc is always halfword aligned
-        let mut offset = page_offset >> 1;
-
-        let mut instructions = Vec::with_capacity(MAX_INSTR_COMPILED);
-        while offset < INSTRUCTION_ENTRIES && instructions.len() < MAX_INSTR_COMPILED {
-            let entry = &page[offset];
-
-            offset += (entry.instruction.width() as usize) >> 1;
-
-            instructions.push(entry.instruction);
-        }
-
-        instructions
     }
 }
 
