@@ -50,7 +50,7 @@ impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, 
     {
         #[cfg(test)]
         {
-            let instr_offset = super::address_to_page_offset(instr_pc) >> 1;
+            let instr_offset = super::address_to_halfword_index(instr_pc);
             page.entries[instr_offset]
                 .call_count
                 .update(|x| x.saturating_add(1));

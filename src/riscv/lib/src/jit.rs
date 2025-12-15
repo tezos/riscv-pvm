@@ -307,12 +307,12 @@ mod tests {
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
-    use crate::machine_state::memory::address_to_page_offset;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
+    use crate::machine_state::page_cache::address_to_halfword_index;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
@@ -408,7 +408,7 @@ mod tests {
                 self.instructions.iter().cloned(),
             );
 
-            let offset = address_to_page_offset(initial_pc) >> 1;
+            let offset = address_to_halfword_index(initial_pc);
 
             test_jit
                 .compile_page::<DummyCompiler, M4K>(&jitted_page, offset, initial_pc)
@@ -2053,7 +2053,7 @@ mod tests {
             jitted.hart.pc.write(initial_pc);
 
             jitted.hart.xregisters.write_nz(x1, 1);
-            let offset = address_to_page_offset(initial_pc) >> 1;
+            let offset = address_to_halfword_index(initial_pc);
 
             let mut failure_page =
                 PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);

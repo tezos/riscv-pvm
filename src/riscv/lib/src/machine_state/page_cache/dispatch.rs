@@ -18,9 +18,9 @@ use std::sync::mpsc::Sender;
 use perfect_derive::perfect_derive;
 
 use crate::jit::JIT;
-use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::address_to_halfword_index;
 use crate::machine_state::page_cache::jitted::Jitted;
 use crate::machine_state::page_cache::jitted::JittedPage;
 
@@ -178,7 +178,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
         // there can be no other attempts to borrow concurrently.
         let mut jit = target.compiler.jit.borrow_mut();
 
-        let offset = memory::address_to_page_offset(program_counter) >> 1;
+        let offset = address_to_halfword_index(program_counter);
 
         let fun: DispatchFn<Self, MC> = match jit.compile_page(target, offset, program_counter) {
             Some(jitfn) => jitfn,
@@ -259,7 +259,7 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompiler<MC> {
                         continue;
                     }
 
-                    let offset = memory::address_to_page_offset(msg.program_counter) >> 1;
+                    let offset = address_to_halfword_index(msg.program_counter);
 
                     if let Some(jitfn) =
                         jit.compile_page::<Self, MC>(&msg.page, offset, msg.program_counter)
@@ -295,7 +295,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
     fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
         let fun = Jitted::run_entrypoint_not_compiled;
 
-        let offset = memory::address_to_page_offset(program_counter) >> 1;
+        let offset = address_to_halfword_index(program_counter);
         target.entries[offset].dispatch.set(fun);
 
         let request = CompilationRequest {

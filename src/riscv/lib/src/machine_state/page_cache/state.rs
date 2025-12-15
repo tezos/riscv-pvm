@@ -132,14 +132,12 @@ impl<CPE: From<Instruction> + std::fmt::Debug, C> PageEntry<CPE, C> {
         address: Address,
         instructions: impl Iterator<Item = Instruction>,
     ) {
-        use crate::machine_state::memory::address_to_page_offset;
-
         let page =
             Arc::get_mut(page).expect("push_instructions can only be called on an uncloned page");
 
         // we only store entries for halfword-aligned addresses, since pc is always halfword
         // aligned
-        let mut offset = address_to_page_offset(address) >> 1;
+        let mut offset = super::address_to_halfword_index(address);
 
         for instr in instructions {
             if offset > INSTRUCTION_ENTRIES {
@@ -172,7 +170,7 @@ where
 
         // we only store entries for halfword-aligned addresses, since pc is always halfword
         // aligned
-        let offset = crate::machine_state::memory::address_to_page_offset(address) >> 1;
+        let offset = super::address_to_halfword_index(address);
 
         Some(page.entries[offset].dispatch.called_times())
     }
