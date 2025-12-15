@@ -543,7 +543,7 @@ mod tests {
             // Assert the JIT-compiled entrypoint was called once.
             let jit_called_counter = jitted_state
                 .page_cache
-                .get_entrypoint_called_times(initial_pc)
+                .get_entrypoint_jit_calls(initial_pc)
                 .expect("Entrypoint at initial_pc should be valid");
             assert_eq!(
                 jit_called_counter, 1,

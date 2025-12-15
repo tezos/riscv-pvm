@@ -420,3 +420,96 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         )
     }
 }
+#[cfg(test)]
+mod state_access_test_utils {
+    use cranelift::prelude::FunctionBuilder;
+
+    use crate::jit::builder::ext_calls;
+    use crate::jit::builder::typed::Pointer;
+    use crate::jit::builder::typed::Value;
+    use crate::jit::state_access::JsaCalls;
+    use crate::machine_state::memory::Address;
+    use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::page_cache::address_to_halfword_index;
+    use crate::machine_state::page_cache::jitted::JittedPage;
+
+    extern "C" fn record_jit_call<D, MC: MemoryConfig>(
+        page: &JittedPage<D, MC>,
+        entrypoint: Address,
+    ) {
+        let entry = address_to_halfword_index(entrypoint);
+        page.entries[entry].dispatch.jit_counters.record_jit_call();
+    }
+
+    extern "C" fn record_budget_check_pass<D, MC: MemoryConfig>(
+        page: &JittedPage<D, MC>,
+        entrypoint: Address,
+    ) {
+        let entry = address_to_halfword_index(entrypoint);
+        page.entries[entry]
+            .dispatch
+            .jit_counters
+            .record_budget_check_pass();
+    }
+
+    extern "C" fn record_fallback_to_interpreter<D, MC: MemoryConfig>(
+        page: &JittedPage<D, MC>,
+        entrypoint: Address,
+    ) {
+        let entry = address_to_halfword_index(entrypoint);
+        page.entries[entry]
+            .dispatch
+            .jit_counters
+            .record_fallback_to_interpreter();
+    }
+
+    impl<MC: MemoryConfig> JsaCalls<MC> {
+        /// Record a JIT function call (test-only).
+        pub(crate) fn record_jit_call<D>(
+            &self,
+            builder: &mut FunctionBuilder,
+            page: Pointer<JittedPage<D, MC>>,
+            entrypoint: Value<Address>,
+        ) {
+            ext_calls::call2(
+                &self.target_config,
+                builder,
+                self::record_jit_call::<D, MC>,
+                unsafe { page.as_ref() },
+                entrypoint,
+            );
+        }
+
+        /// Record that a budget check passed (test-only).
+        pub(crate) fn record_budget_check_pass<D>(
+            &self,
+            builder: &mut FunctionBuilder,
+            page: Pointer<JittedPage<D, MC>>,
+            entrypoint: Value<Address>,
+        ) {
+            ext_calls::call2(
+                &self.target_config,
+                builder,
+                self::record_budget_check_pass::<D, MC>,
+                unsafe { page.as_ref() },
+                entrypoint,
+            );
+        }
+
+        /// Record a fallback to interpreted execution (test-only).
+        pub(crate) fn record_fallback_to_interpreter<D>(
+            &self,
+            builder: &mut FunctionBuilder,
+            page: Pointer<JittedPage<D, MC>>,
+            entrypoint: Value<Address>,
+        ) {
+            ext_calls::call2(
+                &self.target_config,
+                builder,
+                self::record_fallback_to_interpreter::<D, MC>,
+                unsafe { page.as_ref() },
+                entrypoint,
+            );
+        }
+    }
+}

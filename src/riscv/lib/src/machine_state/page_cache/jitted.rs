@@ -33,7 +33,7 @@ pub type JittedPage<D, MC> = Arc<super::state::PageEntry<Jitted<D, MC>, D>>;
 #[derive(derive_more::Debug)]
 pub struct Jitted<D, MC> {
     instruction: Instruction,
-    pub(super) dispatch: DispatchTarget<D, MC>,
+    pub(crate) dispatch: DispatchTarget<D, MC>,
 }
 
 impl<D, MC> AsRef<Instruction> for Jitted<D, MC> {
@@ -134,10 +134,6 @@ impl<D: Clone + RouterEq + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry
 
         let fun = entrypoint.dispatch.get();
 
-        // TODO RV-843: Move the called_times recording into the dispatch mechanism itself.
-        #[cfg(test)]
-        entrypoint.dispatch.record_called();
-
         let mut result = ExceptionCode::NoException;
 
         // SAFETY: the compiler which was used to compile `fun` is still alive (`page` has
@@ -152,7 +148,7 @@ impl<D: Clone + RouterEq + DispatchCompiler<MC>, MC: MemoryConfig> CodePageEntry
 
     #[cfg(test)]
     fn called_times(&self) -> usize {
-        self.dispatch.called_times()
+        self.dispatch.num_jit_calls()
     }
 }
 
@@ -193,7 +189,7 @@ mod tests {
             100 + (DEFAULT_TEST_MAX_STEPS as u64) * InstrWidth::Compressed as u64
         );
 
-        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
+        assert_eq!(page.entries[100 >> 1].dispatch.num_jit_calls(), 1);
     }
 
     proptest::proptest! {
@@ -223,7 +219,7 @@ mod tests {
                 start_pc + (expected_steps as u64) * InstrWidth::Compressed as u64
             );
 
-            prop_assert_eq!(page.entries[start_entry].dispatch.called_times(), 1);
+            prop_assert_eq!(page.entries[start_entry].dispatch.num_jit_calls(), 1);
         }
     }
 
@@ -243,8 +239,8 @@ mod tests {
         assert_eq!(result.error, Some(Exception::FenceI));
         assert_eq!(result.steps, 0);
 
-        // we have attempted compilation
-        assert_eq!(page.entries[100 >> 1].dispatch.called_times(), 1);
+        // Fence is not JIT-compiled, so we will not enter any JIT function.
+        assert_eq!(page.entries[100 >> 1].dispatch.num_jit_calls(), 0);
 
         let info = format!("{:?}", page.entries[100 >> 1].dispatch);
         assert!(
@@ -288,7 +284,7 @@ mod tests {
             (DEFAULT_TEST_MAX_STEPS as u64) * InstrWidth::Uncompressed as u64
         );
 
-        assert_eq!(page.entries[0].dispatch.called_times(), 1);
+        assert_eq!(page.entries[0].dispatch.num_jit_calls(), 1);
 
         // This time, start with a `Unknown` instruction
         let result = CodePageEntry::run_entrypoint(&page, &mut core, 2, DEFAULT_TEST_MAX_STEPS);
@@ -298,6 +294,6 @@ mod tests {
 
         assert_eq!(core.hart.pc.read(), 2);
 
-        assert_eq!(page.entries[2 >> 1].dispatch.called_times(), 1);
+        assert_eq!(page.entries[2 >> 1].dispatch.num_jit_calls(), 1);
     }
 }

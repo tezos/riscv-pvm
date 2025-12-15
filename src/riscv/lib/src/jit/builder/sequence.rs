@@ -170,6 +170,15 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
         // Assign the passed in `max_steps` to the `steps_remaining` variable.
         builder.def_var(steps_remaining, max_steps_param.to_value());
 
+        #[cfg(test)]
+        {
+            let entrypoint = builder.ins().iconst(I64, program_counter as i64);
+            // SAFETY: The value is constructed from an Address type.
+            let entrypoint = unsafe { Value::<Address>::from_raw(entrypoint) };
+            // Record each JIT function invocation from within the generated function.
+            ext_calls.record_jit_call(&mut builder, page_param, entrypoint);
+        }
+
         // The entry block is where we will eventually transition to the first instruction basic
         // block. The function's entry block (`param_block` for our purposes) will directly jump to
         // this `entry_block`.
@@ -253,6 +262,19 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
             let raw_value = self.builder.block_params(self.fallback_interpreted_block)[1];
             Value::<usize>::from_raw(raw_value)
         };
+
+        #[cfg(test)]
+        {
+            let entrypoint = self.builder.ins().iconst(I64, self.program_counter as i64);
+            // SAFETY: The value is constructed from an Address type.
+            let entrypoint = unsafe { Value::<Address>::from_raw(entrypoint) };
+            // Record each fallback to interpreted mode from within the generated function.
+            self.ext_calls.record_fallback_to_interpreter(
+                &mut self.builder,
+                self.page_param,
+                entrypoint,
+            );
+        }
 
         // Call the interpreter fallback function. This will continue up to `fallback_max_steps` steps
         // in interpreted mode. This syncs the PC to the `machine_core_state` as it executes.
@@ -365,6 +387,16 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
 
         self.builder.seal_block(continue_block);
         self.builder.switch_to_block(continue_block);
+
+        #[cfg(test)]
+        {
+            let entrypoint = self.builder.ins().iconst(I64, self.program_counter as i64);
+            // SAFETY: The value is constructed from an Address type.
+            let entrypoint = unsafe { Value::<Address>::from_raw(entrypoint) };
+            // Record each budget check pass from within the generated function.
+            self.ext_calls
+                .record_budget_check_pass(&mut self.builder, self.page_param, entrypoint);
+        }
     }
 
     /// Insert a budget-check into the control flow IR for the current entrypoint.
