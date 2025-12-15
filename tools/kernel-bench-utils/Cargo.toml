@@ -1,0 +1,12 @@
+[package]
+name = "kernel-bench-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Utilities used for benchmarking kernels"
+
+[dependencies]
+datadog-api-client.workspace = true
+
+[lints]
+workspace = true
