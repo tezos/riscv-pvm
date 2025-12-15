@@ -7,6 +7,7 @@ members = [
   "tools/sandbox",
   "tools/analyse-jit-functions",
   "tools/gen-etherlink-store-accesses",
+  "tools/kernel-bench-utils",
   "test-utils",
 ]
 exclude = ["kernels"]
@@ -104,6 +105,11 @@ features = ["derive"]
 [workspace.dependencies.clap]
 version = "4.5.54"
 features = ["derive"]
+
+[workspace.dependencies.datadog-api-client]
+version = "0.26.0"
+default-features = false
+features = ["rustls-tls"]
 
 [workspace.dependencies.derive_more]
 version = "2.1.1"
