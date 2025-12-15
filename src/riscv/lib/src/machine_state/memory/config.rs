@@ -14,7 +14,6 @@ use super::buddy::BuddyConfig;
 use super::buddy::BuddyConfigProxy;
 use super::protection::PagePermissions;
 use super::state::MemoryImpl;
-use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::state::NewState;
 use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
@@ -53,11 +52,6 @@ where
 
     type State<M: ManagerBase> =
         MemoryImpl<PAGES, TOTAL_BYTES, <BuddyConfigProxy<PAGES> as BuddyConfig>::Buddy<M>, M>;
-
-    type PageCache<
-        CPE: crate::machine_state::page_cache::code_page_entry::CodePageEntry<Self, M>,
-        M: ManagerBase,
-    > = PageCacheImpl<CPE, Self, M>;
 
     fn state_from_proof<D: merkle_proof::Deserialiser>(
         proof: D,

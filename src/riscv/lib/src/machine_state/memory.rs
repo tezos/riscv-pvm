@@ -20,8 +20,6 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
-use super::page_cache::PageCache;
-use super::page_cache::code_page_entry::CodePageEntry;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
@@ -325,9 +323,6 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
 
     /// Memory instance
     type State<M: ManagerBase>: Memory<M>;
-
-    /// Page Cache instance
-    type PageCache<CPE: CodePageEntry<Self, M>, M: ManagerBase>: PageCache<Self, M>;
 
     /// Parse the proof to obtain a memory instance.
     fn state_from_proof<D: merkle_proof::Deserialiser>(

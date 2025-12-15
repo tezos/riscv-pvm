@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::memory::MemoryConfig;
-use octez_riscv::machine_state::page_cache::Interpreted;
+use octez_riscv::machine_state::page_cache::PageCacheInterpreted;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::state_backend::proof_backend::proof::Proof;
 use octez_riscv::state_backend::proof_backend::proof::serialise_proof;
@@ -209,7 +209,7 @@ fn run_steps_ladder<MC, F>(
 }
 
 type StepperVerifyFn<MC, M> = fn(
-    &PvmStepper<NoHooks, MC, M, Interpreted<MC, M>>,
+    &PvmStepper<NoHooks, MC, M, PageCacheInterpreted<MC, M>>,
     proof: Proof,
 ) -> Result<(), ProofVerificationFailure>;
 

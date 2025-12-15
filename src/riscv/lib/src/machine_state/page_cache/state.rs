@@ -443,7 +443,6 @@ mod tests {
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::exceptions::Exception;
-    use crate::machine_state::CodePageEntry;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::instruction::Instruction;
     use crate::machine_state::memory;
@@ -456,6 +455,7 @@ mod tests {
     use crate::machine_state::memory::address_to_page_index;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::CodePage;
+    use crate::machine_state::page_cache::CodePageEntry;
     use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;

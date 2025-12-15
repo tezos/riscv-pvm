@@ -6,7 +6,7 @@ use std::ops::ControlFlow;
 
 use crate::machine_state::MachineState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::CodePageEntry;
+use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a7;
 use crate::state::NewState;
@@ -31,9 +31,9 @@ pub struct PosixState<M: ManagerBase> {
 
 impl<M: ManagerBase> PosixState<M> {
     /// Handle a POSIX system call. Returns `Ok(true)` if it makes sense to continue execution.
-    pub fn handle_call<MC: MemoryConfig, CPE: CodePageEntry<MC, M>>(
+    pub fn handle_call<MC: MemoryConfig, PC: PageCache<MC, M>>(
         &mut self,
-        machine: &mut MachineState<MC, CPE, M>,
+        machine: &mut MachineState<MC, PC, M>,
     ) -> ControlFlow<BreakReason>
     where
         M: ManagerRead + ManagerWrite,

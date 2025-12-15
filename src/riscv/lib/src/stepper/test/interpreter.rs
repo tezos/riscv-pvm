@@ -16,6 +16,7 @@ use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
+use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
 use crate::stepper::test::TestStepperResult::*;
@@ -38,7 +39,8 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permiss
 
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
-    let mut interpreter: TestStepper<M1M, CPE> = TestStepper::new(&contents).expect("Boot failed");
+    let mut interpreter: TestStepper<M1M, PageCacheImpl<CPE, M1M, Normal>> =
+        TestStepper::new(&contents).expect("Boot failed");
 
     if required_perms == Permissions::Rwx {
         interpreter.set_all_read_write_exec();

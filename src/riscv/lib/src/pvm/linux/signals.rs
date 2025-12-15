@@ -48,7 +48,7 @@ use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
+use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::nz;
 use crate::machine_state::registers::sp;
 use crate::pvm::Pvm;
@@ -785,10 +785,10 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 }
 
-impl<MC, CPE, M> Pvm<MC, CPE, M>
+impl<MC, PC, M> Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: ManagerBase,
 {
     /// Writes a small function to call the `rt_sigreturn` system call to a provided address, then
@@ -878,16 +878,17 @@ mod tests {
     use crate::exceptions::Exception;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::MemoryConfig;
-    use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::PageCacheInterpreted;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
     use crate::pvm::linux::VirtAddr;
 
     backend_test!(test_step_into_handler, F, {
         type MC = M1M;
-        type Cpe = Interpreted<MC, Normal>;
+        type PC = PageCacheInterpreted<MC, Normal>;
 
-        let mut pvm = Pvm::<MC, Cpe, Normal>::new();
+        // Setup PVM
+        let mut pvm = Pvm::<MC, PC, Normal>::new();
 
         pvm.machine_state.reset();
 
@@ -961,9 +962,10 @@ mod tests {
 
     backend_test!(test_jump_to_restorer, F, {
         type MC = M1M;
-        type Cpe = Interpreted<MC, Normal>;
+        type PC = PageCacheInterpreted<MC, Normal>;
 
-        let mut pvm = Pvm::<MC, Cpe, Normal>::new();
+        // Setup PVM
+        let mut pvm = Pvm::<MC, PC, Normal>::new();
 
         pvm.machine_state.reset();
 

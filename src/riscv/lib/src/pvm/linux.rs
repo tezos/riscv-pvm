@@ -52,7 +52,7 @@ use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
-use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
+use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
@@ -184,7 +184,7 @@ enum AuxVectorKey {
     ProgramHeadersPtr = 3,
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> MachineState<MC, CPE, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerBase> MachineState<MC, PC, M> {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
     where
@@ -259,10 +259,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> MachineState<M
     }
 }
 
-impl<MC, CPE, M> Pvm<MC, CPE, M>
+impl<MC, PC, M> Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: ManagerBase,
 {
     /// Load the program into memory and set the PC to its entrypoint.
@@ -473,15 +473,15 @@ impl<M: ManagerBase> SupervisorState<M> {
     }
 
     /// Handle a Linux system call.
-    pub fn handle_system_call<MC, CPE>(
+    pub fn handle_system_call<MC, PC>(
         &mut self,
-        machine: &mut MachineState<MC, CPE, M>,
+        machine: &mut MachineState<MC, PC, M>,
         hooks: impl PvmHooks,
         on_tezos: impl FnOnce(&mut MachineCoreState<MC, M>) -> ControlFlow<()>,
     ) -> ControlFlow<()>
     where
         MC: MemoryConfig,
-        CPE: CodePageEntry<MC, M>,
+        PC: PageCache<MC, M>,
         M: ManagerRead + ManagerWrite,
     {
         let pc = machine.core.hart.pc.read();
@@ -1126,6 +1126,7 @@ mod tests {
     use crate::backend_test;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::Interpreted;
+    use crate::machine_state::page_cache::state::PageCacheImpl;
     use crate::machine_state::registers::sp;
     use crate::parser::instruction::InstrWidth;
     use crate::pvm::hooks::StdoutDebugHooks;
@@ -1153,7 +1154,8 @@ mod tests {
         type MemLayout = M4K;
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get();
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         machine_state
@@ -1183,7 +1185,8 @@ mod tests {
     backend_test!(ppoll_init_fds, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1246,7 +1249,8 @@ mod tests {
     backend_test!(rt_sigaction_with_handler, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1369,7 +1373,8 @@ mod tests {
     backend_test!(rt_sigaction_ignore, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1474,7 +1479,8 @@ mod tests {
     backend_test!(sigaltstack_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // System call number
@@ -1504,7 +1510,8 @@ mod tests {
     backend_test!(sched_getaffinity_set_sizes, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1582,7 +1589,8 @@ mod tests {
     backend_test!(sched_getaffinity_zero_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1631,7 +1639,8 @@ mod tests {
     backend_test!(sched_getaffinity_unreasonable_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1698,7 +1707,8 @@ mod tests {
     backend_test!(rt_sigaction_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1747,7 +1757,8 @@ mod tests {
     backend_test!(rt_sigprocmask_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1796,7 +1807,8 @@ mod tests {
     backend_test!(clock_gettime_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1859,7 +1871,8 @@ mod tests {
     backend_test!(gettimeofday_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1939,7 +1952,8 @@ mod tests {
     backend_test!(mmap_returns_enomem_when_allocation_fails, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, Interpreted<MemLayout, F>, F>::new();
+        let mut machine_state =
+            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail

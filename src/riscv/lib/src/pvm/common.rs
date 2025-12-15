@@ -40,8 +40,8 @@ use crate::default::ConstDefault;
 use crate::machine_state;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
-use crate::machine_state::page_cache::interpreted::Interpreted;
+use crate::machine_state::page_cache::PageCache;
+use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
@@ -99,14 +99,12 @@ impl fmt::Display for PvmStatus {
 const INITIAL_VERSION: u64 = 0;
 
 /// Proof generator for the PVM.
-///
-/// Uses the interpreted compiler.
-pub(crate) type PvmProve<'a, MC> = Pvm<MC, Interpreted<MC, Prove<'a>>, Prove<'a>>;
+pub(crate) type PvmProve<'a, MC> = Pvm<MC, PageCacheInterpreted<MC, Prove<'a>>, Prove<'a>>;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
-    pub(crate) machine_state: machine_state::MachineState<MC, CPE, M>,
+pub struct Pvm<MC: MemoryConfig, PC, M: ManagerBase> {
+    pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
     version: Atom<u64, M>,
@@ -117,10 +115,10 @@ pub struct Pvm<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerBase> {
     pub(crate) status: Atom<PvmStatus, M>,
 }
 
-impl<MC, CPE, M> Default for Pvm<MC, CPE, M>
+impl<MC, PC, M> Default for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: state_backend::ManagerBase + state_backend::ManagerAlloc,
 {
     fn default() -> Self {
@@ -128,7 +126,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: state_backend::ManagerBase> Pvm<MC, PC, M> {
     /// Allocate a new PVM.
     pub fn new() -> Self
     where
@@ -350,7 +348,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase>
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
+impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Pvm<MC, PC, Normal> {
     /// Return a proof-generating version of this PVM.
     pub(crate) fn start_proof(&self) -> PvmProve<'_, MC> {
         Pvm {
@@ -367,7 +365,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Pvm<MC, CPE, Normal> {
     }
 }
 
-impl<'a, MC: MemoryConfig, CPE: CodePageEntry<MC, Prove<'a>>> Pvm<MC, CPE, Prove<'a>>
+impl<'a, MC: MemoryConfig> Pvm<MC, PageCacheInterpreted<MC, Prove<'a>>, Prove<'a>>
 where
     MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
 {
@@ -386,7 +384,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState for Pvm<MC, CPE, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerClone> CloneState for Pvm<MC, PC, M> {
     fn clone_state(&self) -> Self {
         Self {
             machine_state: self.machine_state.clone_state(),
@@ -402,13 +400,13 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerClone> CloneState fo
     }
 }
 
-impl<MC, CPE, M, F> Foldable<F> for Pvm<MC, CPE, M>
+impl<MC, PC, M, F> Foldable<F> for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: ManagerBase,
     F: Fold,
-    machine_state::MachineState<MC, CPE, M>: Foldable<F>,
+    machine_state::MachineState<MC, PC, M>: Foldable<F>,
     RevealRequest<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
     Atom<PvmStatus, M>: Foldable<F>,
@@ -431,7 +429,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof for Pvm<MC, CPE, Verify> {
+impl<MC: MemoryConfig> FromProof for Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
@@ -459,10 +457,10 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> FromProof for Pvm<MC, CPE
     }
 }
 
-impl<MC, CPE, M> Encode for Pvm<MC, CPE, M>
+impl<MC, PC, M> Encode for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: state_backend::ManagerSerialise,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
@@ -479,10 +477,10 @@ where
     }
 }
 
-impl<C, MC, CPE> Decode<C> for Pvm<MC, CPE, Normal>
+impl<C, MC, PC> Decode<C> for Pvm<MC, PC, Normal>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, Normal>,
+    PC: PageCache<MC, Normal>,
     MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
@@ -500,7 +498,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> Pvm<MC, CPE, Verify> {
+impl<MC: MemoryConfig> Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
         let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
@@ -522,8 +520,8 @@ pub enum InputRequest {
 }
 
 /// Handle a system call in the PVM.
-pub(crate) fn handle_system_call<MC, CPE, M>(
-    machine: &mut machine_state::MachineState<MC, CPE, M>,
+pub(crate) fn handle_system_call<MC, PC, M>(
+    machine: &mut machine_state::MachineState<MC, PC, M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
@@ -531,7 +529,7 @@ pub(crate) fn handle_system_call<MC, CPE, M>(
 ) -> ControlFlow<()>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: state_backend::ManagerRead + state_backend::ManagerWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
@@ -561,8 +559,6 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
-    use crate::machine_state::page_cache;
-    use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
@@ -573,7 +569,7 @@ mod tests {
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
 
-    impl<MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: state_backend::ManagerBase> Pvm<MC, CPE, M> {
+    impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: state_backend::ManagerBase> Pvm<MC, PC, M> {
         /// Handle an exception using the defined Execution Environment.
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
@@ -594,10 +590,10 @@ mod tests {
     #[test]
     fn test_read_input() {
         type MC = M1M;
-        type Cpe = page_cache::Interpreted<MC, Normal>;
+        type PC = PageCacheInterpreted<MC, Normal>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe, Normal>::new();
+        let mut pvm = Pvm::<MC, PC, Normal>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -698,12 +694,12 @@ mod tests {
             written: [u8; WRITTEN_SIZE],
         )|{
             type MC = M1M;
-            type Cpe = page_cache::Interpreted<MC, Normal>;
+            type PC = PageCacheInterpreted<MC, Normal>;
 
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, Cpe, Normal>::new();
+            let mut pvm = Pvm::<MC, PC, Normal>::new();
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -745,10 +741,10 @@ mod tests {
 
     backend_test!(test_reveal, F, {
         type MC = M1M;
-        type Cpe<F> = page_cache::Interpreted<MC, F>;
+        type PC<F> = PageCacheInterpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new();
+        let mut pvm = Pvm::<MC, PC<F>, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -815,10 +811,10 @@ mod tests {
 
     backend_test!(test_reveal_insufficient_buffer_size, F, {
         type MC = M1M;
-        type Cpe<F> = page_cache::Interpreted<MC, F>;
+        type PC<F> = PageCacheInterpreted<MC, F>;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, Cpe<F>, F>::new();
+        let mut pvm = Pvm::<MC, PC<F>, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

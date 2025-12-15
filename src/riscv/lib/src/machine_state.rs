@@ -43,7 +43,7 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use page_cache::CodePage;
 use page_cache::PageCache;
-use page_cache::code_page_entry::CodePageEntry;
+use page_cache::PageCacheInterpreted;
 use perfect_derive::perfect_derive;
 
 use crate::bits::u64;
@@ -271,54 +271,60 @@ where
 /// RISC-V machine state
 ///
 /// The machine state contains everything required to fetch & run instructions.
-pub struct MachineState<
-    MC: memory::MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
-    M: backend::ManagerBase,
-> {
+pub struct MachineState<MC: memory::MemoryConfig, PC, M: backend::ManagerBase> {
     pub core: MachineCoreState<MC, M>,
-    pub page_cache: MC::PageCache<CPE, M>,
+    pub page_cache: PC,
 }
 
-impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClone> Clone
-    for MachineState<MC, CPE, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> Clone
+    for MachineState<MC, PC, M>
 {
     // TODO: RV-806: implement Clone on PageCache
     fn clone(&self) -> Self {
         Self {
             core: self.core.clone(),
-            page_cache: MC::PageCache::new(),
+            page_cache: PC::new(),
         }
     }
 }
 
-impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Normal>> MachineState<MC, CPE, Normal> {
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> MachineState<MC, PC, Normal> {
     /// Return a proof-generating version of this MachineState.
     pub fn start_proof(
         &self,
-    ) -> MachineState<MC, page_cache::Interpreted<MC, Prove<'_>>, Prove<'_>> {
+    ) -> MachineState<
+        MC,
+        // TODO RV-849: replace with `EmptyPageCache`
+        PageCacheInterpreted<MC, Prove<'_>>,
+        Prove<'_>,
+    > {
         MachineState {
             core: self.core.start_proof(),
-            page_cache: MC::PageCache::new(),
+            page_cache: PageCacheInterpreted::new(),
         }
     }
 }
 
-impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerClone> CloneState
-    for MachineState<MC, CPE, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> CloneState
+    for MachineState<MC, PC, M>
 {
     fn clone_state(&self) -> Self {
         Self {
             core: self.core.clone_state(),
-            page_cache: MC::PageCache::new(),
+            page_cache: PC::new(),
         }
     }
 }
 
-impl<MC, CPE> FromProof for MachineState<MC, CPE, Verify>
+impl<MC> FromProof
+    for MachineState<
+        MC,
+        // TODO RV-849: replace with `EmptyPageCache`
+        PageCacheInterpreted<MC, Verify>,
+        Verify,
+    >
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, Verify>,
 {
     fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
         proof: D,
@@ -326,16 +332,16 @@ where
         let result = MachineCoreState::from_proof(proof)?;
         let result = result.map(|core| Self {
             core,
-            page_cache: MC::PageCache::new(),
+            page_cache: PageCacheInterpreted::new(),
         });
         Ok(result)
     }
 }
 
-impl<MC, CPE, M> Encode for MachineState<MC, CPE, M>
+impl<MC, PC, M> Encode for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: backend::ManagerSerialise,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
@@ -343,24 +349,24 @@ where
     }
 }
 
-impl<C, MC, CPE> Decode<C> for MachineState<MC, CPE, Normal>
+impl<C, MC, PC> Decode<C> for MachineState<MC, PC, Normal>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, Normal>,
+    PC: PageCache<MC, Normal>,
     MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             core: Decode::decode(decoder)?,
-            page_cache: MC::PageCache::new(),
+            page_cache: PC::new(),
         })
     }
 }
 
-impl<MC, CPE, M> PartialEq for MachineState<MC, CPE, M>
+impl<MC, PC, M> PartialEq for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: backend::ManagerBase,
     MachineCoreState<MC, M>: PartialEq,
 {
@@ -369,10 +375,10 @@ where
     }
 }
 
-impl<MC, CPE, M> Eq for MachineState<MC, CPE, M>
+impl<MC, PC, M> Eq for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: backend::ManagerBase,
     MachineCoreState<MC, M>: PartialEq,
 {
@@ -428,17 +434,17 @@ impl<E> Default for StepManyResult<E> {
 
 impl<
     MC: memory::MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: backend::ManagerBase + backend::ManagerAlloc,
-> Default for MachineState<MC, CPE, M>
+> Default for MachineState<MC, PC, M>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBase>
-    MachineState<MC, CPE, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerBase>
+    MachineState<MC, PC, M>
 {
     /// Allocate a new machine state.
     pub fn new() -> Self
@@ -447,7 +453,7 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     {
         Self {
             core: MachineCoreState::new(),
-            page_cache: MC::PageCache::new(),
+            page_cache: PC::new(),
         }
     }
 
@@ -788,10 +794,10 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
     }
 }
 
-impl<MC, CPE, M, F> Foldable<F> for MachineState<MC, CPE, M>
+impl<MC, PC, M, F> Foldable<F> for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
-    CPE: CodePageEntry<MC, M>,
+    PC: PageCache<MC, M>,
     M: backend::ManagerBase,
     F: Fold,
     MachineCoreState<MC, M>: Foldable<F>,
@@ -828,8 +834,8 @@ pub(crate) mod test_helpers {
     use octez_riscv_data::mode::Verify;
 
     use super::MachineState;
+    use super::page_cache::PageCacheInterpreted;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::page_cache::Interpreted;
     use crate::state_backend::ManagerBase;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
@@ -859,7 +865,7 @@ pub(crate) mod test_helpers {
     }
 
     /// Type alias for the machine state used in some tests.
-    pub type TestMachineOf<M> = MachineState<M4K, Interpreted<M4K, M>, M>;
+    pub type TestMachineOf<M> = MachineState<M4K, PageCacheInterpreted<M4K, M>, M>;
 
     /// Trait used to initialise a specific object - [`TestMachineStateOf<M>`] - with respect to a
     /// backend type.
@@ -930,7 +936,6 @@ mod tests {
     use super::MachineState;
     use super::instruction::Instruction;
     use super::memory::Address;
-    use super::page_cache::Interpreted;
     use super::page_cache::state::PageEntry;
     use crate::backend_test;
     use crate::default::ConstDefault;
@@ -947,6 +952,7 @@ mod tests {
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::memory::listener::MemoryGovernanceListener;
     use crate::machine_state::page_cache::InterpretedCompiler;
+    use crate::machine_state::page_cache::PageCacheInterpreted;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::sp;
@@ -1067,7 +1073,7 @@ mod tests {
     // `page-cache-tester` kernel's source that is used to test this.
     backend_test!(test_page_cache_state, F, {
         let base_state = {
-            let mut state = Pvm::<M64M, Interpreted<M64M, F>, F>::new();
+            let mut state = Pvm::<M64M, PageCacheInterpreted<M64M, F>, F>::new();
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
@@ -1149,7 +1155,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, Interpreted<M1M, F>, F>::new();
+        let state = MachineState::<M1M, PageCacheInterpreted<M1M, F>, F>::new();
 
         let second = state.clone();
 
@@ -1178,7 +1184,7 @@ mod tests {
                         write_upper: bool,
                         expected_pc: Address,
                         succeeds: bool| {
-            let mut state = MachineState::<M8K, Interpreted<M8K, F>, F>::new();
+            let mut state = MachineState::<M8K, PageCacheInterpreted<M8K, F>, F>::new();
 
             state.core.hart.pc.write(initial_pc);
 
@@ -1250,7 +1256,7 @@ mod tests {
     });
 
     backend_test!(test_signal_context, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new();
+        let mut state = MachineState::<M4K, PageCacheInterpreted<M4K, F>, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();
@@ -1269,7 +1275,7 @@ mod tests {
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
     backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, Interpreted<M4K, F>, F>::new();
+        let mut state = MachineState::<M4K, PageCacheInterpreted<M4K, F>, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();

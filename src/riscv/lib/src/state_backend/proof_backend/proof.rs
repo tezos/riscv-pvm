@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
 // SPDX-FileCopyrightText: 2024-2025 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
@@ -111,7 +111,11 @@ fn deserialise_final_hash(
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verify>`].
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> deserialiser::Result<(Proof, NodePvm<Verify>)> {
+) -> deserialiser::Result<(
+    Proof,
+    // TODO RV-849: use `EmptyPageCache` for verify mode
+    NodePvm<Verify>,
+)> {
     let final_state_hash =
         deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
 

@@ -313,6 +313,8 @@ mod tests {
     use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::Jitted;
+    use crate::machine_state::page_cache::PageCacheInlineJit;
+    use crate::machine_state::page_cache::PageCacheInterpreted;
     use crate::machine_state::page_cache::address_to_halfword_index;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
@@ -355,8 +357,8 @@ mod tests {
         }
     }
 
-    /// Machine state for test scenarios with a configurable [`Block`] type.
-    type TestMachineState<CPE> = MachineState<M4K, CPE, Normal>;
+    /// Machine state for test scenarios with a configurable [`PageCache`] type.
+    type TestMachineState<PC> = MachineState<M4K, PC, Normal>;
 
     #[derive(Debug, Clone, Copy)]
     enum ScenarioSteps {
@@ -468,13 +470,14 @@ mod tests {
             self.check_compilable();
 
             // Create the states for the interpreted and jitted runs.
-            let mut interpreted_state: TestMachineState<Interpreted<_, _>> = MachineState::new();
+            let mut interpreted_state: TestMachineState<PageCacheInterpreted<_, _>> =
+                MachineState::new();
             interpreted_state
                 .core
                 .main_memory
                 .set_all_readable_writeable(NoopMemoryGovernanceListener);
 
-            let mut jitted_state: TestMachineState<Jitted<InlineCompiler, _>> = MachineState::new();
+            let mut jitted_state: TestMachineState<PageCacheInlineJit<_>> = MachineState::new();
             jitted_state
                 .core
                 .main_memory
