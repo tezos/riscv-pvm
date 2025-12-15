@@ -36,6 +36,7 @@ use octez_riscv_data::mode::Normal;
 use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::MulHighType;
+use crate::instruction_context::StoreLoadFloat;
 use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::float::RoundingMode;
@@ -549,6 +550,85 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         {
             self.builder.switch_to_block(success_block);
 
+            let return_value = (errno.on_ok)(self.builder);
+            InstructionResult::HasNext(return_value)
+        }
+    }
+
+    fn main_memory_store_float<V: StoreLoadFloat>(
+        &mut self,
+        phys_address: Self::XValue,
+        value: Self::FValue,
+    ) -> Self::IResult<()> {
+        let errno = self.ext_calls.memory_store_float::<V>(
+            self.builder,
+            self.core_param,
+            phys_address,
+            value,
+        );
+
+        let exception_block = self.builder.create_block();
+        let success_block = self.builder.create_block();
+
+        let is_exception = errno.code.is_exception(self.builder);
+        self.ins().brif(
+            is_exception.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
+
+        self.builder.seal_block(exception_block);
+        self.builder.seal_block(success_block);
+
+        // Code for when the store failed
+        {
+            self.builder.switch_to_block(exception_block);
+            self.handle_exception::<()>(errno.code);
+        }
+
+        // Code for when the store succeeded
+        {
+            self.builder.switch_to_block(success_block);
+            (errno.on_ok)(self.builder);
+        }
+
+        InstructionResult::HasNext(())
+    }
+
+    fn main_memory_load_float<V: StoreLoadFloat>(
+        &mut self,
+        phys_address: Self::XValue,
+    ) -> Self::IResult<Self::FValue> {
+        let errno =
+            self.ext_calls
+                .memory_load_float::<V>(self.builder, self.core_param, phys_address);
+
+        let exception_block = self.builder.create_block();
+        let success_block = self.builder.create_block();
+
+        let is_exception = errno.code.is_exception(self.builder);
+        self.ins().brif(
+            is_exception.to_value(),
+            exception_block,
+            [],
+            success_block,
+            [],
+        );
+
+        self.builder.seal_block(exception_block);
+        self.builder.seal_block(success_block);
+
+        // Code for when the load failed
+        {
+            self.builder.switch_to_block(exception_block);
+            self.handle_exception::<()>(errno.code);
+        }
+
+        // Code for when the load succeeded
+        {
+            self.builder.switch_to_block(success_block);
             let return_value = (errno.on_ok)(self.builder);
             InstructionResult::HasNext(return_value)
         }

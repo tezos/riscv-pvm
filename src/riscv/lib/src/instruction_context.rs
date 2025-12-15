@@ -18,6 +18,7 @@ use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
 use rustc_apfloat::ieee::Double;
 
+pub use self::value::StoreLoadFloat;
 pub use self::value::StoreLoadInt;
 use crate::exceptions::Exception;
 use crate::instruction_context::value::PhiValue;
@@ -214,6 +215,23 @@ where
         phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue>;
 
+    /// Write floating-point value to main memory at the given address.
+    ///
+    /// The value is truncated to the width given by [`LoadStoreWidth`].
+    fn main_memory_store_float<V: StoreLoadFloat>(
+        &mut self,
+        phys_address: Self::XValue,
+        value: Self::FValue,
+    ) -> Self::IResult<()>;
+
+    /// Read floating-point value from main memory at the given address.
+    ///
+    /// The value is truncated to the width given by [`LoadStoreWidth`].
+    fn main_memory_load_float<V: StoreLoadFloat>(
+        &mut self,
+        phys_address: Self::XValue,
+    ) -> Self::IResult<Self::FValue>;
+
     /// Take an `XValue` and convert it to a 64-bit float with the dynamic rounding mode in the `frm` field of the
     /// `fcsr` register, returning the result as an `FValue`.
     fn f64_from_x64_unsigned_dynamic(&mut self, xval: Self::XValue) -> Self::FValue;
@@ -408,6 +426,28 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<M
         self.main_memory
             .read(address)
             .map(V::to_xvalue)
+            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
+    }
+
+    #[inline(always)]
+    fn main_memory_store_float<V: StoreLoadFloat>(
+        &mut self,
+        address: Self::XValue,
+        value: Self::FValue,
+    ) -> Self::IResult<()> {
+        self.main_memory
+            .write(address, V::from_fvalue(value))
+            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault)
+    }
+
+    #[inline(always)]
+    fn main_memory_load_float<V: StoreLoadFloat>(
+        &mut self,
+        address: Self::XValue,
+    ) -> Self::IResult<Self::FValue> {
+        self.main_memory
+            .read(address)
+            .map(V::to_fvalue)
             .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
     }
 
