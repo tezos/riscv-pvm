@@ -59,6 +59,14 @@ const INSTRUCTION_ENTRIES: usize = 1
         .checked_sub(1)
         .expect("OFFSET_BITS is non-zero") as usize;
 
+/// Isolate the the 'halfword-index' into a page of an address.
+///
+/// We only store entries for halfword-aligned addresses, since pc is always halfword aligned.
+#[inline]
+pub fn address_to_halfword_index(address: Address) -> usize {
+    address_to_page_offset(address) >> 1
+}
+
 /// Instance of the page cache.
 ///
 /// A page cache is a mapping from _page indexes_ to a page of entrypoints.
