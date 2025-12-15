@@ -3347,9 +3347,9 @@ checksum = "296cc7892cc05ae83e113b20c113d3fd9020eac7abbbaaeaf69c424ef872be7a"
 
 [[package]]
 name = "tuples"
-version = "1.17.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5dcfa8dec45d3bff92d209a183499f95bf6298c5fea5852a210f15e066e7ca7"
+checksum = "8c2f26d5a2cdc9f4d501969b8392371f3b43afab03aa607380ad387fc4c0ea3b"
 
 [[package]]
 name = "twox-hash"
