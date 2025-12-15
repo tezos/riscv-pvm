@@ -96,6 +96,20 @@ pub enum PersistenceLayerError {
     DirectoryManager(#[from] DirectoryManagerError),
 }
 
+/// Changes the default skip list memtable implementation to a hash linked list one.
+/// The skip list is an ordered data structure with O(log n) bounds for the relevant
+/// operations, while we need a hash map like behaviour which has O(1) bounds for the
+/// same.
+fn set_memtable_to_hash_link_list(options: &mut rocksdb::Options) {
+    let factory = rocksdb::MemtableFactory::HashLinkList {
+        // The 1_000_000 below is a reasonable default for getting a good load factor.
+        bucket_count: 1_000_000,
+    };
+    // Only the skip list based memtable supports concurrent writes.
+    options.set_allow_concurrent_memtable_write(false);
+    options.set_memtable_factory(factory);
+}
+
 /// These options are used for opening and closing a newly created rocksdb instance.
 ///
 /// Although different fields are used for opening vs. destroying a rocksdb instance, you need to
@@ -108,6 +122,29 @@ fn rocksdb_creation_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     options.create_if_missing(true);
     options.set_error_if_exists(true);
+    set_memtable_to_hash_link_list(&mut options);
+    options
+}
+
+/// RocksDB options for when we clone as a checkpoint
+fn rocksdb_clone_as_checkpoint_options() -> rocksdb::Options {
+    let mut options = rocksdb::Options::default();
+    set_memtable_to_hash_link_list(&mut options);
+    options
+}
+
+/// RocksDB options for when we create a DB from
+/// a checkoint
+fn rocksdb_checkpoint_options() -> rocksdb::Options {
+    let mut options = rocksdb::Options::default();
+    set_memtable_to_hash_link_list(&mut options);
+    options
+}
+
+/// RocksDB options for the blob column family creation
+fn rocksdb_blob_cf_creation_options() -> rocksdb::Options {
+    let mut options = rocksdb::Options::default();
+    set_memtable_to_hash_link_list(&mut options);
     options
 }
 
@@ -148,7 +185,7 @@ impl PersistenceLayer {
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
         let options = rocksdb_creation_options();
         let mut db = rocksdb::DB::open(&options, &new_db_path)?;
-        db.create_cf(BLOB_CF, &rocksdb::Options::default())?;
+        db.create_cf(BLOB_CF, &rocksdb_blob_cf_creation_options())?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
@@ -168,7 +205,9 @@ impl PersistenceLayer {
         Checkpoint::new(db)?.create_checkpoint(&checkpoint_path)?;
 
         let temp_db =
-            rocksdb::DB::open_cf(&rocksdb::Options::default(), &checkpoint_path, [BLOB_CF])?;
+            rocksdb::DB::open_cf(&rocksdb_clone_as_checkpoint_options(), &checkpoint_path, [
+                BLOB_CF,
+            ])?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
@@ -192,7 +231,7 @@ impl PersistenceLayer {
             return Err(PersistenceLayerError::CommitNotFound);
         };
 
-        let db = rocksdb::DB::open_cf(&rocksdb::Options::default(), &db_path, [BLOB_CF])?;
+        let db = rocksdb::DB::open_cf(&rocksdb_checkpoint_options(), &db_path, [BLOB_CF])?;
 
         Self::clone_as_checkpoint(&db, repo)
     }
