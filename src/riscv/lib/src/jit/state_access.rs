@@ -23,6 +23,7 @@ use octez_riscv_data::serialisation::elem::Elem;
 use super::builder::errno::ErrnoImpl;
 use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
+use crate::instruction_context::StoreLoadFloat;
 use crate::instruction_context::StoreLoadInt;
 use crate::interpreter::float::RoundRDN;
 use crate::interpreter::float::RoundRMM;
@@ -128,7 +129,7 @@ impl typed::Typed for ExceptionCode {
     const TYPE: typed::Type = typed::Type::Basic(I64);
 }
 
-/// Store the lowest `width` bytes of the given value to memory, at the physical address.
+/// Store the lowest `E::STORED_SIZE` bytes of the given value to memory, at the physical address.
 ///
 /// Returns [`ExceptionCode::NoException`] if the store is successful.
 ///
@@ -145,8 +146,8 @@ extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
     }
 }
 
-/// Load `width` bytes from memory, at the physical address, into lowest `width` bytes of an
-/// `XValue`, with (un)signed extension.
+/// Load `E::STORED_SIZE` bytes from memory, at the physical address, into lowest `E::STORED_SIZE`
+/// bytes of an `XValue`, with (un)signed extension.
 ///
 /// If the load is successful, the value is written to `xval_out` and
 /// [`ExceptionCode::NoException`] is returned.
@@ -240,7 +241,8 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
 
     /// Emit the required IR to call `memory_store`.
     ///
-    /// Returns `errno` - on success, no additional values are returned.
+    /// On success, the returned `ErrnoImpl` code is set to `NoException`.
+    /// No additional values are returned.
     pub(super) fn memory_store<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -266,7 +268,8 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
 
     /// Emit the required IR to call `memory_load`.
     ///
-    /// Returns `errno` - on success, the loaded value is returned.
+    /// On success, the returned `ErrnoImpl` code is set to `NoException`.
+    /// The loaded value is returned as the `ErrnoImpl` value.
     pub(super) fn memory_load<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -297,6 +300,70 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
             let xval = unsafe { xval_slot.assume_init().load(builder) };
 
             V::to_xvalue_ir(builder, xval)
+        })
+    }
+
+    /// Emit the required IR to call `memory_store` for floating-point values.
+    ///
+    /// On success, the returned `ErrnoImpl` code is set to `NoException`.
+    /// No additional values are returned.
+    pub(super) fn memory_store_float<V: StoreLoadFloat>(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
+        phys_address: Value<Address>,
+        value: Value<FValue>,
+    ) -> ErrnoImpl<(), impl FnOnce(&mut FunctionBuilder) + 'static> {
+        let value = V::from_fvalue_ir(builder, value);
+
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument
+        let exception = ext_calls::call3(
+            &self.target_config,
+            builder,
+            self::memory_store,
+            unsafe { core_ptr.as_mut() },
+            phys_address,
+            value,
+        );
+
+        ErrnoImpl::new(exception, |_| {})
+    }
+
+    /// Emit the required IR to call `memory_load` for floating-point values.
+    ///
+    /// On success, the returned `ErrnoImpl` code is set to `NoException`.
+    /// The loaded value is returned as `FValue`.
+    pub(super) fn memory_load_float<V: StoreLoadFloat>(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        core_ptr: Pointer<MachineCoreState<MC, Normal>>,
+        phys_address: Value<Address>,
+    ) -> ErrnoImpl<Value<FValue>, impl FnOnce(&mut FunctionBuilder) -> Value<FValue> + 'static>
+    {
+        let fval_slot =
+            stack::Slot::<MaybeUninit<V>>::new(self.target_config.pointer_type(), builder);
+        let fval_ptr = fval_slot.ptr(builder);
+
+        // SAFETY: The reference argument lifetimes are valid for the duration of the call:
+        // - `core_ptr` is a JIT function argument
+        // - `fval_ptr` points to a stack slot which is valid for the duration of the JIT function
+        let exception = ext_calls::call3(
+            &self.target_config,
+            builder,
+            self::memory_load,
+            unsafe { core_ptr.as_ref() },
+            phys_address,
+            unsafe { fval_ptr.as_mut() },
+        );
+
+        ErrnoImpl::new(exception, move |builder| {
+            // SAFETY: The slot is guaranteed to be initialised at this point as this closure
+            // generates IR for the success case when the external function will have written to
+            // the stack slot.
+            let fval = unsafe { fval_slot.assume_init().load(builder) };
+
+            V::to_fvalue_ir(builder, fval)
         })
     }
 

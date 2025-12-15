@@ -20,6 +20,7 @@ use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
 
@@ -131,6 +132,46 @@ impl_store_load_int!(8, LoadStoreWidth::Byte);
 impl_store_load_int!(16, LoadStoreWidth::Half);
 impl_store_load_int!(32, LoadStoreWidth::Word);
 impl_store_load_int!(64, LoadStoreWidth::Double);
+
+/// Types loaded and stored as floating-point values using [`super::ICB`].
+pub trait StoreLoadFloat: Typed + Stackable + Elem + 'static {
+    /// The width of the value in memory.
+    const WIDTH: LoadStoreWidth;
+
+    /// Convert the value to an [`FValue`], applying NaN-boxing for 32-bit values.
+    fn to_fvalue(self) -> FValue;
+
+    /// Convert an [`FValue`] to the value type, truncating if necessary.
+    fn from_fvalue(fvalue: FValue) -> Self;
+
+    /// Convert an IR value from the representation of `Self` to its `FValue` representation.
+    fn to_fvalue_ir(builder: &mut FunctionBuilder, value: Value<Self>) -> Value<FValue>;
+
+    /// Convert an IR value from its `FValue` representation to the representation of `Self`.
+    fn from_fvalue_ir(builder: &mut FunctionBuilder, value: Value<FValue>) -> Value<Self>;
+}
+
+impl StoreLoadFloat for FValue {
+    const WIDTH: LoadStoreWidth = LoadStoreWidth::Double;
+
+    #[inline(always)]
+    fn to_fvalue(self) -> FValue {
+        self
+    }
+
+    #[inline(always)]
+    fn from_fvalue(fvalue: FValue) -> Self {
+        fvalue
+    }
+
+    fn to_fvalue_ir(_: &mut FunctionBuilder, value: Value<Self>) -> Value<FValue> {
+        value
+    }
+
+    fn from_fvalue_ir(_: &mut FunctionBuilder, value: Value<FValue>) -> Value<Self> {
+        value
+    }
+}
 
 /// PhiValue allows the conversion of values to and from cranelift primitive
 /// [`ir::Value`] when in the context of [`JIT`] compilation. It represents a chosen
