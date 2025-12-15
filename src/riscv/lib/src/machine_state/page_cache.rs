@@ -31,6 +31,8 @@ pub use dispatch::OutlineCompiler;
 pub use interpreted::Interpreted;
 pub use interpreted::InterpretedCompiler;
 pub use jitted::Jitted;
+use octez_riscv_data::mode::Normal;
+use state::PageCacheImpl;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -45,6 +47,21 @@ use crate::exceptions::Exception;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
+
+/// Type alias for the default [`PageCache`] implementation with interpreted dispatch only.
+///
+/// This is currently usable across all state backend modes.
+pub type PageCacheInterpreted<MC, M> = PageCacheImpl<Interpreted<MC, M>, MC, M>;
+
+/// Type alias for the default [`PageCache`] implementation with inline jit enabled.
+///
+/// This is only usable when the [`Normal`] backend mode is selected.
+pub type PageCacheInlineJit<MC> = PageCacheImpl<Jitted<InlineCompiler, MC>, MC, Normal>;
+
+/// Type alias for the default [`PageCache`] implementation with outline jit enabled.
+///
+/// This is only usable when the [`Normal`] backend mode is selected.
+pub type PageCacheOutlineJit<MC> = PageCacheImpl<Jitted<OutlineCompiler<MC>, MC>, MC, Normal>;
 
 /// Per page, we store exactly the number of instruction halfwords we could fetch from that page's
 /// memory.

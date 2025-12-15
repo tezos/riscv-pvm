@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
-use octez_riscv::machine_state::page_cache::CodePageEntry;
+use octez_riscv::machine_state::page_cache::PageCache;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -31,14 +31,14 @@ use crate::memory_config::MemoryConfigValue;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
-        /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Interpreted<MC, Normal>;
+        /// PageCache with interpeted mode selected.
+        pub type PageCacheImpl<MC> = page_cache::PageCacheInterpreted<MC, Normal>;
     } else if #[cfg(feature = "inline-jit")] {
-        /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::InlineCompiler, MC>;
+        /// PageCache with inline jit mode selected.
+        pub type PageCacheImpl<MC> = page_cache::PageCacheInlineJit<MC>;
     } else {
-        /// Execution strategy for entrypoints.
-        pub type CodePageEntryImpl<MC> = page_cache::Jitted<page_cache::OutlineCompiler<MC>, MC>;
+        /// PageCache with outline jit mode selected.
+        pub type PageCacheImpl<MC> = page_cache::PageCacheOutlineJit<MC>;
     }
 }
 
@@ -47,7 +47,7 @@ pub fn run_with_memory_config<MC: memory::MemoryConfig>(
 ) -> Result<(), Box<dyn Error>> {
     let program = fs::read(&opts.input)?;
 
-    let stepper = make_pvm_stepper::<MC, CodePageEntryImpl<MC>>(program.as_slice(), &opts.common)?;
+    let stepper = make_pvm_stepper::<MC, PageCacheImpl<MC>>(program.as_slice(), &opts.common)?;
 
     // Run the profiler if a sampling interval is set
     let steps = match opts.sample_interval_us {
@@ -82,12 +82,12 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, CPE> = PvmStepper<Console<'static>, MC, Normal, CPE>;
+type PvmStepperRunner<MC, PC> = PvmStepper<Console<'static>, MC, Normal, PC>;
 
-pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, Normal>>(
+pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>>(
     program: &[u8],
     common: &CommonOptions,
-) -> Result<PvmStepperRunner<MC, CPE>, Box<dyn error::Error>> {
+) -> Result<PvmStepperRunner<MC, PC>, Box<dyn error::Error>> {
     let mut inbox = InboxBuilder::new();
     if let Some(inbox_file) = &common.inbox.file {
         inbox.load_from_file(inbox_file)?;
@@ -101,7 +101,7 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, 
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, Normal, CPE>::new(
+    let stepper = PvmStepper::<_, MC, Normal, PC>::new(
         program,
         inbox.build(),
         console,

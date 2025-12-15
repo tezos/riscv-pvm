@@ -15,7 +15,8 @@ use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
-use crate::machine_state::page_cache::interpreted::Interpreted;
+use crate::machine_state::page_cache::PageCache;
+use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
@@ -35,18 +36,23 @@ pub enum PvmError {
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
-type NodePvmState<M> = Pvm<NodePvmMemConfig, Interpreted<NodePvmMemConfig, M>, M>;
+type NodePvmPageCache<M> = PageCacheInterpreted<NodePvmMemConfig, M>;
+
+type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
 
 #[perfect_derive(Clone)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
-pub struct NodePvm<M: state_backend::ManagerBase = Normal> {
-    state: Box<NodePvmState<M>>,
+pub struct NodePvm<
+    M: state_backend::ManagerBase = Normal,
+    PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache<M>,
+> {
+    state: Box<NodePvmState<M, PC>>,
 }
 
-impl<M: state_backend::ManagerBase> NodePvm<M> {
+impl<M: state_backend::ManagerBase, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
     /// Wrap the given PVM state.
-    pub fn wrap(state: NodePvmState<M>) -> Self {
+    pub fn wrap(state: NodePvmState<M, PC>) -> Self {
         Self {
             state: Box::new(state),
         }
@@ -54,14 +60,14 @@ impl<M: state_backend::ManagerBase> NodePvm<M> {
 
     fn with_backend_mut<T, F>(&mut self, f: F) -> T
     where
-        F: FnOnce(&mut NodePvmState<M>) -> T,
+        F: FnOnce(&mut NodePvmState<M, PC>) -> T,
     {
         f(&mut self.state)
     }
 
     fn with_backend<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&NodePvmState<M>) -> T,
+        F: FnOnce(&NodePvmState<M, PC>) -> T,
     {
         f(&self.state)
     }
@@ -228,13 +234,15 @@ impl PartialEq for NodePvm {
 
 impl Eq for NodePvm {}
 
-impl<M: state_backend::ManagerBase> NewState<M> for NodePvm<M> {
+impl<M: state_backend::ManagerBase, PC: PageCache<NodePvmMemConfig, M>> NewState<M>
+    for NodePvm<M, PC>
+{
     fn new() -> Self
     where
         M: state_backend::ManagerAlloc,
     {
         Self {
-            state: Box::new(NodePvmState::<M>::new()),
+            state: Box::new(NodePvmState::<M, PC>::new()),
         }
     }
 }

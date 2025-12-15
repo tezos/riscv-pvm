@@ -29,8 +29,8 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::code_page_entry::CodePageEntry;
-use crate::machine_state::page_cache::interpreted::Interpreted;
+use crate::machine_state::page_cache::PageCache;
+use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
@@ -65,9 +65,9 @@ pub struct PvmStepper<
     H,
     MC: MemoryConfig = M1G,
     M: ManagerBase = Normal,
-    CPE: CodePageEntry<MC, M> = Interpreted<MC, M>,
+    PC: PageCache<MC, M> = PageCacheInterpreted<MC, M>,
 > {
-    pvm: Pvm<MC, CPE, M>,
+    pvm: Pvm<MC, PC, M>,
     hooks: H,
     inbox: Inbox,
     rollup_address: [u8; 20],
@@ -76,9 +76,10 @@ pub struct PvmStepper<
 }
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
+// TODO RV-849: use `EmptyPageCache` for verify mode
 type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify>;
 
-impl<H, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> PvmStepper<H, MC, Normal, CPE> {
+impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
     /// Create a new PVM stepper.
     pub fn new(
         program: &[u8],
@@ -152,8 +153,8 @@ impl<H, MC: MemoryConfig> PvmStepper<H, MC, Normal> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, M>, M: ManagerRead + ManagerWrite>
-    PvmStepper<H, MC, M, CPE>
+impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerRead + ManagerWrite>
+    PvmStepper<H, MC, M, PC>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
@@ -296,9 +297,10 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
         stepper.verify_proof_internal(proof_tree, proof.final_state_hash())
     }
 
+    // TODO RV-849: replace with `EmptyPageCache`
     fn to_verify_stepper(
         &self,
-        pvm: Pvm<MC, Interpreted<MC, Verify>, Verify>,
+        pvm: Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify>,
     ) -> Result<PvmVerify<MC>, ProofVerificationFailure> {
         Ok(PvmStepper {
             pvm,
@@ -325,7 +327,7 @@ impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H,
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> PvmStepper<H, MC, Verify, CPE> {
+impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify> {
     /// Try to take one step. Stepping in the [`Verify`] mode may panic
     /// when attempting to access absent data. Catches the case of verifying an invalid proof, as
     /// [`ProofVerificationFailure::AbsentDataAccess`] and all other panics
@@ -377,8 +379,8 @@ impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Verify>> PvmStepper<H
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Stepper
-    for PvmStepper<H, MC, Normal, CPE>
+impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>> Stepper
+    for PvmStepper<H, MC, Normal, PC>
 {
     type MemoryConfig = MC;
 

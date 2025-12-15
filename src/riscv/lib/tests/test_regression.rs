@@ -12,10 +12,9 @@ use std::ops::Bound;
 use std::path::PathBuf;
 
 use octez_riscv::machine_state::memory::M64M;
-use octez_riscv::machine_state::page_cache::CodePageEntry;
-use octez_riscv::machine_state::page_cache::Interpreted;
-use octez_riscv::machine_state::page_cache::Jitted;
-use octez_riscv::machine_state::page_cache::OutlineCompiler;
+use octez_riscv::machine_state::page_cache::PageCache;
+use octez_riscv::machine_state::page_cache::PageCacheInterpreted;
+use octez_riscv::machine_state::page_cache::PageCacheOutlineJit;
 use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -66,17 +65,17 @@ fn regression_frozen_etherlink() {
 }
 
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
-    test_regression_for_block::<Interpreted<M64M, Normal>>(&inputs, capture_volatile_properties);
-
-    // This needs to run *after* the previous *interpreted* test. Otherwise, we run into trouble when
-    // checking and updating the golden files.
-    test_regression_for_block::<Jitted<OutlineCompiler<M64M>, M64M>>(
+    test_regression_for_block::<PageCacheInterpreted<M64M, Normal>>(
         &inputs,
         capture_volatile_properties,
     );
+
+    // This needs to run *after* the previous *interpreted* test. Otherwise, we run into trouble when
+    // checking and updating the golden files.
+    test_regression_for_block::<PageCacheOutlineJit<M64M>>(&inputs, capture_volatile_properties);
 }
 
-fn test_regression_for_block<CPE: CodePageEntry<M64M, Normal>>(
+fn test_regression_for_block<PC: PageCache<M64M, Normal>>(
     inputs: &TestConfig,
     capture_volatile_properties: bool,
 ) {
@@ -101,7 +100,7 @@ fn test_regression_for_block<CPE: CodePageEntry<M64M, Normal>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<_, M64M, Normal, CPE>::new(
+        let mut stepper = PvmStepper::<_, M64M, Normal, PC>::new(
             &program,
             inbox,
             hooks,

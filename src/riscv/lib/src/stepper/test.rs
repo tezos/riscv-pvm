@@ -26,8 +26,9 @@ use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::Permissions;
-use crate::machine_state::page_cache::CodePageEntry;
 use crate::machine_state::page_cache::Interpreted;
+use crate::machine_state::page_cache::PageCache;
+use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::machine_state::registers;
 use crate::program::Program;
 use crate::state::NewState;
@@ -83,13 +84,13 @@ pub enum TestStepperError {
 
 pub struct TestStepper<
     MC: MemoryConfig = M1G,
-    CPE: CodePageEntry<MC, Normal> = Interpreted<MC, Normal>,
+    PC: PageCache<MC, Normal> = PageCacheImpl<Interpreted<MC, Normal>, MC, Normal>,
 > {
-    machine_state: MachineState<MC, CPE, Normal>,
+    machine_state: MachineState<MC, PC, Normal>,
     posix_state: PosixState<Normal>,
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
+impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> TestStepper<MC, PC> {
     /// Initialise an interpreter with a given `program`.
     #[inline]
     pub fn new(program: &[u8]) -> Result<Self, TestStepperError> {
@@ -162,7 +163,7 @@ impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> TestStepper<MC, CPE> {
     }
 }
 
-impl<MC: MemoryConfig, CPE: CodePageEntry<MC, Normal>> Stepper for TestStepper<MC, CPE> {
+impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Stepper for TestStepper<MC, PC> {
     type MemoryConfig = MC;
 
     type Manager = Normal;
