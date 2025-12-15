@@ -23,6 +23,8 @@ use crate::jit::JIT;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::address_to_halfword_index;
+#[cfg(test)]
+use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
 use crate::machine_state::page_cache::jitted::Jitted;
 use crate::machine_state::page_cache::jitted::JittedPage;
 use crate::machine_state::page_cache::router::RouterEq;
@@ -49,14 +51,10 @@ pub struct DispatchTarget<D, MC> {
     /// considerations taken whilst converting pointer <--> usize.
     fun: AtomicUsize,
     remaining_calls: AtomicUsize,
-    /// A test only counter for the number of times this entrypoint has been called.
-    ///
-    /// This is used in the `jit.rs` tests to ensure that when running a scenario over InlineJit,
-    /// we *do* actually run the entrypoint. Previously this check did not exist, and a change resulted
-    /// in the tests using the interpreted fallback mechanism instead for certain classes of test, rather
-    /// than actually running the JIT-compiled function as intended.
+    /// A test-only set of counters used for validating entry and
+    /// exit of JIT execution in `jit.rs` unit tests.
     #[cfg(test)]
-    call_counter: AtomicUsize,
+    pub(crate) jit_counters: JitTestCounters,
     _pd: PhantomData<(D, MC)>,
 }
 
@@ -82,18 +80,6 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
         // Safety: the pointer is indeed a function pointer with an ABI matching `DispatchFn`.
         unsafe { std::mem::transmute::<*const (), DispatchFn<D, MC>>(fun) }
     }
-
-    /// Increase the call counter to keep track of how often it was dispatched for verification in tests.
-    #[cfg(test)]
-    pub(crate) fn record_called(&self) {
-        self.call_counter.fetch_add(1, Ordering::SeqCst);
-    }
-
-    /// Get the number of times this dispatch target has been called for verification in tests.
-    #[cfg(test)]
-    pub(crate) fn called_times(&self) -> usize {
-        self.call_counter.load(Ordering::SeqCst)
-    }
 }
 
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
@@ -102,7 +88,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC
             fun: AtomicUsize::new(Jitted::<D, MC>::run_entrypoint_interpreted as usize),
             remaining_calls: AtomicUsize::new(1000),
             #[cfg(test)]
-            call_counter: AtomicUsize::new(0),
+            jit_counters: JitTestCounters::new(),
             _pd: PhantomData,
         }
     }
@@ -377,6 +363,77 @@ struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     page: Arc<super::state::PageEntry<Jitted<D, MC>, D>>,
     /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,
+}
+
+#[cfg(test)]
+pub(crate) mod jit_counters {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::page_cache::DispatchTarget;
+    use crate::machine_state::page_cache::dispatch::DispatchCompiler;
+
+    /// Test-only counters for JIT execution.
+    #[derive(Debug, Default)]
+    pub struct JitTestCounters {
+        jit_calls: AtomicUsize,
+        budget_check_passes: AtomicUsize,
+        fallback_calls: AtomicUsize,
+    }
+
+    impl JitTestCounters {
+        /// Create a new set of counters, all initialised to zero.
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Record a JIT call.
+        pub fn record_jit_call(&self) {
+            self.jit_calls.fetch_add(1, Ordering::Relaxed);
+        }
+
+        /// Record a passed budget check.
+        pub fn record_budget_check_pass(&self) {
+            self.budget_check_passes.fetch_add(1, Ordering::Relaxed);
+        }
+
+        /// Record a fallback to interpreted execution.
+        pub fn record_fallback_to_interpreter(&self) {
+            self.fallback_calls.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    impl PartialEq for JitTestCounters {
+        fn eq(&self, other: &Self) -> bool {
+            self.jit_calls.load(Ordering::Relaxed) == other.jit_calls.load(Ordering::Relaxed)
+                && self.budget_check_passes.load(Ordering::Relaxed)
+                    == other.budget_check_passes.load(Ordering::Relaxed)
+                && self.fallback_calls.load(Ordering::Relaxed)
+                    == other.fallback_calls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl Eq for JitTestCounters {}
+
+    impl Clone for JitTestCounters {
+        fn clone(&self) -> Self {
+            Self {
+                jit_calls: AtomicUsize::new(self.jit_calls.load(Ordering::Relaxed)),
+                budget_check_passes: AtomicUsize::new(
+                    self.budget_check_passes.load(Ordering::Relaxed),
+                ),
+                fallback_calls: AtomicUsize::new(self.fallback_calls.load(Ordering::Relaxed)),
+            }
+        }
+    }
+
+    impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
+        /// Get the number of times this dispatch target has been called for verification in tests.
+        pub(crate) fn num_jit_calls(&self) -> usize {
+            self.jit_counters.jit_calls.load(Ordering::SeqCst)
+        }
+    }
 }
 
 #[cfg(test)]

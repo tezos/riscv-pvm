@@ -168,8 +168,8 @@ where
 {
     /// TEST ONLY
     ///
-    /// Get the number of times that an entrypoint has been called
-    pub(crate) fn get_entrypoint_called_times(&self, address: Address) -> Option<usize> {
+    /// Get the number of times the JIT function at this entrypoint has been called.
+    pub(crate) fn get_entrypoint_jit_calls(&self, address: Address) -> Option<usize> {
         let page_index = address_to_page_index(address);
         let page = self.pages[page_index].as_ref()?;
 
@@ -177,7 +177,7 @@ where
         // aligned
         let offset = super::address_to_halfword_index(address);
 
-        Some(page.entries[offset].dispatch.called_times())
+        Some(page.entries[offset].dispatch.num_jit_calls())
     }
 }
 
