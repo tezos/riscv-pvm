@@ -242,7 +242,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE,
     }
 
     /// Fetch a dispatch call, if the address corresponds to a populated page in the PageCache.
-    fn get_code_page(&mut self, address: Address) -> Option<super::CodePage<'_, MC, M, CPE>>
+    fn get_code_page(&mut self, address: Address) -> Option<impl super::CodePage<'_, MC, M>>
     where
         M: ManagerRead,
     {
@@ -251,7 +251,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE,
         self.pages
             .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
-            .map(|page| super::CodePage { page })
+            .map(|page| super::CodePageImpl { page })
     }
 
     /// Populates the entry in the page cache, that the given address points to.
@@ -380,6 +380,8 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
+    use crate::machine_state::memory::address_to_page_index;
+    use crate::machine_state::page_cache::CodePage;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
     use crate::machine_state::page_cache::interpreted::Interpreted;
@@ -541,9 +543,15 @@ mod tests {
                 Instruction::DEFAULT
             };
 
-            let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
-            let instr_from_code_page = &code_page.page.entries[pc_offset as usize / 2];
+            let entry_idx = address_to_halfword_index(pc_addr);
+
+            let instr_from_code_page = &cache.pages[address_to_page_index(pc_addr)]
+                .as_ref()
+                .expect("Page is populated")
+                .entries[entry_idx];
             assert_eq!(&expected_instr, instr_from_code_page.as_ref());
+
+            let mut code_page = cache.get_code_page(pc_addr).expect("code page populated");
 
             // double check last halfword
             let pc_last_halfword = page_start + (PAGE_SIZE.get() - InstrWidth::Compressed as u64);
