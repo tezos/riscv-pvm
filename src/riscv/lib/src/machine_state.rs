@@ -41,6 +41,7 @@ use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use page_cache::CodePage;
 use page_cache::PageCache;
 use page_cache::code_page_entry::CodePageEntry;
 use perfect_derive::perfect_derive;
@@ -519,30 +520,29 @@ impl<MC: memory::MemoryConfig, CPE: CodePageEntry<MC, M>, M: backend::ManagerBas
             // Obtain the pc for the next instruction to be executed
             let instr_pc = self.core.hart.pc.read();
 
-            match self.page_cache.get_code_page(instr_pc) {
-                Some(mut code_page) => {
-                    let steps_remaining = max_steps - result.steps;
+            if let Some(mut code_page) = self.page_cache.get_code_page(instr_pc) {
+                let steps_remaining = max_steps - result.steps;
 
-                    let entrypoint_result =
-                        code_page.run(&mut self.core, instr_pc, steps_remaining);
+                let entrypoint_result = code_page.run(&mut self.core, instr_pc, steps_remaining);
 
-                    // Short-circuit if the entrypoint call failed
-                    if result.merge_and_return(entrypoint_result) {
-                        return result;
-                    }
+                // Short-circuit if the entrypoint call failed
+                if result.merge_and_return(entrypoint_result) {
+                    return result;
                 }
 
-                None => match self.run_instr_at(instr_pc) {
-                    Ok(update) => {
-                        self.core.update_pc(instr_pc, update);
-                        result.steps += 1;
-                    }
+                continue;
+            }
 
-                    Err(exc) => {
-                        result.error = Some(exc);
-                        return result;
-                    }
-                },
+            match self.run_instr_at(instr_pc) {
+                Ok(update) => {
+                    self.core.update_pc(instr_pc, update);
+                    result.steps += 1;
+                }
+
+                Err(exc) => {
+                    result.error = Some(exc);
+                    return result;
+                }
             }
         }
 

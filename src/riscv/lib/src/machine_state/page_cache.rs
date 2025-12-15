@@ -91,7 +91,7 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
 
     /// Retrieve code page that is dispatchable against the [`MachineCoreState`]. If found, such a
     /// page will contain the code for `addr`.
-    fn get_code_page(&mut self, addr: Address) -> Option<CodePage<'_, MC, M, CPE>>
+    fn get_code_page(&mut self, addr: Address) -> Option<impl CodePage<'_, MC, M>>
     where
         M: ManagerRead;
 
@@ -105,15 +105,38 @@ pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>
     fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>);
 }
 
+/// A code page contains instructions that can be executed
+/// against the [machine state].
+///
+/// [machine state]: MachineCoreState
+pub trait CodePage<'a, MC: MemoryConfig, M: ManagerBase> {
+    /// Execute instructions from a code page against the
+    /// machine state.
+    ///
+    /// Execution begins at the offset into the page given by
+    /// the `instr_pc` (program counter) - and will run for
+    /// up to `max_steps` steps.
+    fn run(
+        &mut self,
+        core: &mut MachineCoreState<MC, M>,
+        instr_pc: Address,
+        max_steps: usize,
+    ) -> StepManyResult<Exception>
+    where
+        M: ManagerRead + ManagerWrite;
+}
+
 /// A page containing code that may then be run against the [`MachineCoreState`].
 #[derive(Debug)]
-pub struct CodePage<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
+struct CodePageImpl<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
     page: &'a Arc<state::PageEntry<CPE, CPE::Compiler>>,
 }
 
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, MC, M, CPE> {
-    /// Run a code page against the machine state.
-    pub(crate) fn run(
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> CodePage<'_, MC, M>
+    for CodePageImpl<'_, MC, M, CPE>
+{
+    #[inline]
+    fn run(
         &mut self,
         core: &mut MachineCoreState<MC, M>,
         instr_pc: Address,
@@ -204,6 +227,7 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
+    use crate::machine_state::page_cache::CodePageImpl;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::nz;
@@ -213,7 +237,7 @@ mod tests {
 
     struct DispatchTest<'a, F: TestBackendFactory> {
         state: &'a RefCell<MachineCoreState<M4K, F>>,
-        dispatch: &'a RefCell<CodePage<'a, M4K, F, Interpreted<M4K, F>>>,
+        dispatch: &'a RefCell<CodePageImpl<'a, M4K, F, Interpreted<M4K, F>>>,
         pc_addr: u64,
         max_steps: usize,
         expected_steps: usize,
@@ -251,7 +275,7 @@ mod tests {
             ))
         });
 
-        let dispatch = &RefCell::new(CodePage {
+        let dispatch = &RefCell::new(CodePageImpl {
             page: &mut page_entry,
         });
 
@@ -311,7 +335,7 @@ mod tests {
             Ok(instr)
         });
 
-        let dispatch = &RefCell::new(CodePage {
+        let dispatch = &RefCell::new(CodePageImpl {
             page: &mut page_entry,
         });
 
@@ -410,7 +434,7 @@ mod tests {
             std::convert::Infallible,
         >(InterpretedCompiler, |offset| Ok(instructions[offset]));
 
-        let dispatch = &RefCell::new(CodePage {
+        let dispatch = &RefCell::new(CodePageImpl {
             page: &mut page_entry,
         });
 
