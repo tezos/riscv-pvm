@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2026 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -57,34 +57,64 @@ enum Commands {
         collapsible_results: bool,
         #[arg(long, default_value = "0")]
         exclude_warmup_transfers: usize,
+        /// If set, submit the mean of the transfers to datadog as a metric.
+        ///
+        /// Requires the `DD_API_KEY` and `DD_SITE` environment variables to be set.
+        #[arg(long, default_value = "false")]
+        submit_dd_metric: bool,
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Generate {
             address,
             inbox_file,
             transfers,
-        } => handle_generate(&address, &inbox_file, transfers)?,
+        } => {
+            tokio::task::spawn_blocking(move || {
+                handle_generate(&address, &inbox_file, transfers).map_err(|err| err.to_string())
+            })
+            .await??;
+        }
         Commands::GenerateScript {
             address,
             script_file,
             transfers,
-        } => handle_generate_script(&address, &script_file, transfers)?,
+        } => {
+            tokio::task::spawn_blocking(move || {
+                handle_generate_script(&address, &script_file, transfers)
+                    .map_err(|err| err.to_string())
+            })
+            .await??;
+        }
         Commands::Results {
             inbox_file,
             log_file,
             expected_transfers,
             collapsible_results,
             exclude_warmup_transfers,
-        } => handle_results(
-            inbox_file,
-            log_file,
-            expected_transfers,
-            collapsible_results,
-            exclude_warmup_transfers,
-        )?,
+            submit_dd_metric,
+        } => {
+            let mean_tps = tokio::task::spawn_blocking(move || {
+                handle_results(
+                    inbox_file,
+                    log_file,
+                    expected_transfers,
+                    collapsible_results,
+                    exclude_warmup_transfers,
+                )
+                .map_err(|err| err.to_string())
+            })
+            .await??
+            .tps();
+
+            if submit_dd_metric {
+                kernel_bench_utils::datadog::submit_kernel_tps_benchmark("jstz", "fa2", mean_tps)
+                    .await?;
+            }
+        }
     }
 
     Ok(())

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2026 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -23,13 +23,14 @@ use crate::Result;
 // ... but all contained in one level
 const EXPECTED_LEVELS: usize = 1;
 
+/// Summarises results to stdout, returning the mean of the metrics gathered.
 pub fn handle_results(
     inbox: Box<Path>,
     all_logs: Vec<Box<Path>>,
     expected_transfers: usize,
     collapsible_results: bool,
     exclude_warmup_transfers: usize,
-) -> Result<()> {
+) -> Result<TransferMetrics> {
     if expected_transfers <= exclude_warmup_transfers {
         return Err(format!("Warmup transfers {exclude_warmup_transfers} must be less than total transfers {expected_transfers}").into());
     }
@@ -151,7 +152,9 @@ pub fn handle_results(
         println!("</details>");
     }
 
-    Ok(())
+    let mean = TransferMetrics::mean(&all_metrics);
+
+    Ok(mean)
 }
 
 fn check_deploy(level: &Level) -> Result<()> {
@@ -167,13 +170,18 @@ fn check_deploy(level: &Level) -> Result<()> {
 }
 
 #[derive(Clone, Debug, Default)]
-struct TransferMetrics {
+pub(crate) struct TransferMetrics {
     transfers: usize,
     duration: Duration,
     tps: f64,
 }
 
 impl TransferMetrics {
+    /// Returns the tps recorded for this transfer metric
+    pub fn tps(&self) -> f64 {
+        self.tps
+    }
+
     fn mean(metrics: &[TransferMetrics]) -> TransferMetrics {
         let summed = metrics.iter().fold(Self::default(), |acc, m| Self {
             transfers: acc.transfers + m.transfers,
