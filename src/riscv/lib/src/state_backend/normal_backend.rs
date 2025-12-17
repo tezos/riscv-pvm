@@ -143,10 +143,8 @@ pub(crate) mod test_helpers {
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::proof_backend::ProofDynRegion;
-    use crate::state_backend::proof_backend::ProofRegion;
 
     /// Ensure [`Atom`] can be serialised and deserialised in a consistent way.
     #[test]
@@ -168,28 +166,27 @@ pub(crate) mod test_helpers {
         });
     }
 
-    /// Ensure [`Cells`] can be serialised and deserialised in a consistent way.
+    /// Ensure [`Atom`] can be serialised and deserialised in a consistent way.
     #[test]
-    fn cells_serialise() {
+    fn atoms_serialise() {
         proptest::proptest!(|(a: u64, b: u64, c: u64)|{
-            let cell: Cells<u64, 3, Normal> = Cells::bind([a, b, c]);
-            let bytes = serialise(&cell).unwrap();
+            let atoms: Atom<_, Normal> = Atom::new([a, b, c]);
+            let bytes = serialise(&atoms).unwrap();
 
-            let cell_after: Cells<u64, 3, Normal> = deserialise(&bytes).unwrap();
+            let atoms_after: Atom<[u64; 3], Normal> = deserialise(&bytes).unwrap();
 
-            assert_eq!(cell.read_all(), cell_after.read_all());
+            assert_eq!(atoms.read(), atoms_after.read());
 
             for i in 0..3 {
-                assert_eq!(cell.read(i), cell_after.read(i));
+                assert_eq!(atoms[i], atoms_after[i]);
             }
 
-            let bytes_after = serialise(&cell_after).unwrap();
+            let bytes_after = serialise(&atoms_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cells: Cells<u64, 3, Prove> =
-                Cells::bind(ProofRegion::bind(cell.region_ref()));
-            let proof_bytes = serialise(&proof_cells).unwrap();
+            let proof_atoms: Atom<_, Prove> = atoms.start_proof();
+            let proof_bytes = serialise(&proof_atoms).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
     }
