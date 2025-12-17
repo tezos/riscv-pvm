@@ -354,14 +354,12 @@ mod tests {
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
-    use crate::state::NewState;
-    use crate::state_backend::Cells;
 
     #[test]
     fn test_example_normal() {
         struct Example<M: ManagerBase> {
             first: Atom<u64, M>,
-            second: Cells<u32, 4, M>,
+            second: Atom<[u32; 4], M>,
         }
 
         let first_value: u64 = rand::random();
@@ -369,14 +367,14 @@ mod tests {
 
         let mut instance: Example<Normal> = Example {
             first: Atom::default(),
-            second: Cells::new(),
+            second: Atom::default(),
         };
 
         instance.first.write(first_value);
         assert_eq!(instance.first.read(), first_value);
 
-        instance.second.write_all(&second_value);
-        assert_eq!(instance.second.read_all(), second_value);
+        instance.second.write(second_value);
+        assert_eq!(instance.second.read(), second_value);
 
         let first_value_read =
             u64::from_le_bytes(serialise(instance.first).unwrap().try_into().unwrap());
