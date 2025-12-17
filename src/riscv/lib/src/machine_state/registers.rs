@@ -46,8 +46,6 @@ use crate::instruction_context::ICB;
 use crate::jit::builder::typed;
 use crate::machine_state::backend;
 use crate::state::NewState;
-use crate::state_backend::CellsProj;
-use crate::state_backend::ManagerSerialise;
 use crate::state_context::StateContext;
 use crate::state_context::projection::AtomArrayProj;
 use crate::state_context::projection::MachineCoreCons;
@@ -281,7 +279,7 @@ impl<M: CloneAtomMode> CloneState for XRegisters<M> {
 
 impl<M, F> Foldable<F> for XRegisters<M>
 where
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<[u64; 31], M>: Foldable<F>,
 {
@@ -622,37 +620,26 @@ impl typed::Typed for FValue {
 
 /// Floating-point number registers
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct FRegisters<M: backend::ManagerBase> {
-    registers: backend::Cells<FValue, 32, M>,
+pub struct FRegisters<M: Mode> {
+    registers: Atom<[FValue; 32], M>,
 }
 
-impl<M: backend::ManagerBase> FRegisters<M> {
+impl<M: AtomMode> FRegisters<M> {
     /// Reset the floating-point registers.
-    pub fn reset(&mut self)
-    where
-        M: backend::ManagerWrite,
-    {
-        for i in 0..32 {
-            self.registers.write(i, FValue::default());
-        }
+    pub fn reset(&mut self) {
+        self.registers.write(Default::default());
     }
 
     /// Read a floating-point number from the registers.
     #[inline(always)]
-    pub fn read(&self, reg: FRegister) -> FValue
-    where
-        M: backend::ManagerRead,
-    {
-        self.registers.read(reg as usize)
+    pub fn read(&self, reg: FRegister) -> FValue {
+        self.registers[reg as usize]
     }
 
     /// Write a floating-point number to the registers.
     #[inline(always)]
-    pub fn write(&mut self, reg: FRegister, val: FValue)
-    where
-        M: backend::ManagerWrite,
-    {
-        self.registers.write(reg as usize, val)
+    pub fn write(&mut self, reg: FRegister, val: FValue) {
+        self.registers[reg as usize] = val;
     }
 }
 
@@ -671,12 +658,12 @@ impl<M: backend::ManagerBase> NewState<M> for FRegisters<M> {
         M: backend::ManagerAlloc,
     {
         Self {
-            registers: backend::Cells::new(),
+            registers: Atom::default(),
         }
     }
 }
 
-impl<M: backend::ManagerClone> CloneState for FRegisters<M> {
+impl<M: CloneAtomMode> CloneState for FRegisters<M> {
     fn clone_state(&self) -> Self {
         Self {
             registers: self.registers.clone_state(),
@@ -686,16 +673,16 @@ impl<M: backend::ManagerClone> CloneState for FRegisters<M> {
 
 impl<M, F> Foldable<F> for FRegisters<M>
 where
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
-    backend::Cells<FValue, 32, M>: Foldable<F>,
+    Atom<[FValue; 32], M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
     }
 }
 
-impl<M: ManagerSerialise> Encode for FRegisters<M> {
+impl<M: EncodeAtomMode> Encode for FRegisters<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.registers.encode(encoder)
     }
@@ -710,7 +697,7 @@ impl<C> Decode<C> for FRegisters<Normal> {
 
 impl FromProof for FRegisters<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = backend::Cells::from_proof(proof)?;
+        let result = Atom::from_proof(proof)?;
         let result = result.map(|registers| Self { registers });
         Ok(result)
     }
@@ -766,7 +753,7 @@ pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::X
 impl_projection! {
     projection FRegisterProj {
         subject = MachineCoreCons,
-        target_projection = CellsProj<FValue, 32>,
+        target_projection = AtomArrayProj<FValue, 32>,
         path = hart.fregisters.registers,
     }
 }
@@ -774,13 +761,13 @@ impl_projection! {
 /// Read from a floating-point number register.
 #[inline]
 pub fn read_fregister<I: ICB>(icb: &mut I, reg: FRegister) -> I::FValue {
-    icb.read_proj::<FRegisterProj>((reg as usize,))
+    icb.read_proj::<FRegisterProj>(reg as usize)
 }
 
 /// Write to a floating-point number register.
 #[inline]
 pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
-    icb.write_proj::<FRegisterProj>((reg as usize,), value)
+    icb.write_proj::<FRegisterProj>(reg as usize, value)
 }
 
 #[cfg(test)]
