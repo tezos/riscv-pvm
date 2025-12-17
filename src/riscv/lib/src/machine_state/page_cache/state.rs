@@ -17,7 +17,9 @@ use super::INSTRUCTION_ENTRIES;
 use super::PageCache;
 use super::code_page_entry::CodePageEntry;
 use crate::default::ConstDefault;
+use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
+use crate::machine_state::StepManyResult;
 use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory;
 use crate::machine_state::memory::Address;
@@ -251,7 +253,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE,
         self.pages
             .get_mut(page_index)
             .and_then(|entry| entry.as_mut())
-            .map(|page| super::CodePageImpl { page })
+            .map(|page| CodePageImpl { page })
     }
 
     /// Populates the entry in the page cache, that the given address points to.
@@ -361,8 +363,38 @@ enum PopulationError {
     Writable,
 }
 
+/// A page containing code that may then be run against the [`MachineCoreState`].
+///
+/// This serves as the default implementation of [`CodePage`]
+/// to be used with [`PageCacheImpl`].
+///
+/// [`CodePage`]: super::CodePage
+#[derive(Debug)]
+struct CodePageImpl<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
+    page: &'a Arc<PageEntry<CPE, CPE::Compiler>>,
+}
+
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> super::CodePage<'_, MC, M>
+    for CodePageImpl<'_, MC, M, CPE>
+{
+    #[inline]
+    fn run(
+        &mut self,
+        core: &mut MachineCoreState<MC, M>,
+        instr_pc: Address,
+        max_steps: usize,
+    ) -> StepManyResult<Exception>
+    where
+        MC: MemoryConfig,
+        M: ManagerRead + ManagerWrite,
+    {
+        CPE::run_entrypoint(self.page, core, instr_pc, max_steps)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::num::NonZeroUsize;
 
     use octez_riscv_data::mode::Normal;
@@ -371,9 +403,11 @@ mod tests {
     use super::PageCacheImpl;
     use crate::backend_test;
     use crate::default::ConstDefault;
+    use crate::exceptions::Exception;
     use crate::machine_state::CodePageEntry;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::instruction::Instruction;
+    use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
@@ -381,14 +415,19 @@ mod tests {
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::memory::address_to_page_index;
+    use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::CodePage;
+    use crate::machine_state::page_cache::INSTRUCTION_ENTRIES;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCache;
+    use crate::machine_state::page_cache::address_to_halfword_index;
     use crate::machine_state::page_cache::interpreted::Interpreted;
     use crate::machine_state::page_cache::state::PageEntry;
+    use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
     use crate::state_backend::ManagerBase;
+    use crate::state_backend::test_helpers::TestBackendFactory;
 
     fn count_active_pages<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>(
         cache: &PageCacheImpl<CPE, MC, M>,
@@ -561,6 +600,252 @@ mod tests {
                 assert_eq!(step_res.error, Some(crate::exceptions::Exception::ForceFetchRun));
                 assert_eq!(step_res.steps, 0, "raising an exception does not complete a step");
             }
+        });
+    });
+
+    struct DispatchTest<'a, F: TestBackendFactory> {
+        state: &'a RefCell<MachineCoreState<M4K, F>>,
+        dispatch: &'a RefCell<super::CodePageImpl<'a, M4K, F, Interpreted<M4K, F>>>,
+        pc_addr: u64,
+        max_steps: usize,
+        expected_steps: usize,
+        expected_pc_addr: u64,
+        expected_a0: u64,
+        expected_exception: Option<Exception>,
+    }
+
+    fn run_test<F: TestBackendFactory>(test: DispatchTest<'_, F>) {
+        let mut state = test.state.borrow_mut();
+        state.reset(NoopMemoryGovernanceListener);
+
+        // SAFETY: interpreted mode is always safe to call
+        let res = test
+            .dispatch
+            .borrow_mut()
+            .run(&mut state, test.pc_addr, test.max_steps);
+
+        assert_eq!(res.steps, test.expected_steps);
+        assert_eq!(res.error, test.expected_exception);
+
+        assert_eq!(state.hart.pc.read(), test.expected_pc_addr);
+        assert_eq!(state.hart.xregisters.read_nz(nz::a0), test.expected_a0);
+    }
+
+    backend_test!(page_dispatch_respects_max_steps_compressed, F, {
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |_| {
+            Ok(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                5,
+                InstrWidth::Compressed,
+            ))
+        });
+
+        let dispatch = &RefCell::new(super::CodePageImpl {
+            page: &mut page_entry,
+        });
+
+        let state = MachineCoreState::<M4K, F>::new();
+        let state = &RefCell::new(state);
+
+        let page_size = memory::PAGE_SIZE.get();
+
+        // run, no branching, within page
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: 0,
+            max_steps: 10,
+            expected_steps: 10,
+            expected_pc_addr: 10 * InstrWidth::Compressed as u64,
+            expected_a0: 5 * 10,
+            expected_exception: None,
+        });
+
+        // run, no branching, within page (differing max_steps count)
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: 10,
+            max_steps: 5,
+            expected_steps: 5,
+            expected_pc_addr: 10 + 5 * InstrWidth::Compressed as u64,
+            expected_a0: 5 * 5,
+            expected_exception: None,
+        });
+
+        // run, no branching, exits at page boundary
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: page_size - 8 * InstrWidth::Compressed as u64,
+            max_steps: 300,
+            expected_steps: 8,
+            expected_pc_addr: page_size,
+            expected_a0: 5 * 8,
+            expected_exception: None,
+        });
+    });
+
+    backend_test!(page_dispatch_respects_max_steps_uncompressed, F, {
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |idx| {
+            // we put uncompressed instructions on 4-byte aligned addresses
+            let instr = if idx % 2 == 0 {
+                Instruction::new_addi(nz::a0, nz::a0, 5, InstrWidth::Uncompressed)
+            } else {
+                Instruction::new_nop(InstrWidth::Compressed)
+            };
+
+            Ok(instr)
+        });
+
+        let dispatch = &RefCell::new(super::CodePageImpl {
+            page: &mut page_entry,
+        });
+
+        let state = MachineCoreState::<M4K, F>::new();
+        let state = &RefCell::new(state);
+
+        let page_size = memory::PAGE_SIZE.get();
+
+        // run, no branching, within page
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: 0,
+            max_steps: 10,
+            expected_steps: 10,
+            expected_pc_addr: 10 * InstrWidth::Uncompressed as u64,
+            expected_a0: 5 * 10,
+            expected_exception: None,
+        });
+
+        // run, no branching, within page (differing max_steps count)
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            // start on 2-byte aligned instruction, first step compressed no-op
+            pc_addr: 10,
+            max_steps: 5,
+            expected_steps: 5,
+            expected_pc_addr: 10
+                + InstrWidth::Compressed as u64
+                + 4 * InstrWidth::Uncompressed as u64,
+            expected_a0: 5 * 4,
+            expected_exception: None,
+        });
+
+        // run, no branching, exits at page boundary
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            // start on 2-byte aligned instruction, first step compressed no-op
+            pc_addr: page_size
+                - 8 * InstrWidth::Uncompressed as u64
+                - InstrWidth::Compressed as u64,
+            max_steps: 300,
+            expected_steps: 9,
+            expected_pc_addr: page_size,
+            expected_a0: 5 * 8,
+            expected_exception: None,
+        });
+    });
+
+    backend_test!(page_dispatch_exits_on_non_next_pc_update, F, {
+        let mut instructions = Vec::with_capacity(INSTRUCTION_ENTRIES);
+
+        let pc_j_absolute_start = 0;
+        let pc_j_absolute = 10 * InstrWidth::Compressed as u64;
+        for _ in 0..10 {
+            instructions.push(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                5,
+                InstrWidth::Compressed,
+            ));
+        }
+        instructions.push(Instruction::new_j_absolute(0, InstrWidth::Uncompressed));
+
+        let pc_jump_pc_start = pc_j_absolute + InstrWidth::Compressed as u64;
+        let pc_jump_pc = pc_jump_pc_start + 10 * InstrWidth::Compressed as u64;
+        for _ in 0..10 {
+            instructions.push(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                4,
+                InstrWidth::Compressed,
+            ));
+        }
+        instructions.push(Instruction::new_jump_pc(0, InstrWidth::Uncompressed));
+
+        let pc_ecall_start = pc_jump_pc + InstrWidth::Compressed as u64;
+        let pc_ecall = pc_ecall_start + 10 * InstrWidth::Compressed as u64;
+        for _ in 0..10 {
+            instructions.push(Instruction::new_addi(
+                nz::a0,
+                nz::a0,
+                3,
+                InstrWidth::Compressed,
+            ));
+        }
+        instructions.push(Instruction::new_ecall());
+
+        while instructions.len() < instructions.capacity() {
+            instructions.push(Instruction::new_nop(InstrWidth::Compressed));
+        }
+
+        let Ok(mut page_entry) = PageEntry::<Interpreted<_, _>, InterpretedCompiler>::new::<
+            std::convert::Infallible,
+        >(InterpretedCompiler, |offset| Ok(instructions[offset]));
+
+        let dispatch = &RefCell::new(super::CodePageImpl {
+            page: &mut page_entry,
+        });
+
+        let state = MachineCoreState::<M4K, F>::new();
+        let state = &RefCell::new(state);
+
+        // run, exits on PcUpdate::Set
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: pc_j_absolute_start,
+            max_steps: 20,
+            // jump back to start
+            expected_steps: 11,
+            expected_pc_addr: pc_j_absolute_start,
+            expected_a0: 5 * 10,
+            expected_exception: None,
+        });
+
+        // run, exits on PcUpdate::Relative
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: pc_jump_pc_start,
+            max_steps: 20,
+            // jump to current instruction
+            expected_steps: 11,
+            expected_pc_addr: pc_jump_pc,
+            expected_a0: 4 * 10,
+            expected_exception: None,
+        });
+
+        // run, exits on Exception
+        run_test(DispatchTest {
+            state,
+            dispatch,
+            pc_addr: pc_ecall_start,
+            max_steps: 20,
+            // throwing an exception is not a complete step
+            expected_steps: 10,
+            expected_pc_addr: pc_ecall,
+            expected_a0: 3 * 10,
+            expected_exception: Some(Exception::EnvCall),
         });
     });
 }
