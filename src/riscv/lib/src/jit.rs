@@ -303,6 +303,7 @@ mod tests {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
     use crate::machine_state::instruction::Instruction;
+    use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
@@ -314,6 +315,7 @@ mod tests {
     use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::address_to_halfword_index;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
+    use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
@@ -376,6 +378,7 @@ mod tests {
         xregisters: Vec<(NonZeroXRegister, u64)>,
         #[debug(skip)]
         assert_hook: Option<Box<AssertHook>>,
+        expected_jit_counters: JitTestCounters,
         expected_exception: Option<Exception>,
     }
 
@@ -389,6 +392,7 @@ mod tests {
                 setup_hook: None,
                 xregisters: vec![],
                 assert_hook: None,
+                expected_jit_counters: JitTestCounters::with_values(1, 1, 0),
                 // Scenarios are setup to run from pages. These pages are pre-filled with
                 // `Opcode::Unknown` instructions - which will trigger an exception when
                 // run. There is no current mechanism to _restrict_ the input of the compilation
@@ -540,14 +544,15 @@ mod tests {
             let interpreted_res = interpreted_state.step_max_inner(max_steps);
             let jitted_res = jitted_state.step_max_inner(max_steps);
 
-            // Assert the JIT-compiled entrypoint was called once.
-            let jit_called_counter = jitted_state
+            // Check that JIT counters match expected values.
+            let actual_jit_counters = jitted_state
                 .page_cache
-                .get_entrypoint_jit_calls(initial_pc)
-                .expect("Entrypoint at initial_pc should be valid");
+                .get_jit_counters(initial_pc)
+                .expect("Jit Test counter should be available at the entrypoint.");
+
             assert_eq!(
-                jit_called_counter, 1,
-                "Expected JIT-compiled entrypoint to be called exactly once"
+                actual_jit_counters, &self.expected_jit_counters,
+                "Expected JIT counters to match"
             );
 
             // Run the assert hook. We do this on both states for easier debugging.
@@ -595,6 +600,7 @@ mod tests {
         setup_hook: Option<Box<SetupHook>>,
         xregisters: Vec<(NonZeroXRegister, u64)>,
         assert_hook: Option<Box<AssertHook>>,
+        expected_jit_counters: Option<JitTestCounters>,
         expected_exception: Option<Exception>,
     }
 
@@ -624,6 +630,11 @@ mod tests {
             self
         }
 
+        fn set_expected_jit_counters(mut self, counters: JitTestCounters) -> Self {
+            self.expected_jit_counters = Some(counters);
+            self
+        }
+
         fn set_setup_hook(mut self, setup_hook: Box<SetupHook>) -> Self {
             self.setup_hook = Some(setup_hook);
             self
@@ -645,6 +656,9 @@ mod tests {
         }
 
         fn build(self) -> Scenario {
+            let expected_jit_counters = self
+                .expected_jit_counters
+                .unwrap_or_else(|| JitTestCounters::with_values(1, 1, 0));
             Scenario {
                 initial_pc: self.initial_pc,
                 expected_steps: self.expected_steps,
@@ -653,6 +667,7 @@ mod tests {
                 setup_hook: self.setup_hook,
                 xregisters: self.xregisters,
                 assert_hook: self.assert_hook,
+                expected_jit_counters,
                 expected_exception: self.expected_exception,
             }
         }
@@ -668,6 +683,7 @@ mod tests {
                 setup_hook: None,
                 xregisters: vec![],
                 assert_hook: None,
+                expected_jit_counters: None,
                 // Scenarios are setup to run from pages. These pages are pre-filled with
                 // `Opcode::Unknown` instructions - which will trigger an exception when
                 // run. There is no current mechanism to _restrict_ the input of the compilation
@@ -1327,13 +1343,14 @@ mod tests {
                     I::new_jump_pc(0, Compressed),
                     I::new_nop(Uncompressed),
                 ])
-                .set_step_budget(3)
-                .set_expected_steps(3)
+                .set_step_budget(5)
+                .set_expected_steps(5)
                 .no_exception()
                 .set_assert_hook(assert_hook!(|core| {
                     // we jump, but to the current jump instruction
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
+                .set_expected_jit_counters(JitTestCounters::with_values(1, 4, 1))
                 .build(),
             ScenarioBuilder::default()
                 // since we jump to the start of the instruction sequence, however, we will fallback to
@@ -1352,6 +1369,7 @@ mod tests {
                     // after 6 steps we will be executing the first instruction
                     assert_eq!(core.hart.pc.read(), 0);
                 }))
+                .set_expected_jit_counters(JitTestCounters::with_values(1, 2, 1))
                 .build(),
         ];
 
