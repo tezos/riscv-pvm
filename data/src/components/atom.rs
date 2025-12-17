@@ -110,6 +110,12 @@ impl<T: 'static> Atom<T, Verify> {
         }
     }
 }
+impl<T: 'static> Atom<T, Prove<'_>> {
+    /// Was the value accessed (read or written) during proof generation?
+    pub fn was_accessed(&self) -> bool {
+        self.atom.read.get() || self.atom.current.is_some()
+    }
+}
 
 impl<A, B, M, N> PartialEq<Atom<B, N>> for Atom<A, M>
 where
@@ -170,7 +176,7 @@ impl<T: Encode + 'static> Foldable<MerkleTreeFold> for Atom<T, Prove<'_>> {
 
         // Determine whether the value has been read or written during proof generation. If so, we
         // must mark it as not blinded in the Merkle tree.
-        let access = self.atom.read.get() || self.atom.current.is_some();
+        let access = self.was_accessed();
 
         MerkleTree::make_merkle_leaf(data, access)
     }
