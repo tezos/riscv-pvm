@@ -241,6 +241,7 @@ impl<P: Projection> Projection for BoxProj<P> {
 
     type Parameter = P::Parameter;
 
+    #[inline]
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
@@ -248,6 +249,7 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_ref::<MC, M>(state.deref(), param)
     }
 
+    #[inline]
     fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
@@ -258,6 +260,7 @@ impl<P: Projection> Projection for BoxProj<P> {
         P::project_read::<MC, M>(state.deref(), param)
     }
 
+    #[inline]
     fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
@@ -294,6 +297,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
 
     type Parameter = ArrayProjParam<P::Parameter>;
 
+    #[inline]
     fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
@@ -302,6 +306,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         P::project_ref::<MC, M>(inner_state, param.inner_param)
     }
 
+    #[inline]
     fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
@@ -313,6 +318,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
         P::project_read::<MC, M>(inner_state, param.inner_param)
     }
 
+    #[inline]
     fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
