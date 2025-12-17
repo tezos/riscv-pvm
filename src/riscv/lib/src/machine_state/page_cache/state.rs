@@ -224,7 +224,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<
     }
 }
 
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<CPE, MC, M>
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, M>
     for PageCacheImpl<CPE, MC, M>
 {
     /// Construct a new page cache, which will be entirely unpopulated.

@@ -327,7 +327,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     type State<M: ManagerBase>: Memory<M>;
 
     /// Page Cache instance
-    type PageCache<CPE: CodePageEntry<Self, M>, M: ManagerBase>: PageCache<CPE, Self, M>;
+    type PageCache<CPE: CodePageEntry<Self, M>, M: ManagerBase>: PageCache<Self, M>;
 
     /// Parse the proof to obtain a memory instance.
     fn state_from_proof<D: merkle_proof::Deserialiser>(
