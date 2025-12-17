@@ -61,6 +61,7 @@ impl<T: 'static, M: AtomMode> Atom<T, M> {
     }
 
     /// Reads the current state value.
+    #[inline]
     pub fn read(&self) -> T
     where
         T: Copy,
@@ -69,6 +70,7 @@ impl<T: 'static, M: AtomMode> Atom<T, M> {
     }
 
     /// Update the state value.
+    #[inline]
     pub fn write(&mut self, value: T) {
         M::write(self, value)
     }
@@ -117,12 +119,14 @@ impl<A: Eq + 'static, M: AtomMode> Eq for Atom<A, M> {}
 impl<T: 'static, M: AtomMode> Deref for Atom<T, M> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         M::deref(self)
     }
 }
 
 impl<T: Clone + 'static, M: AtomMode> DerefMut for Atom<T, M> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         M::deref_mut(self)
     }
@@ -262,14 +266,17 @@ impl AtomMode for Normal {
         Atom { atom: value }
     }
 
+    #[inline]
     fn deref<T: 'static>(this: &Atom<T, Self>) -> &T {
         &this.atom
     }
 
+    #[inline]
     fn deref_mut<T: 'static>(this: &mut Atom<T, Self>) -> &mut T {
         &mut this.atom
     }
 
+    #[inline]
     fn write<T: 'static>(this: &mut Atom<T, Self>, value: T) {
         this.atom = value;
     }
