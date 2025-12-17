@@ -21,13 +21,6 @@ use super::ManagerWrite;
 use super::StaticCopy;
 use crate::machine_state::memory::PAGE_SIZE;
 
-/// Get the byte offset from a pointer to `Normal::Region` to the start of the element at `index`.
-pub(crate) const fn region_elem_offset<E: 'static, const LEN: usize>(index: usize) -> usize {
-    assert!(index < LEN, "Out of bounds access for region");
-
-    index * std::mem::size_of::<E>()
-}
-
 impl ManagerBase for Normal {
     type Region<E: 'static, const LEN: usize> = [E; LEN];
 

@@ -263,13 +263,6 @@ impl<M: AtomMode> XRegisters<M> {
 }
 
 impl XRegisters<Normal> {
-    /// Get the byte offset from a pointer to `XRegisters` to the memory of the value
-    /// stored in the `reg` in question.
-    pub(crate) const fn xregister_offset(reg: NonZeroXRegister) -> usize {
-        std::mem::offset_of!(Self, registers)
-            + backend::Cells::<XValue, 31, Normal>::region_elem_offset(reg as usize)
-    }
-
     /// Return a proof-generating version of this XRegisters.
     pub fn start_proof(&self) -> XRegisters<Prove<'_>> {
         XRegisters {
@@ -797,6 +790,10 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
+    use crate::machine_state::MachineCoreState;
+    use crate::machine_state::memory::M4K;
+    use crate::state_context::projection::Projection;
+    use crate::state_context::projection::ProjectionOffset;
 
     backend_test!(test_zero, F, {
         let mut registers = XRegisters::<F>::default();
@@ -899,15 +896,19 @@ mod tests {
 
     #[test]
     fn test_xregister_offsets() {
-        let registers = XRegisters::<Normal>::default();
-        let registers_ptr = (&registers) as *const XRegisters<Normal>;
+        let machine = MachineCoreState::<M4K, Normal>::new();
+        let machine_ptr = &machine as *const MachineCoreState<M4K, Normal>;
 
         for reg in NonZeroXRegister::iter() {
-            let offset = XRegisters::<Normal>::xregister_offset(reg);
-            let val: &XValue = &registers.registers[reg as usize];
+            let ProjectionOffset::Direct { offset } =
+                XRegisterProj::normal_pointer_offset::<M4K>(reg as usize)
+            else {
+                panic!("Expected direct offset for {reg:?}");
+            };
+            let val: &XValue = &machine.hart.xregisters.registers[reg as usize];
 
             // Safety: both pointers are valid
-            let offset_refs = unsafe { (val as *const XValue).byte_offset_from(registers_ptr) };
+            let offset_refs = unsafe { (val as *const XValue).byte_offset_from(machine_ptr) };
 
             assert_eq!(
                 offset_refs, offset as isize,
