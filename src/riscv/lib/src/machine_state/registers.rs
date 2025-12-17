@@ -263,13 +263,6 @@ impl<M: AtomMode> XRegisters<M> {
 }
 
 impl XRegisters<Normal> {
-    /// Get the byte offset from a pointer to `XRegisters` to the memory of the value
-    /// stored in the `reg` in question.
-    pub(crate) const fn xregister_offset(reg: NonZeroXRegister) -> usize {
-        std::mem::offset_of!(Self, registers)
-            + backend::Cells::<XValue, 31, Normal>::region_elem_offset(reg as usize)
-    }
-
     /// Return a proof-generating version of this XRegisters.
     pub fn start_proof(&self) -> XRegisters<Prove<'_>> {
         XRegisters {
@@ -797,6 +790,9 @@ mod tests {
 
     use super::*;
     use crate::backend_test;
+    use crate::machine_state::memory::M4K;
+    use crate::state_context::projection::Projection;
+    use crate::state_context::projection::ProjectionOffset;
 
     backend_test!(test_zero, F, {
         let mut registers = XRegisters::<F>::default();
@@ -903,7 +899,11 @@ mod tests {
         let registers_ptr = (&registers) as *const XRegisters<Normal>;
 
         for reg in NonZeroXRegister::iter() {
-            let offset = XRegisters::<Normal>::xregister_offset(reg);
+            let ProjectionOffset::Direct { offset } =
+                XRegisterProj::normal_pointer_offset::<M4K>(reg as usize)
+            else {
+                panic!("Expecting direct offset for {reg:?}");
+            };
             let val: &XValue = &registers.registers[reg as usize];
 
             // Safety: both pointers are valid
