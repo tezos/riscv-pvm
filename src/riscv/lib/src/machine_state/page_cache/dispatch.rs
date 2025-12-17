@@ -388,6 +388,19 @@ pub(crate) mod jit_counters {
             Self::default()
         }
 
+        /// Create a new set of counters with specified initial values.
+        pub fn with_values(
+            jit_calls: usize,
+            budget_check_passes: usize,
+            fallback_calls: usize,
+        ) -> Self {
+            Self {
+                jit_calls: AtomicUsize::new(jit_calls),
+                budget_check_passes: AtomicUsize::new(budget_check_passes),
+                fallback_calls: AtomicUsize::new(fallback_calls),
+            }
+        }
+
         /// Record a JIT call.
         pub fn record_jit_call(&self) {
             self.jit_calls.fetch_add(1, Ordering::Relaxed);
@@ -432,6 +445,11 @@ pub(crate) mod jit_counters {
         /// Get the number of times this dispatch target has been called for verification in tests.
         pub(crate) fn num_jit_calls(&self) -> usize {
             self.jit_counters.jit_calls.load(Ordering::SeqCst)
+        }
+
+        /// Get a reference to the test-only JIT counters.
+        pub(crate) fn jit_counters(&self) -> &JitTestCounters {
+            &self.jit_counters
         }
     }
 }

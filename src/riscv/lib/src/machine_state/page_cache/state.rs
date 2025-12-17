@@ -30,6 +30,8 @@ use crate::machine_state::memory::PAGE_MASK;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::address_to_page_index;
 use crate::machine_state::memory::listener::MemoryGovernanceListener;
+#[cfg(test)]
+use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
 use crate::state_backend::ManagerBase;
@@ -168,8 +170,8 @@ where
 {
     /// TEST ONLY
     ///
-    /// Get the number of times the JIT function at this entrypoint has been called.
-    pub(crate) fn get_entrypoint_jit_calls(&self, address: Address) -> Option<usize> {
+    /// Get the counts of JIT calls, fallbacks and budget checks for this entrypoint.
+    pub(crate) fn get_jit_counters(&self, address: Address) -> Option<&JitTestCounters> {
         let page_index = address_to_page_index(address);
         let page = self.pages[page_index].as_ref()?;
 
@@ -177,7 +179,7 @@ where
         // aligned
         let offset = super::address_to_halfword_index(address);
 
-        Some(page.entries[offset].dispatch.num_jit_calls())
+        Some(page.entries[offset].dispatch.jit_counters())
     }
 }
 
