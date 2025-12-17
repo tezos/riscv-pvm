@@ -394,6 +394,7 @@ impl DynAccess {
 mod tests {
     use std::collections::VecDeque;
 
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
@@ -404,73 +405,61 @@ mod tests {
 
     use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerAlloc;
 
     const CELLS_SIZE: usize = 32;
 
     #[test]
-    fn test_proof_gen_region() {
+    fn test_proof_gen_atoms() {
         proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
-            // A read followed by a write
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(region);
-
-            prop_assert!(!region.region_ref().get_access_info());
-            let value = region.read(i);
-            prop_assert_eq!(value, value_before);
-            prop_assert!(region.region_ref().get_access_info());
-            region.write(i, value_after);
-            prop_assert!(region.region_ref().get_access_info());
-
-            // A write followed by a read
-            let cells = [value_before; CELLS_SIZE];
-            let region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            region.write(i, value_after);
-            prop_assert!(region.region_ref().get_access_info());
-            let value = region.read(i);
-            prop_assert_eq!(value, value_after);
-            prop_assert!(region.region_ref().get_access_info());
-
             let data_before = [value_before; CELLS_SIZE];
             let data_after = [value_after; CELLS_SIZE];
 
+            // A read followed by a write
+            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
+            prop_assert!(!atoms.was_accessed());
+            let value = atoms[i];
+            prop_assert_eq!(value, value_before);
+            prop_assert!(atoms.was_accessed());
+            atoms[i] = value_after;
+            prop_assert!(atoms.was_accessed());
+
+            // A write followed by a read
+            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
+            prop_assert!(!atoms.was_accessed());
+            atoms[i] = value_after;
+            prop_assert!(atoms.was_accessed());
+            let value = atoms[i];
+            prop_assert_eq!(value, value_after);
+            prop_assert!(atoms.was_accessed());
+
             // A read_all followed by a write_all
-            let cells = data_before;
-            let region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            let values = region.read_all();
+            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
+            prop_assert!(!atoms.was_accessed());
+            let values = atoms.read();
             prop_assert_eq!(values.as_slice(), data_before);
-            prop_assert!(region.region_ref().get_access_info());
-            region.write_all(&data_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(atoms.was_accessed());
+            atoms.write(data_after);
+            prop_assert!(atoms.was_accessed());
 
             // A write_all followed by a read_all
-            let cells = data_before;
-            let region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
-            let mut region: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(region);
-            prop_assert!(!region.region_ref().get_access_info());
-            region.write_all(&data_after);
-            prop_assert!(region.region_ref().get_access_info());
-            let values = region.read_all();
+            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
+            prop_assert!(!atoms.was_accessed());
+            atoms.write(data_after);
+            prop_assert!(atoms.was_accessed());
+            let values = atoms.read();
             prop_assert_eq!(values.as_slice(), data_after);
-            prop_assert!(region.region_ref().get_access_info());
+            prop_assert!(atoms.was_accessed());
 
             // Check correct Merkleisation
-            let cells = [value_before; CELLS_SIZE];
-            let cells_owned: Cells<u64, CELLS_SIZE, Normal> = Cells::bind(cells);
-            let initial_root_hash = Hash::from_foldable(&cells_owned);
+            let atoms: Atom<[u64; CELLS_SIZE], Normal> = Atom::new(data_before);
+            let initial_root_hash = Hash::from_foldable(&atoms);
 
-            let mut proof_region: ProofRegion<'_, u64, CELLS_SIZE> = ProofRegion::bind(&cells);
-            Prove::region_write(&mut proof_region, i, value_after);
-            let proof_cells: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region);
+            let mut proof_atoms: Atom<[u64; CELLS_SIZE], Prove> = atoms.start_proof();
+            proof_atoms[i] = value_after;
 
-            let merkle_tree = MerkleTree::from_foldable(&proof_cells);
+            let merkle_tree = MerkleTree::from_foldable(&proof_atoms);
             merkle_tree.check_root_hash();
             match merkle_tree {
                 MerkleTree::Leaf(hash, access_info, _) => {
