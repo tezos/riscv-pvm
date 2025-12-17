@@ -81,9 +81,7 @@ pub fn address_to_halfword_index(address: Address) -> usize {
 ///
 /// Page entrypoints exist at the start of each _halfword_ within a page slot. Since the
 /// instruction pc is always halfword-aligned, a populated
-pub trait PageCache<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>:
-    MemoryGovernanceListener
-{
+pub trait PageCache<MC: MemoryConfig, M: ManagerBase>: MemoryGovernanceListener {
     /// Instantiate a new page cache instance.
     fn new() -> Self;
 
