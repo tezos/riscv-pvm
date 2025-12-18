@@ -42,7 +42,7 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::entrypoint::Page;
 use crate::machine_state::page_cache::run_code_page_interpreted;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
@@ -204,7 +204,7 @@ extern "C" fn csr_read<MC: MemoryConfig>(
 /// Wrapper around [`run_code_page_interpreted`] for fallback to the interpreter
 /// from the JIT context. Returns the steps remaining after interpreter execution.
 extern "C" fn run_interpreter_fallback<D, MC: MemoryConfig>(
-    page: &JittedPage<D, MC>,
+    page: &Page<D, MC>,
     core: &mut MachineCoreState<MC, Normal>,
     max_steps: usize,
     result: &mut ExceptionCode,
@@ -471,7 +471,7 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
     pub(super) fn run_interpreter_fallback<D>(
         &self,
         builder: &mut FunctionBuilder,
-        page: Pointer<JittedPage<D, MC>>,
+        page: Pointer<Page<D, MC>>,
         core_ptr: Pointer<MachineCoreState<MC, Normal>>,
         max_steps: Value<usize>,
         result_ptr: Pointer<ExceptionCode>,
@@ -504,18 +504,15 @@ mod state_access_test_utils {
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::page_cache::address_to_halfword_index;
-    use crate::machine_state::page_cache::jitted::JittedPage;
+    use crate::machine_state::page_cache::entrypoint::Page;
 
-    extern "C" fn record_jit_call<D, MC: MemoryConfig>(
-        page: &JittedPage<D, MC>,
-        entrypoint: Address,
-    ) {
+    extern "C" fn record_jit_call<D, MC: MemoryConfig>(page: &Page<D, MC>, entrypoint: Address) {
         let entry = address_to_halfword_index(entrypoint);
         page.entries[entry].dispatch.jit_counters.record_jit_call();
     }
 
     extern "C" fn record_budget_check_pass<D, MC: MemoryConfig>(
-        page: &JittedPage<D, MC>,
+        page: &Page<D, MC>,
         entrypoint: Address,
     ) {
         let entry = address_to_halfword_index(entrypoint);
@@ -526,7 +523,7 @@ mod state_access_test_utils {
     }
 
     extern "C" fn record_fallback_to_interpreter<D, MC: MemoryConfig>(
-        page: &JittedPage<D, MC>,
+        page: &Page<D, MC>,
         entrypoint: Address,
     ) {
         let entry = address_to_halfword_index(entrypoint);
@@ -549,7 +546,7 @@ mod state_access_test_utils {
         pub(crate) fn record_jit_call<D>(
             &self,
             builder: &mut FunctionBuilder,
-            page: Pointer<JittedPage<D, MC>>,
+            page: Pointer<Page<D, MC>>,
             entrypoint: Value<Address>,
         ) {
             ext_calls::call2(
@@ -565,7 +562,7 @@ mod state_access_test_utils {
         pub(crate) fn record_budget_check_pass<D>(
             &self,
             builder: &mut FunctionBuilder,
-            page: Pointer<JittedPage<D, MC>>,
+            page: Pointer<Page<D, MC>>,
             entrypoint: Value<Address>,
         ) {
             ext_calls::call2(
@@ -581,7 +578,7 @@ mod state_access_test_utils {
         pub(crate) fn record_fallback_to_interpreter<D>(
             &self,
             builder: &mut FunctionBuilder,
-            page: Pointer<JittedPage<D, MC>>,
+            page: Pointer<Page<D, MC>>,
             entrypoint: Value<Address>,
         ) {
             ext_calls::call2(

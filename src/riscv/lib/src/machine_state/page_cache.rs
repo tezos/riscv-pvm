@@ -17,24 +17,20 @@
 //! therefore execution using the page cache is semantically identical to the fetch/parse/run
 //! cycle.
 
-pub(crate) mod code_page_entry;
 pub(crate) mod dispatch;
 mod empty;
+pub(crate) mod entrypoint;
 pub(crate) mod interpreted;
-pub(crate) mod jitted;
 mod router;
 pub(crate) mod state;
 
-pub use code_page_entry::CodePageEntry;
 pub use dispatch::DispatchTarget;
 pub use dispatch::InlineCompiler;
 pub use dispatch::OutlineCompiler;
 pub use empty::EmptyPageCache;
-pub use interpreted::Interpreted;
+pub use entrypoint::Entrypoint;
 pub use interpreted::InterpretedCompiler;
-pub use jitted::Jitted;
 use octez_riscv_data::mode::Mode;
-use octez_riscv_data::mode::Normal;
 use state::PageCacheImpl;
 
 use super::MachineCoreState;
@@ -53,17 +49,23 @@ use crate::state_backend::ManagerWrite;
 /// Type alias for the default [`PageCache`] implementation with interpreted dispatch only.
 ///
 /// This is only usable when the [`Normal`] backend mode is selected.
-pub type PageCacheInterpreted<MC> = PageCacheImpl<Interpreted<MC, Normal>, MC, Normal>;
+///
+/// [`Normal`]: octez_riscv_data::mode::Normal
+pub type PageCacheInterpreted<MC> = PageCacheImpl<InterpretedCompiler, MC>;
 
 /// Type alias for the default [`PageCache`] implementation with inline jit enabled.
 ///
-/// This is only usable when the [`Normal`] backend mode is selected.
-pub type PageCacheInlineJit<MC> = PageCacheImpl<Jitted<InlineCompiler, MC>, MC, Normal>;
+/// This should only be used when the [`Normal`] backend mode is selected.
+///
+/// [`Normal`]: octez_riscv_data::mode::Normal
+pub type PageCacheInlineJit<MC> = PageCacheImpl<InlineCompiler, MC>;
 
 /// Type alias for the default [`PageCache`] implementation with outline jit enabled.
 ///
-/// This is only usable when the [`Normal`] backend mode is selected.
-pub type PageCacheOutlineJit<MC> = PageCacheImpl<Jitted<OutlineCompiler<MC>, MC>, MC, Normal>;
+/// This should only be used when the [`Normal`] backend mode is selected.
+///
+/// [`Normal`]: octez_riscv_data::mode::Normal
+pub type PageCacheOutlineJit<MC> = PageCacheImpl<OutlineCompiler<MC>, MC>;
 
 /// Per page, we store exactly the number of instruction halfwords we could fetch from that page's
 /// memory.

@@ -43,7 +43,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::ProgramCounterProj;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::entrypoint::Page;
 use crate::machine_state::registers::XValue;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::PcWriteContext;
@@ -71,7 +71,7 @@ pub struct SequenceBuilder<'jit, D, MC: MemoryConfig> {
     fallback_interpreted_block: Block,
 
     /// Parameter pointing to the code page
-    page_param: Pointer<JittedPage<D, MC>>,
+    page_param: Pointer<Page<D, MC>>,
 
     /// Parameter pointing to the `MachineCoreState`
     core_param: Pointer<MachineCoreState<MC, Normal>>,
@@ -139,10 +139,10 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
         builder.append_block_params_for_function_params(param_block);
         builder.switch_to_block(param_block);
 
-        // SAFETY: `JitFn` accepts a `&JittedPage` as the 1st parameter.
+        // SAFETY: `JitFn` accepts a `&Page` as the 1st parameter.
         let page_param = unsafe {
             let raw_value = builder.block_params(param_block)[0];
-            Pointer::<JittedPage<D, MC>>::from_raw(raw_value)
+            Pointer::<Page<D, MC>>::from_raw(raw_value)
         };
 
         // SAFETY: `JitFn` accepts a `&mut MachineCoreState<MC, Normal>` as the 2nd parameter.

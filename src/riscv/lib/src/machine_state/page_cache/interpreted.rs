@@ -7,23 +7,14 @@
 //!
 //! [`CodePage`]: super::CodePage
 
-use std::marker::PhantomData;
-use std::sync::Arc;
-
-use octez_riscv_data::mode::Mode;
-
-use super::code_page_entry::CodePageEntry;
-use crate::exceptions::Exception;
-use crate::machine_state::MachineCoreState;
-use crate::machine_state::StepManyResult;
-use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::dispatch::DispatchCompiler;
+use crate::machine_state::page_cache::dispatch::DispatchFn;
+use crate::machine_state::page_cache::entrypoint::Page;
 use crate::machine_state::page_cache::router::RouterEq;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
-/// Interpreted entrypoints are built automatically, and require no additional context.
+/// A compiler that does not actually do any compilation.
 #[derive(Debug, Default, Clone)]
 pub struct InterpretedCompiler;
 
@@ -38,76 +29,21 @@ impl RouterEq for InterpretedCompiler {
     }
 }
 
-/// Entrypoints that are interpreted only.
-#[derive(derive_more::Debug)]
-pub struct Interpreted<MC, M> {
-    instruction: Instruction,
-    #[cfg(test)]
-    call_count: std::cell::Cell<usize>,
-    #[debug(skip)]
-    _pd: PhantomData<(MC, M)>,
-}
+/// Dummy implementation of the `DispatchCompiler` trait.
+impl<MC: MemoryConfig> DispatchCompiler<MC> for InterpretedCompiler {
+    /// The `InterpretedCompiler` needs no context.
+    type Context = ();
 
-impl<MC: MemoryConfig, M: Mode> CodePageEntry<MC, M> for Interpreted<MC, M> {
-    type Compiler = InterpretedCompiler;
-
-    type CompilerContext = ();
-
-    fn new_compiler(_context: &()) -> Self::Compiler {
+    /// Trivial constructor for an empty struct.
+    fn new(_ctx: &()) -> Self {
         InterpretedCompiler
     }
 
-    /// Run an entrypoint in a purely interpreted manner.
-    fn run_entrypoint(
-        page: &Arc<super::state::PageEntry<Self, InterpretedCompiler>>,
-        core: &mut MachineCoreState<MC, M>,
-        instr_pc: Address,
-        max_steps: usize,
-    ) -> StepManyResult<Exception>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
-        #[cfg(test)]
-        {
-            let instr_offset = super::address_to_halfword_index(instr_pc);
-            page.entries[instr_offset]
-                .call_count
-                .update(|x| x.saturating_add(1));
-        }
-
-        super::run_code_page_interpreted(&page.entries, core, instr_pc, max_steps)
-    }
-
-    #[cfg(test)]
-    fn called_times(&self) -> usize {
-        self.call_count.get()
-    }
-}
-
-impl<MC, M> From<Instruction> for Interpreted<MC, M> {
-    fn from(instruction: Instruction) -> Self {
-        Self {
-            instruction,
-            #[cfg(test)]
-            call_count: std::cell::Cell::new(0),
-            _pd: PhantomData,
-        }
-    }
-}
-
-impl<MC, M> AsRef<Instruction> for Interpreted<MC, M> {
-    fn as_ref(&self) -> &Instruction {
-        &self.instruction
-    }
-}
-
-impl<MC, M> Clone for Interpreted<MC, M> {
-    fn clone(&self) -> Self {
-        Self {
-            instruction: self.instruction,
-            #[cfg(test)]
-            call_count: self.call_count.clone(),
-            _pd: self._pd,
-        }
+    /// We never compile, instead simply return `None`.
+    fn compile(
+        _target: &Page<Self, MC>,
+        _program_counter: Address,
+    ) -> Option<DispatchFn<Self, MC>> {
+        None
     }
 }

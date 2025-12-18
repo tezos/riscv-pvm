@@ -28,7 +28,7 @@ use crate::log;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
-use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::entrypoint::Page;
 
 /// Alias for the function signature produced by the JIT compilation.
 ///
@@ -43,7 +43,7 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 /// The rust compiler has no way of checking if function pointers returned by the JIT
 /// compiler are still valid, so any function pointer it returns must be marked `unsafe`.
 pub type JitFn<D, MC> = unsafe extern "C" fn(
-    &JittedPage<D, MC>,
+    &Page<D, MC>,
     &mut MachineCoreState<MC, Normal>,
     // ignored - address hardcoded in instruction building
     u64,
@@ -122,7 +122,7 @@ impl JIT {
     /// unsupported instructions, `None` will be returned.
     pub fn compile_page<D, MC: MemoryConfig>(
         &mut self,
-        page: &JittedPage<D, MC>,
+        page: &Page<D, MC>,
         mut offset: usize,
         program_counter: Address,
     ) -> Option<JitFn<D, MC>> {
@@ -303,20 +303,16 @@ mod tests {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::MachineState;
     use crate::machine_state::instruction::Instruction;
-    use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
     use crate::machine_state::page_cache::InlineCompiler;
-    use crate::machine_state::page_cache::Interpreted;
     use crate::machine_state::page_cache::InterpretedCompiler;
-    use crate::machine_state::page_cache::Jitted;
     use crate::machine_state::page_cache::PageCacheInlineJit;
     use crate::machine_state::page_cache::PageCacheInterpreted;
     use crate::machine_state::page_cache::address_to_halfword_index;
-    use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::FRegister;
@@ -330,32 +326,6 @@ mod tests {
 
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Normal>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
-
-    /// Dummy compiler used as a generic parameter to `compile`.
-    #[derive(Debug)]
-    struct DummyCompiler;
-
-    impl<MC: MemoryConfig> DispatchCompiler<MC> for DummyCompiler {
-        type Context = ();
-
-        fn new(_: &()) -> Self {
-            DummyCompiler
-        }
-
-        fn should_compile(
-            &self,
-            _target: &crate::machine_state::page_cache::DispatchTarget<Self, MC>,
-        ) -> bool {
-            unimplemented!("Dummy Compiler")
-        }
-
-        fn compile(
-            _target: &JittedPage<Self, MC>,
-            _program_counter: Address,
-        ) -> crate::machine_state::page_cache::dispatch::DispatchFn<Self, MC> {
-            unimplemented!("Dummy Compiler")
-        }
-    }
 
     /// Machine state for test scenarios with a configurable [`PageCache`] type.
     type TestMachineState<PC> = MachineState<M4K, PC, Normal>;
@@ -412,7 +382,7 @@ mod tests {
             let initial_pc = self.initial_pc.unwrap_or_default();
 
             let mut jitted_page =
-                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+                PageEntry::<InterpretedCompiler, M4K>::zeroed(InterpretedCompiler);
 
             PageEntry::push_instructions(
                 &mut jitted_page,
@@ -423,7 +393,7 @@ mod tests {
             let offset = address_to_halfword_index(initial_pc);
 
             test_jit
-                .compile_page::<DummyCompiler, M4K>(&jitted_page, offset, initial_pc)
+                .compile_page::<InterpretedCompiler, M4K>(&jitted_page, offset, initial_pc)
                 .expect("JIT compilation should succeed.");
         }
 
@@ -487,9 +457,7 @@ mod tests {
 
             // Push the given instructions to the correct page
             let mut interpreted_page =
-                PageEntry::<Interpreted<M4K, Normal>, InterpretedCompiler>::zeroed(
-                    InterpretedCompiler,
-                );
+                PageEntry::<InterpretedCompiler, M4K>::zeroed(InterpretedCompiler);
             PageEntry::push_instructions(
                 &mut interpreted_page,
                 initial_pc,
@@ -500,9 +468,8 @@ mod tests {
                 .page_cache
                 .overwrite_page(initial_pc, interpreted_page);
 
-            let mut jitted_page = PageEntry::<Jitted<InlineCompiler, M4K>, InlineCompiler>::zeroed(
-                InlineCompiler::default(),
-            );
+            let mut jitted_page =
+                PageEntry::<InlineCompiler, M4K>::zeroed(InlineCompiler::default());
             PageEntry::push_instructions(
                 &mut jitted_page,
                 initial_pc,
@@ -2083,11 +2050,12 @@ mod tests {
             let offset = address_to_halfword_index(initial_pc);
 
             let mut failure_page =
-                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+                PageEntry::<InterpretedCompiler, M4K>::zeroed(InterpretedCompiler);
             PageEntry::push_instructions(&mut failure_page, initial_pc, failure.iter().cloned());
 
             // Act
-            let res = jit.compile_page::<DummyCompiler, M4K>(&failure_page, offset, initial_pc);
+            let res =
+                jit.compile_page::<InterpretedCompiler, M4K>(&failure_page, offset, initial_pc);
 
             assert!(
                 res.is_none(),
@@ -2095,11 +2063,11 @@ mod tests {
             );
 
             let mut success_page =
-                PageEntry::<Jitted<DummyCompiler, M4K>, DummyCompiler>::zeroed(DummyCompiler);
+                PageEntry::<InterpretedCompiler, M4K>::zeroed(InterpretedCompiler);
             PageEntry::push_instructions(&mut success_page, initial_pc, success.iter().cloned());
 
             let fun = jit
-                .compile_page::<DummyCompiler, _>(&success_page, offset, initial_pc)
+                .compile_page::<InterpretedCompiler, _>(&success_page, offset, initial_pc)
                 .expect("Compilation of subsequent functions should succeed");
 
             let mut jitted_err = ExceptionCode::NoException;

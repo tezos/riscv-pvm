@@ -26,9 +26,8 @@ use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::Permissions;
-use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::PageCache;
-use crate::machine_state::page_cache::state::PageCacheImpl;
+use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::machine_state::registers;
 use crate::program::Program;
 
@@ -81,10 +80,8 @@ pub enum TestStepperError {
     MachineError(MachineError),
 }
 
-pub struct TestStepper<
-    MC: MemoryConfig = M1G,
-    PC: PageCache<MC, Normal> = PageCacheImpl<Interpreted<MC, Normal>, MC, Normal>,
-> {
+pub struct TestStepper<MC: MemoryConfig = M1G, PC: PageCache<MC, Normal> = PageCacheInterpreted<MC>>
+{
     machine_state: MachineState<MC, PC, Normal>,
     posix_state: PosixState<Normal>,
 }
