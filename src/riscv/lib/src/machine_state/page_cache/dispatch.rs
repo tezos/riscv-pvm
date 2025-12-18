@@ -25,8 +25,8 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::address_to_halfword_index;
 #[cfg(test)]
 use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
-use crate::machine_state::page_cache::jitted::Jitted;
-use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::page_cache::entrypoint::Entrypoint;
+use crate::machine_state::page_cache::entrypoint::Page;
 use crate::machine_state::page_cache::router::RouterEq;
 
 /// The function signature for dispatching an entrypoint run.
@@ -85,7 +85,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
     fn default() -> Self {
         Self {
-            fun: AtomicUsize::new(Jitted::<D, MC>::run_entrypoint_interpreted as usize),
+            fun: AtomicUsize::new(Entrypoint::<D, MC>::run_entrypoint_interpreted as usize),
             remaining_calls: AtomicUsize::new(1000),
             #[cfg(test)]
             jit_counters: JitTestCounters::new(),
@@ -105,9 +105,9 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug for DispatchTarg
             Compiled,
         }
 
-        let status = if fun as usize == Jitted::<D, MC>::run_entrypoint_interpreted as usize {
+        let status = if fun as usize == Entrypoint::<D, MC>::run_entrypoint_interpreted as usize {
             Status::Interpreted
-        } else if fun as usize == Jitted::<D, MC>::run_entrypoint_not_compiled as usize {
+        } else if fun as usize == Entrypoint::<D, MC>::run_entrypoint_not_compiled as usize {
             Status::NotCompiled
         } else {
             Status::Compiled
@@ -123,7 +123,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug for DispatchTarg
 
 /// A compiler that can JIT-compile sequences of instructions, and hot-swap the execution of
 /// said entrypoint in the given dispatch target.
-pub trait DispatchCompiler<MC: MemoryConfig>: Sized {
+pub trait DispatchCompiler<MC: MemoryConfig>: Sized + Clone + RouterEq {
     /// In some implementations there are shared resources that we don't want to recreate for every
     /// new compiler. These are stored in the compiler context.
     type Context: Default;
@@ -131,17 +131,17 @@ pub trait DispatchCompiler<MC: MemoryConfig>: Sized {
     /// A new compiler is created, given a context.
     fn new(context: &Self::Context) -> Self;
 
-    /// Whether compilation should be attempted for the instruction sequence.
-    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool;
-
-    /// Compile an instruction sequence, hot-swapping the `run_entrypoint` function contained in `target` in
-    /// the process. This could be to an interpreted execution method, and/or jit-compiled
-    /// function.
+    /// First this checks if the suggested entrypoint should be compiled. If not, we simply return
+    /// `None`.
+    ///
+    /// Otherwise, we compile an instruction sequence, hot-swapping the `run_entrypoint` function
+    /// contained in `target` in the process. This could be to an interpreted execution method,
+    /// and/or jit-compiled function.
     ///
     /// NB - the hot-swapping of JIT-compiled entrypoints may occur at any time, and is not
-    /// guaranteed to be contained within the call-time of this function. (This is true for
-    /// outline jit, especially).
-    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC>;
+    /// guaranteed to be contained within the call-time of this function. (This is true for outline
+    /// jit, especially).
+    fn compile(target: &Page<Self, MC>, program_counter: Address) -> Option<DispatchFn<Self, MC>>;
 }
 
 /// JIT compiler for entrypoints that performs compilation inline, in the same thread as execution.
@@ -175,14 +175,7 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
         Self::default()
     }
 
-    #[inline]
-    fn should_compile(&self, _target: &DispatchTarget<Self, MC>) -> bool {
-        // every entrypoint must be compiled immediately for inline jit, as it's used for testing
-        // jit compatibility with interpreted mode.
-        true
-    }
-
-    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
+    fn compile(target: &Page<Self, MC>, program_counter: Address) -> Option<DispatchFn<Self, MC>> {
         // The `InlineCompiler` is exclusively used in a single threaded context (compilation is
         // done in the same thread as execution). Therefore, this borrow should never panic as
         // there can be no other attempts to borrow concurrently.
@@ -192,12 +185,12 @@ impl<MC: MemoryConfig> DispatchCompiler<MC> for InlineCompiler {
 
         let fun: DispatchFn<Self, MC> = match jit.compile_page(target, offset, program_counter) {
             Some(jitfn) => jitfn,
-            None => Jitted::run_entrypoint_not_compiled,
+            None => Entrypoint::run_entrypoint_not_compiled,
         };
 
         target.entries[offset].dispatch.set(fun);
 
-        fun
+        Some(fun)
     }
 }
 
@@ -270,7 +263,7 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompilerContext<MC> {
 
                         debug_assert_eq!(
                             dispatch.fun.load(Ordering::Acquire),
-                            Jitted::<Self, MC>::run_entrypoint_not_compiled as usize,
+                            Entrypoint::<Self, MC>::run_entrypoint_not_compiled as usize,
                             "Unexpected function pointer in dispatch target"
                         );
 
@@ -326,33 +319,35 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
         }
     }
 
-    fn should_compile(&self, target: &DispatchTarget<Self, MC>) -> bool {
-        target.remaining_calls.fetch_sub(1, Ordering::SeqCst) == 1
-    }
-
-    fn compile(target: &JittedPage<Self, MC>, program_counter: Address) -> DispatchFn<Self, MC> {
-        let fun = Jitted::run_entrypoint_not_compiled;
-
+    fn compile(target: &Page<Self, MC>, program_counter: Address) -> Option<DispatchFn<Self, MC>> {
         let offset = address_to_halfword_index(program_counter);
-        target.entries[offset].dispatch.set(fun);
+        let d_target = &target.entries[offset].dispatch;
 
-        let request = CompilationRequest {
-            page: target.clone(),
-            program_counter,
-        };
+        let should_compile = d_target.remaining_calls.fetch_sub(1, Ordering::SeqCst) == 1;
 
-        // This will always succeed, unless the compilation thread has panicked
-        // (as this would result in the receiving end of the channel being closed).
-        //
-        // If it has, execution must still continue - but everything will fallback
-        // to interpreted mode.
-        //
-        // NB - any entrypoints already JIT compiled are safe to keep calling, as the
-        // data behind the mutex (the JIT) is kept alive for as long as we maintain
-        // our reference to it, despite the lock itself being poisoned.
-        let _ = target.compiler.sender.send(request);
+        should_compile.then(|| {
+            let fun: DispatchFn<Self, MC> = Entrypoint::run_entrypoint_not_compiled;
 
-        fun
+            d_target.set(fun);
+
+            let request = CompilationRequest {
+                page: target.clone(),
+                program_counter,
+            };
+
+            // This will always succeed, unless the compilation thread has panicked
+            // (as this would result in the receiving end of the channel being closed).
+            //
+            // If it has, execution must still continue - but everything will fallback
+            // to interpreted mode.
+            //
+            // NB - any entrypoints already JIT compiled are safe to keep calling, as the
+            // data behind the mutex (the JIT) is kept alive for as long as we maintain
+            // our reference to it, despite the lock itself being poisoned.
+            let _ = target.compiler.sender.send(request);
+
+            fun
+        })
     }
 }
 
@@ -360,7 +355,7 @@ impl<MC: MemoryConfig + Send> DispatchCompiler<MC> for OutlineCompiler<MC> {
 struct CompilationRequest<D: DispatchCompiler<MC>, MC: MemoryConfig> {
     /// Reference to the page containing the entrypoint to compile. This carries the compiler
     /// itself, which the background thread uses to access the JIT instance.
-    page: Arc<super::state::PageEntry<Jitted<D, MC>, D>>,
+    page: Arc<super::state::PageEntry<D, MC>>,
     /// The program counter of the entrypoint we wish to compile.
     program_counter: Address,
 }
@@ -465,8 +460,8 @@ mod tests {
     use crate::machine_state::memory::Address;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
-    use crate::machine_state::page_cache::jitted::Jitted;
-    use crate::machine_state::page_cache::jitted::JittedPage;
+    use crate::machine_state::page_cache::entrypoint::Entrypoint;
+    use crate::machine_state::page_cache::entrypoint::Page;
 
     #[test]
     fn test_dispatch_debug_classification() {
@@ -478,7 +473,7 @@ mod tests {
             "unexpected formatting \"{format}\""
         );
 
-        dispatch.set(Jitted::<_, _>::run_entrypoint_not_compiled);
+        dispatch.set(Entrypoint::<_, _>::run_entrypoint_not_compiled);
         let format = format!("{dispatch:?}");
 
         assert!(
@@ -487,7 +482,7 @@ mod tests {
         );
 
         extern "C" fn compiled_dummy<D: DispatchCompiler<M4K>>(
-            _: &JittedPage<D, M4K>,
+            _: &Page<D, M4K>,
             _: &mut MachineCoreState<M4K, Normal>,
             _: Address,
             _: usize,
