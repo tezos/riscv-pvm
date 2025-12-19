@@ -3,13 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::array;
 use std::collections::BTreeMap;
-use std::ops::Index;
 
-use bincode::Encode;
-use bincode::enc::Encoder;
-use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
@@ -58,8 +53,6 @@ impl From<CaughtNotFoundOrPanic> for ProofVerificationFailure {
 }
 
 impl ManagerBase for Verify {
-    type Region<E: 'static, const LEN: usize> = Region<E, LEN>;
-
     type DynRegion = DynRegion<{ MERKLE_LEAF_SIZE.get() }>;
 
     type ManagerRoot = Self;
@@ -70,7 +63,6 @@ mod test_helpers {
     use crate::state_backend::ManagerAlloc;
     use crate::state_backend::verify_backend::DynRegion;
     use crate::state_backend::verify_backend::PageId;
-    use crate::state_backend::verify_backend::Region;
     use crate::state_backend::verify_backend::Verify;
 
     impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
@@ -94,10 +86,6 @@ mod test_helpers {
     }
 
     impl ManagerAlloc for Verify {
-        fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
-            Region::Partial(Box::new(init_value.map(Some)))
-        }
-
         fn allocate_dyn_region(length: usize) -> Self::DynRegion {
             // Since this implementation is only for testing purposes, we can allocate the regions
             // as zero initialized to mimic what the normal mode would do (to pass tests).
@@ -107,18 +95,6 @@ mod test_helpers {
 }
 
 impl ManagerRead for Verify {
-    fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
-        region[index]
-    }
-
-    fn region_ref<E: 'static, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> &E {
-        &region[index]
-    }
-
-    fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E> {
-        (0..LEN).map(|index| region[index]).collect()
-    }
-
     fn dyn_region_len(region: &Self::DynRegion) -> usize {
         region.len()
     }
@@ -133,36 +109,6 @@ impl ManagerRead for Verify {
 }
 
 impl ManagerWrite for Verify {
-    fn region_write<E: 'static, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) {
-        match region {
-            Region::Absent => {
-                // We can't uses `[None; LEN]` because `E: Copy` is not given.
-                let mut data = Box::new(array::from_fn(|_| None));
-
-                data[index] = Some(value);
-
-                *region = Region::Partial(data);
-            }
-
-            Region::Partial(data) => {
-                data[index] = Some(value);
-            }
-        }
-    }
-
-    fn region_write_all<E: Copy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        values: &[E],
-    ) {
-        for (i, &value) in values.iter().enumerate() {
-            Self::region_write(region, i, value);
-        }
-    }
-
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         let raw_data = elem_bytes(value);
         region.write_bytes(address, &raw_data);
@@ -170,27 +116,9 @@ impl ManagerWrite for Verify {
 }
 
 impl ManagerClone for Verify {
-    fn clone_region<E: Clone + 'static, const LEN: usize>(
-        region: &Self::Region<E, LEN>,
-    ) -> Self::Region<E, LEN> {
-        region.clone()
-    }
-
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         region.clone()
     }
-}
-
-/// Verifier region
-#[derive(Clone)]
-pub enum Region<E: 'static, const LEN: usize> {
-    // We maintain a separate [`Absent`] variant in order to save space for regions that aren't
-    // accessed at all.
-    Absent,
-    Partial(
-        // This needs to be boxed to prevent inflating the size of this type for absent regions.
-        Box<[Option<E>; LEN]>,
-    ),
 }
 
 /// Represents either a present and complete region in `Verify` mode
@@ -202,63 +130,6 @@ pub enum PartialState<T> {
     Absent,
     /// A region is only partially present
     Incomplete,
-}
-
-/// Reference to a complete region in `Verify` mode
-pub struct CompleteRegionRef<'a, E, const LEN: usize> {
-    region: &'a [Option<E>; LEN],
-}
-
-impl<T: Encode, const LEN: usize> Encode for CompleteRegionRef<'_, T, LEN> {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        for elem in self.region {
-            let Some(elem) = elem.as_ref() else {
-                return Err(EncodeError::Other("Region is not complete"));
-            };
-
-            elem.encode(encoder)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<E, const LEN: usize> Region<E, LEN> {
-    /// Get the contents of the region if it is fully present or its status otherwise.
-    pub fn get_partial_region(&self) -> PartialState<CompleteRegionRef<'_, E, LEN>> {
-        let region = match self {
-            Region::Absent => return PartialState::Absent,
-            Region::Partial(region) => region,
-        };
-
-        for value in region.iter() {
-            if value.is_none() {
-                return PartialState::Incomplete;
-            }
-        }
-
-        PartialState::Complete(CompleteRegionRef {
-            region: region.as_ref(),
-        })
-    }
-}
-
-impl<E, const LEN: usize> Index<usize> for Region<E, LEN> {
-    type Output = E;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        // SAFETY: `not_found` is safe to call because we're in `Verify` mode where `not_found`
-        // panics can be caught and converted into an error upstream.
-        unsafe {
-            match self {
-                Region::Absent => not_found(),
-                Region::Partial(region) => match region.get(index).and_then(Option::as_ref) {
-                    Some(value) => value,
-                    None => not_found(),
-                },
-            }
-        }
-    }
 }
 
 /// Page identifier

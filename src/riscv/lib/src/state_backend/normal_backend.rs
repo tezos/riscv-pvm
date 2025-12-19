@@ -18,22 +18,15 @@ use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
-use super::StaticCopy;
 use crate::machine_state::memory::PAGE_SIZE;
 
 impl ManagerBase for Normal {
-    type Region<E: 'static, const LEN: usize> = [E; LEN];
-
     type DynRegion = memmap2::MmapMut;
 
     type ManagerRoot = Self;
 }
 
 impl ManagerAlloc for Normal {
-    fn allocate_region<E: 'static, const LEN: usize>(value: [E; LEN]) -> Self::Region<E, LEN> {
-        value
-    }
-
     fn allocate_dyn_region(len: usize) -> Self::DynRegion {
         let region = memmap2::MmapMut::map_anon(len).expect("Failed to allocate dynamic region");
 
@@ -48,21 +41,6 @@ impl ManagerAlloc for Normal {
 }
 
 impl ManagerRead for Normal {
-    fn region_read<E: StaticCopy, const LEN: usize>(
-        region: &Self::Region<E, LEN>,
-        index: usize,
-    ) -> E {
-        region[index]
-    }
-
-    fn region_ref<E: 'static, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> &E {
-        &region[index]
-    }
-
-    fn region_read_all<E: StaticCopy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E> {
-        region.to_vec()
-    }
-
     fn dyn_region_len(region: &Self::DynRegion) -> usize {
         region.len()
     }
@@ -75,21 +53,6 @@ impl ManagerRead for Normal {
 }
 
 impl ManagerWrite for Normal {
-    fn region_write<E: 'static, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) {
-        region[index] = value;
-    }
-
-    fn region_write_all<E: StaticCopy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        value: &[E],
-    ) {
-        region.copy_from_slice(value)
-    }
-
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         debug_assert!(address + E::STORED_SIZE.get() <= region.len());
 
@@ -98,17 +61,6 @@ impl ManagerWrite for Normal {
 }
 
 impl ManagerSerialise for Normal {
-    fn serialise_region<T: Encode + 'static, const LEN: usize, E: Encoder>(
-        region: &Self::Region<T, LEN>,
-        mut encoder: E,
-    ) -> Result<(), EncodeError> {
-        for elem in region.iter() {
-            elem.encode(&mut encoder)?;
-        }
-
-        Ok(())
-    }
-
     fn serialise_dyn_region<E: Encoder>(
         region: &Self::DynRegion,
         mut encoder: E,
@@ -121,12 +73,6 @@ impl ManagerSerialise for Normal {
 }
 
 impl ManagerClone for Normal {
-    fn clone_region<E: Clone + 'static, const LEN: usize>(
-        region: &Self::Region<E, LEN>,
-    ) -> Self::Region<E, LEN> {
-        region.clone()
-    }
-
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         let len = region.len();
         let mut new_region = Normal::allocate_dyn_region(len);
@@ -230,14 +176,5 @@ pub(crate) mod test_helpers {
         let binary_value = serialise(cell).unwrap();
         let expected_binary_value = serialise(42u64).unwrap();
         assert_eq!(binary_value, expected_binary_value);
-    }
-
-    /// Check that regions are properly initialised.
-    #[test]
-    fn region_init() {
-        proptest::proptest!(|(init_value: [u64; 17])| {
-            let region = Normal::allocate_region(init_value);
-            proptest::prop_assert_eq!(region, init_value);
-        });
     }
 }
