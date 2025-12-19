@@ -3,8 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::marker::PhantomData;
-
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -39,272 +37,12 @@ use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
-use crate::default::ConstDefault;
-use crate::machine_state::memory::MemoryConfig;
-use crate::state::NewState;
 use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
-use crate::state_backend::RegionProj;
 use crate::state_backend::proof_backend;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 use crate::state_backend::verify_backend;
-use crate::state_context::projection::ApplyCons;
-use crate::state_context::projection::CellsCons;
-use crate::state_context::projection::Projection;
-use crate::state_context::projection::ProjectionOffset;
-
-/// Multiple elements of type `E`
-#[repr(transparent)]
-pub struct Cells<E: 'static, const LEN: usize, M: ManagerBase> {
-    region: M::Region<E, LEN>,
-}
-
-impl<E: 'static, const LEN: usize, M: ManagerBase> Cells<E, LEN, M> {
-    /// Allocate new cells with the given values.
-    pub fn new_with(values: [E; LEN]) -> Self
-    where
-        M: ManagerAlloc,
-    {
-        let region = M::allocate_region(values);
-        Self { region }
-    }
-
-    /// Bind this state to the given region.
-    pub const fn bind(region: M::Region<E, LEN>) -> Self {
-        Self { region }
-    }
-
-    /// Obtain a reference to the underlying region.
-    pub fn region_ref(&self) -> &M::Region<E, LEN> {
-        &self.region
-    }
-
-    /// Obtain the underlying region.
-    pub fn into_region(self) -> M::Region<E, LEN> {
-        self.region
-    }
-
-    /// Read an element in the region.
-    #[inline]
-    pub fn read(&self, index: usize) -> E
-    where
-        E: Copy,
-        M: ManagerRead,
-    {
-        M::region_read(&self.region, index)
-    }
-
-    /// Obtain a reference to an element in the region.
-    pub fn read_ref(&self, index: usize) -> &E
-    where
-        M: ManagerRead,
-    {
-        M::region_ref(&self.region, index)
-    }
-
-    /// Read all elements in the region.
-    #[inline]
-    pub fn read_all(&self) -> Vec<E>
-    where
-        E: Copy,
-        M: ManagerRead,
-    {
-        M::region_read_all(&self.region)
-    }
-
-    /// Update an element in the region.
-    #[inline]
-    pub fn write(&mut self, index: usize, value: E)
-    where
-        M: ManagerWrite,
-    {
-        M::region_write(&mut self.region, index, value)
-    }
-
-    /// Update all elements in the region.
-    #[inline]
-    pub fn write_all(&mut self, value: &[E])
-    where
-        E: Copy,
-        M: ManagerWrite,
-    {
-        M::region_write_all(&mut self.region, value)
-    }
-}
-
-impl<E: 'static, const LEN: usize> Cells<E, LEN, Normal> {
-    /// Return a proof-generating version of these Cells.
-    pub fn start_proof(&self) -> Cells<E, LEN, Prove<'_>> {
-        Cells {
-            region: proof_backend::ProofRegion::bind(&self.region),
-        }
-    }
-}
-
-impl<E: ConstDefault + 'static, const LEN: usize, M: ManagerBase> NewState<M> for Cells<E, LEN, M> {
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        Self::new_with([E::DEFAULT; LEN])
-    }
-}
-
-impl<T: Encode, const LEN: usize, M: ManagerSerialise> Encode for Cells<T, LEN, M> {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        M::serialise_region(&self.region, encoder)
-    }
-}
-
-impl<C, T: Decode<C>, const LEN: usize> Decode<C> for Cells<T, LEN, Normal> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        Ok(Self {
-            region: Decode::decode(decoder)?,
-        })
-    }
-}
-
-impl<A: PartialEq<B>, B, const LEN: usize, M: ManagerRead, N: ManagerRead>
-    PartialEq<Cells<B, LEN, N>> for Cells<A, LEN, M>
-{
-    fn eq(&self, other: &Cells<B, LEN, N>) -> bool {
-        (0..LEN).all(|i| self.read_ref(i).eq(other.read_ref(i)))
-    }
-}
-
-impl<T: Eq, const LEN: usize, M: ManagerRead> Eq for Cells<T, LEN, M> {}
-
-impl<E: Clone, const LEN: usize, M: ManagerClone> Clone for Cells<E, LEN, M> {
-    fn clone(&self) -> Self {
-        Self {
-            region: M::clone_region(&self.region),
-        }
-    }
-}
-
-impl<E: Clone, const LEN: usize, M: ManagerClone> CloneState for Cells<E, LEN, M> {
-    fn clone_state(&self) -> Self {
-        self.clone()
-    }
-}
-
-impl<T: Encode, const LEN: usize, M: ManagerSerialise> Foldable<HashFold> for Cells<T, LEN, M> {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        Hash::blake3_hash(self).expect("Hashing should not fail")
-    }
-}
-
-impl<T: Encode, const LEN: usize> Foldable<MerkleTreeFold> for Cells<T, LEN, Prove<'_>> {
-    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
-        // RV-282: Break down into multiple leaves if the size of the `Cells`
-        // is too large for a proof.
-
-        // The Merkle leaf must hold the serialisation of the initial state.
-        // Directly serialising the `Prove` state would produce the serialisation
-        // of the final state. Therefore, access the inner region which contains the initial state.
-        let data = self.region.inner_region_ref();
-        let leaf_data = serialise(data).expect("Serialising cells should not fail");
-
-        let was_accessed = self.region.get_access_info();
-        MerkleTree::make_merkle_leaf(leaf_data, was_accessed)
-    }
-}
-
-impl<E: Decode<()>, const LEN: usize> FromProof for Cells<E, LEN, Verify> {
-    fn from_proof<D: merkle_proof::Deserialiser>(
-        proof: D,
-    ) -> merkle_proof::SuspendedResult<D, Self> {
-        let result = proof.into_leaf::<[E; LEN]>()?;
-        let result = result.map(|region| {
-            let region = match region {
-                Partial::Absent | Partial::Blinded(_) => verify_backend::Region::Absent,
-                Partial::Present(values) => {
-                    let values: Box<[Option<E>; LEN]> = Box::new(values.map(Some));
-                    verify_backend::Region::Partial(values)
-                }
-            };
-            super::Cells::bind(region)
-        });
-        Ok(result)
-    }
-}
-
-impl<T: Encode, const LEN: usize> Foldable<PartialHashFold<'_>> for Cells<T, LEN, Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
-        let verify_backend::Region::Partial(values) = &self.region else {
-            return builder.previous();
-        };
-
-        let values = values
-            .iter()
-            .filter_map(|item| item.as_ref())
-            .collect::<Vec<_>>();
-
-        if values.is_empty() {
-            // Nothing has changed.
-            return builder.previous();
-        }
-
-        if values.len() != LEN {
-            // Some elements are missing, so we cannot compute the full hash.
-            return PartialHash::InvalidProof;
-        }
-
-        let Ok(values) = <[&T; LEN]>::try_from(values) else {
-            unreachable!("We checked the length before")
-        };
-
-        let hash =
-            Hash::blake3_hash(values).expect("Hashing element in partial region should not fail");
-        PartialHash::Present(hash)
-    }
-}
-
-/// Projection from [`Cells`] to its element type `E`
-pub struct CellsProj<E, const LEN: usize>(PhantomData<E>);
-
-impl<E: 'static, const LEN: usize> Projection for CellsProj<E, LEN> {
-    type Subject = CellsCons<E, LEN>;
-
-    type Target = E;
-
-    type Parameter = <RegionProj<E, LEN> as Projection>::Parameter;
-
-    #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-    ) -> &'a Self::Target {
-        RegionProj::<E, LEN>::project_ref::<MC, M>(&state.region, param)
-    }
-
-    #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-    ) -> Self::Target
-    where
-        Self::Target: Copy,
-    {
-        RegionProj::<E, LEN>::project_read::<MC, M>(&state.region, param)
-    }
-
-    #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
-        state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-        value: Self::Target,
-    ) {
-        RegionProj::<E, LEN>::project_write::<MC, M>(&mut state.region, param, value);
-    }
-
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        let field_offset = std::mem::offset_of!(Cells<E, LEN, Normal>, region);
-
-        RegionProj::<E, LEN>::normal_pointer_offset::<MC>(param) + field_offset
-    }
-}
 
 /// Multiple elements of an unspecified type
 pub struct DynCells<M: ManagerBase> {
@@ -651,8 +389,6 @@ pub(crate) mod tests {
 
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::state::NewState;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::Elem;
     use crate::state_backend::ManagerBase;
@@ -700,74 +436,6 @@ pub(crate) mod tests {
         }
     }
 
-    backend_test!(test_region_overlap, F, {
-        const LEN: usize = 64;
-
-        let mut array1: Cells<u64, LEN, F> = Cells::new();
-        let mut array2: Cells<u64, LEN, F> = Cells::new();
-
-        // Allocate two consecutive arrays
-        // let mut array1 = manager.allocate_region(array1_place);
-        let mut array1_mirror = [0; LEN];
-
-        for (i, item) in array1_mirror.iter_mut().enumerate() {
-            // Ensure the array is zero-initialised.
-            assert_eq!(array1.read(i), 0);
-
-            // Then write something random in it.
-            let value = rand::random();
-            array1.write(i, value);
-            assert_eq!(array1.read(i), value);
-
-            // Retain the value for later.
-            *item = value;
-        }
-
-        let array1_vec = array1.read_all();
-        assert_eq!(array1_vec, array1_mirror);
-
-        for i in 0..LEN {
-            // Check the array is zero-initialised and that the first array
-            // did not mess with the second array.
-            assert_eq!(array2.read(i), 0);
-
-            // Write a random value to it.
-            let value = rand::random();
-            array2.write(i, value);
-            assert_eq!(array2.read(i), value);
-        }
-
-        for (i, item) in array1_mirror.into_iter().enumerate() {
-            // Ensure that writing to the second array didn't mess with the
-            // first array.
-            assert_eq!(item, array1.read(i));
-        }
-    });
-
-    backend_test!(test_atom_overlap, F, {
-        let mut atom1: Atom<[u64; 4], F> = Atom::default();
-        let mut atom2: Atom<[u64; 4], F> = Atom::default();
-
-        // Atom should be zero-initialised.
-        assert_eq!(atom1.read(), [0; 4]);
-        assert_eq!(atom2.read(), [0; 4]);
-
-        // Write something to atom 1 and check.
-        let atom1_value: [u64; 4] = rand::random();
-        atom1.write(atom1_value);
-        assert_eq!(atom1.read(), atom1_value);
-
-        // Second atom should still be zero-initialised
-        assert_eq!(atom2.read(), [0; 4]);
-
-        // Write something to atom 2 and check.
-        let atom2_value: [u64; 4] = rand::random();
-        atom2.write(atom2_value);
-        assert_eq!(atom2.read(), atom2_value);
-
-        // Atom 1 should not have its value changed.
-        assert_eq!(atom1.read(), atom1_value);
-    });
 
     backend_test!(
         #[should_panic]
@@ -837,25 +505,17 @@ pub(crate) mod tests {
         assert_eq!(Atom::<MyFoo, F>::default().read(), MyFoo::DEFAULT);
     });
 
-    // Test that the Array layout initialises the underlying Cells correctly.
-    backend_test!(test_cells_init, F, {
-        assert_eq!(
-            Cells::<MyFoo, 1337, F>::new().read_all(),
-            [MyFoo::DEFAULT; 1337]
-        );
-    });
-
     #[test]
     fn test_struct_example() {
         struct Foo<M: ManagerBase> {
             bar: Atom<u64, M>,
-            qux: Cells<u8, 64, M>,
+            qux: Atom<[u8; 64], M>,
         }
 
         impl<F: Fold, M: ManagerBase> Foldable<F> for Foo<M>
         where
             Atom<u64, M>: Foldable<F>,
-            Cells<u8, 64, M>: Foldable<F>,
+            Atom<[u8; 64], M>: Foldable<F>,
         {
             fn fold(&self, builder: F) -> <F as Fold>::Folded {
                 let mut builder = builder.into_node_fold();
@@ -868,11 +528,11 @@ pub(crate) mod tests {
         fn inner(bar: u64, qux: [u8; 64]) {
             let mut foo = Foo::<Normal> {
                 bar: Atom::default(),
-                qux: Cells::new(),
+                qux: Atom::new([0u8; 64]),
             };
 
             foo.bar.write(bar);
-            foo.qux.write_all(&qux);
+            foo.qux.write(qux);
 
             // Obtain the state hash
             let hash = Hash::from_foldable(&foo);
@@ -889,7 +549,7 @@ pub(crate) mod tests {
 
             // Modify the values so they appear in the proof
             proof_foo.bar.write(bar.wrapping_add(1));
-            proof_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+            proof_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
             let tree = MerkleTree::from_foldable(&proof_foo);
@@ -904,7 +564,7 @@ pub(crate) mod tests {
             // Apply the same modification on the `Normal` state in order to obtain
             // the final state hash
             foo.bar.write(bar.wrapping_add(1));
-            foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+            foo.qux.write(qux.map(|x| x.wrapping_add(1)));
             let final_hash = Hash::from_foldable(&foo);
 
             // Verify the proof and check the final hash
@@ -917,12 +577,12 @@ pub(crate) mod tests {
                 };
 
                 assert_eq!(bar, verify_foo.bar.read());
-                assert_eq!(qux, verify_foo.qux.read_all().as_slice());
+                assert_eq!(qux, verify_foo.qux.read());
 
                 // Apply the same modification to the state in `Verify` mode and check
                 // that the final hash is correct
                 verify_foo.bar.write(bar.wrapping_add(1));
-                verify_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+                verify_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
                 let verify_hash = PartialHash::from_foldable(Some(&proof), &verify_foo)
                     .to_hash()
