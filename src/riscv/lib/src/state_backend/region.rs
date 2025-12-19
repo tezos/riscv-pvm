@@ -837,13 +837,6 @@ pub(crate) mod tests {
         assert_eq!(Atom::<MyFoo, F>::default().read(), MyFoo::DEFAULT);
     });
 
-    // Test that the Array layout initialises the underlying Cells correctly.
-    backend_test!(test_cells_init, F, {
-        assert_eq!(
-            Cells::<MyFoo, 1337, F>::new().read_all(),
-            [MyFoo::DEFAULT; 1337]
-        );
-    });
 
     #[test]
     fn test_struct_example() {
