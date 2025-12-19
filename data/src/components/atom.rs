@@ -442,3 +442,6 @@ impl CloneAtomMode for Verify {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

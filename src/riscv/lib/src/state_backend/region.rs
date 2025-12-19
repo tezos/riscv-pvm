@@ -436,7 +436,6 @@ pub(crate) mod tests {
         }
     }
 
-
     backend_test!(
         #[should_panic]
         test_dynregion_oob_2,
@@ -500,10 +499,6 @@ pub(crate) mod tests {
         }
     }
 
-    // Test that the Atom initialises correctly.
-    backend_test!(test_atom_init, F, {
-        assert_eq!(Atom::<MyFoo, F>::default().read(), MyFoo::DEFAULT);
-    });
 
     #[test]
     fn test_struct_example() {
