@@ -849,13 +849,13 @@ pub(crate) mod tests {
     fn test_struct_example() {
         struct Foo<M: ManagerBase> {
             bar: Atom<u64, M>,
-            qux: Cells<u8, 64, M>,
+            qux: Atom<[u8; 64], M>,
         }
 
         impl<F: Fold, M: ManagerBase> Foldable<F> for Foo<M>
         where
             Atom<u64, M>: Foldable<F>,
-            Cells<u8, 64, M>: Foldable<F>,
+            Atom<[u8; 64], M>: Foldable<F>,
         {
             fn fold(&self, builder: F) -> <F as Fold>::Folded {
                 let mut builder = builder.into_node_fold();
@@ -868,11 +868,11 @@ pub(crate) mod tests {
         fn inner(bar: u64, qux: [u8; 64]) {
             let mut foo = Foo::<Normal> {
                 bar: Atom::default(),
-                qux: Cells::new(),
+                qux: Atom::new([0u8; 64]),
             };
 
             foo.bar.write(bar);
-            foo.qux.write_all(&qux);
+            foo.qux.write(qux);
 
             // Obtain the state hash
             let hash = Hash::from_foldable(&foo);
@@ -889,7 +889,7 @@ pub(crate) mod tests {
 
             // Modify the values so they appear in the proof
             proof_foo.bar.write(bar.wrapping_add(1));
-            proof_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+            proof_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
             let tree = MerkleTree::from_foldable(&proof_foo);
@@ -904,7 +904,7 @@ pub(crate) mod tests {
             // Apply the same modification on the `Normal` state in order to obtain
             // the final state hash
             foo.bar.write(bar.wrapping_add(1));
-            foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+            foo.qux.write(qux.map(|x| x.wrapping_add(1)));
             let final_hash = Hash::from_foldable(&foo);
 
             // Verify the proof and check the final hash
@@ -917,12 +917,12 @@ pub(crate) mod tests {
                 };
 
                 assert_eq!(bar, verify_foo.bar.read());
-                assert_eq!(qux, verify_foo.qux.read_all().as_slice());
+                assert_eq!(qux, verify_foo.qux.read());
 
                 // Apply the same modification to the state in `Verify` mode and check
                 // that the final hash is correct
                 verify_foo.bar.write(bar.wrapping_add(1));
-                verify_foo.qux.write_all(&qux.map(|x| x.wrapping_add(1)));
+                verify_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
                 let verify_hash = PartialHash::from_foldable(Some(&proof), &verify_foo)
                     .to_hash()
