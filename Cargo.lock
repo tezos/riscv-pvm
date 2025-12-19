@@ -1849,6 +1849,7 @@ dependencies = [
  "perfect-derive",
  "proptest",
  "thiserror 2.0.17",
+ "trait-set",
 ]
 
 [[package]]
