@@ -18,3 +18,4 @@ perfect-derive.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 trait-set.workspace = true
+rand.workspace = true

@@ -361,8 +361,6 @@ impl<const LEAF_SIZE: usize> Default for DynRegion<LEAF_SIZE> {
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::components::atom::Atom;
-    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::mode::utils::NotFound;
     use octez_riscv_data::mode::utils::catch_not_found;
 
@@ -410,36 +408,6 @@ mod tests {
             assert!(item > page4[0]);
             assert_eq!(item, page8[0]);
         });
-    }
-
-    /// Check functionality of an Atom that is present.
-    #[test]
-    fn atom_present() {
-        proptest::proptest!(|(reg: [u64; 32])| {
-            let mut atoms: Atom<[_; 32], Verify> = Atom::new(reg);
-
-            for i in 0..32 {
-                let value = catch_not_found(|| atoms[i]).ok();
-                proptest::prop_assert_eq!(value, Some(reg[i]));
-
-                let new_value = rand::random();
-                atoms[i] = new_value;
-
-                let read_value = atoms[i];
-                proptest::prop_assert_eq!(read_value, new_value);
-            }
-        });
-    }
-
-    /// Check functionality of an Atom that is absent.
-    #[test]
-    fn atom_absent() {
-        let cells: Atom<[u64; 32], Verify> = Atom::absent();
-
-        for i in 0..32 {
-            let value = catch_not_found(|| cells[i]).ok();
-            assert_eq!(value, None);
-        }
     }
 
     macro_rules! assert_eq_found {
@@ -593,42 +561,5 @@ mod tests {
             assert_not_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE - 1));
             assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE));
         }
-    }
-
-    #[test]
-    fn test_partial_hash_absent() {
-        let verify_cell: Atom<u64, Verify> = Atom::absent();
-        let proof = None;
-
-        let hash = PartialHash::from_foldable(proof, &verify_cell);
-        assert_eq!(hash, PartialHash::Previous);
-    }
-
-    #[test]
-    fn test_partial_hash_absent_written() {
-        let mut verify_cell: Atom<u64, Verify> = Atom::absent();
-        let proof = None;
-
-        let written_value = 1337;
-        verify_cell.write(written_value);
-
-        let value_hash = Hash::blake3_hash(written_value).unwrap();
-        let expected_state_hash = PartialHash::Present(value_hash);
-        let hash = PartialHash::from_foldable(proof, &verify_cell);
-        assert_eq!(hash, expected_state_hash);
-    }
-
-    #[test]
-    fn test_partial_hash_present_written() {
-        let mut verify_cell: Atom<u64, Verify> = Atom::new(42);
-        let proof = None;
-
-        let written_value = 1337;
-        verify_cell.write(written_value);
-
-        let value_hash = Hash::blake3_hash(written_value).unwrap();
-        let expected_state_hash = PartialHash::Present(value_hash);
-        let hash = PartialHash::from_foldable(proof, &verify_cell);
-        assert_eq!(hash, expected_state_hash);
     }
 }

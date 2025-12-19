@@ -260,12 +260,10 @@ impl DynAccess {
 mod tests {
     use std::collections::VecDeque;
 
-    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
     use proptest::array;
-    use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
@@ -273,69 +271,6 @@ mod tests {
     use super::*;
     use crate::state_backend::DynCells;
     use crate::state_backend::ManagerAlloc;
-
-    const CELLS_SIZE: usize = 32;
-
-    #[test]
-    fn test_proof_gen_atoms() {
-        proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
-            let data_before = [value_before; CELLS_SIZE];
-            let data_after = [value_after; CELLS_SIZE];
-
-            // A read followed by a write
-            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
-            prop_assert!(!atoms.was_accessed());
-            let value = atoms[i];
-            prop_assert_eq!(value, value_before);
-            prop_assert!(atoms.was_accessed());
-            atoms[i] = value_after;
-            prop_assert!(atoms.was_accessed());
-
-            // A write followed by a read
-            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
-            prop_assert!(!atoms.was_accessed());
-            atoms[i] = value_after;
-            prop_assert!(atoms.was_accessed());
-            let value = atoms[i];
-            prop_assert_eq!(value, value_after);
-            prop_assert!(atoms.was_accessed());
-
-            // A read_all followed by a write_all
-            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
-            prop_assert!(!atoms.was_accessed());
-            let values = atoms.read();
-            prop_assert_eq!(values.as_slice(), data_before);
-            prop_assert!(atoms.was_accessed());
-            atoms.write(data_after);
-            prop_assert!(atoms.was_accessed());
-
-            // A write_all followed by a read_all
-            let mut atoms: Atom<[u64; CELLS_SIZE], Prove> = Atom::new(data_before);
-            prop_assert!(!atoms.was_accessed());
-            atoms.write(data_after);
-            prop_assert!(atoms.was_accessed());
-            let values = atoms.read();
-            prop_assert_eq!(values.as_slice(), data_after);
-            prop_assert!(atoms.was_accessed());
-
-            // Check correct Merkleisation
-            let atoms: Atom<[u64; CELLS_SIZE], Normal> = Atom::new(data_before);
-            let initial_root_hash = Hash::from_foldable(&atoms);
-
-            let mut proof_atoms: Atom<[u64; CELLS_SIZE], Prove> = atoms.start_proof();
-            proof_atoms[i] = value_after;
-
-            let merkle_tree = MerkleTree::from_foldable(&proof_atoms);
-            merkle_tree.check_root_hash();
-            match merkle_tree {
-                MerkleTree::Leaf(hash, access_info, _) => {
-                    prop_assert_eq!(hash, initial_root_hash);
-                    prop_assert!(access_info);
-                }
-                _ => panic!("Expected Merkle tree to contain a single written leaf"),
-            }
-        });
-    }
 
     const LEAVES: usize = 8;
     const DYN_REGION_SIZE: usize = MERKLE_LEAF_SIZE.get() * LEAVES;
