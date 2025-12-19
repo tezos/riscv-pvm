@@ -139,6 +139,7 @@ impl OwnedProofPart {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
@@ -150,14 +151,11 @@ mod tests {
     use proptest::proptest;
 
     use super::*;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
-    use crate::state_backend::ManagerWrite;
-    use crate::state_backend::proof_backend::ProofRegion;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
-    const CELLS_SIZE: usize = 32;
+    const ATOMS_SIZE: usize = 32;
 
     // When producing a proof from a state in `Prove` mode, values written during
     // the execution of the tick being proven should not be blinded, whereas
@@ -166,21 +164,20 @@ mod tests {
     // state in `Verify` mode constructed from this proof.
     #[test]
     fn test_proof_blinding() {
-        type TestState<M> = (Cells<u64, CELLS_SIZE, M>, Cells<u64, CELLS_SIZE, M>);
+        type TestState<M> = (Atom<[u64; ATOMS_SIZE], M>, Atom<[u64; ATOMS_SIZE], M>);
 
-        proptest!(|(value_before: u64, value_after: u64, i in 0..CELLS_SIZE)| {
-            // Bind `Prove` cells and write at one address
-            let cells1 = [value_before; CELLS_SIZE];
-            let mut proof_region1: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells1);
-            Prove::region_write(&mut proof_region1, i, value_after);
-            let proof_cells1: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region1);
+        proptest!(|(value_before: u64, value_after: u64, i in 0..ATOMS_SIZE)| {
+            let data_before = [value_before; ATOMS_SIZE];
 
-            // Bind `Prove` cells and do not access them
-            let cells2 = [value_before; CELLS_SIZE];
-            let proof_region2: ProofRegion<u64, CELLS_SIZE> = ProofRegion::bind(&cells2);
-            let proof_cells2: Cells<u64, CELLS_SIZE, Prove> = Cells::bind(proof_region2);
+            // Bind `Prove` atoms and write to one index
+            let mut proof_atoms1: Atom<[u64; ATOMS_SIZE], Prove> = Atom::new(data_before);
+            proof_atoms1[i] = value_after;
 
-            let proof_state = (proof_cells1, proof_cells2);
+
+            // Bind `Prove` atoms and do not access them
+            let proof_atoms2: Atom<[u64; ATOMS_SIZE], Prove> = Atom::new(data_before);
+
+            let proof_state = (proof_atoms1, proof_atoms2);
 
             let merkle_proof = merkle_tree_to_merkle_proof(MerkleTree::from_foldable(&proof_state));
 
@@ -191,12 +188,12 @@ mod tests {
 
             // The first component of the state was present in the proof, can be
             // fully read, and contains the initial state.
-            prop_assert_eq!(verifier_state.0.0.read_all(), vec![value_before; CELLS_SIZE]);
+            prop_assert_eq!(verifier_state.0.0.read(), [value_before; ATOMS_SIZE]);
 
             // The second component of the state is fully blinded: no values can
             // be read from the array.
-            for i in 0..CELLS_SIZE {
-                prop_assert!(catch_not_found(|| verifier_state.0.1.read(i)).is_err());
+            for i in 0..ATOMS_SIZE {
+                prop_assert!(catch_not_found(|| verifier_state.0.1[i]).is_err());
             };
 
             let partial_hash = PartialHash::from_foldable(
