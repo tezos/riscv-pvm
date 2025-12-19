@@ -18,7 +18,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
@@ -39,23 +38,12 @@ pub mod merkle;
 pub mod proof;
 
 impl<'normal> ManagerBase for Prove<'normal> {
-    type Region<E: 'static, const LEN: usize> = ProofRegion<'normal, E, LEN>;
-
     type DynRegion = ProofDynRegion<'normal>;
 
     type ManagerRoot = Self;
 }
 
 impl<'normal> ManagerAlloc for Prove<'normal> {
-    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN> {
-        let source = Normal::allocate_region::<E, LEN>(init_value);
-        ProofRegion {
-            source: Source::from(source),
-            writes: BTreeMap::new(),
-            access: Cell::new(false),
-        }
-    }
-
     fn allocate_dyn_region(len: usize) -> Self::DynRegion {
         let source = Normal::allocate_dyn_region(len);
         ProofDynRegion {
@@ -70,19 +58,6 @@ impl<'normal> ManagerAlloc for Prove<'normal> {
 /// Implementation of [`ManagerRead`] which wraps another manager and
 /// additionally records read locations.
 impl<'normal> ManagerRead for Prove<'normal> {
-    fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E {
-        *Self::region_ref(region, index)
-    }
-
-    fn region_ref<E: 'static, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> &E {
-        region.set_access_info();
-        region.unrecorded_ref(index)
-    }
-
-    fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E> {
-        (0..LEN).map(|i| Self::region_read(region, i)).collect()
-    }
-
     fn dyn_region_len(region: &Self::DynRegion) -> usize {
         region.len()
     }
@@ -96,24 +71,6 @@ impl<'normal> ManagerRead for Prove<'normal> {
 /// Implementation of [`ManagerWrite`] which wraps another manager and
 /// records written locations but does not write to the wrapped region directly.
 impl<'normal> ManagerWrite for Prove<'normal> {
-    fn region_write<E, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    ) {
-        region.set_access_info();
-        region.writes.insert(index, value);
-    }
-
-    fn region_write_all<E: Copy, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        values: &[E],
-    ) {
-        for (i, value) in values.iter().enumerate() {
-            Self::region_write(region, i, *value);
-        }
-    }
-
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         debug_assert!(address + E::STORED_SIZE.get() <= region.unrecorded_len());
 
@@ -128,41 +85,6 @@ impl<'normal> ManagerWrite for Prove<'normal> {
 /// via variants of [`ManagerRead`] functions which do not record access
 /// information.
 impl<'normal> ManagerSerialise for Prove<'normal> {
-    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
-        region: &Self::Region<T, LEN>,
-        mut encoder: E,
-    ) -> Result<(), EncodeError> {
-        if region.writes.is_empty() {
-            // If no writes were recorded, we can serialise the underlying region as is.
-            return Normal::serialise_region(&region.source, encoder);
-        }
-
-        // This variable keeps the index of the next item from the region that should be written.
-        let mut write_index = 0;
-
-        for (&index, value) in region.writes.iter() {
-            // There are items before the current index that have not been written yet.
-            if write_index < index {
-                for i in write_index..index {
-                    Normal::region_ref(&region.source, i).encode(&mut encoder)?;
-                }
-            }
-
-            value.encode(&mut encoder)?;
-
-            // Make sure we expect to write the next item after the current.
-            write_index = index.saturating_add(1);
-        }
-
-        // Write the remaining items from the region that were not written yet.
-        let source = &region.source;
-        for i in write_index..LEN {
-            Normal::region_ref(source, i).encode(&mut encoder)?;
-        }
-
-        Ok(())
-    }
-
     fn serialise_dyn_region<E: Encoder>(
         region: &Self::DynRegion,
         mut encoder: E,
@@ -203,64 +125,8 @@ impl<'normal> ManagerSerialise for Prove<'normal> {
 }
 
 impl<'normal> ManagerClone for Prove<'normal> {
-    fn clone_region<E: 'static + Clone, const LEN: usize>(
-        region: &Self::Region<E, LEN>,
-    ) -> Self::Region<E, LEN> {
-        region.clone()
-    }
-
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion {
         region.clone()
-    }
-}
-
-/// Proof region which wraps a region managed by another manager.
-///
-/// A [`ManagerBase::Region`] is never split across multiple leaves when Merkleised.
-/// An access to any part of the region is thus recorded as an access to the region as a whole.
-/// The underlying region is never mutated, but all written values are recorded
-/// in order to preserve the integrity of subsequent reads.
-#[derive(Clone)]
-pub struct ProofRegion<'normal, E: 'static, const LEN: usize> {
-    /// See documentation of [`Source`].
-    source: Source<'normal, <Normal as ManagerBase>::Region<E, LEN>>,
-    writes: BTreeMap<usize, E>,
-    access: Cell<bool>,
-}
-
-impl<'normal, E: 'static, const LEN: usize> ProofRegion<'normal, E, LEN> {
-    /// Bind a pre-existing region.
-    pub fn bind(source: &'normal <Normal as ManagerBase>::Region<E, LEN>) -> Self {
-        Self {
-            source: Source::Borrowed(source),
-            writes: BTreeMap::new(),
-            access: Cell::new(false),
-        }
-    }
-
-    /// Get a copy of the access log.
-    pub fn get_access_info(&self) -> bool {
-        self.access.get()
-    }
-
-    /// Record that the regions has been accessed
-    pub fn set_access_info(&self) {
-        self.access.set(true)
-    }
-
-    /// Get a reference to the wrapper region.
-    pub fn inner_region_ref(&self) -> &<Normal as ManagerBase>::Region<E, LEN> {
-        &self.source
-    }
-}
-
-impl<'normal, E: 'static, const LEN: usize> ProofRegion<'normal, E, LEN> {
-    /// Version of [`ManagerRead::region_ref`] which does not record
-    /// the access as a read.
-    fn unrecorded_ref(&self, index: usize) -> &E {
-        self.writes
-            .get(&index)
-            .unwrap_or_else(|| Normal::region_ref(&self.source, index))
     }
 }
 

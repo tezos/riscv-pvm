@@ -436,7 +436,6 @@ pub(crate) mod tests {
         }
     }
 
-
     backend_test!(
         #[should_panic]
         test_dynregion_oob_2,

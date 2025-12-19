@@ -63,13 +63,6 @@ impl<T: TypeCons, const LEN: usize> TypeCons for ArrayCons<T, LEN> {
     type Applied<MC: MemoryConfig, M: ManagerBase> = [ApplyCons<T, MC, M>; LEN];
 }
 
-/// Type constructor [`ManagerBase::Region`]
-pub struct RegionCons<E, const LEN: usize>(PhantomData<E>);
-
-impl<E: 'static, const LEN: usize> TypeCons for RegionCons<E, LEN> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = M::Region<E, LEN>;
-}
-
 /// Type constructor [`Atom`]
 pub struct AtomCons<T>(PhantomData<T>);
 
