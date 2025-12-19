@@ -42,9 +42,6 @@ pub(crate) mod proof_layout;
 mod region;
 pub mod verify_backend;
 
-use std::marker::PhantomData;
-
-use bincode::enc::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 pub use elems::*;
@@ -55,17 +52,8 @@ use octez_riscv_data::mode::Mode;
 pub use proof_layout::*;
 pub use region::*;
 
-use crate::machine_state::memory::MemoryConfig;
-use crate::state_context::projection::ApplyCons;
-use crate::state_context::projection::Projection;
-use crate::state_context::projection::ProjectionOffset;
-use crate::state_context::projection::RegionCons;
-
 /// Manager of the state backend storage
 pub trait ManagerBase: Mode + Sized {
-    /// Region that has been allocated in the state storage
-    type Region<E: 'static, const LEN: usize>;
-
     /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
     type DynRegion;
 
@@ -94,24 +82,12 @@ pub trait ManagerBase: Mode + Sized {
 /// Any `ManagerAlloc` inherently has read & write capabilities,
 /// since the manager creates the values on the first allocation.
 pub trait ManagerAlloc: ManagerRead + ManagerWrite {
-    /// Allocate a region in the state storage.
-    fn allocate_region<E, const LEN: usize>(init_value: [E; LEN]) -> Self::Region<E, LEN>;
-
     /// Allocate a dynamic region in the state storage.
     fn allocate_dyn_region(len: usize) -> Self::DynRegion;
 }
 
 /// Manager with read capabilities
 pub trait ManagerRead: ManagerBase + AtomMode {
-    /// Read an element in the region.
-    fn region_read<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> E;
-
-    /// Obtain a reference to an element in the region.
-    fn region_ref<E: 'static, const LEN: usize>(region: &Self::Region<E, LEN>, index: usize) -> &E;
-
-    /// Read all elements in the region.
-    fn region_read_all<E: Copy, const LEN: usize>(region: &Self::Region<E, LEN>) -> Vec<E>;
-
     /// Read the length of the dynamic region in bytes.
     fn dyn_region_len(region: &Self::DynRegion) -> usize;
 
@@ -160,16 +136,6 @@ pub trait ManagerRead: ManagerBase + AtomMode {
 
 /// Manager with write capabilities
 pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
-    /// Update an element in the region.
-    fn region_write<E: 'static, const LEN: usize>(
-        region: &mut Self::Region<E, LEN>,
-        index: usize,
-        value: E,
-    );
-
-    /// Update all elements in the region.
-    fn region_write_all<E: Copy, const LEN: usize>(region: &mut Self::Region<E, LEN>, value: &[E]);
-
     /// Update an element in the region. `address` is in bytes.
     ///
     /// # Safety
@@ -222,12 +188,6 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
 
 /// Manager with the ability to serialise regions
 pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
-    /// Serialise the contents of the region.
-    fn serialise_region<T: Encode, const LEN: usize, E: Encoder>(
-        region: &Self::Region<T, LEN>,
-        encoder: E,
-    ) -> Result<(), EncodeError>;
-
     /// Serialise the contents of the dynamic region.
     fn serialise_dyn_region<E: Encoder>(
         region: &Self::DynRegion,
@@ -237,68 +197,8 @@ pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
 
 /// Manager with the ability to clone regions
 pub trait ManagerClone: ManagerBase + CloneAtomMode {
-    /// Clone the region.
-    fn clone_region<E: Clone, const LEN: usize>(
-        region: &Self::Region<E, LEN>,
-    ) -> Self::Region<E, LEN>;
-
     /// Clone the dynamic region.
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
-}
-
-/// Projection from [`ManagerBase::Region`] to the element type `E`
-pub struct RegionProj<E, const LEN: usize>(PhantomData<E>);
-
-impl<E: 'static, const LEN: usize> Projection for RegionProj<E, LEN> {
-    type Subject = RegionCons<E, LEN>;
-
-    type Target = E;
-
-    // The parameter needs to be a tuple to allow better composition via the `tuples` crate.
-    type Parameter = (usize,);
-
-    #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-    ) -> &'a Self::Target {
-        M::region_ref(state, param.0)
-    }
-
-    #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
-        state: &'a ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-    ) -> Self::Target
-    where
-        Self::Target: Copy,
-    {
-        M::region_read(state, param.0)
-    }
-
-    #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
-        state: &'a mut ApplyCons<Self::Subject, MC, M>,
-        param: Self::Parameter,
-        value: Self::Target,
-    ) {
-        M::region_write(state, param.0, value);
-    }
-
-    fn normal_pointer_offset<MC: MemoryConfig>(param: Self::Parameter) -> ProjectionOffset {
-        assert!(
-            param.0 < LEN,
-            "Region index out of bounds: {} >= {}",
-            param.0,
-            LEN
-        );
-
-        let offset = std::mem::size_of::<E>()
-            .checked_mul(param.0)
-            .expect("Region offset exceeds usize range");
-
-        ProjectionOffset::direct(offset)
-    }
 }
 
 #[cfg(test)]
