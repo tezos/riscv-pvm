@@ -496,7 +496,6 @@ mod tests {
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use super::*;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
 
     /// Ensures that page indices are properly calculated.
@@ -542,36 +541,20 @@ mod tests {
         });
     }
 
-    /// Proptest value for a partial region
-    type PartialRegionArb<E, const LEN: usize> = Box<[Option<E>; LEN]>;
-
-    /// Proptest value for a region
-    type RegionArb<E, const LEN: usize> = Option<PartialRegionArb<E, LEN>>;
-
-    /// Construct [`Cells`] from a proptest value.
-    fn arb_to_cells<E, const LEN: usize>(region: RegionArb<E, LEN>) -> Cells<E, LEN, Verify> {
-        let region = match region {
-            Some(data) => Region::Partial(data),
-            None => Region::Absent,
-        };
-
-        Cells::bind(region)
-    }
-
-    /// Check functionality of a region that is partially present.
+    /// Check functionality of an Atom that is present.
     #[test]
-    fn region_present() {
-        proptest::proptest!(|(reg: PartialRegionArb<u64, 32>)| {
-            let mut cells: Cells<_, 32, Verify> = arb_to_cells(Some(reg.clone()));
+    fn atom_present() {
+        proptest::proptest!(|(reg: [u64; 32])| {
+            let mut cells: Atom<[_; 32], Verify> = Atom::new(reg);
 
             for i in 0..32 {
-                let value = catch_not_found(|| cells.read(i)).ok();
-                proptest::prop_assert_eq!(value, reg[i]);
+                let value = catch_not_found(|| cells[i]).ok();
+                proptest::prop_assert_eq!(value, Some(reg[i]));
 
                 let new_value = rand::random();
-                cells.write(i, new_value);
+                cells[i] = new_value;
 
-                let read_value = cells.read(i);
+                let read_value = cells[i];
                 proptest::prop_assert_eq!(read_value, new_value);
             }
         });
