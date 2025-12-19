@@ -577,13 +577,13 @@ mod tests {
         });
     }
 
-    /// Check functionality of a region that is absent.
+    /// Check functionality of an Atom that is absent.
     #[test]
-    fn region_absent() {
-        let cells: Cells<u64, 32, Verify> = arb_to_cells(None);
+    fn atom_absent() {
+        let cells: Atom<[u64; 32], Verify> = Atom::absent();
 
         for i in 0..32 {
-            let value = catch_not_found(|| cells.read(i)).ok();
+            let value = catch_not_found(|| cells[i]).ok();
             assert_eq!(value, None);
         }
     }
