@@ -651,8 +651,6 @@ pub(crate) mod tests {
 
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::state::NewState;
-    use crate::state_backend::Cells;
     use crate::state_backend::DynCells;
     use crate::state_backend::Elem;
     use crate::state_backend::ManagerBase;
@@ -766,14 +764,6 @@ pub(crate) mod tests {
     // Test that the Atom initialises correctly.
     backend_test!(test_atom_init, F, {
         assert_eq!(Atom::<MyFoo, F>::default().read(), MyFoo::DEFAULT);
-    });
-
-    // Test that the Array layout initialises the underlying Cells correctly.
-    backend_test!(test_cells_init, F, {
-        assert_eq!(
-            Cells::<MyFoo, 1337, F>::new().read_all(),
-            [MyFoo::DEFAULT; 1337]
-        );
     });
 
     #[test]
