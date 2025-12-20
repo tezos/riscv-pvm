@@ -1,9 +1,9 @@
 {
   stdenv,
   mkShell,
+  callPackage,
   rustup,
   taplo,
-  cargo-audit,
   cargo-nextest,
   ocaml-ng,
   cacert,
@@ -19,34 +19,38 @@ mkShell {
 
   LIBCLANG_PATH = "${libclang.lib}/lib";
 
-  packages = [
-    # Rust
-    rustup
+  packages =
+    let
+      cargo-audit = callPackage ./cargo-audit.nix { };
+    in
+    [
+      # Rust
+      rustup
 
-    # For RISC-V kernel cross-compilation
-    pkgsCross.riscv64.pkgsStatic.stdenv.cc
+      # For RISC-V kernel cross-compilation
+      pkgsCross.riscv64.pkgsStatic.stdenv.cc
 
-    # Utilities
-    taplo
-    cargo-audit
-    cargo-nextest
+      # Utilities
+      taplo
+      cargo-audit
+      cargo-nextest
 
-    # Make sure there is an OCaml compiler available
-    ocaml-ng.ocamlPackages_5_2.ocaml
+      # Make sure there is an OCaml compiler available
+      ocaml-ng.ocamlPackages_5_2.ocaml
 
-    # These are needed for downloads and stuff
-    cacert
-    curl
-  ]
-  ++ (
-    if stdenv.isDarwin then
-      [
-        libiconv
-        fswatch
-      ]
-    else
-      [
-        inotify-tools
-      ]
-  );
+      # These are needed for downloads and stuff
+      cacert
+      curl
+    ]
+    ++ (
+      if stdenv.isDarwin then
+        [
+          libiconv
+          fswatch
+        ]
+      else
+        [
+          inotify-tools
+        ]
+    );
 }
