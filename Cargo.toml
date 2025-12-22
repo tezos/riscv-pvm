@@ -77,7 +77,7 @@ unty = "0.0.4"
 vm-fdt = "0.3.0"
 zerocopy = "0.8.31"
 zerocopy-derive = "0.8.27"
-rangemap = "1.7.0"
+rangemap = "1.7.1"
 
 [workspace.dependencies.tezos-smart-rollup-constants]
 git = "https://gitlab.com/tezos/tezos.git"
