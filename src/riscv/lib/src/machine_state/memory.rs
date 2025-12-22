@@ -244,6 +244,46 @@ pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
         E: Elem + Copy,
         M: ManagerRead + ManagerWrite;
 
+    /// Check whether a narrow access is readable without performing a bounds check.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds.
+    unsafe fn check_readable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + crate::state_backend::NarrowlySized,
+        M: ManagerRead;
+
+    /// Check whether a narrow access is writable without performing a bounds check.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds.
+    unsafe fn check_writable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + crate::state_backend::NarrowlySized,
+        M: ManagerRead;
+
+    /// Read an element without bounds or permission checks.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds and permitted.
+    unsafe fn read_unchecked<E>(&self, address: Address) -> E
+    where
+        E: Elem,
+        M: ManagerRead;
+
+    /// Write an element without bounds or permission checks.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the access is within bounds and permitted.
+    unsafe fn write_unchecked<E>(&mut self, address: Address, value: E)
+    where
+        E: Elem,
+        M: ManagerRead + ManagerWrite;
+
     /// Clone the persistent memory state.
     fn clone_state(&self) -> Self
     where

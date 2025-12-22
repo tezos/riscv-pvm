@@ -26,7 +26,6 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::ProgramCounterUpdate;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::instruction::Args;
-use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FValue;
@@ -197,19 +196,28 @@ where
     where
         F: FnOnce(Value) -> Self::IResult<Next>;
 
-    /// Write value to main memory, at the given address.
-    ///
+    /// Check if a narrow memory access is within bounds.
+    fn main_memory_bounds_check<V: StoreLoadInt>(
+        &mut self,
+        phys_address: Self::XValue,
+        exception: Exception,
+    ) -> Self::IResult<()>;
+
+    /// Write value to main memory, at the given address if permitted.
     /// The value is truncated to the width given by [`LoadStoreWidth`].
-    fn main_memory_store<V: StoreLoadInt>(
+    ///
+    /// SAFETY: The caller must ensure that the access is within bounds.
+    unsafe fn main_memory_store<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
         value: Self::XValue,
     ) -> Self::IResult<()>;
 
-    /// Read value from main memory, at the given address.
-    ///
+    /// Read a value from main memory, at the given address if permitted.
     /// The value is truncated to the width given by [`LoadStoreWidth`].
-    fn main_memory_load<V: StoreLoadInt>(
+    ///
+    /// SAFETY: The caller must ensure that the access is within bounds.
+    unsafe fn main_memory_load<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue>;
@@ -390,25 +398,51 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<M
     }
 
     #[inline(always)]
-    fn main_memory_store<V: StoreLoadInt>(
+    fn main_memory_bounds_check<V: StoreLoadInt>(
         &mut self,
         address: Self::XValue,
-        value: Self::XValue,
+        exception: Exception,
     ) -> Self::IResult<()> {
-        self.main_memory
-            .write(address, V::from_xvalue(value))
-            .map_err(|_: BadMemoryAccess| Exception::StoreAMOAccessFault)
+        let total_bytes = MC::TOTAL_BYTES.get();
+        let width = V::STORED_SIZE.get();
+
+        let max_address = (total_bytes - width) as u64;
+        if address <= max_address {
+            Ok(())
+        } else {
+            Err(exception)
+        }
     }
 
     #[inline(always)]
-    fn main_memory_load<V: StoreLoadInt>(
+    unsafe fn main_memory_store<V: StoreLoadInt>(
         &mut self,
-        address: Self::XValue,
+        phys_address: Self::XValue,
+        value: Self::XValue,
+    ) -> Self::IResult<()> {
+        unsafe {
+            if !self.main_memory.check_writable_narrow::<V>(phys_address) {
+                return Err(Exception::StoreAMOAccessFault);
+            }
+
+            self.main_memory
+                .write_unchecked(phys_address, V::from_xvalue(value));
+            Ok(())
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn main_memory_load<V: StoreLoadInt>(
+        &mut self,
+        phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue> {
-        self.main_memory
-            .read(address)
-            .map(V::to_xvalue)
-            .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
+        unsafe {
+            if !self.main_memory.check_readable_narrow::<V>(phys_address) {
+                return Err(Exception::LoadAccessFault);
+            }
+            let loaded = self.main_memory.read_unchecked::<V>(phys_address);
+            Ok(V::to_xvalue(loaded))
+        }
     }
 
     fn f64_from_x64_unsigned_static(

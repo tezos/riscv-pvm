@@ -27,6 +27,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::Block;
 use cranelift::prelude::FunctionBuilder;
 use cranelift::prelude::InstBuilder;
+use cranelift::prelude::IntCC;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
@@ -473,7 +474,46 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         }
     }
 
-    fn main_memory_store<V: StoreLoadInt>(
+    fn main_memory_bounds_check<V: StoreLoadInt>(
+        &mut self,
+        address: Self::XValue,
+        exception: Exception,
+    ) -> Self::IResult<()> {
+        let total_bytes = MC::TOTAL_BYTES.get();
+        let width = V::STORED_SIZE.get();
+
+        let max_address = (total_bytes - width) as i64;
+        let in_bounds = self.ins().icmp_imm(
+            IntCC::UnsignedLessThanOrEqual,
+            address.to_value(),
+            max_address,
+        );
+
+        let success_block = self.builder.create_block();
+        let exception_block = self.builder.create_block();
+
+        self.ins()
+            .brif(in_bounds, success_block, [], exception_block, []);
+
+        self.builder.seal_block(exception_block);
+        self.builder.seal_block(success_block);
+
+        // Code for when the access is out of bounds
+        {
+            self.builder.switch_to_block(exception_block);
+            self.builder.set_cold_block(exception_block);
+            let code = ExceptionCode::build_exception_code(self.builder, exception);
+            self.handle_exception::<()>(code);
+        }
+
+        // Code for when the access is in bounds
+        {
+            self.builder.switch_to_block(success_block);
+            self.ok(())
+        }
+    }
+
+    unsafe fn main_memory_store<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
         value: Self::XValue,
@@ -500,6 +540,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when the store failed
         {
             self.builder.switch_to_block(exception_block);
+            self.builder.set_cold_block(exception_block);
             self.handle_exception::<()>(errno.code);
         }
 
@@ -512,7 +553,7 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         InstructionResult::HasNext(())
     }
 
-    fn main_memory_load<V: StoreLoadInt>(
+    unsafe fn main_memory_load<V: StoreLoadInt>(
         &mut self,
         phys_address: Self::XValue,
     ) -> Self::IResult<Self::XValue> {
@@ -538,7 +579,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         // Code for when the load failed
         {
             self.builder.switch_to_block(exception_block);
-
             self.handle_exception::<()>(errno.code);
         }
 

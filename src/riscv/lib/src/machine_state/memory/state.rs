@@ -34,6 +34,7 @@ use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
+use crate::state_backend::NarrowlySized;
 
 /// Machine's memory
 #[perfect_derive(PartialEq, Eq)]
@@ -42,10 +43,10 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Manage
     pub(super) data: DynCells<M>,
 
     /// Read permissions per page
-    pub(super) readable_pages: PagePermissions<PAGES, M>,
+    pub(crate) readable_pages: PagePermissions<PAGES, M>,
 
     /// Write permissions per page
-    pub(super) writable_pages: PagePermissions<PAGES, M>,
+    pub(crate) writable_pages: PagePermissions<PAGES, M>,
 
     /// Execute permissions per page
     pub(super) executable_pages: PagePermissions<PAGES, M>,
@@ -236,6 +237,42 @@ where
 
         self.data.write_all(address as usize, values);
         Ok(())
+    }
+
+    unsafe fn check_readable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + NarrowlySized,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds.
+        unsafe { self.readable_pages.can_access_narrow::<E>(address) }
+    }
+
+    unsafe fn check_writable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + NarrowlySized,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds.
+        unsafe { self.writable_pages.can_access_narrow::<E>(address) }
+    }
+
+    unsafe fn read_unchecked<E>(&self, address: Address) -> E
+    where
+        E: Elem,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds and permitted.
+        unsafe { self.data.read(address as usize) }
+    }
+
+    unsafe fn write_unchecked<E>(&mut self, address: Address, value: E)
+    where
+        E: Elem,
+        M: ManagerRead + ManagerWrite,
+    {
+        // SAFETY: The caller guarantees the access is within bounds and permitted.
+        unsafe { self.data.write(address as usize, value) }
     }
 
     fn clone_state(&self) -> Self

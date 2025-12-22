@@ -49,19 +49,23 @@ fn run_x64_atomic<I: ICB>(
         atomic_access_fault_guard::<u64, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
-    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u64>(address_rs1));
+    let val_rs1_result = I::and_then(result, |_| {
+        let res = icb.main_memory_bounds_check::<u64>(address_rs1, Exception::LoadAccessFault);
+        // SAFETY: The address has been checked for bounds and permission.
+        I::and_then(res, |_| unsafe { icb.main_memory_load::<u64>(address_rs1) })
+    });
 
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
         // Apply the binary operation to the loaded value and the value in rs2
         let val_rs2 = read_xregister(icb, rs2);
-        let res = f(val_rs1, val_rs2, icb);
+        let res_val = f(val_rs1, val_rs2, icb);
 
         // Write the value read fom the address in rs1 in rd
         write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1
-        icb.main_memory_store::<u64>(address_rs1, res)
+        unsafe { icb.main_memory_store::<u64>(address_rs1, res_val) }
     })
 }
 
@@ -79,7 +83,11 @@ fn run_x32_atomic<I: ICB>(
         atomic_access_fault_guard::<u32, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
-    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<u32>(address_rs1));
+    let val_rs1_result = I::and_then(result, |_| {
+        let res = icb.main_memory_bounds_check::<u32>(address_rs1, Exception::LoadAccessFault);
+        // SAFETY: The address has been checked for bounds and permission.
+        I::and_then(res, |_| unsafe { icb.main_memory_load::<u32>(address_rs1) })
+    });
 
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
@@ -97,7 +105,8 @@ fn run_x32_atomic<I: ICB>(
         write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1
-        icb.main_memory_store::<u32>(address_rs1, res)
+        // SAFETY: The address has been checked for bounds and permission.
+        unsafe { icb.main_memory_store::<u32>(address_rs1, res) }
     })
 }
 
@@ -385,7 +394,11 @@ pub(super) fn run_atomic_load<I: ICB, V: StoreLoadInt>(
     let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned and load the value from address in rs1.
-    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
+    let val_rs1_result = I::and_then(result, |_| {
+        let res = icb.main_memory_bounds_check::<V>(address_rs1, Exception::LoadAccessFault);
+        // SAFETY: The address has been checked for bounds and permission.
+        I::and_then(res, |_| unsafe { icb.main_memory_load::<V>(address_rs1) })
+    });
 
     // If the load was successful, register a reservation set for the address in rs1
     // and write the value at that address to rd.
@@ -420,9 +433,10 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
     // is not naturally aligned, an address-misaligned exception or
     // an access-fault exception will be generated."
     // icb.reset_reservation_set();
-    let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::Reset);
+    let amo_check =
+        atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::Reset);
 
-    I::and_then(result, |_| {
+    I::and_then(amo_check, |_| {
         let cond = test_and_unset_reservation_set::<V, I>(icb, address_rs1);
 
         icb.if_then_else::<Result<(), Exception>, _, _>(
@@ -434,7 +448,16 @@ pub(super) fn run_atomic_store<I: ICB, V: StoreLoadInt>(
                 let sc_success_imm = icb.xvalue_of_imm(SC_SUCCESS as i64);
 
                 write_xregister(icb, rd, sc_success_imm);
-                icb.main_memory_store::<V>(address_rs1, value_rs2)
+
+                // Store the resulting value to the address in rs1
+                let check_res =
+                    icb.main_memory_bounds_check::<V>(address_rs1, Exception::StoreAMOAccessFault);
+                // SAFETY: The address has been checked for bounds and permission.
+                unsafe {
+                    I::and_then(check_res, |_| {
+                        icb.main_memory_store::<V>(address_rs1, value_rs2)
+                    })
+                }
             },
             |icb| {
                 // If the address in rs1 does not belong to a valid reservation or
@@ -471,7 +494,11 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
     let result = atomic_access_fault_guard::<V, I>(icb, address_rs1, ReservationSetOption::NoReset);
 
     // Continue with the operation if the address is aligned.
-    let val_rs1_result = I::and_then(result, |_| icb.main_memory_load::<V>(address_rs1));
+    let val_rs1_result = I::and_then(result, |_| {
+        let res = icb.main_memory_bounds_check::<V>(address_rs1, Exception::LoadAccessFault);
+        // SAFETY: The address has been checked for bounds and permission.
+        I::and_then(res, |_| unsafe { icb.main_memory_load::<V>(address_rs1) })
+    });
 
     // Continue with the operation if the load was successful.
     I::and_then(val_rs1_result, |val_rs1| {
@@ -482,7 +509,8 @@ pub fn run_atomic_swap<I: ICB, V: StoreLoadInt>(
         write_xregister(icb, rd, val_rs1);
 
         // Store rs2's value to memory
-        icb.main_memory_store::<V>(address_rs1, val_rs2)
+        // SAFETY: The address has been checked for bounds and permission.
+        unsafe { icb.main_memory_store::<V>(address_rs1, val_rs2) }
     })
 }
 

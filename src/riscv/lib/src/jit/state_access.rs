@@ -37,7 +37,6 @@ use crate::jit::builder::typed::Value;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
-use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::jitted::JittedPage;
@@ -45,6 +44,7 @@ use crate::machine_state::page_cache::run_code_page_interpreted;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::Elem;
+use crate::state_backend::NarrowlySized;
 
 /// Exception codes used for efficient exception handling in JIT-compiled code
 ///
@@ -128,43 +128,46 @@ impl typed::Typed for ExceptionCode {
     const TYPE: typed::Type = typed::Type::Basic(I64);
 }
 
-/// Store the lowest `width` bytes of the given value to memory, at the physical address.
+/// Check the write permission and store the lowest `width` bytes of the given value to memory,
+/// at the physical address.
 ///
-/// Returns [`ExceptionCode::NoException`] if the store is successful.
-///
-/// If the store fails (due to out of bounds etc) then the appropriate exception code
-/// is returned to indicate the type of failure that occurred.
-extern "C" fn memory_store<E: Elem, MC: MemoryConfig>(
+/// # Safety
+/// The caller must ensure the access is within bounds.
+extern "C" fn memory_store<V: Elem + NarrowlySized, MC: MemoryConfig>(
     core: &mut MachineCoreState<MC, Normal>,
     address: u64,
-    value: E,
+    value: V,
 ) -> ExceptionCode {
-    match core.main_memory.write(address, value) {
-        Ok(()) => ExceptionCode::NoException,
-        Err(BadMemoryAccess) => ExceptionCode::from_exception(Exception::StoreAMOAccessFault),
+    // SAFETY: The caller guarantees the access is within bounds.
+    let writable = unsafe { core.main_memory.check_writable_narrow::<V>(address) };
+    if writable {
+        // SAFETY: The caller guarantees the access is valid and permitted.
+        unsafe { core.main_memory.write_unchecked(address, value) };
+        ExceptionCode::NoException
+    } else {
+        ExceptionCode::from_exception(Exception::StoreAMOAccessFault)
     }
 }
 
-/// Load `width` bytes from memory, at the physical address, into lowest `width` bytes of an
-/// `XValue`, with (un)signed extension.
+/// Check the read permission and load `width` bytes from memory, at the physical address,
+/// into lowest `width` bytes of an `XValue`, with (un)signed extension.
 ///
-/// If the load is successful, the value is written to `xval_out` and
-/// [`ExceptionCode::NoException`] is returned.
-///
-/// If the load fails (due to out of bounds etc) then the appropriate exception code
-/// is returned to indicate the type of failure that occurred.
-extern "C" fn memory_load<E: Elem, MC: MemoryConfig>(
+/// # Safety
+/// The caller must ensure the access is within bounds.
+extern "C" fn memory_load<V: Elem + NarrowlySized, MC: MemoryConfig>(
     core: &MachineCoreState<MC, Normal>,
     address: u64,
-    xval_out: &mut MaybeUninit<E>,
+    xval_out: &mut MaybeUninit<V>,
 ) -> ExceptionCode {
-    match core.main_memory.read::<E>(address) {
-        Ok(value) => {
-            xval_out.write(value);
-            ExceptionCode::NoException
-        }
-
-        Err(BadMemoryAccess) => ExceptionCode::from_exception(Exception::LoadAccessFault),
+    // SAFETY: The caller guarantees the access is within bounds.
+    let readable = unsafe { core.main_memory.check_readable_narrow::<V>(address) };
+    if readable {
+        // SAFETY: The caller guarantees the access is valid and permitted.
+        let value = unsafe { core.main_memory.read_unchecked::<V>(address) };
+        xval_out.write(value);
+        ExceptionCode::NoException
+    } else {
+        ExceptionCode::from_exception(Exception::LoadAccessFault)
     }
 }
 
@@ -238,9 +241,10 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         }
     }
 
-    /// Emit the required IR to call `memory_store`.
+    /// Emit the required IR to check permission and store to memory.
     ///
-    /// Returns `errno` - on success, no additional values are returned.
+    /// # Safety
+    /// The caller must ensure the access is within bounds.
     pub(super) fn memory_store<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -264,9 +268,10 @@ impl<MC: MemoryConfig> JsaCalls<MC> {
         ErrnoImpl::new(exception, |_| {})
     }
 
-    /// Emit the required IR to call `memory_load`.
+    /// Emit the required IR to check permission and load from memory.
     ///
-    /// Returns `errno` - on success, the loaded value is returned.
+    /// # Safety
+    /// The caller must ensure the access is within bounds.
     pub(super) fn memory_load<V: StoreLoadInt>(
         &mut self,
         builder: &mut FunctionBuilder,

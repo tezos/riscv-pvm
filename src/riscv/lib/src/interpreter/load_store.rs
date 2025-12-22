@@ -4,6 +4,7 @@
 
 //! Implementation of load and store instructions for RISC-V over the ICB.
 
+use crate::exceptions::Exception;
 use crate::instruction_context::ICB;
 use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
@@ -57,7 +58,8 @@ pub fn run_store<V: StoreLoadInt, I: ICB>(
 
     let value = read_xregister(icb, rs2);
 
-    icb.main_memory_store::<V>(address, value)
+    let res = icb.main_memory_bounds_check::<V>(address, Exception::StoreAMOAccessFault);
+    unsafe { I::and_then(res, |_| icb.main_memory_store::<V>(address, value)) }
 }
 
 /// Loads a value from the address starting at `val(rs1) + imm`.
@@ -78,7 +80,9 @@ pub fn run_load<V: StoreLoadInt, I: ICB>(
 
     let address = base_address.add(offset, icb);
 
-    let value = icb.main_memory_load::<V>(address);
+    let res = icb.main_memory_bounds_check::<V>(address, Exception::LoadAccessFault);
+    let value = I::and_then(res, |_| unsafe { icb.main_memory_load::<V>(address) });
+
     I::and_then(value, |value| {
         write_xregister(icb, rd, value);
         icb.ok(())
