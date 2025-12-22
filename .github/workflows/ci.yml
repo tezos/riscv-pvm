@@ -39,11 +39,9 @@ jobs:
         include:
           - runs-on: ubuntu-latest
             make-target: check check-nix build audit
-            disk-cleanup: true
             title: Linux Checks
           - runs-on: ubuntu-latest
             make-target: test
-            disk-cleanup: true
             title: Linux Tests
           - runs-on: ubuntu-latest
             make-target: codecov.json
@@ -51,7 +49,6 @@ jobs:
             title: Code Coverage
           - runs-on: macos-latest
             make-target: check build
-            disk-cleanup: true
             title: MacOS Checks
 
     name: ${{ matrix.title }}
@@ -59,7 +56,6 @@ jobs:
 
     steps:
       - name: Aggressive cleanup
-        if: matrix.disk-cleanup
         run: |
           # Remove Java (JDKs)
           sudo rm -rf /usr/lib/jvm
