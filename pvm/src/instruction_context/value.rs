@@ -6,11 +6,11 @@
 
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::InstBuilder;
-use cranelift::prelude::FunctionBuilder;
-use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
+use cranelift::prelude::types::I8;
+use cranelift::prelude::FunctionBuilder;
 use octez_riscv_data::serialisation::elem::Elem;
 
 use super::LoadStoreWidth;
@@ -23,9 +23,10 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
+use crate::state_backend::NarrowlySized;
 
 /// Types which can be loaded and stored using the [`super::ICB`]
-pub trait StoreLoadInt: Typed + Stackable + Elem + 'static {
+pub trait StoreLoadInt: Typed + Stackable + Elem + NarrowlySized + 'static {
     /// The width of the value in memory
     const WIDTH: LoadStoreWidth;
 

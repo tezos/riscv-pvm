@@ -5,12 +5,12 @@
 use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 
-use bincode::Decode;
-use bincode::Encode;
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use bincode::Decode;
+use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -30,15 +30,16 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::elem::Elem;
 use perfect_derive::perfect_derive;
 
-use super::Address;
-use super::BadMemoryAccess;
-use super::Memory;
-use super::PAGE_SIZE;
-use super::Permissions;
 use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
+use super::Address;
+use super::BadMemoryAccess;
+use super::Memory;
+use super::Permissions;
+use super::PAGE_SIZE;
+use crate::state_backend::NarrowlySized;
 
 /// Machine's memory
 #[perfect_derive(PartialEq, Eq)]
@@ -47,10 +48,10 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode> 
     pub(super) data: DataSpace<M>,
 
     /// Read permissions per page
-    pub(super) readable_pages: PagePermissions<PAGES, M>,
+    pub(crate) readable_pages: PagePermissions<PAGES, M>,
 
     /// Write permissions per page
-    pub(super) writable_pages: PagePermissions<PAGES, M>,
+    pub(crate) writable_pages: PagePermissions<PAGES, M>,
 
     /// Execute permissions per page
     pub(super) executable_pages: PagePermissions<PAGES, M>,
@@ -254,6 +255,42 @@ where
 
         self.data.write_all(address as usize, values);
         Ok(())
+    }
+
+    unsafe fn check_readable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + NarrowlySized,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds.
+        unsafe { self.readable_pages.can_access_narrow::<E>(address) }
+    }
+
+    unsafe fn check_writable_narrow<E>(&self, address: Address) -> bool
+    where
+        E: Elem + NarrowlySized,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds.
+        unsafe { self.writable_pages.can_access_narrow::<E>(address) }
+    }
+
+    unsafe fn read_unchecked<E>(&self, address: Address) -> E
+    where
+        E: Elem,
+        M: ManagerRead,
+    {
+        // SAFETY: The caller guarantees the access is within bounds and permitted.
+        unsafe { self.data.read(address as usize) }
+    }
+
+    unsafe fn write_unchecked<E>(&mut self, address: Address, value: E)
+    where
+        E: Elem,
+        M: ManagerRead + ManagerWrite,
+    {
+        // SAFETY: The caller guarantees the access is within bounds and permitted.
+        unsafe { self.data.write(address as usize, value) }
     }
 
     fn clone_state(&self) -> Self
@@ -498,11 +535,11 @@ where
 }
 
 impl<
-    const PAGES: usize,
-    const TOTAL_BYTES: usize,
-    B: Buddy<M>,
-    M: EncodeAtomMode + EncodeDataSpaceMode,
-> Encode for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+        const PAGES: usize,
+        const TOTAL_BYTES: usize,
+        B: Buddy<M>,
+        M: EncodeAtomMode + EncodeDataSpaceMode,
+    > Encode for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.data.encode(encoder)?;
@@ -545,9 +582,9 @@ pub mod tests {
     use octez_riscv_data::mode_test;
 
     use super::*;
-    use crate::machine_state::memory::M4K;
-    use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
+    use crate::machine_state::memory::MemoryConfig;
+    use crate::machine_state::memory::M4K;
 
     #[test]
     fn bounds_check() {
@@ -562,8 +599,8 @@ pub mod tests {
     // This test verifies that memory is fully zeroed up to the page boundary, not just the
     // requested length, when allocating memory.
     mode_test!(test_memory_fully_zeroed_on_allocation, F, {
-        use crate::machine_state::memory::PAGE_SIZE;
         use crate::machine_state::memory::Permissions;
+        use crate::machine_state::memory::PAGE_SIZE;
 
         let mut memory = <<M4K as MemoryConfig>::State<F>>::default();
 
