@@ -878,17 +878,17 @@ mod tests {
     use crate::exceptions::Exception;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::MemoryConfig;
-    use crate::machine_state::page_cache::PageCacheInterpreted;
+    use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
     use crate::pvm::linux::VirtAddr;
 
     backend_test!(test_step_into_handler, F, {
         type MC = M1M;
-        type PC = PageCacheInterpreted<MC, Normal>;
+        type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, Normal>::new();
+        let mut pvm = Pvm::<MC, PC, F>::new();
 
         pvm.machine_state.reset();
 
@@ -962,10 +962,10 @@ mod tests {
 
     backend_test!(test_jump_to_restorer, F, {
         type MC = M1M;
-        type PC = PageCacheInterpreted<MC, Normal>;
+        type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, Normal>::new();
+        let mut pvm = Pvm::<MC, PC, F>::new();
 
         pvm.machine_state.reset();
 

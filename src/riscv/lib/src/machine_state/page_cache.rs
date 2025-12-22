@@ -19,6 +19,7 @@
 
 pub(crate) mod code_page_entry;
 pub(crate) mod dispatch;
+mod empty;
 pub(crate) mod interpreted;
 pub(crate) mod jitted;
 mod router;
@@ -28,6 +29,7 @@ pub use code_page_entry::CodePageEntry;
 pub use dispatch::DispatchTarget;
 pub use dispatch::InlineCompiler;
 pub use dispatch::OutlineCompiler;
+pub use empty::EmptyPageCache;
 pub use interpreted::Interpreted;
 pub use interpreted::InterpretedCompiler;
 pub use jitted::Jitted;
@@ -50,8 +52,8 @@ use crate::state_backend::ManagerWrite;
 
 /// Type alias for the default [`PageCache`] implementation with interpreted dispatch only.
 ///
-/// This is currently usable across all state backend modes.
-pub type PageCacheInterpreted<MC, M> = PageCacheImpl<Interpreted<MC, M>, MC, M>;
+/// This is only usable when the [`Normal`] backend mode is selected.
+pub type PageCacheInterpreted<MC> = PageCacheImpl<Interpreted<MC, Normal>, MC, Normal>;
 
 /// Type alias for the default [`PageCache`] implementation with inline jit enabled.
 ///

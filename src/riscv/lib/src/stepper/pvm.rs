@@ -29,6 +29,7 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::MachineError;
 use crate::machine_state::memory::M1G;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
@@ -65,7 +66,7 @@ pub struct PvmStepper<
     H,
     MC: MemoryConfig = M1G,
     M: ManagerBase = Normal,
-    PC: PageCache<MC, M> = PageCacheInterpreted<MC, M>,
+    PC: PageCache<MC, M> = PageCacheInterpreted<MC>,
 > {
     pvm: Pvm<MC, PC, M>,
     hooks: H,
@@ -77,7 +78,7 @@ pub struct PvmStepper<
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
 // TODO RV-849: use `EmptyPageCache` for verify mode
-type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify>;
+type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify, EmptyPageCache>;
 
 impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
     /// Create a new PVM stepper.
@@ -117,9 +118,9 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
     }
 }
 
-impl<H, MC: MemoryConfig> PvmStepper<H, MC, Normal> {
+impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
     /// Create a new stepper in which the existing PVM is put into [`Prove`] mode.
-    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove> {
+    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove, EmptyPageCache> {
         PvmStepper {
             pvm: self.pvm.start_proof(),
             rollup_address: self.rollup_address,
@@ -248,7 +249,9 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerRead + Manag
     }
 }
 
-impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
+impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
+    PvmStepper<H, MC, M, PC>
+{
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
     ///
     /// Useful for testing the stream deserialisation.
@@ -300,7 +303,7 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     // TODO RV-849: replace with `EmptyPageCache`
     fn to_verify_stepper(
         &self,
-        pvm: Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify>,
+        pvm: Pvm<MC, EmptyPageCache, Verify>,
     ) -> Result<PvmVerify<MC>, ProofVerificationFailure> {
         Ok(PvmStepper {
             pvm,
@@ -320,14 +323,16 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite> PvmStepper<H, MC, M> {
+impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
+    PvmStepper<H, MC, M, PC>
+{
     /// Perform one evaluation step.
     pub fn eval_one(&mut self) {
         self.pvm.eval_one(&mut self.hooks)
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify> {
+impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify, EmptyPageCache> {
     /// Try to take one step. Stepping in the [`Verify`] mode may panic
     /// when attempting to access absent data. Catches the case of verifying an invalid proof, as
     /// [`ProofVerificationFailure::AbsentDataAccess`] and all other panics

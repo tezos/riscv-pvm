@@ -1125,8 +1125,7 @@ mod tests {
     use super::*;
     use crate::backend_test;
     use crate::machine_state::memory::M4K;
-    use crate::machine_state::page_cache::Interpreted;
-    use crate::machine_state::page_cache::state::PageCacheImpl;
+    use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::sp;
     use crate::parser::instruction::InstrWidth;
     use crate::pvm::hooks::StdoutDebugHooks;
@@ -1154,8 +1153,7 @@ mod tests {
         type MemLayout = M4K;
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get();
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         machine_state
@@ -1185,8 +1183,7 @@ mod tests {
     backend_test!(ppoll_init_fds, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1249,8 +1246,7 @@ mod tests {
     backend_test!(rt_sigaction_with_handler, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1373,8 +1369,7 @@ mod tests {
     backend_test!(rt_sigaction_ignore, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1479,8 +1474,7 @@ mod tests {
     backend_test!(sigaltstack_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // System call number
@@ -1510,8 +1504,7 @@ mod tests {
     backend_test!(sched_getaffinity_set_sizes, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::<F>::new();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1589,8 +1582,7 @@ mod tests {
     backend_test!(sched_getaffinity_zero_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1639,8 +1631,7 @@ mod tests {
     backend_test!(sched_getaffinity_unreasonable_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // Mask pointer (must be non-zero)
@@ -1707,8 +1698,7 @@ mod tests {
     backend_test!(rt_sigaction_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1757,8 +1747,7 @@ mod tests {
     backend_test!(rt_sigprocmask_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         let mut supervisor_state = SupervisorState::new();
 
         // System call number
@@ -1807,8 +1796,7 @@ mod tests {
     backend_test!(clock_gettime_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1871,8 +1859,7 @@ mod tests {
     backend_test!(gettimeofday_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
@@ -1952,8 +1939,7 @@ mod tests {
     backend_test!(mmap_returns_enomem_when_allocation_fails, F, {
         type MemLayout = M4K;
 
-        let mut machine_state =
-            MachineState::<MemLayout, PageCacheImpl<Interpreted<MemLayout, F>, _, _>, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail
