@@ -13,9 +13,11 @@ use paste::paste;
 
 use crate::machine_state::memory::M1M;
 use crate::machine_state::page_cache::CodePageEntry;
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::InlineCompiler;
 use crate::machine_state::page_cache::Interpreted;
 use crate::machine_state::page_cache::Jitted;
+use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::stepper::Stepper;
 use crate::stepper::test::TestStepper;
@@ -31,16 +33,15 @@ enum Permissions {
     Rwx,
 }
 
-fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permissions, label: &str) {
-    // Create a Mint instance: when it goes out of scope (at the end of interpret_test),
+fn run_test<PC: PageCache<M1M, Normal>>(path: &str, required_perms: Permissions) -> (PC, Mint) {
+    // Create a Mint instance: when it goes out of scope (at the end of run_test_and_summarise),
     // all golden files will be compared to the checked-in versions.
     let mut mint = Mint::new(GOLDEN_DIR);
     let mut golden = mint.new_goldenfile(format!("{path}.out")).unwrap();
 
     let contents = fs::read(format!("{TESTS_DIR}/{path}")).expect("Failed to read binary");
 
-    let mut interpreter: TestStepper<M1M, PageCacheImpl<CPE, M1M, Normal>> =
-        TestStepper::new(&contents).expect("Boot failed");
+    let mut interpreter: TestStepper<M1M, PC> = TestStepper::new(&contents).expect("Boot failed");
 
     if required_perms == Permissions::Rwx {
         interpreter.set_all_read_write_exec();
@@ -67,12 +68,19 @@ fn run_test<CPE: CodePageEntry<M1M, Normal>>(path: &str, required_perms: Permiss
         },
     };
 
+    (interpreter.machine_state.page_cache, mint)
+}
+
+fn run_test_and_summarise<CPE: CodePageEntry<M1M, Normal>>(
+    path: &str,
+    required_perms: Permissions,
+    label: &str,
+) {
+    let (cache, mut mint) = run_test::<PageCacheImpl<CPE, M1M, Normal>>(path, required_perms);
+
     let mut cache_golden = mint.new_goldenfile(format!("{path}_{label}.out")).unwrap();
 
-    interpreter
-        .machine_state
-        .page_cache
-        .write_summary(&mut cache_golden);
+    cache.write_summary(&mut cache_golden);
 }
 
 macro_rules! test_case {
@@ -86,13 +94,19 @@ macro_rules! test_case {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                run_test::<Interpreted<M1M, Normal>>($path, $required_perms, "interpreted")
+                run_test_and_summarise::<Interpreted<M1M, Normal>>($path, $required_perms, "interpreted");
             }
 
             #[test]
             $(#[$m])*
             fn [< $name _inline_jit >]() {
-                run_test::<Jitted<InlineCompiler, M1M>>($path, $required_perms, "inline_jit")
+                run_test_and_summarise::<Jitted<InlineCompiler, M1M>>($path, $required_perms, "inline_jit")
+            }
+
+            #[test]
+            $(#[$m])*
+            fn [< $name _empty_page_cache >]() {
+                run_test::<EmptyPageCache>($path, $required_perms);
             }
         }
     }

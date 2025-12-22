@@ -15,6 +15,7 @@ use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
@@ -36,7 +37,7 @@ pub enum PvmError {
 
 type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
-type NodePvmPageCache<M> = PageCacheInterpreted<NodePvmMemConfig, M>;
+type NodePvmPageCache = PageCacheInterpreted<NodePvmMemConfig>;
 
 type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
 
@@ -45,7 +46,7 @@ type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
 #[debug("NodePvm(<unknown state>)")]
 pub struct NodePvm<
     M: state_backend::ManagerBase = Normal,
-    PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache<M>,
+    PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache,
 > {
     state: Box<NodePvmState<M, PC>>,
 }
@@ -161,7 +162,7 @@ impl<M: state_backend::ManagerBase, PC: PageCache<NodePvmMemConfig, M>> NodePvm<
     }
 }
 
-impl NodePvm {
+impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
     /// Construct an empty PVM state.
     pub fn empty() -> Self {
         Self::new()
@@ -195,7 +196,7 @@ impl NodePvm {
     }
 }
 
-impl NodePvm<Verify> {
+impl NodePvm<Verify, EmptyPageCache> {
     /// Verify the proof with the given input by evaluating one step.
     /// Upon success, return the input request which corresponds to the initial state of the proof.      
     pub fn verify_proof(

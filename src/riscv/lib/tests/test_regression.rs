@@ -12,6 +12,7 @@ use std::ops::Bound;
 use std::path::PathBuf;
 
 use octez_riscv::machine_state::memory::M64M;
+use octez_riscv::machine_state::page_cache::EmptyPageCache;
 use octez_riscv::machine_state::page_cache::PageCache;
 use octez_riscv::machine_state::page_cache::PageCacheInterpreted;
 use octez_riscv::machine_state::page_cache::PageCacheOutlineJit;
@@ -65,11 +66,14 @@ fn regression_frozen_etherlink() {
 }
 
 fn test_regression(inputs: TestConfig, capture_volatile_properties: bool) {
-    test_regression_for_block::<PageCacheInterpreted<M64M, Normal>>(
-        &inputs,
-        capture_volatile_properties,
-    );
+    // Run with the page cache but no JIT compilation.
+    test_regression_for_block::<PageCacheInterpreted<M64M>>(&inputs, capture_volatile_properties);
 
+    // Run with `EmptyPageCache`, to force fetching and interpreting every instruction individually.
+    test_regression_for_block::<EmptyPageCache>(&inputs, capture_volatile_properties);
+
+    // Run with the outline jit compiler.
+    //
     // This needs to run *after* the previous *interpreted* test. Otherwise, we run into trouble when
     // checking and updating the golden files.
     test_regression_for_block::<PageCacheOutlineJit<M64M>>(&inputs, capture_volatile_properties);

@@ -21,6 +21,7 @@ use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::pvm::node_pvm::NodePvm;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofError;
@@ -111,11 +112,7 @@ fn deserialise_final_hash(
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verify>`].
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> deserialiser::Result<(
-    Proof,
-    // TODO RV-849: use `EmptyPageCache` for verify mode
-    NodePvm<Verify>,
-)> {
+) -> deserialiser::Result<(Proof, NodePvm<Verify, EmptyPageCache>)> {
     let final_state_hash =
         deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
 

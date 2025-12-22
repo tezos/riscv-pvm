@@ -470,7 +470,7 @@ mod tests {
             self.check_compilable();
 
             // Create the states for the interpreted and jitted runs.
-            let mut interpreted_state: TestMachineState<PageCacheInterpreted<_, _>> =
+            let mut interpreted_state: TestMachineState<PageCacheInterpreted<_>> =
                 MachineState::new();
             interpreted_state
                 .core

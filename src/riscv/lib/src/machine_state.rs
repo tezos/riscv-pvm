@@ -42,8 +42,8 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use page_cache::CodePage;
+use page_cache::EmptyPageCache;
 use page_cache::PageCache;
-use page_cache::PageCacheInterpreted;
 use perfect_derive::perfect_derive;
 
 use crate::bits::u64;
@@ -290,17 +290,10 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> C
 
 impl<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> MachineState<MC, PC, Normal> {
     /// Return a proof-generating version of this MachineState.
-    pub fn start_proof(
-        &self,
-    ) -> MachineState<
-        MC,
-        // TODO RV-849: replace with `EmptyPageCache`
-        PageCacheInterpreted<MC, Prove<'_>>,
-        Prove<'_>,
-    > {
+    pub fn start_proof(&self) -> MachineState<MC, EmptyPageCache, Prove<'_>> {
         MachineState {
             core: self.core.start_proof(),
-            page_cache: PageCacheInterpreted::new(),
+            page_cache: <EmptyPageCache as PageCache<MC, Prove<'_>>>::new(),
         }
     }
 }
@@ -316,13 +309,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> C
     }
 }
 
-impl<MC> FromProof
-    for MachineState<
-        MC,
-        // TODO RV-849: replace with `EmptyPageCache`
-        PageCacheInterpreted<MC, Verify>,
-        Verify,
-    >
+impl<MC> FromProof for MachineState<MC, EmptyPageCache, Verify>
 where
     MC: MemoryConfig,
 {
@@ -332,7 +319,7 @@ where
         let result = MachineCoreState::from_proof(proof)?;
         let result = result.map(|core| Self {
             core,
-            page_cache: PageCacheInterpreted::new(),
+            page_cache: <EmptyPageCache as PageCache<MC, Verify>>::new(),
         });
         Ok(result)
     }
@@ -834,7 +821,7 @@ pub(crate) mod test_helpers {
     use octez_riscv_data::mode::Verify;
 
     use super::MachineState;
-    use super::page_cache::PageCacheInterpreted;
+    use super::page_cache::EmptyPageCache;
     use crate::machine_state::memory::M4K;
     use crate::state_backend::ManagerBase;
 
@@ -865,7 +852,7 @@ pub(crate) mod test_helpers {
     }
 
     /// Type alias for the machine state used in some tests.
-    pub type TestMachineOf<M> = MachineState<M4K, PageCacheInterpreted<M4K, M>, M>;
+    pub type TestMachineOf<M> = MachineState<M4K, EmptyPageCache, M>;
 
     /// Trait used to initialise a specific object - [`TestMachineStateOf<M>`] - with respect to a
     /// backend type.
@@ -930,13 +917,13 @@ mod tests {
     use std::ops::ControlFlow;
 
     use octez_riscv_data::clone::CloneState;
+    use octez_riscv_data::mode::Normal;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
     use super::MachineState;
     use super::instruction::Instruction;
     use super::memory::Address;
-    use super::page_cache::state::PageEntry;
     use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::exceptions::Exception;
@@ -951,8 +938,10 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::Permissions;
     use crate::machine_state::memory::listener::MemoryGovernanceListener;
+    use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::page_cache::InterpretedCompiler;
     use crate::machine_state::page_cache::PageCacheInterpreted;
+    use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::a7;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::sp;
@@ -1071,9 +1060,10 @@ mod tests {
     // This test checks that view on the instruction memory is synchronised with data memory,
     // including across rebindings of the PVM state. There are more details in the
     // `page-cache-tester` kernel's source that is used to test this.
-    backend_test!(test_page_cache_state, F, {
+    #[test]
+    fn test_page_cache_state() {
         let base_state = {
-            let mut state = Pvm::<M64M, PageCacheInterpreted<M64M, F>, F>::new();
+            let mut state = Pvm::<M64M, PageCacheInterpreted<_>, Normal>::new();
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
@@ -1151,11 +1141,11 @@ mod tests {
         );
 
         assert!(state == alt_state, "States aren't equal");
-    });
+    }
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, PageCacheInterpreted<M1M, F>, F>::new();
+        let state = MachineState::<M1M, EmptyPageCache, F>::new();
 
         let second = state.clone();
 
@@ -1164,7 +1154,8 @@ mod tests {
 
     // Ensure that the force-fetch-run mechanism correctly fetches instructions directly from
     // memory, and executes them.
-    backend_test!(test_force_fetch_run, F, {
+    #[test]
+    fn test_force_fetch_run() {
         // li a1, 1
         let li_bytes: u32 = 0x00100593;
         const IMMEDIATE: i64 = 1;
@@ -1184,7 +1175,7 @@ mod tests {
                         write_upper: bool,
                         expected_pc: Address,
                         succeeds: bool| {
-            let mut state = MachineState::<M8K, PageCacheInterpreted<M8K, F>, F>::new();
+            let mut state = MachineState::<M8K, PageCacheInterpreted<_>, Normal>::new();
 
             state.core.hart.pc.write(initial_pc);
 
@@ -1253,10 +1244,10 @@ mod tests {
 
         // force fetch run across one non-executable page followed by an executable page
         run_test(pc_across_pages, false, true, 0, false);
-    });
+    }
 
     backend_test!(test_signal_context, F, {
-        let mut state = MachineState::<M4K, PageCacheInterpreted<M4K, F>, F>::new();
+        let mut state = MachineState::<M4K, EmptyPageCache, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();
@@ -1275,7 +1266,7 @@ mod tests {
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
     backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, PageCacheInterpreted<M4K, F>, F>::new();
+        let mut state = MachineState::<M4K, EmptyPageCache, F>::new();
 
         state.reset();
         state.set_all_readable_writeable();

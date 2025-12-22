@@ -40,8 +40,8 @@ use crate::default::ConstDefault;
 use crate::machine_state;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
-use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
@@ -99,7 +99,7 @@ impl fmt::Display for PvmStatus {
 const INITIAL_VERSION: u64 = 0;
 
 /// Proof generator for the PVM.
-pub(crate) type PvmProve<'a, MC> = Pvm<MC, PageCacheInterpreted<MC, Prove<'a>>, Prove<'a>>;
+pub(crate) type PvmProve<'a, MC> = Pvm<MC, EmptyPageCache, Prove<'a>>;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone, PartialEq, Eq)]
@@ -365,7 +365,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Pvm<MC, PC, Normal> {
     }
 }
 
-impl<'a, MC: MemoryConfig> Pvm<MC, PageCacheInterpreted<MC, Prove<'a>>, Prove<'a>>
+impl<'a, MC: MemoryConfig> Pvm<MC, EmptyPageCache, Prove<'a>>
 where
     MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
 {
@@ -429,7 +429,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig> FromProof for Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify> {
+impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
@@ -498,7 +498,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig> Pvm<MC, PageCacheInterpreted<MC, Verify>, Verify> {
+impl<MC: MemoryConfig> Pvm<MC, EmptyPageCache, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
         let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
@@ -559,6 +559,7 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
+    use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::a0;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
@@ -590,7 +591,7 @@ mod tests {
     #[test]
     fn test_read_input() {
         type MC = M1M;
-        type PC = PageCacheInterpreted<MC, Normal>;
+        type PC = EmptyPageCache;
 
         // Setup PVM
         let mut pvm = Pvm::<MC, PC, Normal>::new();
@@ -694,7 +695,7 @@ mod tests {
             written: [u8; WRITTEN_SIZE],
         )|{
             type MC = M1M;
-            type PC = PageCacheInterpreted<MC, Normal>;
+            type PC = EmptyPageCache;
 
             let mut buffer = Vec::new();
 
@@ -741,10 +742,10 @@ mod tests {
 
     backend_test!(test_reveal, F, {
         type MC = M1M;
-        type PC<F> = PageCacheInterpreted<MC, F>;
+        type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC<F>, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -811,10 +812,10 @@ mod tests {
 
     backend_test!(test_reveal_insufficient_buffer_size, F, {
         type MC = M1M;
-        type PC<F> = PageCacheInterpreted<MC, F>;
+        type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC<F>, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::new();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
