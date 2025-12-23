@@ -1,2 +1,25 @@
-page 0:
- entrypoint calls: [(40, 1), (156, 1), (190, 1), (240, 1), (290, 1), (340, 1), (390, 1), (440, 1), (464, 1)]
+page 0 entrypoints:
+   40: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  120: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  144: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  156: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  160: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  176: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  190: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  194: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  224: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  240: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  244: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  272: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  290: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  294: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  320: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  340: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  344: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  368: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  390: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  394: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  416: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  440: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  444: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  464: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }

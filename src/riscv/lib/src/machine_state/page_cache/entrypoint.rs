@@ -116,6 +116,9 @@ impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> Entrypoint<D, MC> {
 
         let mut result = ExceptionCode::NoException;
 
+        #[cfg(test)]
+        entrypoint.dispatch.jit_counters().record_entrypoint_call();
+
         // SAFETY: the compiler which was used to compile `fun` is still alive (`page` has
         // a reference) so the function pointer is safe to call
         let steps = unsafe { (fun)(page, core, instr_pc, max_steps, &mut result) };
@@ -127,8 +130,8 @@ impl<D: Clone + DispatchCompiler<MC>, MC: MemoryConfig> Entrypoint<D, MC> {
     }
 
     #[cfg(test)]
-    pub fn called_times(&self) -> usize {
-        self.dispatch.num_jit_calls()
+    pub fn call_statistics(&self) -> &super::dispatch::jit_counters::JitTestCounters {
+        self.dispatch.jit_counters()
     }
 }
 

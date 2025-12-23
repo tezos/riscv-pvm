@@ -1,2 +1,19 @@
-page 0:
- entrypoint calls: [(40, 1), (120, 1), (230, 1), (252, 1), (276, 1), (302, 1), (322, 1), (344, 1), (368, 1), (390, 1), (414, 1), (438, 1), (458, 1), (480, 1), (504, 1), (526, 1), (550, 1), (626, 1)]
+page 0 entrypoints:
+   40: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  120: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  230: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  252: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  276: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  302: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  322: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  344: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  368: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  390: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  414: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  438: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  458: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  480: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  504: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  526: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  550: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  626: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }

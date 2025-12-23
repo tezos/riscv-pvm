@@ -1,2 +1,10 @@
-page 0:
- entrypoint calls: [(40, 1), (120, 1), (300, 1), (324, 1), (350, 1), (378, 1), (400, 1), (424, 1), (492, 1)]
+page 0 entrypoints:
+   40: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  120: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  300: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  324: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  350: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  378: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  400: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  424: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }
+  492: JitTestCounters { entrypoint_calls: 1, jit_calls: 0, budget_check_passes: 0, fallback_calls: 0 }

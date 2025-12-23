@@ -364,7 +364,7 @@ mod tests {
                 setup_hook: None,
                 xregisters: vec![],
                 assert_hook: None,
-                expected_jit_counters: JitTestCounters::with_values(1, 1, 0),
+                expected_jit_counters: JitTestCounters::with_values(1, 1, 1, 0),
                 // Scenarios are setup to run from pages. These pages are pre-filled with
                 // `Opcode::Unknown` instructions - which will trigger an exception when
                 // run. There is no current mechanism to _restrict_ the input of the compilation
@@ -628,7 +628,7 @@ mod tests {
         fn build(self) -> Scenario {
             let expected_jit_counters = self
                 .expected_jit_counters
-                .unwrap_or_else(|| JitTestCounters::with_values(1, 1, 0));
+                .unwrap_or_else(|| JitTestCounters::with_values(1, 1, 1, 0));
             Scenario {
                 initial_pc: self.initial_pc,
                 expected_steps: self.expected_steps,
@@ -1320,7 +1320,7 @@ mod tests {
                     // we jump, but to the current jump instruction
                     assert_eq!(core.hart.pc.read(), 2);
                 }))
-                .set_expected_jit_counters(JitTestCounters::with_values(1, 4, 1))
+                .set_expected_jit_counters(JitTestCounters::with_values(1, 1, 4, 1))
                 .build(),
             ScenarioBuilder::default()
                 // since we jump to the start of the instruction sequence, however, we will fallback to
@@ -1339,7 +1339,7 @@ mod tests {
                     // after 6 steps we will be executing the first instruction
                     assert_eq!(core.hart.pc.read(), 0);
                 }))
-                .set_expected_jit_counters(JitTestCounters::with_values(1, 2, 1))
+                .set_expected_jit_counters(JitTestCounters::with_values(1, 1, 2, 1))
                 .build(),
         ];
 
