@@ -20,6 +20,7 @@ use crate::merkle_layer::CommitId;
 use crate::merkle_layer::Key;
 use crate::merkle_layer::MerkleLayer;
 use crate::merkle_layer::MerkleLayerError;
+use crate::merkle_layer::node_resolver::LazyMavlNodeResolver;
 use crate::persistence_layer::PersistenceLayer;
 
 /// Commands that can be sent to the Merkle worker background thread
@@ -48,7 +49,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<MerkleLayer, MerkleLayerError>>,
+        response: oneshot::Sender<Result<MerkleLayer<LazyMavlNodeResolver>, MerkleLayerError>>,
     },
 }
 
@@ -75,7 +76,8 @@ impl MerkleWorker {
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
     ) -> Result<Self, MerkleWorkerError> {
-        let layer = MerkleLayer::new(persistence_layer);
+        let node_resolver = Arc::new(LazyMavlNodeResolver::new(persistence_layer.clone()));
+        let layer = MerkleLayer::new(persistence_layer, node_resolver);
         let worker = MerkleWorker::from_layer(async_handle, layer);
         Ok(worker)
     }
@@ -123,7 +125,7 @@ impl MerkleWorker {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer) -> Self {
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<LazyMavlNodeResolver>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         async_handle.spawn(async move {
@@ -216,6 +218,7 @@ mod tests {
     use crate::merkle_layer::KEY_MAX_SIZE;
     use crate::merkle_layer::Key;
     use crate::merkle_layer::MerkleLayer;
+    use crate::merkle_layer::node_resolver::LazyMavlNodeResolver;
     use crate::merkle_worker::MerkleWorker;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
@@ -247,7 +250,7 @@ mod tests {
             handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
-            layer: &mut MerkleLayer,
+            layer: &mut MerkleLayer<LazyMavlNodeResolver>,
         ) {
             match self {
                 Self::Set { key, value } => {
@@ -328,7 +331,8 @@ mod tests {
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
             let persistence_layer = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
-            let mut merkle_layer = MerkleLayer::new(persistence_layer);
+            let node_resolver = Arc::new(LazyMavlNodeResolver::new(persistence_layer.clone()));
+            let mut merkle_layer = MerkleLayer::new(persistence_layer, node_resolver);
 
             let persistence_worker = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);

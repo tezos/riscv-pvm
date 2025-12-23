@@ -9,6 +9,7 @@ pub mod elem;
 use std::io::Read;
 use std::io::Write;
 
+use bincode::BorrowDecode;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::config::Config;
@@ -28,6 +29,12 @@ pub const fn bincode_default_config() -> impl Config {
 /// Deserialise a slice of bytes into a value of type `T`.
 pub fn deserialise<T: Decode<()>>(data: &[u8]) -> Result<T, DecodeError> {
     let (value, _) = bincode::decode_from_slice(data, bincode_default_config())?;
+    Ok(value)
+}
+
+/// Borrows the bytes of a slice and cast it into a type `T`
+pub fn borrow_decode<'a, T: BorrowDecode<'a, ()>>(slice: &'a [u8]) -> Result<T, DecodeError> {
+    let (value, _) = bincode::borrow_decode_from_slice(slice, bincode_default_config())?;
     Ok(value)
 }
 

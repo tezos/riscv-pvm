@@ -2,26 +2,28 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use bincode::BorrowDecode;
 use bincode::Encode;
 use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
 use super::Key;
+use super::node_wrapper::MavlNodeWrapper;
+use crate::merkle_layer::node_resolver::MavlNodeResolver;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]
-pub(super) struct MavlNode {
+pub(crate) struct MavlNode<Resolver: MavlNodeResolver> {
     key: Key,
     data: BytesMut,
-    left: Option<Arc<Self>>,
-    right: Option<Arc<Self>>,
+    left: Resolver::NodeWrapper,
+    right: Resolver::NodeWrapper,
 
     /// A cache for the hash of this node. This uses `OnceLock` so that updating the cache is a
     /// non-mutating operation.
@@ -33,19 +35,19 @@ pub(super) struct MavlNode {
     balance_factor: i64,
 }
 
-#[derive(Encode)]
+#[derive(Encode, BorrowDecode)]
 /// A serialisable representation of [`MavlNode`].
-struct MavlNodeHashRepresentation<'a> {
-    key: &'a Key,
+pub(super) struct MavlNodeHashRepresentation<'a> {
+    pub(crate) key: &'a [u8],
     data: &'a [u8],
     // The bytes of the hash of an optional left child
-    left: Option<&'a [u8; Hash::DIGEST_SIZE]>,
+    pub(crate) left: Option<&'a [u8]>,
     // The bytes of the hash of an optional right child
-    right: Option<&'a [u8; Hash::DIGEST_SIZE]>,
+    pub(crate) right: Option<&'a [u8]>,
     balance_factor: i64,
 }
 
-impl MavlNode {
+impl<Resolver: MavlNodeResolver> MavlNode<Resolver> {
     /// The difference in heights between child branches.
     #[cfg(test)]
     pub(super) fn balance_factor(&self) -> i64 {
@@ -63,14 +65,20 @@ impl MavlNode {
     }
 
     /// A mutable reference to the left branch.
-    pub(super) fn left_mut(&mut self) -> &mut Option<Arc<Self>> {
+    pub(super) fn left_mut(&mut self, node_resolver: &Resolver) -> &mut Option<Arc<Self>> {
+        self.resolve_children(node_resolver);
         self.invalidate_hash();
-        &mut self.left
+        self.left
+            .try_borrow_mut()
+            .expect("The left child is already resolved")
     }
 
     /// An immutable reference to the left branch.
-    pub(super) fn left_ref(&self) -> &Option<Arc<Self>> {
-        &self.left
+    pub(super) fn left_ref(&self, node_resolver: &Resolver) -> &Option<Arc<Self>> {
+        self.resolve_children(node_resolver);
+        self.left
+            .try_borrow()
+            .expect("The left child is already resolved")
     }
 
     /// Create a new leaf node from the given key and data.
@@ -78,40 +86,50 @@ impl MavlNode {
         MavlNode {
             key,
             data: data.into(),
+            left: Resolver::NodeWrapper::new(None),
+            right: Resolver::NodeWrapper::new(None),
+            hash: OnceLock::new(),
             balance_factor: 0,
-            ..Default::default()
         }
     }
 
     /// A mutable reference to the right branch.
-    pub(super) fn right_mut(&mut self) -> &mut Option<Arc<Self>> {
+    pub(super) fn right_mut(&mut self, node_resolver: &Resolver) -> &mut Option<Arc<Self>> {
+        self.resolve_children(node_resolver);
         self.invalidate_hash();
-        &mut self.right
+        self.right
+            .try_borrow_mut()
+            .expect("The right child is already resolved")
     }
 
     /// An immutable reference to the right branch.
-    pub(super) fn right_ref(&self) -> &Option<Arc<Self>> {
-        &self.right
+    pub(super) fn right_ref(&self, node_resolver: &Resolver) -> &Option<Arc<Self>> {
+        self.resolve_children(node_resolver);
+        self.right
+            .try_borrow()
+            .expect("The right child is already resolved")
     }
 
     /// Converts the node to an encoded, serialisable representation, potentially re-hashing
     /// uncached nodes.
-    pub(super) fn to_encode(&self) -> impl Encode + '_ {
+    pub(super) fn to_encode(&self, node_resolver: &Resolver) -> MavlNodeHashRepresentation<'_> {
         MavlNodeHashRepresentation {
-            key: &self.key,
+            key: self.key.0.as_slice(),
             data: &self.data,
 
             // Recursively hashes any left child and its children
-            left: self.left.as_ref().map(hash).map(|h| {
-                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
-                digest
-            }),
+            left: self
+                .left_ref(node_resolver)
+                .as_ref()
+                .map(|left_ref| hash(left_ref, node_resolver))
+                .map(|h| h.as_ref()),
 
             // Recursively hashes any right child and its children
-            right: self.right.as_ref().map(hash).map(|h| {
-                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
-                digest
-            }),
+            right: self
+                .right_ref(node_resolver)
+                .as_ref()
+                .map(|right_ref| hash(right_ref, node_resolver))
+                .map(|h| h.as_ref()),
 
             balance_factor: self.balance_factor,
         }
@@ -121,18 +139,44 @@ impl MavlNode {
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
     }
+
+    pub(super) fn decode(
+        hash_representation: MavlNodeHashRepresentation,
+        commited_hash: Hash,
+        key: Key,
+        left: Resolver::NodeWrapper,
+        right: Resolver::NodeWrapper,
+    ) -> Self {
+        Self {
+            key,
+            data: BytesMut::from(hash_representation.data),
+            left,
+            right,
+            hash: OnceLock::from(commited_hash),
+            balance_factor: hash_representation.balance_factor,
+        }
+    }
+
+    fn resolve_children(&self, node_resolver: &Resolver) {
+        node_resolver.resolve(&self.left);
+        node_resolver.resolve(&self.right);
+    }
 }
 
 /// Delete the value of the node with a given key. If the key does not exist, do nothing.
 ///
 /// Returns true if the subtree has shrank in size.
-pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
+pub(super) fn delete<Resolver: MavlNodeResolver>(
+    root: &mut Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+    node_resolver: &Resolver,
+) -> bool {
     let Some(node) = root else {
         // The key does not exist so nothing will happen.
         return false;
     };
     match node.key.cmp(key) {
-        Ordering::Equal => match (node.left_ref(), node.right_ref()) {
+        Ordering::Equal => match (node.left_ref(node_resolver), node.right_ref(node_resolver)) {
             (None, None) => {
                 *root = None;
                 true
@@ -146,7 +190,7 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
                 true
             }
             (Some(_), Some(_)) => {
-                let (new_node, shrank) = replace_with_successor(node);
+                let (new_node, shrank) = replace_with_successor(node, node_resolver);
                 *node = new_node;
                 shrank
             }
@@ -155,41 +199,46 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
             let node_mut = Arc::make_mut(node);
             let old_balance_factor = node_mut.balance_factor;
 
-            let left_shrank = delete(node_mut.left_mut(), key);
+            let left_shrank = delete(node_mut.left_mut(node_resolver), key, node_resolver);
 
             node_mut.balance_factor += if left_shrank { 1 } else { 0 };
-            *node = rebalance(node);
+            *node = rebalance(node, node_resolver);
             old_balance_factor.abs() == 1 && node.balance_factor == 0
         }
         Ordering::Less => {
             let node_mut = Arc::make_mut(node);
             let old_balance_factor = node_mut.balance_factor;
 
-            let right_shrank = delete(node_mut.right_mut(), key);
+            let right_shrank = delete(node_mut.right_mut(node_resolver), key, node_resolver);
 
             node_mut.balance_factor -= if right_shrank { 1 } else { 0 };
-            *node = rebalance(node);
+            *node = rebalance(node, node_resolver);
             old_balance_factor.abs() == 1 && node.balance_factor == 0
         }
     }
 }
 
 /// The data stored in a node in the tree with a given key.
-pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a BytesMut> {
+pub(super) fn get<'a, Resolver: MavlNodeResolver>(
+    root: &'a Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+    node_resolver: &Resolver,
+) -> Option<&'a BytesMut> {
     let mut node = root.as_deref()?;
     loop {
         match node.key().cmp(key) {
             Ordering::Equal => return Some(node.data()),
-            Ordering::Greater => node = node.left_ref().as_deref()?,
-            Ordering::Less => node = node.right_ref().as_deref()?,
+            Ordering::Greater => node = node.left_ref(node_resolver).as_deref()?,
+            Ordering::Less => node = node.right_ref(node_resolver).as_deref()?,
         }
     }
 }
 
 /// A mutable reference to the data stored in a node in the tree with a given key.
-pub(super) fn get_mut<'a>(
-    root: &'a mut Option<Arc<MavlNode>>,
+pub(super) fn get_mut<'a, Resolver: MavlNodeResolver>(
+    root: &'a mut Option<Arc<MavlNode<Resolver>>>,
     key: &Key,
+    node_resolver: &Resolver,
 ) -> Option<&'a mut BytesMut> {
     let node = root.as_mut()?;
     let node = Arc::make_mut(node);
@@ -198,8 +247,8 @@ pub(super) fn get_mut<'a>(
             node.invalidate_hash();
             Some(&mut node.data)
         }
-        Ordering::Greater => get_mut(node.left_mut(), key),
-        Ordering::Less => get_mut(node.right_mut(), key),
+        Ordering::Greater => get_mut(node.left_mut(node_resolver), key, node_resolver),
+        Ordering::Less => get_mut(node.right_mut(node_resolver), key, node_resolver),
     }
 }
 
@@ -207,9 +256,12 @@ pub(super) fn get_mut<'a>(
 ///
 /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
 /// cached.
-pub(super) fn hash(node: &Arc<MavlNode>) -> &Hash {
+pub(super) fn hash<'a, Resolver: MavlNodeResolver>(
+    node: &'a Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> &'a Hash {
     node.hash.get_or_init(|| {
-        Hash::hash_encodable(node.to_encode()).expect("The hashing should not fail")
+        Hash::hash_encodable(node.to_encode(node_resolver)).expect("The hashing should not fail")
     })
 }
 
@@ -221,14 +273,20 @@ pub(super) fn hash(node: &Arc<MavlNode>) -> &Hash {
 ///
 /// Returns the rebalanced subtree.
 #[must_use]
-fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rebalance<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> Arc<MavlNode<Resolver>> {
     match node.balance_factor {
         2 => {
-            let right_balance = node.right.as_ref().map_or(0, |r| r.balance_factor);
+            let right_balance = node
+                .right_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |r| r.balance_factor);
 
             match right_balance {
-                1 | 0 => rotate_left(node),
-                -1 => rotate_right_left(node),
+                1 | 0 => rotate_left(node, node_resolver),
+                -1 => rotate_right_left(node, node_resolver),
                 _ => panic!(
                     "Rebalancing an invalid AVL tree. The balance factor of the right node is {right_balance:?}, but it should be in the range of -1..=1"
                 ),
@@ -236,11 +294,14 @@ fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
         }
         -1..=1 => node.clone(),
         -2 => {
-            let left_balance = node.left.as_ref().map_or(0, |l| l.balance_factor);
+            let left_balance = node
+                .left_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |l| l.balance_factor);
 
             match left_balance {
-                1 => rotate_left_right(node),
-                -1 | 0 => rotate_right(node),
+                1 => rotate_left_right(node, node_resolver),
+                -1 | 0 => rotate_right(node, node_resolver),
                 _ => panic!(
                     "Rebalancing an invalid AVL tree. The balance factor of the left node is {left_balance:?}, but it should be in the range of -1..=1"
                 ),
@@ -270,15 +331,18 @@ fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_left<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
     let mut right = node_mut
-        .right_mut()
+        .right_mut(node_resolver)
         .take()
         .expect("There should be a right node to rotate left");
     let right_mut = Arc::make_mut(&mut right);
 
-    *node_mut.right_mut() = right_mut.left_mut().take();
+    *node_mut.right_mut(node_resolver) = right_mut.left_mut(node_resolver).take();
 
     // new_node_bf = B.height() - node.left.height()
     // old_node_bf = A.height() - node.left.height()
@@ -310,7 +374,7 @@ fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     //          = old_node_bf - 1 + std::cmp::min(new_node_bf, 0)
     right_mut.balance_factor = right_mut.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
 
-    *right_mut.left_mut() = Some(node.clone());
+    *right_mut.left_mut(node_resolver) = Some(node.clone());
     right
 }
 
@@ -331,15 +395,18 @@ fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_right<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
     let mut left = node_mut
-        .left_mut()
+        .left_mut(node_resolver)
         .take()
         .expect("There should be a left node to rotate right");
     let left_mut = Arc::make_mut(&mut left);
 
-    *node_mut.left_mut() = left_mut.right_mut().take();
+    *node_mut.left_mut(node_resolver) = left_mut.right_mut(node_resolver).take();
 
     // new_node_bf = node.right.height() - C.height()
     // old_node_bf = node.right.height() - A.height()
@@ -371,7 +438,7 @@ fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     // where the balance factor of A is 1
     left_mut.balance_factor = left_mut.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
 
-    *left_mut.right_mut() = Some(node.clone());
+    *left_mut.right_mut(node_resolver) = Some(node.clone());
     left
 }
 
@@ -394,17 +461,20 @@ fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_left_right<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
 
     let mut left = node_mut
-        .left_mut()
+        .left_mut(node_resolver)
         .take()
         .expect("Left child must exist for the right rotation of the node");
     let left_mut = Arc::make_mut(&mut left);
 
     let mut left_right = left_mut
-        .right_mut()
+        .right_mut(node_resolver)
         .take()
         .expect("Left's right child must exist for the left rotation of the left node");
 
@@ -418,20 +488,20 @@ fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let left_right_mut = Arc::make_mut(&mut left_right);
 
     // B's right child is between B and B, it's moved to node's left
-    node_mut.left = left_right_mut.right.take();
+    *node_mut.left_mut(node_resolver) = left_right_mut.right_mut(node_resolver).take();
 
     // B's left child is between A and B, it's moved to A's right
-    left_mut.right = left_right_mut.left.take();
+    *left_mut.right_mut(node_resolver) = left_right_mut.left_mut(node_resolver).take();
 
     // Set A
-    left_right_mut.left = Some(left);
+    *left_right_mut.left_mut(node_resolver) = Some(left);
 
     // If B is 0 or 1, the new node balance factor will be 0
     // If B is -1, the new node balance factor will be 1
     node_mut.balance_factor = std::cmp::max(0, -left_right_mut.balance_factor);
 
     // Set node
-    left_right_mut.right = Some(node.clone());
+    *left_right_mut.right_mut(node_resolver) = Some(node.clone());
 
     // The new root will always be balanced
     left_right_mut.balance_factor = 0;
@@ -457,17 +527,20 @@ fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_right_left<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
 
     let mut right = node_mut
-        .right_mut()
+        .right_mut(node_resolver)
         .take()
         .expect("Right child must exist for the left rotation of the node");
     let right_mut = Arc::make_mut(&mut right);
 
     let mut right_left = right_mut
-        .left_mut()
+        .left_mut(node_resolver)
         .take()
         .expect("Right's left child must exist for the right rotation of the right node");
 
@@ -481,20 +554,20 @@ fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
     let right_left_mut = Arc::make_mut(&mut right_left);
 
     // B's left child is between node and B, it's moved to node's right
-    node_mut.right = right_left_mut.left.take();
+    *node_mut.right_mut(node_resolver) = right_left_mut.left_mut(node_resolver).take();
 
     // B's right child is between B and A, it's moved to A's left
-    right_mut.left = right_left_mut.right.take();
+    *right_mut.left_mut(node_resolver) = right_left_mut.right_mut(node_resolver).take();
 
     // Set A
-    right_left_mut.right = Some(right);
+    *right_left_mut.right_mut(node_resolver) = Some(right);
 
     // If B is 0 or -1, the new node balance factor will be 0
     // If B is 1, the new node balance factor will be -1
     node_mut.balance_factor = -std::cmp::max(0, right_left_mut.balance_factor);
 
     // Set node
-    right_left_mut.left = Some(node.clone());
+    *right_left_mut.left_mut(node_resolver) = Some(node.clone());
 
     // The new root will always be balanced
     right_left_mut.balance_factor = 0;
@@ -507,21 +580,24 @@ fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///  - The new subtree.
 ///  - True if the subtree has shrank in size.
 #[must_use]
-fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
+fn replace_with_successor<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+    node_resolver: &Resolver,
+) -> (Arc<MavlNode<Resolver>>, bool) {
     let node_balance_factor = node.balance_factor;
     let node_mut = Arc::make_mut(node);
     let node_bf = node_mut.balance_factor;
 
     // If the right child has a left child, the successor is the min of the left child's subtree.
     let (mut successor, shrank) = if node_mut
-        .right_ref()
+        .right_ref(node_resolver)
         .as_ref()
         .expect("A node with a successor must have a right child")
-        .left_ref()
+        .left_ref(node_resolver)
         .is_some()
     {
-        let right = node_mut.right_mut();
-        let (min, _, shrank) = take_min(right);
+        let right = node_mut.right_mut(node_resolver);
+        let (min, _, shrank) = take_min(right, node_resolver);
         (
             min.expect("A node with a successor must have a right child"),
             shrank,
@@ -529,13 +605,13 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
     // If there is no left child of the right child, the successor is the right child.
     } else {
         let mut successor = node_mut
-            .right_mut()
+            .right_mut(node_resolver)
             .take()
             .expect("A node with a successor must have a right child");
         let successor_mut = Arc::make_mut(&mut successor);
 
         // Bump up the (optional) right child of the right child, causing the subtree to shrink.
-        node_mut.right = successor_mut.right.take();
+        *node_mut.right_mut(node_resolver) = successor_mut.right_mut(node_resolver).take();
         (successor, true)
     };
 
@@ -545,7 +621,7 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
     successor_mut.left = node.left.clone();
     successor_mut.right = node.right.clone();
 
-    successor = rebalance(&mut successor);
+    successor = rebalance(&mut successor, node_resolver);
 
     let shrank = node_balance_factor.abs() == 1 && successor.balance_factor == 0;
     (successor, shrank)
@@ -554,7 +630,12 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
 /// Set the value of the node with a given key.
 ///
 /// Returns true if the subtree has grown in size.
-pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> bool {
+pub(super) fn set<Resolver: MavlNodeResolver>(
+    root: &mut Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+    data: Bytes,
+    node_resolver: &Resolver,
+) -> bool {
     let Some(node) = root else {
         // The key does not exist and a new node shall be created.
         *root = Some(Arc::new(MavlNode::new(key.clone(), data)));
@@ -587,10 +668,10 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
         }
         Ordering::Greater => {
             let node_mut = Arc::make_mut(node);
-            let grew = set(node_mut.left_mut(), key, data);
+            let grew = set(node_mut.left_mut(node_resolver), key, data, node_resolver);
             if grew {
                 node_mut.balance_factor -= 1;
-                *node = rebalance(node);
+                *node = rebalance(node, node_resolver);
                 node.balance_factor != 0
             } else {
                 false
@@ -598,10 +679,10 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
         }
         Ordering::Less => {
             let node_mut = Arc::make_mut(node);
-            let grew = set(node_mut.right_mut(), key, data);
+            let grew = set(node_mut.right_mut(node_resolver), key, data, node_resolver);
             if grew {
                 node_mut.balance_factor += 1;
-                *node = rebalance(node);
+                *node = rebalance(node, node_resolver);
                 node.balance_factor != 0
             } else {
                 false
@@ -610,6 +691,12 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
     }
 }
 
+type TakeMinReturnType<Resolver> = (
+    Option<Arc<MavlNode<Resolver>>>,
+    Option<Arc<MavlNode<Resolver>>>,
+    bool,
+);
+
 /// Remove the minimum node from this subtree and return it.
 ///
 /// Returns:
@@ -617,9 +704,10 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
 ///  - The minimum node's right child, if it hasn't been moved to its new position.
 ///  - True if the subtree has shrank in size.
 #[must_use]
-fn take_min(
-    node: &mut Option<Arc<MavlNode>>,
-) -> (Option<Arc<MavlNode>>, Option<Arc<MavlNode>>, bool) {
+fn take_min<Resolver: MavlNodeResolver>(
+    node: &mut Option<Arc<MavlNode<Resolver>>>,
+    node_resolver: &Resolver,
+) -> TakeMinReturnType<Resolver> {
     // Shouldn't occur if this function is used sensibly, but there is no danger to defending
     // against this.
     let Some(node_arc) = node else {
@@ -629,27 +717,27 @@ fn take_min(
     let node_mut = Arc::make_mut(node_arc);
 
     // Base case
-    if node_mut.left_ref().is_none() {
+    if node_mut.left_ref(node_resolver).is_none() {
         let mut min = node.take().expect("Already checked");
         let min_mut = Arc::make_mut(&mut min);
 
-        let right = min_mut.right_mut().take();
+        let right = min_mut.right_mut(node_resolver).take();
 
         (Some(min), right, true)
     // Recursive
     } else {
         let old_node_bf = node_mut.balance_factor;
-        let left = node_mut.left_mut();
-        let (min, right, left_shrank) = take_min(left);
+        let left = node_mut.left_mut(node_resolver);
+        let (min, right, left_shrank) = take_min(left, node_resolver);
 
         if right.is_some() {
-            *node_mut.left_mut() = right;
+            *node_mut.left_mut(node_resolver) = right;
             node_mut.balance_factor += 1;
         } else if left_shrank {
             node_mut.balance_factor += 1;
         };
 
-        *node_arc = rebalance(node_arc);
+        *node_arc = rebalance(node_arc, node_resolver);
         (
             min,
             None,
