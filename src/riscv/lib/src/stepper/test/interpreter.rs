@@ -14,8 +14,8 @@ use paste::paste;
 use crate::machine_state::memory::M1M;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::InlineCompiler;
+use crate::machine_state::page_cache::InterpretedCompiler;
 use crate::machine_state::page_cache::PageCache;
-use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::machine_state::page_cache::dispatch::DispatchCompiler;
 use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::stepper::Stepper;
@@ -93,11 +93,7 @@ macro_rules! test_case {
             #[test]
             $(#[$m])*
             fn [< $name _interpreted >]() {
-                // TODO RV-852: get the page cache summary to show something useful for Interpreted mode.
-                // After the page cache changes it currently shows no entrypoint runs at all.
-                //
-                // run_test_and_summarise::<InterpretedCompiler>($path, $required_perms, "interpreted");
-                run_test::<PageCacheInterpreted<M1M>>($path, $required_perms);
+                run_test_and_summarise::<InterpretedCompiler>($path, $required_perms, "interpreted");
             }
 
             #[test]

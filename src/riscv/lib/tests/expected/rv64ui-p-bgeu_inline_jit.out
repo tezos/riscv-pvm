@@ -1,2 +1,17 @@
-page 0:
- entrypoint calls: [(40, 1), (120, 1), (618, 1), (648, 1), (650, 1), (654, 1), (662, 1), (664, 1), (668, 1), (676, 1), (678, 1), (682, 1), (714, 1), (716, 1), (720, 1), (740, 1)]
+page 0 entrypoints:
+   40: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  120: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 19, fallback_calls: 0 }
+  618: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 2, fallback_calls: 0 }
+  648: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  650: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  654: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  662: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  664: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  668: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  676: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  678: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  682: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  714: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  716: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  720: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }
+  740: JitTestCounters { entrypoint_calls: 1, jit_calls: 1, budget_check_passes: 1, fallback_calls: 0 }

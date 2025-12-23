@@ -372,6 +372,7 @@ pub(crate) mod jit_counters {
     /// Test-only counters for JIT execution.
     #[derive(Debug, Default)]
     pub struct JitTestCounters {
+        entrypoint_calls: AtomicUsize,
         jit_calls: AtomicUsize,
         budget_check_passes: AtomicUsize,
         fallback_calls: AtomicUsize,
@@ -385,15 +386,22 @@ pub(crate) mod jit_counters {
 
         /// Create a new set of counters with specified initial values.
         pub fn with_values(
+            entrypoint_calls: usize,
             jit_calls: usize,
             budget_check_passes: usize,
             fallback_calls: usize,
         ) -> Self {
             Self {
+                entrypoint_calls: AtomicUsize::new(entrypoint_calls),
                 jit_calls: AtomicUsize::new(jit_calls),
                 budget_check_passes: AtomicUsize::new(budget_check_passes),
                 fallback_calls: AtomicUsize::new(fallback_calls),
             }
+        }
+
+        /// Record a call of the entrypoint.
+        pub fn record_entrypoint_call(&self) {
+            self.entrypoint_calls.fetch_add(1, Ordering::Relaxed);
         }
 
         /// Record a JIT call.
@@ -414,7 +422,9 @@ pub(crate) mod jit_counters {
 
     impl PartialEq for JitTestCounters {
         fn eq(&self, other: &Self) -> bool {
-            self.jit_calls.load(Ordering::Relaxed) == other.jit_calls.load(Ordering::Relaxed)
+            self.entrypoint_calls.load(Ordering::Relaxed)
+                == other.entrypoint_calls.load(Ordering::Relaxed)
+                && self.jit_calls.load(Ordering::Relaxed) == other.jit_calls.load(Ordering::Relaxed)
                 && self.budget_check_passes.load(Ordering::Relaxed)
                     == other.budget_check_passes.load(Ordering::Relaxed)
                 && self.fallback_calls.load(Ordering::Relaxed)
@@ -427,6 +437,7 @@ pub(crate) mod jit_counters {
     impl Clone for JitTestCounters {
         fn clone(&self) -> Self {
             Self {
+                entrypoint_calls: AtomicUsize::new(self.entrypoint_calls.load(Ordering::Relaxed)),
                 jit_calls: AtomicUsize::new(self.jit_calls.load(Ordering::Relaxed)),
                 budget_check_passes: AtomicUsize::new(
                     self.budget_check_passes.load(Ordering::Relaxed),
@@ -437,7 +448,8 @@ pub(crate) mod jit_counters {
     }
 
     impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
-        /// Get the number of times this dispatch target has been called for verification in tests.
+        /// Get the number of times the compiled jit function for this dispatch target has been called
+        /// for verification in tests.
         pub(crate) fn num_jit_calls(&self) -> usize {
             self.jit_counters.jit_calls.load(Ordering::SeqCst)
         }

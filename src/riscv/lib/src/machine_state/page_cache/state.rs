@@ -215,14 +215,13 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> PageCacheImpl<D, MC> {
             let Some(page) = page else {
                 continue;
             };
-            let call_summary = page
-                .entries
-                .iter()
-                .enumerate()
-                .map(|(i, entrypoint)| (i, entrypoint.called_times()))
-                .filter(|(_i, calls)| *calls != 0)
-                .collect::<Vec<_>>();
-            writeln!(w, "page {page_ix}:\n entrypoint calls: {call_summary:?}").unwrap();
+            writeln!(w, "page {page_ix} entrypoints:").unwrap();
+            for (i, entrypoint) in page.entries.iter().enumerate() {
+                let calls = entrypoint.call_statistics();
+                if *calls != JitTestCounters::default() {
+                    writeln!(w, " {i:4}: {calls:?}").unwrap();
+                }
+            }
         }
     }
 }
