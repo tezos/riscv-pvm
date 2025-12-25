@@ -321,21 +321,19 @@ fn handle_tezos_reveal<MC, M>(
     M: ManagerRead + ManagerWrite,
 {
     let request_address = machine.hart.xregisters.read(a0);
-    let request_size = machine.hart.xregisters.read(a1);
+    let request_size = machine.hart.xregisters.read(a1) as usize;
+    let request_size = request_size.min(REVEAL_REQUEST_MAX_SIZE);
 
-    let mut buffer = vec![0u8; min(request_size as usize, REVEAL_REQUEST_MAX_SIZE)];
-
+    let target_buffer = &mut reveal_request.bytes[..request_size];
     if machine
         .main_memory
-        .read_all(request_address, &mut buffer)
+        .read_all(request_address, target_buffer)
         .is_err()
     {
         return sbi_return_error(&mut machine.hart.xregisters, SbiError::InvalidAddress);
     }
 
-    // TODO: RV-425 Cross-page memory accesses are not translated correctly
-    reveal_request.bytes.write_all(0, &buffer);
-    reveal_request.size.write(request_size);
+    reveal_request.size.write(request_size as u64);
     status.write(PvmStatus::WaitingForReveal);
 }
 
