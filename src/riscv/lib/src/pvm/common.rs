@@ -46,7 +46,6 @@ use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
-use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -134,7 +133,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: state_backend::ManagerBase> Pvm<
     {
         Self {
             machine_state: machine_state::MachineState::new(),
-            reveal_request: RevealRequest::new(),
+            reveal_request: RevealRequest::default(),
             system_state: linux::SupervisorState::new(),
             version: Atom::new(INITIAL_VERSION),
             status: Atom::default(),
