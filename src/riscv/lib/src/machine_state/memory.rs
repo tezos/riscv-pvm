@@ -18,12 +18,12 @@ use octez_riscv_data::merkle_proof;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::serialisation::elem::Elem;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
-use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;

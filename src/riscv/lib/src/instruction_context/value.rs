@@ -11,6 +11,7 @@ use cranelift::prelude::types::I8;
 use cranelift::prelude::types::I16;
 use cranelift::prelude::types::I32;
 use cranelift::prelude::types::I64;
+use octez_riscv_data::serialisation::elem::Elem;
 
 use super::LoadStoreWidth;
 use crate::instruction_context::ICB;
@@ -21,7 +22,6 @@ use crate::jit::state_access::stack::Stackable;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
-use crate::state_backend::Elem;
 
 /// Types which can be loaded and stored using the [`super::ICB`]
 pub trait StoreLoadInt: Typed + Stackable + Elem + 'static {

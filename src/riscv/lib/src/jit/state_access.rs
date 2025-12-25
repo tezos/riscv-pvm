@@ -18,6 +18,7 @@ use cranelift::prelude::IntCC;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use cranelift::prelude::types::I64;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::serialisation::elem::Elem;
 
 use super::builder::errno::ErrnoImpl;
 use crate::exceptions::Exception;
@@ -44,7 +45,6 @@ use crate::machine_state::page_cache::jitted::JittedPage;
 use crate::machine_state::page_cache::run_code_page_interpreted;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XValue;
-use crate::state_backend::Elem;
 
 /// Exception codes used for efficient exception handling in JIT-compiled code
 ///
