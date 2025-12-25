@@ -88,7 +88,7 @@ pub trait ManagerAlloc: ManagerRead + ManagerWrite {
 }
 
 /// Manager with read capabilities
-pub trait ManagerRead: ManagerBase + AtomMode {
+pub trait ManagerRead: ManagerBase + AtomMode + DataSpaceMode {
     /// Read the length of the dynamic region in bytes.
     fn dyn_region_len(region: &Self::DynRegion) -> usize;
 
@@ -136,7 +136,7 @@ pub trait ManagerRead: ManagerBase + AtomMode {
 }
 
 /// Manager with write capabilities
-pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
+pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode + DataSpaceMode {
     /// Update an element in the region. `address` is in bytes.
     ///
     /// # Safety
@@ -188,7 +188,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
 }
 
 /// Manager with the ability to serialise regions
-pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
+pub trait ManagerSerialise: ManagerRead + EncodeAtomMode + EncodeDataSpaceMode {
     /// Serialise the contents of the dynamic region.
     fn serialise_dyn_region<E: Encoder>(
         region: &Self::DynRegion,
@@ -197,7 +197,7 @@ pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
 }
 
 /// Manager with the ability to clone regions
-pub trait ManagerClone: ManagerBase + CloneAtomMode {
+pub trait ManagerClone: ManagerBase + CloneAtomMode + CloneDataSpaceMode {
     /// Clone the dynamic region.
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
 }
