@@ -39,6 +39,7 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::serialisation::elem::Elem;
 use perfect_derive::perfect_derive;
 
 use crate::default::ConstDefault;
@@ -592,7 +593,7 @@ impl FValue {
     }
 }
 
-impl backend::Elem for FValue {
+impl Elem for FValue {
     const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
     #[inline(always)]

@@ -10,8 +10,8 @@ use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::serialisation::elem::Elem;
 
-use super::Elem;
 use super::ManagerAlloc;
 use super::ManagerBase;
 use super::ManagerClone;
