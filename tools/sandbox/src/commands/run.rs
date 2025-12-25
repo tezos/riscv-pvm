@@ -31,8 +31,8 @@ use crate::memory_config::MemoryConfigValue;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "disable-jit")] {
-        /// PageCache with interpeted mode selected.
-        pub type PageCacheImpl<MC> = page_cache::PageCacheInterpreted<MC, Normal>;
+        /// PageCache with interpreted mode selected.
+        pub type PageCacheImpl<MC> = page_cache::PageCacheInterpreted<MC>;
     } else if #[cfg(feature = "inline-jit")] {
         /// PageCache with inline jit mode selected.
         pub type PageCacheImpl<MC> = page_cache::PageCacheInlineJit<MC>;
