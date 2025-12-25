@@ -5,3 +5,4 @@
 //! State components
 
 pub mod atom;
+pub mod data_space;
