@@ -75,11 +75,6 @@ mod test_helpers {
                 }),
             )
         }
-
-        /// Like [`Self::zero_initialized`] but all pages are absent.
-        pub(crate) fn absent(length: usize) -> Self {
-            Self::from_pages(Some(length), std::iter::empty())
-        }
     }
 
     impl ManagerAlloc for Verify {
@@ -365,11 +360,11 @@ impl<const LEAF_SIZE: usize> Default for DynRegion<LEAF_SIZE> {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::mode::utils::NotFound;
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use super::*;
-    use crate::state_backend::DynCells;
 
     /// Ensures that page indices are properly calculated.
     #[test]
@@ -427,32 +422,30 @@ mod tests {
         }};
     }
 
-    /// Check the read functionality of a region that has no gaps between its pages.
+    /// Check the read functionality of a data space that has no gaps between its pages.
     #[test]
-    fn dyn_region_continuous() {
+    fn data_space_continuous() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::absent(3 * LEAF_SIZE);
-        dyn_region.write_bytes(
+        let mut dyn_cells = DataSpace::absent(3 * LEAF_SIZE);
+        dyn_cells.populate_pages_with_bytes(
             0,
-            [1, 3, 3, 7]
+            [1u8, 3, 3, 7]
                 .into_iter()
                 .cycle()
                 .take(LEAF_SIZE)
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
-        dyn_region.write_bytes(
+        dyn_cells.populate_pages_with_bytes(
             LEAF_SIZE,
-            [11, 14, 14, 15]
+            [11u8, 14, 14, 15]
                 .into_iter()
                 .cycle()
                 .take(LEAF_SIZE)
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
-
-        let dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
         unsafe {
@@ -498,32 +491,30 @@ mod tests {
         }
     }
 
-    /// Check the functionality of a region that has gaps between its pages.
+    /// Check the functionality of a data space that has gaps between its pages.
     #[test]
-    fn dyn_region_gaps() {
+    fn data_space_gaps() {
         const LEAF_SIZE: usize = MERKLE_LEAF_SIZE.get();
 
-        let mut dyn_region = DynRegion::absent(3 * LEAF_SIZE);
-        dyn_region.write_bytes(
+        let mut dyn_cells = DataSpace::absent(3 * LEAF_SIZE);
+        dyn_cells.populate_pages_with_bytes(
             0,
-            [7, 3, 3]
+            [7u8, 3, 3]
                 .into_iter()
                 .cycle()
                 .take(LEAF_SIZE)
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
-        dyn_region.write_bytes(
+        dyn_cells.populate_pages_with_bytes(
             LEAF_SIZE * 2,
-            [42, 41]
+            [42u8, 41]
                 .into_iter()
                 .cycle()
                 .take(LEAF_SIZE)
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
-
-        let dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         unsafe {
             assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);

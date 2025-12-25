@@ -81,41 +81,38 @@ impl ManagerClone for Normal {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
     use super::*;
-    use crate::state_backend::DynCells;
-    use crate::state_backend::proof_backend::ProofDynRegion;
 
-    /// Ensure [`DynCells`] can be serialised and deserialised in a consistent way.
+    /// Ensure [`DataSpace`] can be serialised and deserialised in a consistent way.
     #[test]
-    fn dyn_cells_serialise() {
+    fn data_space_serialise() {
         proptest::proptest!(|(address in (0usize..120), value: u64)| {
-            let mapping = Normal::allocate_dyn_region(128);
-            let mut cells: DynCells<Normal> = DynCells::bind(mapping);
+            let mut space: DataSpace<Normal> = DataSpace::new(128);
 
             unsafe {
-                cells.write(address, value);
+                space.write(address, value);
             }
 
-            let bytes = serialise(&cells).unwrap();
+            let bytes = serialise(&space).unwrap();
 
-            let cells_after: DynCells<Normal> = deserialise(&bytes).unwrap();
+            let space_after: DataSpace<Normal> = deserialise(&bytes).unwrap();
             for i in 0..128 {
                 unsafe {
-                    assert_eq!(cells.read::<u8>(i), cells_after.read::<u8>(i));
+                    assert_eq!(space.read::<u8>(i), space_after.read::<u8>(i));
                 }
             }
 
-            let bytes_after = serialise(&cells_after).unwrap();
+            let bytes_after = serialise(&space_after).unwrap();
             assert_eq!(bytes, bytes_after);
 
             // Serialisation is consistent with that of the `Prove` mode.
-            let proof_cells: DynCells<Prove> =
-                DynCells::bind(ProofDynRegion::bind(cells.region_ref()));
-            let proof_bytes = serialise(&proof_cells).unwrap();
+            let proof_space: DataSpace<Prove> = space.start_proof();
+            let proof_bytes = serialise(&proof_space).unwrap();
             assert_eq!(bytes, proof_bytes);
         });
     }

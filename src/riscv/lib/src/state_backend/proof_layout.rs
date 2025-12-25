@@ -140,6 +140,7 @@ impl OwnedProofPart {
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::components::atom::Atom;
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
@@ -151,7 +152,6 @@ mod tests {
     use proptest::proptest;
 
     use super::*;
-    use crate::state_backend::DynCells;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
@@ -204,7 +204,7 @@ mod tests {
         })
     }
 
-    /// Test the proof generation and verification for a computation against a dynamic region.
+    /// Test the proof generation and verification for a computation against a data space.
     ///
     /// # Safety
     ///
@@ -217,18 +217,18 @@ mod tests {
     /// simulate the rank-2-ness, but that means you can't provide closures as the implementation
     /// any more. If any of the given `test_proof` or `test_verify` capture an environment, this
     /// would no longer work.
-    unsafe fn test_dyn_array_with_funs(
+    unsafe fn test_data_space_with_funs(
         len: usize,
-        test_proof: impl FnOnce(&mut DynCells<Prove>),
-        test_verify: impl FnOnce(&mut DynCells<Verify>),
+        test_proof: impl FnOnce(&mut DataSpace<Prove>),
+        test_verify: impl FnOnce(&mut DataSpace<Verify>),
     ) {
-        let owned_cell = DynCells::new(len);
+        let owned_cell = DataSpace::new(len);
 
         // We require the initial hash to ensure that the generated proof, but also the
         // instantiated state from the proof match the "before" state.
         let init_hash = Hash::from_foldable(&owned_cell);
 
-        // The `ProofWrapper` transformer ensures the resulting dynamic region (via `DynCells`) is
+        // The `ProofWrapper` transformer ensures the resulting data space is
         // setup for proof generation. You can think of this as starting the recording for a proof.
         let mut proof_cell = owned_cell.start_proof();
 
@@ -245,7 +245,7 @@ mod tests {
         // Instantiating the verifier state allows us to replay the computation and verify it does
         // the right things.
         let (mut verify_cell, out_proof) =
-            deserialise_owned::deserialise::<DynCells<Verify>>(ProofTree::Present(&proof_tree))
+            deserialise_owned::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree))
                 .unwrap();
 
         let OwnedProofPart::Present(out_tree) = &out_proof else {
@@ -271,37 +271,37 @@ mod tests {
         assert_eq!(verifier_post_hash, post_hash);
     }
 
-    /// Generate a test for dynamic regions using a given size and closure which operates on the
-    /// [`DynCells`]. This effectively demonstrates that the actions performed by the given closure
+    /// Generate a test for data spaces using a given size and closure which operates on the
+    /// [`DataSpace`]. This effectively demonstrates that the actions performed by the given closure
     /// can be proven and verified correctly.
-    macro_rules! test_dyn_array_with {
+    macro_rules! test_data_space_with {
         ($len:literal, | $param:ident | { $($body:tt)* }) => {
             {
-                let test_proof = |$param: &mut DynCells<Prove>| {
+                let test_proof = |$param: &mut DataSpace<Prove>| {
                     $($body)*
                 };
 
-                let test_verify = |$param: &mut DynCells<Verify>| {
+                let test_verify = |$param: &mut DataSpace<Verify>| {
                     $($body)*
                 };
 
                 // SAFETY: This function is intended to be used only in this macro.
                 unsafe {
-                    test_dyn_array_with_funs($len, test_proof, test_verify);
+                    test_data_space_with_funs($len, test_proof, test_verify);
                 }
             }
         };
     }
 
     #[test]
-    fn test_dyn_array_proofs_nothing() {
-        test_dyn_array_with!(65536, |_cell| {});
+    fn test_data_space_proofs_nothing() {
+        test_data_space_with!(65536, |_cell| {});
     }
 
     #[test]
-    fn test_dyn_array_proofs_read() {
+    fn test_data_space_proofs_read() {
         proptest!(|(addr in 0..65528usize)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     cell.read::<u64>(addr);
                 }
@@ -310,9 +310,9 @@ mod tests {
     }
 
     #[test]
-    fn test_dyn_array_proofs_write() {
+    fn test_data_space_proofs_write() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     cell.write::<u64>(addr, val);
                 }
@@ -321,16 +321,16 @@ mod tests {
     }
 
     #[test]
-    fn test_dyn_array_proofs_len() {
-        test_dyn_array_with!(65536, |cell| {
+    fn test_data_space_proofs_len() {
+        test_data_space_with!(65536, |cell| {
             cell.len();
         });
     }
 
     #[test]
-    fn test_dyn_array_proofs_read_and_len() {
+    fn test_data_space_proofs_read_and_len() {
         proptest!(|(addr in 0..65528usize)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     cell.read::<u64>(addr);
                 }
@@ -341,9 +341,9 @@ mod tests {
     }
 
     #[test]
-    fn test_dyn_array_proofs_write_and_len() {
+    fn test_data_space_proofs_write_and_len() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     cell.write::<u64>(addr, val);
                 }
@@ -354,9 +354,9 @@ mod tests {
     }
 
     #[test]
-    fn test_dyn_array_proofs_read_and_write() {
+    fn test_data_space_proofs_read_and_write() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     let x = cell.read::<u64>(addr);
                     cell.write(addr, x.wrapping_add(val));
@@ -366,9 +366,9 @@ mod tests {
     }
 
     #[test]
-    fn test_dyn_array_proofs_read_and_write_and_len() {
+    fn test_data_space_proofs_read_and_write_and_len() {
         proptest!(|(addr in 0..65528usize, val: u64)| {
-            test_dyn_array_with!(65536, |cell| {
+            test_data_space_with!(65536, |cell| {
                 unsafe {
                     let x = cell.read::<u64>(addr);
                     cell.write(addr, x.wrapping_add(val));

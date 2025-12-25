@@ -265,6 +265,7 @@ impl DynAccess {
 mod tests {
     use std::collections::VecDeque;
 
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Normal;
@@ -274,8 +275,6 @@ mod tests {
 
     use super::merkle::MERKLE_LEAF_SIZE;
     use super::*;
-    use crate::state_backend::DynCells;
-    use crate::state_backend::ManagerAlloc;
 
     const LEAVES: usize = 8;
     const DYN_REGION_SIZE: usize = MERKLE_LEAF_SIZE.get() * LEAVES;
@@ -295,25 +294,23 @@ mod tests {
         proptest!(|(byte_before: u8,
                     bytes_after: [u8; ELEM_SIZE],
                     write_address in &address_range)| {
-            let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
-            cells.fill(byte_before);
-            let dyn_region: ProofDynRegion = ProofDynRegion::bind(&cells);
-            let mut dyn_cells: DynCells<Prove> = DynCells::bind(dyn_region);
+            let mut space = DataSpace::<Normal>::new(DYN_REGION_SIZE);
+            space.fill(byte_before);
+            let mut proof_space: DataSpace<Prove> = space.start_proof();
 
             // Perform static memory accesses
             let value_before = u64::from_le_bytes([byte_before; ELEM_SIZE]);
             let value_after = u64::from_le_bytes(bytes_after);
 
-            let value: u64 = unsafe { dyn_cells.read(write_address) };
+            let value: u64 = unsafe { proof_space.read(write_address) };
             assert_eq!(value, value_before);
-            unsafe { dyn_cells.write(write_address, value_after); }
-            let value: u64 = unsafe { dyn_cells.read(write_address) };
+            unsafe { proof_space.write(write_address, value_after); }
+            let value: u64 = unsafe { proof_space.read(write_address) };
             assert_eq!(value, value_after);
 
-            let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
-            cells.fill(byte_before);
-            let dyn_region: ProofDynRegion = ProofDynRegion::bind(&cells);
-            let mut dyn_cells: DynCells<Prove> = DynCells::bind(dyn_region);
+            let mut space = DataSpace::<Normal>::new(DYN_REGION_SIZE);
+            space.fill(byte_before);
+            let mut proof_space: DataSpace<Prove> = space.start_proof();
 
             // Perform dynamic memory accesses as `u16`
             let value_before = [u16::from_le_bytes([byte_before; 2]); ELEM_SIZE / 2];
@@ -325,60 +322,53 @@ mod tests {
             ];
 
             let mut value = [0u16; ELEM_SIZE / 2];
-            dyn_cells.read_all(write_address, &mut value);
+            proof_space.read_all(write_address, &mut value);
             assert_eq!(value, value_before);
-            dyn_cells.write_all(write_address, &value_after);
-            dyn_cells.read_all(write_address, &mut value);
+            proof_space.write_all(write_address, &value_after);
+            proof_space.read_all(write_address, &mut value);
             assert_eq!(value, value_after);
 
-            let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
-            cells.fill(byte_before);
-            let dyn_region: ProofDynRegion = ProofDynRegion::bind(&cells);
-            let mut dyn_cells: DynCells<Prove> = DynCells::bind(dyn_region);
+            let mut space = DataSpace::<Normal>::new(DYN_REGION_SIZE);
+            space.fill(byte_before);
+            let mut proof_space: DataSpace<Prove> = space.start_proof();
 
             // Perform dynamic memory accesses as bytes
             let value_before = [byte_before; ELEM_SIZE];
 
             let mut value = [0u8; ELEM_SIZE];
-            dyn_cells.read_all(write_address, &mut value);
+            proof_space.read_all(write_address, &mut value);
             assert_eq!(value, value_before);
-            dyn_cells.write_all(write_address, &bytes_after);
-            dyn_cells.read_all(write_address, &mut value);
+            proof_space.write_all(write_address, &bytes_after);
+            proof_space.read_all(write_address, &mut value);
             assert_eq!(value, bytes_after);
         });
 
-        // Check correct Merkleisation of a dynamic region which was read from and written to
+        // Check correct Merkleisation of a data space which was read from and written to
         proptest!(|(byte_before: u8,
                     bytes_after: [u8; ELEM_SIZE],
                     reads in array::uniform2(&address_range),
                     writes in array::uniform2(&address_range))| {
-            let mut cells = Normal::allocate_dyn_region(DYN_REGION_SIZE);
-            cells.fill(byte_before);
-            let owned_dyn_cells: DynCells<Normal> = DynCells::bind(cells);
-            let initial_root_hash = Hash::from_foldable(&owned_dyn_cells);
+            let mut space = DataSpace::<Normal>::new(DYN_REGION_SIZE);
+            space.fill(byte_before);
+            let initial_root_hash = Hash::from_foldable(&space);
 
-            let mut proof_dyn_region: ProofDynRegion = owned_dyn_cells.start_proof().into_region();
+            let mut proof_space: DataSpace<Prove> = space.start_proof();
 
             // Perform memory accesses
             let value_before = [byte_before; ELEM_SIZE];
             reads.iter().try_for_each(|i| {
                 let mut value = [0u8; ELEM_SIZE];
-                Prove::dyn_region_read_all(&proof_dyn_region, *i, &mut value);
+                proof_space.read_all(*i, &mut value);
                 prop_assert_eq!(value, value_before);
                 Ok::<(), proptest::test_runner::TestCaseError>(())
             })?;
             writes.iter().for_each(|i| {
-                Prove::dyn_region_write_all(
-                    &mut proof_dyn_region,
-                    *i,
-                    &bytes_after,
-                );
+                proof_space.write_all(*i, &bytes_after);
             });
 
             // Build the Merkle tree and check that it has the root hash of the
-            // initial wrapped region.
-            let proof_dyn_cells: DynCells<Prove> = DynCells::bind(proof_dyn_region);
-            let merkle_tree = MerkleTree::from_foldable(&proof_dyn_cells);
+            // initial data space.
+            let merkle_tree = MerkleTree::from_foldable(&proof_space);
             merkle_tree.check_root_hash();
             prop_assert_eq!(merkle_tree.root_hash(), initial_root_hash);
 

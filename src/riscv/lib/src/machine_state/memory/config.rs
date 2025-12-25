@@ -4,6 +4,7 @@
 
 use std::num::NonZeroUsize;
 
+use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::mode::Normal;
@@ -15,7 +16,6 @@ use super::buddy::BuddyConfigProxy;
 use super::protection::PagePermissions;
 use super::state::MemoryImpl;
 use crate::state::NewState;
-use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 
@@ -33,7 +33,7 @@ where
         M: ManagerAlloc,
     {
         MemoryImpl {
-            data: DynCells::new(TOTAL_BYTES),
+            data: DataSpace::new(TOTAL_BYTES),
             readable_pages: PagePermissions::new(),
             writable_pages: PagePermissions::new(),
             executable_pages: PagePermissions::new(),
