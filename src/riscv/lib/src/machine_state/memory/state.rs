@@ -12,6 +12,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -28,7 +29,6 @@ use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
-use crate::state_backend::DynCells;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -39,7 +39,7 @@ use crate::state_backend::ManagerWrite;
 #[perfect_derive(PartialEq, Eq)]
 pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase> {
     /// Memory contents
-    pub(super) data: DynCells<M>,
+    pub(super) data: DataSpace<M>,
 
     /// Read permissions per page
     pub(super) readable_pages: PagePermissions<PAGES, M>,
@@ -437,7 +437,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
 where
     M: ManagerBase,
     F: Fold,
-    DynCells<M>: Foldable<F>,
+    DataSpace<M>: Foldable<F>,
     B: Foldable<F>,
     PagePermissions<PAGES, M>: Foldable<F>,
 {
