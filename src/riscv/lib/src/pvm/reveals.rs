@@ -24,7 +24,6 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
 use crate::state::NewState;
-use crate::state_backend::DynCells;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
@@ -35,22 +34,18 @@ use crate::state_backend::ManagerSerialise;
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct RevealRequest<M: ManagerBase> {
     /// Reveal request payload
-    pub bytes: DynCells<M>,
+    pub bytes: Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>,
     /// Size of reveal request payload
     pub size: Atom<u64, M>,
 }
 
 impl<M: ManagerBase> RevealRequest<M> {
+    /// Read the reveal request as a vector.
     pub fn to_vec(&self) -> Vec<u8>
     where
         M: ManagerRead,
     {
-        use std::cmp::min;
-
-        let size = self.size.read() as usize;
-        let mut buffer = vec![0u8; min(size, REVEAL_REQUEST_MAX_SIZE)];
-        self.bytes.read_all(0, &mut buffer);
-        buffer
+        self.bytes[..self.size.read() as usize].to_vec()
     }
 }
 
@@ -70,7 +65,7 @@ impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
         M: ManagerAlloc,
     {
         Self {
-            bytes: DynCells::new(REVEAL_REQUEST_MAX_SIZE),
+            bytes: Atom::new([0; REVEAL_REQUEST_MAX_SIZE]),
             size: Atom::default(),
         }
     }
@@ -89,7 +84,7 @@ impl<M, F> Foldable<F> for RevealRequest<M>
 where
     M: ManagerBase,
     F: Fold,
-    DynCells<M>: Foldable<F>,
+    Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
