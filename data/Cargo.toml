@@ -14,6 +14,8 @@ derive_more.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 perfect-derive.workspace = true
+memmap2.workspace = true
+range-collections.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

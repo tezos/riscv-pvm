@@ -1846,9 +1846,11 @@ dependencies = [
  "blake3",
  "derive_more",
  "hex",
+ "memmap2",
  "perfect-derive",
  "proptest",
  "rand 0.9.2",
+ "range-collections",
  "thiserror 2.0.17",
  "trait-set",
 ]

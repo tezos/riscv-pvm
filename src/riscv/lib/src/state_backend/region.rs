@@ -378,6 +378,7 @@ pub(crate) mod tests {
     use bincode::enc::Encoder;
     use bincode::error::EncodeError;
     use octez_riscv_data::components::atom::Atom;
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::foldable::Fold;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::foldable::NodeFold;
@@ -389,7 +390,6 @@ pub(crate) mod tests {
 
     use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::state_backend::DynCells;
     use crate::state_backend::Elem;
     use crate::state_backend::ManagerBase;
     use crate::state_backend::ProofPart;
@@ -443,7 +443,7 @@ pub(crate) mod tests {
         {
             const LEN: usize = 4096;
 
-            let mut state = DynCells::<F>::new(LEN);
+            let mut state = DataSpace::<F>::new(LEN);
 
             // This should panic because we are trying to write an element at the address which
             // corresponds to the end of the buffer.
@@ -455,7 +455,7 @@ pub(crate) mod tests {
 
     backend_test!(test_dynregion_stored_format, F, {
         // Writing to one item of the region must convert to stored format.
-        let mut region = DynCells::<F>::new(4096);
+        let mut region = DataSpace::<F>::new(4096);
 
         unsafe {
             region.write(0, Flipper { a: 13, b: 37 });

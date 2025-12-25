@@ -48,6 +48,9 @@ pub use elems::*;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::serialisation::elem::Elem;
 pub use proof_layout::*;
@@ -88,7 +91,7 @@ pub trait ManagerAlloc: ManagerRead + ManagerWrite {
 }
 
 /// Manager with read capabilities
-pub trait ManagerRead: ManagerBase + AtomMode {
+pub trait ManagerRead: ManagerBase + AtomMode + DataSpaceMode {
     /// Read the length of the dynamic region in bytes.
     fn dyn_region_len(region: &Self::DynRegion) -> usize;
 
@@ -136,7 +139,7 @@ pub trait ManagerRead: ManagerBase + AtomMode {
 }
 
 /// Manager with write capabilities
-pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
+pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode + DataSpaceMode {
     /// Update an element in the region. `address` is in bytes.
     ///
     /// # Safety
@@ -188,7 +191,7 @@ pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
 }
 
 /// Manager with the ability to serialise regions
-pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
+pub trait ManagerSerialise: ManagerRead + EncodeAtomMode + EncodeDataSpaceMode {
     /// Serialise the contents of the dynamic region.
     fn serialise_dyn_region<E: Encoder>(
         region: &Self::DynRegion,
@@ -197,7 +200,7 @@ pub trait ManagerSerialise: ManagerRead + EncodeAtomMode {
 }
 
 /// Manager with the ability to clone regions
-pub trait ManagerClone: ManagerBase + CloneAtomMode {
+pub trait ManagerClone: ManagerBase + CloneAtomMode + CloneDataSpaceMode {
     /// Clone the dynamic region.
     fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
 }
@@ -252,6 +255,7 @@ pub(crate) mod test_helpers {
 mod tests {
     use std::num::NonZeroUsize;
 
+    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::FromProof;
@@ -292,7 +296,7 @@ mod tests {
     fn test_partial_elem_impls() {
         const LEN: usize = 4096;
 
-        let mut mem_normal = DynCells::new(LEN);
+        let mut mem_normal = DataSpace::new(LEN);
 
         // Randomise the contents
         let mut rand_buffer = [0u8; LEN];
@@ -319,7 +323,7 @@ mod tests {
         let merkle_tree = MerkleTree::from_foldable(&mem_prove);
         let proof_tree = merkle_tree_to_merkle_proof(merkle_tree);
         let proof_deser = ProofTreeDeserialiser::from(ProofTree::Present(&proof_tree));
-        let mut mem_verify = DynCells::from_proof(proof_deser).unwrap().into_result();
+        let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
         unsafe {
             // Finally, also perform the write in Verify mode
