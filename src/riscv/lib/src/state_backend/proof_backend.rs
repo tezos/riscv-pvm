@@ -24,12 +24,12 @@ use bincode::error::EncodeError;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::utils::Source;
+use octez_riscv_data::serialisation::elem::Elem;
 
 use super::ManagerBase;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
-use crate::state_backend::Elem;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 

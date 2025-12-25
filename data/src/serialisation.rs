@@ -4,6 +4,8 @@
 
 //! Serialisation and deserialisation
 
+pub mod elem;
+
 use std::io::Read;
 use std::io::Write;
 

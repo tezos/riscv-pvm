@@ -49,6 +49,7 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::mode::Mode;
+use octez_riscv_data::serialisation::elem::Elem;
 pub use proof_layout::*;
 pub use region::*;
 

@@ -16,6 +16,7 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::serialisation::elem::Elem;
 use perfect_derive::perfect_derive;
 
 use super::Address;
@@ -28,7 +29,6 @@ use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
 use crate::state_backend::DynCells;
-use crate::state_backend::Elem;
 use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;

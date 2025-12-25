@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::serialisation::elem::Elem;
+
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory;
@@ -17,17 +19,14 @@ where
     M: backend::ManagerRead + backend::ManagerWrite,
 {
     /// Generic read function for loading `T::STORED_SIZE` bytes from `address`
-    pub(super) fn read_from_address<T: backend::Elem>(
-        &mut self,
-        address: u64,
-    ) -> Result<T, Exception> {
+    pub(super) fn read_from_address<T: Elem>(&mut self, address: u64) -> Result<T, Exception> {
         self.main_memory
             .read(address)
             .map_err(|_: BadMemoryAccess| Exception::LoadAccessFault)
     }
 
     /// Generic read function for loading `T::STORED_SIZE` bytes from address val(rs1) + imm
-    pub(super) fn read_from_bus<T: backend::Elem>(
+    pub(super) fn read_from_bus<T: Elem>(
         &mut self,
         imm: i64,
         rs1: XRegister,
@@ -37,7 +36,7 @@ where
     }
 
     /// Generic store-operation for writing `T::STORED_SIZE` bytes starting at `address`
-    pub(super) fn write_to_address<T: backend::Elem>(
+    pub(super) fn write_to_address<T: Elem>(
         &mut self,
         address: u64,
         value: T,
@@ -48,7 +47,7 @@ where
     }
 
     /// Generic store operation for writing `T::STORED_SIZE` bytes starting at address val(rs1) + imm
-    pub(super) fn write_to_bus<T: backend::Elem>(
+    pub(super) fn write_to_bus<T: Elem>(
         &mut self,
         imm: i64,
         rs1: XRegister,

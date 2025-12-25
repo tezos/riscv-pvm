@@ -29,6 +29,7 @@ use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::serialisation::elem::Elem;
 use octez_riscv_data::serialisation::serialise;
 
 use super::ManagerAlloc;
@@ -37,7 +38,6 @@ use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerSerialise;
 use super::ManagerWrite;
-use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::proof_backend;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;

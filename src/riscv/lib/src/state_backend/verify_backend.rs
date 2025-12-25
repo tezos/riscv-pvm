@@ -10,13 +10,13 @@ use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
 use octez_riscv_data::mode::utils::NotFound;
 use octez_riscv_data::mode::utils::not_found;
+use octez_riscv_data::serialisation::elem::Elem;
 use range_collections::RangeSet2;
 
 use super::ManagerBase;
 use super::ManagerClone;
 use super::ManagerRead;
 use super::ManagerWrite;
-use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
