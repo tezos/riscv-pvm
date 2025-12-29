@@ -17,6 +17,7 @@ pub(crate) mod projection;
 use crate::jit::builder::typed::Typed;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::XValue;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 use crate::state_context::projection::MachineCoreProjection;
@@ -36,6 +37,9 @@ pub trait StateContext {
     fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
     where
         P: MachineCoreProjection;
+
+    /// Read the program counter.
+    fn pc_read(&mut self) -> Self::Value<XValue>;
 }
 
 impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCoreState<MC, M> {
@@ -56,5 +60,28 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCo
         P: MachineCoreProjection,
     {
         P::project_write(self, param, value);
+    }
+
+    #[inline]
+    fn pc_read(&mut self) -> Self::Value<XValue> {
+        self.hart.pc.read()
+    }
+}
+
+/// Context where you can update the program counter.
+pub(crate) trait PcWriteContext {
+    /// Value type for this context
+    type Value<R>;
+
+    /// Write the program counter.
+    fn pc_write(&mut self, value: Self::Value<XValue>);
+}
+
+impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> PcWriteContext for MachineCoreState<MC, M> {
+    type Value<R> = R;
+
+    #[inline]
+    fn pc_write(&mut self, value: Self::Value<XValue>) {
+        self.hart.pc.write(value);
     }
 }

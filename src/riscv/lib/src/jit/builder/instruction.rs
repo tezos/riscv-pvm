@@ -287,18 +287,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
         unsafe { Value::<XValue>::from_raw(raw) }
     }
 
-    fn pc_read(&mut self) -> Self::XValue {
-        // SAFETY: `I64` is the valid cranelift representation for an `Address`, and matches
-        // the representation of `XValue`.
-        unsafe {
-            Value::<XValue>::from_discriminant(
-                &self.target_config,
-                self.builder,
-                self.instruction_pc as i64,
-            )
-        }
-    }
-
     fn bool_and(&mut self, lhs: Self::Bool, rhs: Self::Bool) -> Self::Bool {
         // SAFETY: `band` preserves the type of the values, so the result is also a `bool`.
         unsafe { lhs.lift_binary(|lhs, rhs| self.ins().band(lhs, rhs), rhs) }
@@ -709,5 +697,17 @@ impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
             param,
             value,
         )
+    }
+
+    fn pc_read(&mut self) -> Self::Value<XValue> {
+        // SAFETY: `I64` is the valid cranelift representation for an `Address`, and matches
+        // the representation of `XValue`.
+        unsafe {
+            Value::<XValue>::from_discriminant(
+                &self.target_config,
+                self.builder,
+                self.instruction_pc as i64,
+            )
+        }
     }
 }

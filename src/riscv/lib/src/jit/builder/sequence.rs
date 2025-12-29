@@ -36,18 +36,17 @@ use crate::jit::builder::instruction::LoweredInstruction;
 use crate::jit::builder::outcome_map::ExitKind;
 use crate::jit::builder::outcome_map::TargetInstrLoc;
 use crate::jit::builder::typed::Pointer;
-use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
 use crate::machine_state::MachineCoreState;
-use crate::machine_state::hart_state::write_pc;
+use crate::machine_state::hart_state::ProgramCounterProj;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::jitted::JittedPage;
+use crate::machine_state::registers::XValue;
 use crate::parser::instruction::InstrWidth;
-use crate::state_context::StateContext;
-use crate::state_context::projection::MachineCoreProjection;
+use crate::state_context::PcWriteContext;
 
 const STEPS_REMAINING_VAR_ID: usize = 0;
 
@@ -226,7 +225,7 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
             Value::<Address>::from_raw(final_program_counter)
         };
 
-        write_pc(self, final_program_counter);
+        self.pc_write(final_program_counter);
 
         let steps_remaining = self.builder.use_var(self.steps_remaining);
         let max_steps = self.max_steps_param.to_value();
@@ -265,7 +264,7 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
             Value::<Address>::from_raw(raw_value)
         };
 
-        write_pc(self, current_pc);
+        self.pc_write(current_pc);
 
         // SAFETY: The second parameter of the block is the `steps_remaining` value, which is a `usize`.
         let fallback_max_steps = unsafe {
@@ -535,32 +534,16 @@ impl<'jit, D, MC: MemoryConfig> SequenceBuilder<'jit, D, MC> {
     }
 }
 
-impl<D, MC: MemoryConfig> StateContext for SequenceBuilder<'_, D, MC> {
+impl<D, MC: MemoryConfig> PcWriteContext for SequenceBuilder<'_, D, MC> {
     type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
-    where
-        P: MachineCoreProjection,
-        P::Target: Typed,
-    {
-        super::read_proj::<MC, P>(
+    fn pc_write(&mut self, value: Self::Value<XValue>) {
+        super::write_proj::<MC, ProgramCounterProj>(
             &self.target_config,
             &mut self.builder,
             self.core_param,
-            param,
-        )
-    }
-
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
-    where
-        P: MachineCoreProjection,
-    {
-        super::write_proj::<MC, P>(
-            &self.target_config,
-            &mut self.builder,
-            self.core_param,
-            param,
+            (),
             value,
-        )
+        );
     }
 }
