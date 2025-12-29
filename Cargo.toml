@@ -140,5 +140,5 @@ package = "tracing"
 version = "0.1.41"
 
 [workspace.dependencies.tracing-subscriber]
-version = "0.3.20"
+version = "0.3.22"
 features = ["json", "env-filter"]
