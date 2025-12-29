@@ -30,7 +30,6 @@ use crate::machine_state::registers::XValue;
 use crate::machine_state::reservation_set::ReservationSet;
 use crate::state::NewState;
 use crate::state_backend as backend;
-use crate::state_context::StateContext;
 use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -171,15 +170,9 @@ impl<C> Decode<C> for HartState<Normal> {
 }
 
 impl_projection! {
-    projection ProgramCounterProj {
+    pub(crate) projection ProgramCounterProj {
         subject = MachineCoreCons,
         target_projection = AtomProj<XValue>,
         path = hart.pc,
     }
-}
-
-/// Update the program counter in the given state context.
-#[inline]
-pub(crate) fn write_pc<SC: StateContext + ?Sized>(state: &mut SC, value: SC::Value<XValue>) {
-    state.write_proj::<ProgramCounterProj>((), value);
 }

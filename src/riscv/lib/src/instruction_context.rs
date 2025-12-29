@@ -95,9 +95,6 @@ where
     /// Construct an [`ICB::XValue32`] from an `imm: i32`.
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32;
 
-    /// Perform a read of the program counter.
-    fn pc_read(&mut self) -> Self::XValue;
-
     /// Type for boolean operations.
     type Bool;
 
@@ -247,11 +244,6 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> ICB for MachineCoreState<M
 
     fn xvalue32_of_imm(&mut self, imm: i32) -> Self::XValue32 {
         imm as u32
-    }
-
-    #[inline(always)]
-    fn pc_read(&mut self) -> Self::XValue {
-        self.hart.pc.read()
     }
 
     type Bool = bool;
