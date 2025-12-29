@@ -17,6 +17,9 @@ pub(crate) mod projection;
 use crate::jit::builder::typed::Typed;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FValue;
+use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XValue;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -40,6 +43,24 @@ pub trait StateContext {
 
     /// Read the program counter.
     fn pc_read(&mut self) -> Self::Value<XValue>;
+
+    /// Read from a non-zero integer register.
+    fn xreg_read_nz(&mut self, reg: NonZeroXRegister) -> Self::Value<XValue>;
+
+    /// Write to a non-zero integer register.
+    fn xreg_write_nz(&mut self, reg: NonZeroXRegister, value: Self::Value<XValue>);
+
+    /// Read from a floating-point register.
+    fn freg_read(&mut self, reg: FRegister) -> Self::Value<FValue>;
+
+    /// Write to a floating-point register.
+    fn freg_write(&mut self, reg: FRegister, value: Self::Value<FValue>);
+
+    /// Read the reservation set.
+    fn reservation_set_read(&mut self) -> Self::Value<u64>;
+
+    /// Write the reservation set.
+    fn reservation_set_write(&mut self, value: Self::Value<u64>);
 }
 
 impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCoreState<MC, M> {
@@ -65,6 +86,36 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCo
     #[inline]
     fn pc_read(&mut self) -> Self::Value<XValue> {
         self.hart.pc.read()
+    }
+
+    #[inline]
+    fn xreg_read_nz(&mut self, reg: NonZeroXRegister) -> Self::Value<XValue> {
+        self.hart.xregisters.read_nz(reg)
+    }
+
+    #[inline]
+    fn xreg_write_nz(&mut self, reg: NonZeroXRegister, value: Self::Value<XValue>) {
+        self.hart.xregisters.write_nz(reg, value);
+    }
+
+    #[inline]
+    fn freg_read(&mut self, reg: FRegister) -> Self::Value<FValue> {
+        self.hart.fregisters.read(reg)
+    }
+
+    #[inline]
+    fn freg_write(&mut self, reg: FRegister, value: Self::Value<FValue>) {
+        self.hart.fregisters.write(reg, value);
+    }
+
+    #[inline]
+    fn reservation_set_read(&mut self) -> Self::Value<u64> {
+        self.hart.reservation_set.start_addr.read()
+    }
+
+    #[inline]
+    fn reservation_set_write(&mut self, value: Self::Value<u64>) {
+        self.hart.reservation_set.start_addr.write(value);
     }
 }
 

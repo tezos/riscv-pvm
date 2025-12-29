@@ -40,10 +40,21 @@ use crate::machine_state::backend;
 /// pair with the most recent LR, and LR with the next following SC, in program
 /// order."
 use crate::state::NewState;
+use crate::state_context::projection::AtomProj;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
 
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct ReservationSet<M: backend::ManagerBase> {
     pub(crate) start_addr: Atom<u64, M>,
+}
+
+impl_projection! {
+    pub(crate) projection ReservationSetProj {
+        subject = MachineCoreCons,
+        target_projection = AtomProj<u64>,
+        path = hart.reservation_set.start_addr,
+    }
 }
 
 /// The size of the reservation set is 8 bytes in order to accommodate

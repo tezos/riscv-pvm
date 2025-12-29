@@ -705,7 +705,7 @@ impl FromProof for FRegisters<Verify> {
 }
 
 impl_projection! {
-    projection XRegisterProj {
+    pub(crate) projection XRegisterProj {
         subject = MachineCoreCons,
         target_projection = AtomArrayProj<XValue, 31>,
         path = hart.xregisters.registers,
@@ -718,7 +718,7 @@ pub fn read_xregister_nz<SC: StateContext + ?Sized>(
     state: &mut SC,
     reg: NonZeroXRegister,
 ) -> SC::Value<XValue> {
-    state.read_proj::<XRegisterProj>(reg as usize)
+    state.xreg_read_nz(reg)
 }
 
 /// Write to a non-zero integer register.
@@ -728,7 +728,7 @@ pub fn write_xregister_nz<SC: StateContext + ?Sized>(
     reg: NonZeroXRegister,
     value: SC::Value<XValue>,
 ) {
-    state.write_proj::<XRegisterProj>(reg as usize, value)
+    state.xreg_write_nz(reg, value)
 }
 
 /// Read from an integer register.
@@ -738,7 +738,7 @@ pub fn read_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister) -> I::XValue
         return icb.xvalue_of_imm(0);
     }
 
-    icb.read_proj::<XRegisterProj>(reg as usize)
+    icb.xreg_read_nz(NonZeroXRegister::assert_from(reg))
 }
 
 /// Write to an integer register.
@@ -748,11 +748,11 @@ pub fn write_xregister<I: ICB + ?Sized>(icb: &mut I, reg: XRegister, value: I::X
         return;
     }
 
-    icb.write_proj::<XRegisterProj>(reg as usize, value)
+    icb.xreg_write_nz(NonZeroXRegister::assert_from(reg), value)
 }
 
 impl_projection! {
-    projection FRegisterProj {
+    pub(crate) projection FRegisterProj {
         subject = MachineCoreCons,
         target_projection = AtomArrayProj<FValue, 32>,
         path = hart.fregisters.registers,
@@ -762,13 +762,13 @@ impl_projection! {
 /// Read from a floating-point number register.
 #[inline]
 pub fn read_fregister<I: ICB>(icb: &mut I, reg: FRegister) -> I::FValue {
-    icb.read_proj::<FRegisterProj>(reg as usize)
+    icb.freg_read(reg)
 }
 
 /// Write to a floating-point number register.
 #[inline]
 pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
-    icb.write_proj::<FRegisterProj>(reg as usize, value)
+    icb.freg_write(reg, value)
 }
 
 #[cfg(test)]
