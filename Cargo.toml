@@ -27,7 +27,7 @@ private_intra_doc_links = "allow"
 [workspace.dependencies]
 anyhow = "1.0"
 arbitrary-int = "2.0.0"
-bincode = "2.0"
+bincode = "3.0"
 blake3 = "1.8.2"
 bytes = "1.11.0"
 capstone = "0.13"
