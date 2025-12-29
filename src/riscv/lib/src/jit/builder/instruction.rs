@@ -48,9 +48,14 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::csregisters::CSRegister;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::registers::FRegister;
+use crate::machine_state::registers::FRegisterProj;
 use crate::machine_state::registers::FValue;
+use crate::machine_state::registers::NonZeroXRegister;
+use crate::machine_state::registers::XRegisterProj;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
+use crate::machine_state::reservation_set::ReservationSetProj;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
 use crate::state_context::projection::MachineCoreProjection;
@@ -629,5 +634,29 @@ impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
                 self.instruction_pc as i64,
             )
         }
+    }
+
+    fn xreg_read_nz(&mut self, reg: NonZeroXRegister) -> Self::Value<XValue> {
+        self.read_proj::<XRegisterProj>(reg as usize)
+    }
+
+    fn xreg_write_nz(&mut self, reg: NonZeroXRegister, value: Self::Value<XValue>) {
+        self.write_proj::<XRegisterProj>(reg as usize, value);
+    }
+
+    fn freg_read(&mut self, reg: FRegister) -> Self::Value<FValue> {
+        self.read_proj::<FRegisterProj>(reg as usize)
+    }
+
+    fn freg_write(&mut self, reg: FRegister, value: Self::Value<FValue>) {
+        self.write_proj::<FRegisterProj>(reg as usize, value);
+    }
+
+    fn reservation_set_read(&mut self) -> Self::Value<u64> {
+        self.read_proj::<ReservationSetProj>(())
+    }
+
+    fn reservation_set_write(&mut self, value: Self::Value<u64>) {
+        self.write_proj::<ReservationSetProj>((), value);
     }
 }

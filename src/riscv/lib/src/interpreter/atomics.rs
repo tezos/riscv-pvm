@@ -16,9 +16,6 @@ use crate::machine_state::registers::write_xregister;
 use crate::machine_state::reservation_set::RES_SET_BITMASK;
 use crate::machine_state::reservation_set::UNSET_VALUE;
 use crate::state_context::StateContext;
-use crate::state_context::projection::AtomProj;
-use crate::state_context::projection::MachineCoreCons;
-use crate::state_context::projection::impl_projection;
 
 pub const SC_SUCCESS: u64 = 0;
 pub const SC_FAILURE: u64 = 1;
@@ -662,22 +659,14 @@ fn test_and_unset_reservation_set<V: StoreLoadInt, I: ICB>(
     icb.bool_and(is_set, in_reservation_set)
 }
 
-impl_projection! {
-    projection ReservationSetProj {
-        subject = MachineCoreCons,
-        target_projection = AtomProj<u64>,
-        path = hart.reservation_set.start_addr,
-    }
-}
-
 /// Read the reservation set address from the machine state.
 pub(crate) fn read_reservation_set<SC: StateContext>(state: &mut SC) -> SC::Value<u64> {
-    state.read_proj::<ReservationSetProj>(())
+    state.reservation_set_read()
 }
 
 /// Write to the reservation set address in the machine state.
 pub(crate) fn write_reservation_set<SC: StateContext>(state: &mut SC, value: SC::Value<u64>) {
-    state.write_proj::<ReservationSetProj>((), value);
+    state.reservation_set_write(value);
 }
 
 #[cfg(test)]
