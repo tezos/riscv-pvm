@@ -41,7 +41,6 @@ use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::value::PhiValue;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed::Pointer;
-use crate::jit::builder::typed::Typed;
 use crate::jit::builder::typed::Value;
 use crate::jit::state_access::ExceptionCode;
 use crate::jit::state_access::JsaCalls;
@@ -59,7 +58,6 @@ use crate::machine_state::registers::XValue32;
 use crate::machine_state::reservation_set::ReservationSetProj;
 use crate::parser::instruction::InstrWidth;
 use crate::state_context::StateContext;
-use crate::state_context::projection::MachineCoreProjection;
 
 /// Probability of taking an outcome of a particular instruction.
 ///
@@ -683,27 +681,6 @@ impl<MC: MemoryConfig> ICB for InstructionBuilder<'_, '_, MC> {
 impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
     type Value<R> = Value<R>;
 
-    fn read_proj<P>(&mut self, param: P::Parameter) -> Self::Value<P::Target>
-    where
-        P: MachineCoreProjection,
-        P::Target: Typed,
-    {
-        super::read_proj::<MC, P>(&self.target_config, self.builder, self.core_param, param)
-    }
-
-    fn write_proj<P>(&mut self, param: P::Parameter, value: Self::Value<P::Target>)
-    where
-        P: MachineCoreProjection,
-    {
-        super::write_proj::<MC, P>(
-            &self.target_config,
-            self.builder,
-            self.core_param,
-            param,
-            value,
-        )
-    }
-
     fn pc_read(&mut self) -> Self::Value<XValue> {
         // SAFETY: `I64` is the valid cranelift representation for an `Address`, and matches
         // the representation of `XValue`.
@@ -717,26 +694,59 @@ impl<MC: MemoryConfig> StateContext for InstructionBuilder<'_, '_, MC> {
     }
 
     fn xreg_read_nz(&mut self, reg: NonZeroXRegister) -> Self::Value<XValue> {
-        self.read_proj::<XRegisterProj>(reg as usize)
+        super::read_proj::<MC, XRegisterProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            reg as usize,
+        )
     }
 
     fn xreg_write_nz(&mut self, reg: NonZeroXRegister, value: Self::Value<XValue>) {
-        self.write_proj::<XRegisterProj>(reg as usize, value);
+        super::write_proj::<MC, XRegisterProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            reg as usize,
+            value,
+        );
     }
 
     fn freg_read(&mut self, reg: FRegister) -> Self::Value<FValue> {
-        self.read_proj::<FRegisterProj>(reg as usize)
+        super::read_proj::<MC, FRegisterProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            reg as usize,
+        )
     }
 
     fn freg_write(&mut self, reg: FRegister, value: Self::Value<FValue>) {
-        self.write_proj::<FRegisterProj>(reg as usize, value);
+        super::write_proj::<MC, FRegisterProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            reg as usize,
+            value,
+        );
     }
 
     fn reservation_set_read(&mut self) -> Self::Value<u64> {
-        self.read_proj::<ReservationSetProj>(())
+        super::read_proj::<MC, ReservationSetProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            (),
+        )
     }
 
     fn reservation_set_write(&mut self, value: Self::Value<u64>) {
-        self.write_proj::<ReservationSetProj>((), value);
+        super::write_proj::<MC, ReservationSetProj>(
+            &self.target_config,
+            self.builder,
+            self.core_param,
+            (),
+            value,
+        );
     }
 }
