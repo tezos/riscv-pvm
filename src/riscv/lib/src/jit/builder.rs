@@ -47,8 +47,7 @@ impl From<Predicate> for IntCC {
     }
 }
 
-/// Reusable implementation of [`crate::state_context::StateContext::read_proj`] for
-/// the sequencer and instruction builder
+/// Reusable implementation of projection-based reads for the sequencer and instruction builder.
 fn read_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
@@ -79,8 +78,7 @@ where
     unsafe { Value::<P::Target>::from_raw(val) }
 }
 
-/// Reusable implementation of [`crate::state_context::StateContext::write_proj`] for
-/// the sequencer and instruction builder
+/// Reusable implementation of projection-based writes for the sequencer and instruction builder.
 fn write_proj<MC, P>(
     target_config: &TargetFrontendConfig,
     builder: &mut FunctionBuilder,
