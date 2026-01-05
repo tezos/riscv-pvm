@@ -6,15 +6,24 @@
 //!
 //! See [`Bytes`] for more details.
 
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::ops::Range;
 
 use bincode::Encode;
 use perfect_derive::perfect_derive;
+use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::merkle_proof::Partial;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Prove;
+use crate::mode::Verify;
+use crate::mode::utils::Source;
+use crate::mode::utils::not_found;
+use crate::partial_vec::PartialVec;
 
 /// Byte array state component
 #[perfect_derive(Debug)]
@@ -188,7 +197,7 @@ enum BytesTemplate {}
 impl Modal for BytesTemplate {
     type Normal = bytes::BytesMut;
 
-    type Prove<'normal> = ProveImpl;
+    type Prove<'normal> = ProveImpl<'normal>;
 
     type Verify = VerifyImpl;
 }
@@ -274,6 +283,22 @@ impl CloneBytesMode for Normal {
     }
 }
 
+impl CloneBytesMode for Prove<'_> {
+    fn clone(this: &Bytes<Self>) -> Bytes<Self> {
+        Bytes {
+            bytes: this.bytes.clone(),
+        }
+    }
+}
+
+impl CloneBytesMode for Verify {
+    fn clone(this: &Bytes<Self>) -> Bytes<Self> {
+        Bytes {
+            bytes: this.bytes.clone(),
+        }
+    }
+}
+
 /// Mode types that implement this trait support encoding of the [`Bytes`] component
 pub trait EncodeBytesMode: Mode {
     /// Encodes the [`Bytes`] component as a byte vector.
@@ -292,11 +317,186 @@ impl EncodeBytesMode for Normal {
     }
 }
 
+impl BytesMode for Prove<'_> {
+    fn new() -> Bytes<Self> {
+        Bytes {
+            bytes: ProveImpl {
+                previous: Source::default(),
+                length: 0,
+                did_access_length: Cell::new(false),
+                reads: RefCell::new(RangeSet2::empty()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+
+    fn read(this: &Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize {
+        let len = this.len();
+
+        // If the read starts out of bounds, there is nothing to read.
+        if start >= len {
+            return 0;
+        }
+
+        let range = clamp_range(len, start, buffer.len());
+        let len = range.len();
+
+        // The read range needs to be recorded, as it is used in the Merkle tree compression.
+        this.bytes
+            .reads
+            .borrow_mut()
+            .union_with(&RangeSet2::from(range.clone()));
+
+        let buffer = &mut buffer[..len];
+        let from_previous = this.bytes.previous.read(range.start, buffer);
+
+        // Bytes beyond the previous length are implicitly zero, if they are not present in the
+        // `writes` vector.
+        buffer[from_previous..].fill(0);
+
+        for (offset, bytes) in this.bytes.writes.defined_range(range.clone()) {
+            buffer[offset..][..bytes.len()].copy_from_slice(bytes);
+        }
+
+        len
+    }
+
+    fn write(this: &mut Bytes<Self>, start: usize, buffer: &[u8]) -> usize {
+        let len = this.len();
+
+        // We can't write if we start out of bounds.
+        if start >= len {
+            return 0;
+        }
+
+        let range = clamp_range(len, start, buffer.len());
+        let len = range.len();
+
+        let data = buffer[..len].to_vec();
+        this.bytes.writes.define(range.start, data);
+
+        len
+    }
+
+    fn len(this: &Bytes<Self>) -> usize {
+        this.bytes.did_access_length.set(true);
+        this.bytes.length
+    }
+
+    fn resize(this: &mut Bytes<Self>, new_len: usize) {
+        if new_len < this.len() {
+            // We need to clear out the previously written bytes that are now out of bounds.
+            // Otherwise, resizing up again would restore them.
+            this.bytes.writes.truncate(new_len);
+        }
+
+        this.bytes.length = new_len;
+
+        // NOTE: We do not extend the `writes` vector, as the new bytes are implicitly zero.
+    }
+}
+
+impl BytesMode for Verify {
+    fn new() -> Bytes<Self> {
+        Bytes {
+            bytes: VerifyImpl {
+                length: Partial::Present(0),
+                data: PartialVec::undefined(0),
+            },
+        }
+    }
+
+    fn read(this: &Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize {
+        let len = this.len();
+
+        // If the read starts out of bounds, there is nothing to read.
+        if start >= len {
+            return 0;
+        }
+
+        let range = clamp_range(len, start, buffer.len());
+        let len = range.len();
+
+        let buffer = &mut buffer[..len];
+        let Some(data) = this.bytes.data.continuous_defined_range(range) else {
+            // SAFETY: We're in verify mode where `not_found` may be used.
+            unsafe { not_found() }
+        };
+
+        let mut offset = 0;
+        for chunk in data {
+            buffer[offset..][..chunk.len()].copy_from_slice(chunk);
+            offset += chunk.len();
+        }
+
+        len
+    }
+
+    fn write(this: &mut Bytes<Self>, start: usize, buffer: &[u8]) -> usize {
+        let len = this.len();
+
+        // We can't write if we start out of bounds.
+        if start >= len {
+            return 0;
+        }
+
+        let range = clamp_range(len, start, buffer.len());
+        let len = range.len();
+
+        this.bytes.data.define(start, buffer[..len].to_vec());
+
+        len
+    }
+
+    fn len(this: &Bytes<Self>) -> usize {
+        match this.bytes.length {
+            Partial::Present(len) => len,
+            Partial::Absent | Partial::Blinded(_) => {
+                // SAFETY: We're in verify mode where `not_found` may be used.
+                unsafe { not_found() }
+            }
+        }
+    }
+
+    fn resize(this: &mut Bytes<Self>, new_len: usize) {
+        let prev_len = this.len();
+
+        if new_len > prev_len {
+            // Define the grown part of the byte array as zeros.
+            // This is different to Prove mode where we just implicitly treat undefined bytes as
+            // zeros. We can't do this in Verify mode because we don't have a previous length to
+            // compare against. So we can't differentiate between undefined bytes that should have
+            // been part of the proof and undefined bytes as a result of resizing.
+            let zero_data = vec![0u8; new_len - prev_len];
+            this.bytes.data.define(prev_len, zero_data);
+        }
+
+        if new_len < prev_len {
+            // If we shrink the byte array, we need to remove any data beyond the new length to
+            // ensure it is not accessible later on.
+            this.bytes.data.truncate(new_len);
+        }
+
+        this.bytes.length = Partial::Present(new_len);
+    }
+}
+
 /// [`crate::mode::Prove`] mode implementation for the [`Bytes`] component
-struct ProveImpl {}
+#[perfect_derive(Clone)]
+struct ProveImpl<'normal> {
+    previous: Source<'normal, Bytes<Normal>>,
+    length: usize,
+    did_access_length: Cell<bool>,
+    reads: RefCell<RangeSet2<usize>>,
+    writes: PartialVec<u8>,
+}
 
 /// [`crate::mode::Verify`] mode implementation for the [`Bytes`] component
-struct VerifyImpl {}
+#[perfect_derive(Clone)]
+struct VerifyImpl {
+    length: Partial<usize>,
+    data: PartialVec<u8>,
+}
 
 /// Construct a range `start..start+len` then clamp it so it doesn't extend beyond `total_len`.
 fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {

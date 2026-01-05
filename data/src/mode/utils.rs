@@ -9,6 +9,8 @@ use std::panic::resume_unwind;
 
 use crate::components::atom::AtomMode;
 use crate::components::atom::CloneAtomMode;
+use crate::components::bytes::BytesMode;
+use crate::components::bytes::CloneBytesMode;
 use crate::components::data_space::CloneDataSpaceMode;
 use crate::components::data_space::DataSpaceMode;
 
@@ -69,6 +71,12 @@ impl<T> Deref for Source<'_, T> {
 impl<T> From<T> for Source<'_, T> {
     fn from(value: T) -> Self {
         Source::from(Box::new(value))
+    }
+}
+
+impl<T: Default> Default for Source<'_, T> {
+    fn default() -> Self {
+        Source::Owned(Default::default())
     }
 }
 
@@ -138,7 +146,13 @@ trait_set::trait_set! {
     /// Each state component comes with a small set of mode-constraining traits. When a component
     /// is used in tests, it is best to mention those traits in this trait alias, so that they are
     /// available to all tests.
-    pub trait TestMode = AtomMode + CloneAtomMode + DataSpaceMode + CloneDataSpaceMode;
+    pub trait TestMode =
+        AtomMode
+        + CloneAtomMode
+        + DataSpaceMode
+        + CloneDataSpaceMode
+        + BytesMode
+        + CloneBytesMode;
 }
 
 /// Generate a test against all modes.
