@@ -162,7 +162,7 @@ checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
 dependencies = [
  "bincode_derive",
  "serde",
- "unty",
+ "unty 0.0.4",
 ]
 
 [[package]]
@@ -1833,7 +1833,7 @@ dependencies = [
  "trait-set",
  "try-blocks",
  "tuples",
- "unty",
+ "unty 0.0.5",
  "vm-fdt",
  "zerocopy",
  "zerocopy-derive",
@@ -3399,6 +3399,12 @@ name = "unty"
 version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
+name = "unty"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dbe8d477efbc6c70a1dea1f9f1e0482168983a9147dee6b3a619f666f3aeac6"
 
 [[package]]
 name = "utf8parse"
