@@ -18,7 +18,6 @@ use super::ManagerRead;
 use super::ManagerWrite;
 use crate::state_backend::Elem;
 use crate::state_backend::ProofError;
-use crate::state_backend::elem_bytes;
 use crate::state_backend::proof_backend::merkle::MERKLE_LEAF_SIZE;
 
 /// Error during proof verification
@@ -110,8 +109,15 @@ impl ManagerRead for Verify {
 
 impl ManagerWrite for Verify {
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
-        let raw_data = elem_bytes(value);
-        region.write_bytes(address, &raw_data);
+        let mut buffer = vec![0u8; E::STORED_SIZE.get()];
+        Self::dyn_region_read_all(region, address, &mut buffer);
+
+        // SAFETY: The buffer has been allocated with sufficient space.
+        unsafe {
+            value.write_unaligned(buffer.as_mut_ptr());
+        }
+
+        region.write_bytes(address, &buffer);
     }
 }
 
@@ -448,7 +454,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
+        let dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         // Read things that are contained in the first leaf.
         unsafe {
@@ -478,22 +484,12 @@ mod tests {
             assert_not_found!(dyn_cells.read::<u8>(LEAF_SIZE * 2));
         }
 
-        // Write to an index that is out of bounds.
+        // Add more to the third leaf.
         unsafe {
-            assert_not_found!(dyn_cells.clone().write(LEAF_SIZE * 3, 0u8));
+            assert_not_found!(dyn_cells.clone().write(LEAF_SIZE * 2, [255u8, 0]));
         }
 
-        // Add more to the third leaf.
-        let dyn_cells = catch_not_found(move || unsafe {
-            dyn_cells.write(LEAF_SIZE * 2, [255u8, 0]);
-            dyn_cells
-        })
-        .unwrap();
         unsafe {
-            assert_eq_found!(dyn_cells.read::<[u8; 6]>(LEAF_SIZE * 2 - 4), [
-                11, 14, 14, 15, 255, 0
-            ]);
-            assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2), [255, 0]);
             assert_not_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE * 2));
             assert_not_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE * 2 + 2));
         }
@@ -529,7 +525,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let mut dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
+        let dyn_cells: DynCells<Verify> = DynCells::bind(dyn_region);
 
         unsafe {
             assert_eq_found!(dyn_cells.read::<[u8; 3]>(0), [7, 3, 3]);
@@ -544,17 +540,9 @@ mod tests {
             assert_not_found!(dyn_cells.read::<[u8; LEAF_SIZE]>(LEAF_SIZE));
         }
 
-        // Write within the gap.
-        let dyn_cells = catch_not_found(move || unsafe {
-            dyn_cells.write(LEAF_SIZE - 1, [1u8, 1, 3]);
-            dyn_cells
-        })
-        .unwrap();
-
+        // Write within the gap. That should fail as these kinds of writes need to read first.
         unsafe {
-            assert_eq_found!(dyn_cells.read::<[u8; 3]>(LEAF_SIZE - 1), [1, 1, 3]);
-            assert_eq_found!(dyn_cells.read::<[u8; 2]>(LEAF_SIZE), [1, 3]);
-            assert_eq_found!(dyn_cells.read::<[u8; 4]>(LEAF_SIZE - 2), [3, 1, 1, 3]);
+            assert_not_found!(dyn_cells.clone().write(LEAF_SIZE - 1, [1u8, 1, 3]));
         }
 
         unsafe {

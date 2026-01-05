@@ -32,7 +32,6 @@ use super::ManagerWrite;
 use crate::state_backend::Elem;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
-use crate::state_backend::elem_bytes;
 
 pub mod merkle;
 pub mod proof;
@@ -74,7 +73,15 @@ impl<'normal> ManagerWrite for Prove<'normal> {
     unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E) {
         debug_assert!(address + E::STORED_SIZE.get() <= region.unrecorded_len());
 
-        for (offset, byte) in elem_bytes(value).into_iter().enumerate() {
+        let mut buffer = vec![0u8; E::STORED_SIZE.get()];
+        Self::dyn_region_read_all(region, address, &mut buffer);
+
+        // SAFETY: The buffer has been allocated with sufficient space.
+        unsafe {
+            value.write_unaligned(buffer.as_mut_ptr());
+        }
+
+        for (offset, byte) in buffer.into_iter().enumerate() {
             region.writes.insert(address + offset, byte);
         }
     }
