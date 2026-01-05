@@ -17,6 +17,7 @@ perfect-derive.workspace = true
 trait-set.workspace = true
 memmap2.workspace = true
 range-collections.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
