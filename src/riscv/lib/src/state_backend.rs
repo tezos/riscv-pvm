@@ -288,7 +288,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Exposes a bug which is not yet fixed (RV-854)"]
     fn test_partial_elem_impls() {
         const LEN: usize = 4096;
 

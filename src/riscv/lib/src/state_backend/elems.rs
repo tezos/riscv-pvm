@@ -45,18 +45,6 @@ pub trait Elem {
     unsafe fn write_unaligned(self, dest: *mut u8);
 }
 
-/// Capture the stored representation of an element from a dynamic region.
-pub fn elem_bytes<E: Elem>(value: E) -> Box<[u8]> {
-    let mut value_bytes = vec![0u8; E::STORED_SIZE.get()];
-
-    // SAFETY: The vector has been allocated with sufficient space.
-    unsafe {
-        value.write_unaligned(value_bytes.as_mut_ptr());
-    }
-
-    value_bytes.into_boxed_slice()
-}
-
 macro_rules! impl_dyn_value_prim {
     ( $x:ty ) => {
         impl Elem for $x {
