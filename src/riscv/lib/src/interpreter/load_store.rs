@@ -5,11 +5,15 @@
 //! Implementation of load and store instructions for RISC-V over the ICB.
 
 use crate::instruction_context::ICB;
+use crate::instruction_context::StoreLoadFloat;
 use crate::instruction_context::StoreLoadInt;
 use crate::instruction_context::arithmetic::Arithmetic;
-use crate::machine_state::registers::NonZeroXRegister;
+use crate::machine_state::NonZeroXRegister;
+use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::XRegister;
+use crate::machine_state::registers::read_fregister;
 use crate::machine_state::registers::read_xregister;
+use crate::machine_state::registers::write_fregister;
 use crate::machine_state::registers::write_xregister;
 use crate::machine_state::registers::write_xregister_nz;
 
@@ -41,7 +45,7 @@ pub fn run_li(icb: &mut impl ICB, imm: i64, rd_rs1: NonZeroXRegister) {
 
 /// Stores a value to the address starting at `val(rs1) + imm`.
 ///
-/// The value is taken from `rs2`, but only the lowest `width` bytes
+/// The value is taken from `rs2`, but only the lowest `V::LoadStoreWidth` bytes
 /// are written to memory.
 #[inline(always)]
 pub fn run_store<V: StoreLoadInt, I: ICB>(
@@ -60,9 +64,29 @@ pub fn run_store<V: StoreLoadInt, I: ICB>(
     icb.main_memory_store::<V>(address, value)
 }
 
+/// Stores a floating-point value `val(rs2)` to the address starting at `val(rs1) + imm`.
+///
+/// Only the lowest `V::LoadStoreWidth` bytes are written to memory.
+#[inline(always)]
+pub fn run_store_float<V: StoreLoadFloat, I: ICB>(
+    icb: &mut I,
+    imm: i64,
+    rs1: XRegister,
+    rs2: FRegister,
+) -> I::IResult<()> {
+    let base_address = read_xregister(icb, rs1);
+    let offset = icb.xvalue_of_imm(imm);
+
+    let address = base_address.add(offset, icb);
+
+    let value = read_fregister(icb, rs2);
+
+    icb.main_memory_store_float::<V>(address, value)
+}
+
 /// Loads a value from the address starting at `val(rs1) + imm`.
 ///
-/// Only `width` bytes are read from memory and then extended to the full register size
+/// Only `V::LoadStoreWidth` bytes are read from memory and then extended to the full register size
 /// using the appropriate signed/unsigned extension.
 ///
 /// The result is written to `rd`.
@@ -85,9 +109,33 @@ pub fn run_load<V: StoreLoadInt, I: ICB>(
     })
 }
 
+/// Loads a floating-point value from the address starting at `val(rs1) + imm`.
+///
+/// Only `V::LoadStoreWidth` bytes are read from memory and then extended to the full register size,
+/// applying NaN-boxing for 32-bit values.
+#[inline(always)]
+pub fn run_load_float<V: StoreLoadFloat, I: ICB>(
+    icb: &mut I,
+    imm: i64,
+    rs1: XRegister,
+    rd: FRegister,
+) -> I::IResult<()> {
+    let base_address = read_xregister(icb, rs1);
+    let offset = icb.xvalue_of_imm(imm);
+
+    let address = base_address.add(offset, icb);
+
+    let value = icb.main_memory_load_float::<V>(address);
+    I::and_then(value, |value| {
+        write_fregister(icb, rd, value);
+        icb.ok(())
+    })
+}
+
 #[cfg(test)]
 mod test {
     use proptest::arbitrary::any;
+    use proptest::prelude::Strategy;
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -98,10 +146,13 @@ mod test {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
+    use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::a1;
     use crate::machine_state::registers::a2;
     use crate::machine_state::registers::a3;
     use crate::machine_state::registers::a4;
+    use crate::machine_state::registers::fa2;
+    use crate::machine_state::registers::fa3;
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t1;
@@ -221,6 +272,56 @@ mod test {
             prop_assert!(perform_test(aligned_offset, false).is_ok());
             // Unaligned loads / stores
             prop_assert!(perform_test(misaligned_offset, false).is_ok());
+        });
+    });
+
+    backend_test!(test_loadstore_float, F, {
+        let state = MachineCoreState::<M4K, F>::new();
+        let state_cell = std::cell::RefCell::new(state);
+
+        proptest!(|(
+            val in any::<f64>().prop_map(f64::to_bits),
+        )| {
+            let mut state = state_cell.borrow_mut();
+            state.reset(NoopMemoryGovernanceListener);
+            state.main_memory.set_all_readable_writeable(NoopMemoryGovernanceListener);
+
+            let mut perform_test = |offset: u64| -> Result<(), Exception> {
+                // Save test values v_i in registers ai
+                state.hart.fregisters.write(fa2, val.into());
+
+                // t0 will hold the "global" offset of all loads / stores we are going to make
+                state.hart.xregisters.write(t0, offset);
+
+                // Perform the stores
+                run_store_float::<FValue, _>(&mut *state, -4, t0, fa2)?;
+                run_load_float::<FValue, _>(&mut *state, -4, t0, fa3)?;
+
+                assert_eq!(state.hart.fregisters.read(fa3), val.into());
+                Ok(())
+            };
+
+            let invalid_offset = 0u64.wrapping_sub(1024);
+            let aligned_offset = 512;
+            let misaligned_offset = 513;
+
+            // Out of bounds loads / stores
+            prop_assert!(perform_test(invalid_offset).is_err_and(|e|
+                matches!(e, Exception::StoreAMOAccessFault)
+            ));
+            // Aligned loads / stores
+            prop_assert!(perform_test(aligned_offset).is_ok());
+            // Unaligned loads / stores
+            prop_assert!(perform_test(misaligned_offset).is_ok());
+
+            // Out of bounds loads / stores
+            prop_assert!(perform_test(invalid_offset).is_err_and(|e|
+                matches!(e, Exception::StoreAMOAccessFault)
+            ));
+            // Aligned loads / stores
+            prop_assert!(perform_test(aligned_offset).is_ok());
+            // Unaligned loads / stores
+            prop_assert!(perform_test(misaligned_offset).is_ok());
         });
     });
 }

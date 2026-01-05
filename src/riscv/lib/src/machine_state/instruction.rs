@@ -44,6 +44,7 @@ use crate::interpreter::float;
 use crate::interpreter::integer;
 use crate::interpreter::load_store;
 use crate::machine_state::ProgramCounterUpdate::Next;
+use crate::machine_state::registers::FValue;
 use crate::parser::instruction::CIBDTypeArgs;
 use crate::parser::instruction::CSSDTypeArgs;
 use crate::parser::instruction::CsrArgs;
@@ -261,8 +262,8 @@ pub enum OpCode {
     Fmsubd,
     Fnmsubd,
     Fnmaddd,
-    Fld,
-    Fsd,
+    F64Load,
+    F64Store,
     Fcvtdw,
     Fcvtdwu,
     Fcvtdl,
@@ -484,8 +485,8 @@ impl OpCode {
             Self::Fmsubd => Args::run_fmsub_d,
             Self::Fnmsubd => Args::run_fnmsub_d,
             Self::Fnmaddd => Args::run_fnmadd_d,
-            Self::Fld => Args::run_fld,
-            Self::Fsd => Args::run_fsd,
+            Self::F64Load => Args::run_f64_load,
+            Self::F64Store => Args::run_f64_store,
             Self::Fcvtdw => Args::run_fcvt_d_w,
             Self::Fcvtdwu => Args::run_fcvt_d_wu,
             Self::Fcvtdl => Args::run_fcvt_d_l,
@@ -654,6 +655,8 @@ impl OpCode {
             Self::X32AtomicMaxUnsigned => Some(Args::run_x32_atomic_max_unsigned),
 
             // RV64F instructions
+            Self::F64Store => Some(Args::run_f64_store),
+            Self::F64Load => Some(Args::run_f64_load),
             Self::F64FromX64Unsigned => Some(Args::run_f64_from_x64_unsigned),
 
             // RV64Zicsr instructions
@@ -865,6 +868,13 @@ macro_rules! impl_fload_type {
                 .map(|_| Next(self.width))
         }
     };
+
+    ($fn: ident, $value: ty) => {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res = load_store::run_load_float::<$value, I>(icb, self.imm, self.rs1.x, self.rd.f);
+            I::map(res, |_| icb.next(self.width))
+        }
+    };
 }
 
 macro_rules! impl_load_type {
@@ -912,6 +922,14 @@ macro_rules! impl_fstore_type {
         {
             core.$fn(self.imm, self.rs1.x, self.rs2.f)
                 .map(|_| Next(self.width))
+        }
+    };
+
+    ($fn: ident, $value: ty) => {
+        fn $fn<I: ICB>(&self, icb: &mut I) -> IcbFnResult<I> {
+            let res =
+                load_store::run_store_float::<$value, I>(icb, self.imm, self.rs1.x, self.rs2.f);
+            I::map(res, |_| icb.next(self.width))
         }
     };
 }
@@ -1346,8 +1364,8 @@ impl Args {
     impl_x_f_type!(run_fcvt_lu_s, rm);
 
     // RV64D instructions
-    impl_fload_type!(run_fld);
-    impl_fstore_type!(run_fsd);
+    impl_fload_type!(run_f64_load, FValue);
+    impl_fstore_type!(run_f64_store, FValue);
     impl_f_r_type!(run_feq_d, (rd, x));
     impl_f_r_type!(run_fle_d, (rd, x));
     impl_f_r_type!(run_flt_d, (rd, x));
@@ -1937,14 +1955,12 @@ impl From<&Instr> for Instruction {
             },
 
             // RV64D instructions
-            Instr::Fld(args) => Instruction {
-                opcode: OpCode::Fld,
-                args: args.to_args(InstrWidth::Uncompressed),
-            },
-            Instr::Fsd(args) => Instruction {
-                opcode: OpCode::Fsd,
-                args: args.to_args(InstrWidth::Uncompressed),
-            },
+            Instr::Fld(args) => {
+                Instruction::new_f64_load(args.rd, args.rs1, args.imm, InstrWidth::Uncompressed)
+            }
+            Instr::Fsd(args) => {
+                Instruction::new_f64_store(args.rs1, args.rs2, args.imm, InstrWidth::Uncompressed)
+            }
             Instr::Feqd(args) => Instruction {
                 opcode: OpCode::Feqd,
                 args: args.into(),

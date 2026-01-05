@@ -319,6 +319,7 @@ mod tests {
     use crate::machine_state::page_cache::dispatch::DispatchCompiler;
     use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
     use crate::machine_state::page_cache::state::PageEntry;
+    use crate::machine_state::registers::FRegister;
     use crate::machine_state::registers::FValue;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::machine_state::registers::XRegister;
@@ -2569,6 +2570,145 @@ mod tests {
             invalid_load(I::new_x16_load_unsigned, LoadStoreWidth::Half),
             invalid_load(I::new_x8_load_signed, LoadStoreWidth::Byte),
             invalid_load(I::new_x8_load_unsigned, LoadStoreWidth::Byte),
+        ];
+
+        for scenario in scenarios {
+            scenario.run();
+        }
+    }
+
+    #[test]
+    fn test_store_float() {
+        use crate::machine_state::registers::FRegister::*;
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
+        use crate::machine_state::registers::XRegister::*;
+
+        type ConstructStoreFn =
+            fn(rs1: XRegister, rs2: FRegister, imm: i64, width: InstrWidth) -> I;
+
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get() as u64;
+        const FREG_VALUE: u64 = 0xFFEEDDCCBBAA9988;
+
+        let valid_store = |constructor: ConstructStoreFn, imm: u64, expected: u64| {
+            const STORE_ADDRESS_BASE: u64 = MEMORY_SIZE / 2;
+
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(|core| {
+                    core.hart.fregisters.write(f2, FREG_VALUE.into());
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, STORE_ADDRESS_BASE as i64, InstrWidth::Compressed),
+                    constructor(x1, f2, imm as i64, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(|core| {
+                    let value: u64 = core.main_memory.read(STORE_ADDRESS_BASE + imm).unwrap();
+
+                    assert_eq!(value, expected, "Found {value:x}, expected {expected:x}");
+                }))
+                .build()
+        };
+
+        let invalid_store = |constructor: ConstructStoreFn, width: LoadStoreWidth| {
+            // an address that, with the immediate of 16, will be out of bounds by one byte
+            let store_address_base = MEMORY_SIZE - 15 - width as u64;
+            let store_address_offset = 16;
+
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(NZ::x1, store_address_base as i64, InstrWidth::Compressed),
+                    I::new_li(NZ::x2, FREG_VALUE as i64, InstrWidth::Compressed),
+                    constructor(
+                        x1,
+                        f2,
+                        store_address_offset as i64,
+                        InstrWidth::Uncompressed,
+                    ),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                // the store will fail due to being out of bounds
+                .set_expected_steps(2)
+                .set_expected_exception(Exception::StoreAMOAccessFault)
+                .set_assert_hook(assert_hook!(|core| {
+                    let value: u64 = core.main_memory.read(MEMORY_SIZE - 8).unwrap();
+
+                    assert_eq!(value, 0, "Found {value:x}, but expected store to fail");
+                }))
+                .build()
+        };
+
+        let scenarios = vec![
+            valid_store(I::new_f64_store, 0, FREG_VALUE),
+            // invalid stores: out of bounds
+            invalid_store(I::new_f64_store, LoadStoreWidth::Double),
+        ];
+
+        for scenario in scenarios {
+            scenario.run();
+        }
+    }
+
+    #[test]
+    fn test_load_float() {
+        use crate::machine_state::registers::FRegister::*;
+        use crate::machine_state::registers::NonZeroXRegister as NZ;
+        use crate::machine_state::registers::XRegister::*;
+
+        type ConstructLoadFn = fn(rd: FRegister, rs1: XRegister, imm: i64, width: InstrWidth) -> I;
+
+        const MEMORY_SIZE: u64 = M4K::TOTAL_BYTES.get() as u64;
+
+        let valid_load = |new_load: ConstructLoadFn, imm: u64, expected: u64| {
+            const LOAD_ADDRESS_BASE: u64 = MEMORY_SIZE / 2;
+
+            ScenarioBuilder::default()
+                .set_setup_hook(setup_hook!(|core| {
+                    core.main_memory
+                        .write(LOAD_ADDRESS_BASE + imm, expected)
+                        .unwrap();
+                }))
+                .set_instructions(&[
+                    I::new_li(NZ::x1, LOAD_ADDRESS_BASE as i64, InstrWidth::Compressed),
+                    new_load(f2, x1, imm as i64, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                .set_expected_steps(3)
+                .set_assert_hook(assert_hook!(|core| {
+                    let value: u64 = core.hart.fregisters.read(f2).into();
+                    assert_eq!(value, expected, "Found {value:x}, expected {expected:x}");
+                }))
+                .build()
+        };
+
+        let invalid_load = |new_load: ConstructLoadFn, width: LoadStoreWidth| {
+            // an address that, with the immediate of 16, will be out of bounds by one byte
+            let load_address_base = MEMORY_SIZE - 15 - width as u64;
+            let load_address_offset = 16;
+
+            ScenarioBuilder::default()
+                .set_instructions(&[
+                    I::new_li(NZ::x1, load_address_base as i64, InstrWidth::Compressed),
+                    new_load(f2, x1, load_address_offset as i64, InstrWidth::Uncompressed),
+                    I::new_nop(InstrWidth::Compressed),
+                ])
+                // the load will fail due to being out of bounds
+                .set_expected_steps(1)
+                .set_expected_exception(Exception::LoadAccessFault)
+                .set_assert_hook(assert_hook!(|core| {
+                    let value: u64 = core.hart.xregisters.read(x2);
+                    assert_eq!(value, 0, "Found {value:x}, but expected load to fail");
+                }))
+                .build()
+        };
+
+        const FREG_VALUE: u64 = 0xFFEEDDCCBBAA9988;
+
+        let scenarios = vec![
+            // check loads - differing imm value to ensure both
+            // aligned & unaligned loads are supported
+            valid_load(I::new_f64_load, 8, FREG_VALUE),
+            invalid_load(I::new_f64_load, LoadStoreWidth::Double),
         ];
 
         for scenario in scenarios {
