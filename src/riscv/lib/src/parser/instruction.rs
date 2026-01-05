@@ -822,6 +822,13 @@ pub enum Instr {
     /// The immediate is obtained by zero-extending and scaling by 8 the
     /// offset encoded in the instruction (see U:C-16.3).
     CFld(FLoadArgs),
+    /// `C.FLDSP` CI-type compressed instruction
+    ///
+    /// Loads a double-precision floating-point value from memory into
+    /// floating-point register `rd`. It computes an effective address by
+    /// adding the immediate to the stack pointer.
+    /// The immediate is obtained by zero-extending and scaling by 8 the
+    /// offset encoded in the instruction (see U:C-16.3).
     CFldsp(CIBDTypeArgs),
     /// `C.FSD` - Stores a double-precision floating-point value in floating-point
     /// register `rs2` to memory. It computes an effective address by adding
@@ -830,6 +837,12 @@ pub enum Instr {
     /// The immediate is obtained by zero-extending and scaling by 8 the
     /// offset encoded in the instruction (see U:C-16.3).
     CFsd(FStoreArgs),
+    /// `C.FSDSP` - Stores a double-precision floating-point value in floating-point
+    /// register `rs2` to memory. It computes an effective address by adding
+    /// the immediate to the stack pointer.
+    ///
+    /// The immediate is obtained by zero-extending and scaling by 8 the
+    /// offset encoded in the instruction (see U:C-16.3).
     CFsdsp(CSSDTypeArgs),
 
     Unknown {
