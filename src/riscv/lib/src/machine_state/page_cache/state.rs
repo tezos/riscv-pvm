@@ -448,6 +448,7 @@ mod tests {
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::M4K;
+    use crate::machine_state::memory::M8K;
     use crate::machine_state::memory::Memory;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::PAGE_SIZE;
@@ -582,12 +583,15 @@ mod tests {
     });
 
     backend_test!(populate_from_memory, F, {
-        let state = MachineCoreState::<M1M, F>::new();
+        type MemConfig = M8K;
+
+        let state = MachineCoreState::<MemConfig, F>::new();
         let state = &std::cell::RefCell::new(state);
 
-        let cache = &std::cell::RefCell::new(PageCacheImpl::<Interpreted<_, _>, M1M, F>::new());
+        let cache =
+            &std::cell::RefCell::new(PageCacheImpl::<Interpreted<_, _>, MemConfig, F>::new());
 
-        proptest!(|(pc_addr in 0..M1M::TOTAL_BYTES.get() as u64,
+        proptest!(|(pc_addr in 0..MemConfig::TOTAL_BYTES.get() as u64,
                     page: Box<[u8; PAGE_SIZE.get() as usize]>)| {
             // Arrange
             let mut state = state.borrow_mut();
