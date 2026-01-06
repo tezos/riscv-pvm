@@ -883,3 +883,6 @@ enum BadProofError {
     #[error("Length node is absent but some page nodes are present")]
     LengthAbsentButPagesPresent,
 }
+
+#[cfg(test)]
+mod tests;
