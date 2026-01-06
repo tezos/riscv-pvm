@@ -16,7 +16,7 @@ build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/bu
 
 test: riscv/test jstz/test etherlink/test
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean 
+clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
 ### Specific top-level targets
 
@@ -27,7 +27,7 @@ check-nix:
 	@nix fmt
 
 check-format: taplo-check-format
-	
+
 taplo-check-format:
 	@taplo format --check
 
@@ -41,22 +41,22 @@ codecov.json: riscv/test-deps
 
 ### Target proxies
 
-riscv/%: 
+riscv/%:
 	@make -C src/riscv ${@:riscv/%=%}
 
-sandbox/%: 
+sandbox/%:
 	@make -C tools/sandbox ${@:sandbox/%=%}
 
-jstz/%: 
+jstz/%:
 	@make -C kernels/jstz ${@:jstz/%=%}
 
-dummy/%: 
+dummy/%:
 	@make -C kernels/dummy ${@:dummy/%=%}
 
-page-cache-tester/%: 
+page-cache-tester/%:
 	@make -C kernels/page-cache-tester ${@:page-cache-tester/%=%}
 
-etherlink/%: 
+etherlink/%:
 	@make -C kernels/etherlink ${@:etherlink/%=%}
 
 assets/%:
