@@ -373,13 +373,7 @@ impl Foldable<PartialHashFold<'_>> for DynCells<Verify> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::num::NonZeroUsize;
-
-    use bincode::Encode;
-    use bincode::enc::Encoder;
-    use bincode::error::EncodeError;
     use octez_riscv_data::components::atom::Atom;
-    use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::foldable::Fold;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::foldable::NodeFold;
@@ -389,103 +383,11 @@ pub(crate) mod tests {
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::utils::catch_not_found;
 
-    use crate::backend_test;
     use crate::default::ConstDefault;
-    use crate::state_backend::Elem;
     use crate::state_backend::ManagerBase;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
-
-    /// Dummy type that helps us implement custom normalisation via [`Elem`]
-    #[repr(C, packed)]
-    #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Default)]
-    struct Flipper {
-        a: u8,
-        b: u8,
-    }
-
-    impl ConstDefault for Flipper {
-        const DEFAULT: Self = Self { a: 0, b: 0 };
-    }
-
-    impl Encode for Flipper {
-        fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-            self.b.encode(encoder)?;
-            self.a.encode(encoder)?;
-            Ok(())
-        }
-    }
-
-    impl Elem for Flipper {
-        const STORED_SIZE: NonZeroUsize = NonZeroUsize::new(2).unwrap();
-
-        unsafe fn read_unaligned(source: *const u8) -> Self {
-            unsafe {
-                Self {
-                    a: source.add(1).read(),
-                    b: source.read(),
-                }
-            }
-        }
-
-        unsafe fn write_unaligned(self, dest: *mut u8) {
-            unsafe {
-                dest.add(1).write(self.a);
-                dest.write(self.b);
-            }
-        }
-    }
-
-    backend_test!(
-        #[should_panic]
-        test_dynregion_oob_2,
-        F,
-        {
-            const LEN: usize = 4096;
-
-            let mut state = DataSpace::<F>::new(LEN);
-
-            // This should panic because we are trying to write an element at the address which
-            // corresponds to the end of the buffer.
-            unsafe {
-                state.write(LEN * Flipper::STORED_SIZE.get(), Flipper { a: 1, b: 2 });
-            }
-        }
-    );
-
-    backend_test!(test_dynregion_stored_format, F, {
-        // Writing to one item of the region must convert to stored format.
-        let mut region = DataSpace::<F>::new(4096);
-
-        unsafe {
-            region.write(0, Flipper { a: 13, b: 37 });
-            assert_eq!(region.read::<Flipper>(0), Flipper { a: 13, b: 37 });
-        }
-
-        let buffer = unsafe { region.read::<[u8; 2]>(0) };
-        assert_eq!(buffer, [37, 13]);
-
-        // Writing to the entire region must convert properly to stored format.
-        region.write_all::<Flipper>(0, &[
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
-
-        let mut buff = [Flipper::default(); 4];
-        region.read_all::<Flipper>(0, &mut buff);
-        assert_eq!(buff, [
-            Flipper { a: 11, b: 22 },
-            Flipper { a: 13, b: 24 },
-            Flipper { a: 15, b: 26 },
-            Flipper { a: 17, b: 28 },
-        ]);
-
-        let buffer = unsafe { region.read::<[u8; 8]>(0) };
-        assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);
-    });
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct MyFoo(u64);

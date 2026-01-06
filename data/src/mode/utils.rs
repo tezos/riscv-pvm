@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::panic::resume_unwind;
 
 use crate::components::atom::AtomMode;
+use crate::components::data_space::DataSpaceMode;
 
 /// Source for a state component, either borrowed or owned
 ///
@@ -135,7 +136,7 @@ trait_set::trait_set! {
     /// Each state component comes with a small set of mode-constraining traits. When a component
     /// is used in tests, it is best to mention those traits in this trait alias, so that they are
     /// available to all tests.
-    pub trait TestMode = AtomMode;
+    pub trait TestMode = AtomMode + DataSpaceMode;
 }
 
 /// Generate a test against all modes.
@@ -155,3 +156,28 @@ macro_rules! mode_test {
         }
     };
 }
+
+/// Assert that the given expression evaluates to the expected result.
+#[cfg(test)]
+macro_rules! assert_eq_found {
+    ( $expr:expr, $result:expr ) => {{
+        let result = $crate::mode::utils::catch_not_found(|| $expr);
+        assert_eq!(result, Ok($result));
+    }};
+}
+
+#[cfg(test)]
+pub(crate) use assert_eq_found;
+
+/// Assert that the given expression evaluates to a [`NotFound`] error.
+#[cfg(test)]
+macro_rules! assert_not_found {
+    ( $expr:expr ) => {{
+        let result =
+            $crate::mode::utils::catch_not_found(|| $expr).expect_err("computation should fail");
+        assert_eq!(result, $crate::mode::utils::NotFound);
+    }};
+}
+
+#[cfg(test)]
+pub(crate) use assert_not_found;
