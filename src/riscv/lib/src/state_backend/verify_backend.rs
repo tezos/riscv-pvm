@@ -242,11 +242,6 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
         }
     }
 
-    /// Like [`Self::len`] but returns `None` if the length is not known, instead of panicking.
-    pub(crate) fn len_opt(&self) -> Option<usize> {
-        self.length
-    }
-
     /// Construct a verifier dynamic region using the given known pages.
     pub fn from_pages(
         length: Option<usize>,
@@ -338,14 +333,6 @@ impl<const LEAF_SIZE: usize> DynRegion<LEAF_SIZE> {
             Some(_) => PartialState::Incomplete,
             None => PartialState::Absent,
         }
-    }
-
-    /// Check whether no pages, not even the length is available.
-    ///
-    /// This would be the case when the dynamic region represents an absent or blinded node from
-    /// the compressed partial Merkle proof tree, and no data has been written to it.
-    pub(crate) fn is_completely_absent(&self) -> bool {
-        self.length.is_none() && self.pages.is_empty()
     }
 }
 

@@ -54,7 +54,6 @@ use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::serialisation::elem::Elem;
 pub use proof_layout::*;
-pub use region::*;
 
 /// Manager of the state backend storage
 pub trait ManagerBase: Mode + Sized {
