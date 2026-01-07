@@ -173,15 +173,6 @@ impl<'normal> ProofDynRegion<'normal> {
         let writes: BTreeSet<_> = self.writes.keys().copied().collect();
         DynAccess(writes)
     }
-
-    /// Figure out whether the part of the Merkle tree that contains the dynamic region length
-    /// needs to be present.
-    ///
-    /// Generally that is when the length was retrieved, or when any other read or write occurred
-    /// within the dynamic region.
-    pub(crate) fn need_length_in_proof(&self) -> bool {
-        self.did_access_length.get() || !self.reads.borrow().is_empty() || !self.writes.is_empty()
-    }
 }
 
 impl<'normal> ProofDynRegion<'normal> {
@@ -253,10 +244,5 @@ impl DynAccess {
     /// has been accessed.
     pub fn includes_range(&self, r: std::ops::Range<usize>) -> bool {
         self.0.range(r).next().is_some()
-    }
-
-    /// Check whether no address has been accessed.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
