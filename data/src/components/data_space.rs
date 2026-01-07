@@ -845,7 +845,7 @@ const OFFSET_MASK: usize = PAGE_SIZE - 1;
 const PAGE_MASK: usize = !OFFSET_MASK;
 
 /// Identifier for a page in the data space
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 struct PageId {
     number: usize,
