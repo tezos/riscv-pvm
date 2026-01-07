@@ -22,8 +22,6 @@ use crate::machine_state::memory::PAGE_SIZE;
 
 impl ManagerBase for Normal {
     type DynRegion = memmap2::MmapMut;
-
-    type ManagerRoot = Self;
 }
 
 impl ManagerAlloc for Normal {

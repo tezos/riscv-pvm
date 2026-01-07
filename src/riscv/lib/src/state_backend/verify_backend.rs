@@ -53,8 +53,6 @@ impl From<CaughtNotFoundOrPanic> for ProofVerificationFailure {
 
 impl ManagerBase for Verify {
     type DynRegion = DynRegion<{ MERKLE_LEAF_SIZE.get() }>;
-
-    type ManagerRoot = Self;
 }
 
 #[cfg(test)]
