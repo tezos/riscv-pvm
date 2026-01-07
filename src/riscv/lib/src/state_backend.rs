@@ -5,15 +5,6 @@
 
 //! Generic state backends
 //!
-//! # Managers
-//!
-//! Different backends have different capabilities and they are described as `Manager<Capability>`.
-//! Some of these capabilities are:
-//! - [ManagerBase]
-//! - [ManagerAlloc]
-//! - [ManagerRead]
-//! - [ManagerWrite]
-//!
 //! # Modes
 //!
 //! Modes are ZSTs implementing these traits.
@@ -48,14 +39,10 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
-use octez_riscv_data::mode::Mode;
 pub use proof_layout::*;
 use trait_set::trait_set;
 
 trait_set! {
-    /// Manager of the state backend storage
-    pub trait ManagerBase = Mode + Sized;
-
     /// Manager with allocation capabilities
     ///
     /// Any `ManagerAlloc` inherently has read & write capabilities,

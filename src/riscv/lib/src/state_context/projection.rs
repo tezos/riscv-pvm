@@ -20,11 +20,11 @@ use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -43,7 +43,7 @@ use crate::state_backend::ManagerWrite;
 /// `A::Instance<MC, M> == B::Instance<MC, M>`.
 pub trait TypeCons {
     /// Fully apply the type constructor
-    type Applied<MC: MemoryConfig, M: ManagerBase>;
+    type Applied<MC: MemoryConfig, M: Mode>;
 }
 
 /// Apply a type constructor `TC` to memory config `MC` and manager `M`.
@@ -53,28 +53,28 @@ pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
 pub struct BoxCons<T>(PhantomData<T>);
 
 impl<T: TypeCons> TypeCons for BoxCons<T> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = Box<ApplyCons<T, MC, M>>;
+    type Applied<MC: MemoryConfig, M: Mode> = Box<ApplyCons<T, MC, M>>;
 }
 
 /// Type constructor `[T; LEN]`
 pub struct ArrayCons<T, const LEN: usize>(PhantomData<T>);
 
 impl<T: TypeCons, const LEN: usize> TypeCons for ArrayCons<T, LEN> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = [ApplyCons<T, MC, M>; LEN];
+    type Applied<MC: MemoryConfig, M: Mode> = [ApplyCons<T, MC, M>; LEN];
 }
 
 /// Type constructor [`Atom`]
 pub struct AtomCons<T>(PhantomData<T>);
 
 impl<T: 'static> TypeCons for AtomCons<T> {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = Atom<T, M>;
+    type Applied<MC: MemoryConfig, M: Mode> = Atom<T, M>;
 }
 
 /// Type constructor [`crate::machine_state::MachineCoreState`]
 pub struct MachineCoreCons;
 
 impl TypeCons for MachineCoreCons {
-    type Applied<MC: MemoryConfig, M: ManagerBase> = MachineCoreState<MC, M>;
+    type Applied<MC: MemoryConfig, M: Mode> = MachineCoreState<MC, M>;
 }
 
 /// Offset from a base pointer to a [projection's] subject with a state in normal mode.

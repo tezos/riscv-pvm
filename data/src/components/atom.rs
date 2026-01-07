@@ -44,13 +44,13 @@ use crate::serialisation::serialise;
 
 /// Single value state component
 ///
-/// The [`Atom`] component holds a single value of type `T`.  
+/// The [`Atom`] component holds a single value of type `T`.
 ///
 /// The held value is atomic in its presence. In [`Normal`] and [`Prove`] mode, the value is always
 /// present. In [`Verify`] mode, the value is either fully present, or fully absent.
 #[perfect_derive(Debug)]
 #[repr(transparent)]
-pub struct Atom<T: 'static, M: Mode + ?Sized> {
+pub struct Atom<T: 'static, M: Mode> {
     atom: M::Select<AtomTemplate<T>>,
 }
 

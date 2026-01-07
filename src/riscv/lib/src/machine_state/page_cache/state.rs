@@ -13,6 +13,8 @@
 
 use std::sync::Arc;
 
+use octez_riscv_data::mode::Mode;
+
 use super::INSTRUCTION_ENTRIES;
 use super::PageCache;
 use super::code_page_entry::CodePageEntry;
@@ -34,7 +36,6 @@ use crate::machine_state::memory::listener::MemoryGovernanceListener;
 use crate::machine_state::page_cache::dispatch::jit_counters::JitTestCounters;
 use crate::parser::is_compressed;
 use crate::parser::parse_compressed_instruction;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -191,14 +192,14 @@ type BoxedPages<CPE, C> = Box<[Option<Arc<PageEntry<CPE, C>>>]>;
 /// [`PageCache`]: super::PageCache
 // TODO RV-775: this will change to be the default implementor of `PageCache` for
 //              `Normal` mode, only.
-pub struct PageCacheImpl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> {
+pub struct PageCacheImpl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode> {
     pages: BoxedPages<CPE, CPE::Compiler>,
     compiler_context: CPE::CompilerContext,
     router: Router<CPE::Compiler>,
 }
 
 #[cfg(test)]
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<CPE, MC, M> {
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode> PageCacheImpl<CPE, MC, M> {
     /// TEST ONLY
     ///
     /// Overwrite a page entry within the page cache. The entry overwritten is the one containing
@@ -232,7 +233,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<
     }
 }
 
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, M>
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode> PageCache<MC, M>
     for PageCacheImpl<CPE, MC, M>
 {
     /// Construct a new page cache, which will be entirely unpopulated.
@@ -346,7 +347,7 @@ impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCache<MC, 
     }
 }
 
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> PageCacheImpl<CPE, MC, M> {
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode> PageCacheImpl<CPE, MC, M> {
     /// Invalidate the ranges of pages in the router which overlap the provided range of memory.
     fn invalidate_pages(&mut self, pages: std::ops::RangeInclusive<u64>) {
         for range in self.router.drain_overlapping(pages) {
@@ -368,7 +369,7 @@ impl<CPE, MC, M> MemoryGovernanceListener for PageCacheImpl<CPE, MC, M>
 where
     CPE: CodePageEntry<MC, M>,
     MC: MemoryConfig,
-    M: ManagerBase,
+    M: Mode,
 {
     /// The PageCache must ensure that it is always synchronised with main memory.
     ///
@@ -409,11 +410,11 @@ enum PopulationError {
 ///
 /// [`CodePage`]: super::CodePage
 #[derive(Debug)]
-struct CodePageImpl<'a, MC: MemoryConfig, M: ManagerBase, CPE: CodePageEntry<MC, M>> {
+struct CodePageImpl<'a, MC: MemoryConfig, M: Mode, CPE: CodePageEntry<MC, M>> {
     page: &'a Arc<PageEntry<CPE, CPE::Compiler>>,
 }
 
-impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase> super::CodePage<'_, MC, M>
+impl<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode> super::CodePage<'_, MC, M>
     for CodePageImpl<'_, MC, M, CPE>
 {
     #[inline]
@@ -436,6 +437,7 @@ mod tests {
     use std::cell::RefCell;
     use std::num::NonZeroUsize;
 
+    use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
 
@@ -466,10 +468,9 @@ mod tests {
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
     use crate::state::NewState;
-    use crate::state_backend::ManagerBase;
     use crate::state_backend::test_helpers::TestBackendFactory;
 
-    fn count_active_pages<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: ManagerBase>(
+    fn count_active_pages<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode>(
         cache: &PageCacheImpl<CPE, MC, M>,
     ) -> usize {
         cache.pages.iter().fold(

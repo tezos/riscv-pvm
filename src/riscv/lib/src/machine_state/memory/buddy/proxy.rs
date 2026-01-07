@@ -5,6 +5,7 @@
 //! Simplified [`BuddyConfig`] selection using const-generics
 
 use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -18,7 +19,6 @@ use super::leaf::BuddyLeafConfig;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch8Config;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch32Config;
 use crate::machine_state::memory::buddy::branch_combinations::BuddyBranch64Config;
-use crate::state_backend::ManagerBase;
 
 /// Proxy for a [`BuddyConfig`] that manages the specified number of `PAGES`
 pub struct BuddyConfigProxy<const PAGES: usize>;
@@ -27,7 +27,7 @@ impl<const PAGES: usize> BuddyConfig for BuddyConfigProxy<PAGES>
 where
     (): BuddyConfigMatch<PAGES>,
 {
-    type Buddy<M: ManagerBase> = <PickConfig<PAGES> as BuddyConfig>::Buddy<M>;
+    type Buddy<M: Mode> = <PickConfig<PAGES> as BuddyConfig>::Buddy<M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         <PickConfig<PAGES> as BuddyConfig>::start_proof(instance)

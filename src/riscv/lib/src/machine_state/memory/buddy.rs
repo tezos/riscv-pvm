@@ -25,13 +25,13 @@ use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyConfigProxy;
 
 use crate::state::NewState;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -40,7 +40,7 @@ use crate::state_backend::ManagerWrite;
 /// Configuration for a Buddy-style memory manager
 pub trait BuddyConfig: 'static {
     /// Buddy-style memory manager implementation
-    type Buddy<M: ManagerBase>: Buddy<M>;
+    type Buddy<M: Mode>: Buddy<M>;
 
     /// Return a proof-generating Buddy memory manager instance.
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
@@ -50,7 +50,7 @@ pub trait BuddyConfig: 'static {
 }
 
 /// Buddy-style memory manager
-pub trait Buddy<M: ManagerBase>: NewState<M> + Sized {
+pub trait Buddy<M: Mode>: NewState<M> {
     /// Number of pages being managed
     const PAGES: u64;
 

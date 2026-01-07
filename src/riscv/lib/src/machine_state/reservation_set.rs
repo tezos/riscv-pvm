@@ -23,6 +23,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -45,7 +46,7 @@ use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct ReservationSet<M: backend::ManagerBase> {
+pub struct ReservationSet<M: Mode> {
     pub(crate) start_addr: Atom<u64, M>,
 }
 
@@ -72,7 +73,7 @@ pub(crate) const RES_SET_BITMASK: u64 = !0b111;
 
 pub(crate) const UNSET_VALUE: u64 = u64::MAX;
 
-impl<M: backend::ManagerBase> ReservationSet<M> {
+impl<M: Mode> ReservationSet<M> {
     /// Unset any reservation
     pub fn reset(&mut self)
     where
@@ -128,7 +129,7 @@ impl ReservationSet<Normal> {
     }
 }
 
-impl<M: backend::ManagerBase> NewState<M> for ReservationSet<M> {
+impl<M: Mode> NewState<M> for ReservationSet<M> {
     fn new() -> Self
     where
         M: backend::ManagerAlloc,
@@ -149,7 +150,7 @@ impl<M: backend::ManagerClone> CloneState for ReservationSet<M> {
 
 impl<M, F> Foldable<F> for ReservationSet<M>
 where
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<u64, M>: Foldable<F>,
 {

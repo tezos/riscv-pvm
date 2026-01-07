@@ -4,16 +4,17 @@
 
 //! Implementations of system calls related to the file system
 
+use octez_riscv_data::mode::Mode;
+
 use super::SupervisorState;
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Handle the `fstatat` system call. All access to the file system is denied.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/fstatat.2.html>

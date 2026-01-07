@@ -653,7 +653,7 @@ impl FRegisters<Normal> {
     }
 }
 
-impl<M: backend::ManagerBase> NewState<M> for FRegisters<M> {
+impl<M: Mode> NewState<M> for FRegisters<M> {
     fn new() -> Self
     where
         M: backend::ManagerAlloc,

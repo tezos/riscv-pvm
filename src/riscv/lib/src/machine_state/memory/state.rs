@@ -16,6 +16,7 @@ use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::elem::Elem;
 use perfect_derive::perfect_derive;
@@ -29,7 +30,8 @@ use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
-use crate::state_backend::ManagerBase;
+use crate::state::NewState;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -37,7 +39,7 @@ use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
 #[perfect_derive(PartialEq, Eq)]
-pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase> {
+pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode> {
     /// Memory contents
     pub(super) data: DataSpace<M>,
 
@@ -54,7 +56,7 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Manage
     pub(super) allocated_pages: B,
 }
 
-impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 {
     /// Ensure the access is within bounds.
@@ -112,11 +114,30 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: ManagerBase>
     }
 }
 
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> NewState<M>
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+where
+    B: NewState<M>,
+    M: Mode,
+{
+    fn new() -> Self
+    where
+        M: ManagerAlloc,
+    {
+        MemoryImpl {
+            data: DataSpace::new(TOTAL_BYTES),
+            readable_pages: PagePermissions::new(),
+            writable_pages: PagePermissions::new(),
+            executable_pages: PagePermissions::new(),
+            allocated_pages: B::new(),
+        }
+    }
+}
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> Memory<M>
     for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 where
     B: Buddy<M>,
-    M: ManagerBase,
+    M: Mode,
 {
     #[inline]
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
@@ -435,7 +456,7 @@ where
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M, F> Foldable<F>
     for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     DataSpace<M>: Foldable<F>,
     B: Foldable<F>,

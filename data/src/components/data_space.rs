@@ -52,7 +52,7 @@ use crate::serialisation::serialise;
 
 /// Byte array-like state component which allows reading and writing values of various types
 #[repr(transparent)]
-pub struct DataSpace<M: Mode + ?Sized> {
+pub struct DataSpace<M: Mode> {
     /// Mode-specific representation
     ///
     /// See [`DataSpaceTemplate`].

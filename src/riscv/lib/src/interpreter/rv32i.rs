@@ -6,6 +6,8 @@
 //!
 //! Chapter 2 - Unprivileged spec
 
+use octez_riscv_data::mode::Mode;
+
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::HartState;
@@ -31,7 +33,7 @@ where
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: backend::ManagerBase,
+    M: Mode,
 {
     /// `FENCE` I-Type instruction
     ///

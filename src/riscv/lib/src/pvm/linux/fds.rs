@@ -4,6 +4,8 @@
 
 //! Implementations of system calls related to file descriptors
 
+use octez_riscv_data::mode::Mode;
+
 use super::SupervisorState;
 use super::error::Error;
 use crate::machine_state::MachineCoreState;
@@ -14,11 +16,10 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters;
 use crate::pvm::linux::parameters::FileDescriptorWriteable;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Handle `ioctl` system call.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man2/ioctl.2.html>

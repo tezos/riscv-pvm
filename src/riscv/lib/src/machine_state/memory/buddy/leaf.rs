@@ -17,6 +17,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -27,7 +28,6 @@ use super::BuddyConfig;
 use crate::bits::ones;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -37,7 +37,7 @@ use crate::state_backend::ManagerWrite;
 pub struct BuddyLeafConfig<const PAGES: u64>;
 
 impl<const PAGES: u64> BuddyConfig for BuddyLeafConfig<PAGES> {
-    type Buddy<M: ManagerBase> = BuddyLeaf<PAGES, M>;
+    type Buddy<M: Mode> = BuddyLeaf<PAGES, M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         BuddyLeaf {
@@ -54,13 +54,13 @@ impl<const PAGES: u64> BuddyConfig for BuddyLeafConfig<PAGES> {
 
 /// Leaf of a tree that forms a Buddy-style memory manager
 #[perfect_derive(PartialEq, Eq)]
-pub struct BuddyLeaf<const PAGES: u64, M: ManagerBase> {
+pub struct BuddyLeaf<const PAGES: u64, M: Mode> {
     /// Each bit of the `u64` represents a page.
     /// The least significant bit is the page with index 0.
     set: Atom<u64, M>,
 }
 
-impl<const PAGES: u64, M: ManagerBase> NewState<M> for BuddyLeaf<PAGES, M> {
+impl<const PAGES: u64, M: Mode> NewState<M> for BuddyLeaf<PAGES, M> {
     fn new() -> Self
     where
         M: ManagerAlloc,
@@ -71,7 +71,7 @@ impl<const PAGES: u64, M: ManagerBase> NewState<M> for BuddyLeaf<PAGES, M> {
     }
 }
 
-impl<const PAGES: u64, M: ManagerBase> Buddy<M> for BuddyLeaf<PAGES, M> {
+impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
     const PAGES: u64 = PAGES;
 
     fn allocate(&mut self, pages: u64) -> Option<u64>
@@ -218,7 +218,7 @@ impl<C, const PAGES: u64> Decode<C> for BuddyLeaf<PAGES, Normal> {
 
 impl<const PAGES: u64, M, F> Foldable<F> for BuddyLeaf<PAGES, M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<u64, M>: Foldable<F>,
 {

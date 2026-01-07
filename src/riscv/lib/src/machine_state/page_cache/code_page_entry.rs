@@ -9,6 +9,8 @@
 
 use std::sync::Arc;
 
+use octez_riscv_data::mode::Mode;
+
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::StepManyResult;
@@ -16,7 +18,6 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::router::RouterEq;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -24,8 +25,8 @@ use crate::state_backend::ManagerWrite;
 ///
 /// Entrypoints are semantically equivalent to instructions - but may
 /// take the opportunity to execute multiple instructions in a row before returning.
-pub trait CodePageEntry<MC: MemoryConfig, M: ManagerBase>:
-    AsRef<Instruction> + From<Instruction> + std::fmt::Debug + Sized
+pub trait CodePageEntry<MC: MemoryConfig, M: Mode>:
+    AsRef<Instruction> + From<Instruction> + std::fmt::Debug
 {
     /// Entrypoints may be just-in-time compiled to more efficient code,
     /// if called frequently.

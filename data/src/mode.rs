@@ -18,7 +18,16 @@ use std::marker::PhantomData;
 /// Operational mode of the PVM
 ///
 /// This trait can be used to instantiate the modal representation for a [`Modal`] template type.
-pub trait Mode {
+///
+/// # [`Sized`] supertrait
+///
+/// The [`Sized`] trait bound is added primarily for convenience - technically modes are generally
+/// used as phantom type parameters, and hence need not have a known size. Rust does not infer
+/// [`Sized`]/[`?Sized`] correctly for type parameters, though. As a consequence, if you want type a
+/// parameter to not need a known size, you must annotate it with [`?Sized`] manually - everywhere.
+/// As [`?Sized`] can't be used as a supertrait, we just give up and use [`Sized`] instead.
+/// Fortunately for us, all known modes are [`Sized`]. Phew.
+pub trait Mode: Sized {
     /// Select the type from the [`Modal`] template that corresponds to the current mode.
     type Select<Template: Modal + ?Sized>;
 }

@@ -4,43 +4,19 @@
 
 use std::num::NonZeroUsize;
 
-use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 
 use super::buddy::BuddyConfig;
 use super::buddy::BuddyConfigProxy;
-use super::protection::PagePermissions;
 use super::state::MemoryImpl;
-use crate::state::NewState;
-use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 
 /// State layout for the memory component
 pub struct MemoryConfig<const PAGES: usize, const TOTAL_BYTES: usize>;
-
-impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> NewState<M>
-    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
-where
-    B: NewState<M>,
-    M: ManagerBase,
-{
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        MemoryImpl {
-            data: DataSpace::new(TOTAL_BYTES),
-            readable_pages: PagePermissions::new(),
-            writable_pages: PagePermissions::new(),
-            executable_pages: PagePermissions::new(),
-            allocated_pages: B::new(),
-        }
-    }
-}
 
 impl<const PAGES: usize, const TOTAL_BYTES: usize> super::MemoryConfig
     for MemoryConfig<PAGES, TOTAL_BYTES>
@@ -50,7 +26,7 @@ where
     const TOTAL_BYTES: NonZeroUsize = NonZeroUsize::new(TOTAL_BYTES)
         .expect("size of memory `TOTAL_BYTES` must be greater than zero");
 
-    type State<M: ManagerBase> =
+    type State<M: Mode> =
         MemoryImpl<PAGES, TOTAL_BYTES, <BuddyConfigProxy<PAGES> as BuddyConfig>::Buddy<M>, M>;
 
     fn state_from_proof<D: merkle_proof::Deserialiser>(

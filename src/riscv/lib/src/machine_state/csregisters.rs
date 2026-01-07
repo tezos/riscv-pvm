@@ -23,6 +23,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -169,7 +170,7 @@ const FFLAGS_MASK: CSRRepr = 0b11111;
 
 /// Cntrol and State Registers (CSRs)
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct CSRegisters<M: backend::ManagerBase> {
+pub struct CSRegisters<M: Mode> {
     /// Floating-point exception flags
     pub fflags: Atom<FloatExceptionFlags, M>,
 
@@ -177,7 +178,7 @@ pub struct CSRegisters<M: backend::ManagerBase> {
     pub frm: Atom<RoundingMode, M>,
 }
 
-impl<M: backend::ManagerBase> CSRegisters<M> {
+impl<M: Mode> CSRegisters<M> {
     /// Write to a CSR.
     #[inline]
     pub fn write(&mut self, reg: CSRegister, value: CSRRepr)
@@ -360,7 +361,7 @@ impl CSRegisters<Normal> {
     }
 }
 
-impl<M: backend::ManagerBase> NewState<M> for CSRegisters<M> {
+impl<M: Mode> NewState<M> for CSRegisters<M> {
     fn new() -> Self
     where
         M: backend::ManagerAlloc,
@@ -383,7 +384,7 @@ impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
 
 impl<M, F> Foldable<F> for CSRegisters<M>
 where
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<FloatExceptionFlags, M>: Foldable<F>,
     Atom<RoundingMode, M>: Foldable<F>,

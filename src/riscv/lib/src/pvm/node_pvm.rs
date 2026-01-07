@@ -9,6 +9,7 @@ use std::path::Path;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -44,14 +45,11 @@ type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
 #[perfect_derive(Clone)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
-pub struct NodePvm<
-    M: state_backend::ManagerBase = Normal,
-    PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache,
-> {
+pub struct NodePvm<M: Mode = Normal, PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache> {
     state: Box<NodePvmState<M, PC>>,
 }
 
-impl<M: state_backend::ManagerBase, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
+impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
     /// Wrap the given PVM state.
     pub fn wrap(state: NodePvmState<M, PC>) -> Self {
         Self {
@@ -198,7 +196,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
 
 impl NodePvm<Verify, EmptyPageCache> {
     /// Verify the proof with the given input by evaluating one step.
-    /// Upon success, return the input request which corresponds to the initial state of the proof.      
+    /// Upon success, return the input request which corresponds to the initial state of the proof.
     pub fn verify_proof(
         &mut self,
         merkle_proof_tree: &MerkleProof,
@@ -235,9 +233,7 @@ impl PartialEq for NodePvm {
 
 impl Eq for NodePvm {}
 
-impl<M: state_backend::ManagerBase, PC: PageCache<NodePvmMemConfig, M>> NewState<M>
-    for NodePvm<M, PC>
-{
+impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NewState<M> for NodePvm<M, PC> {
     fn new() -> Self
     where
         M: state_backend::ManagerAlloc,
