@@ -16,12 +16,12 @@ use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Prove;
 use crate::mode::Verify;
-use crate::mode::tests::backend_test;
 use crate::mode::utils::catch_not_found;
+use crate::mode_test;
 use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
 
-backend_test!(init, F, {
+mode_test!(init, F, {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     struct MyFoo(u64);
 
