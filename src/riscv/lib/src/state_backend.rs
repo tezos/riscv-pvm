@@ -57,25 +57,6 @@ pub use region::*;
 pub trait ManagerBase: Mode + Sized {
     /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
     type DynRegion;
-
-    /// The `ManagerRoot` is the ultimate manager type used to run things.
-    ///
-    /// It is primarily used to defer trait bounds to a later point when the root manager type is
-    /// known.
-    ///
-    /// You might need to refer to a function `foo<M: ManagerWrite>(...)`. Unless you're running
-    /// that function, the `M: ManagerWrite` bound is not needed. However, Rust does not let you
-    /// express that directly. The trait bound would be immediately needed, therefore granting the
-    /// function that refers to `foo` the same capabilities.
-    ///
-    /// The `ManagerRoot` is a utility that can be used to express that the function is only
-    /// callable when `M` is the root manager type. We instantiate `foo<M::ManagerRoot>`, so that
-    /// the trait bounds are imposed on the root manager type.
-    ///
-    /// This alone does not let us run `foo`. Fortunately, `ManagerWrite` requires that
-    /// `ManagerRoot = Self`. This in contexts with `M: ManagerWrite`, we can actually run
-    /// `foo<M::ManagerRoot>` as `foo<M>`.
-    type ManagerRoot: ManagerBase<ManagerRoot = Self::ManagerRoot>;
 }
 
 /// Manager with allocation capabilities
@@ -136,7 +117,7 @@ pub trait ManagerRead: ManagerBase + AtomMode {
 }
 
 /// Manager with write capabilities
-pub trait ManagerWrite: ManagerBase<ManagerRoot = Self> + AtomMode {
+pub trait ManagerWrite: ManagerBase + AtomMode {
     /// Update an element in the region. `address` is in bytes.
     ///
     /// # Safety

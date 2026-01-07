@@ -38,8 +38,6 @@ pub mod proof;
 
 impl<'normal> ManagerBase for Prove<'normal> {
     type DynRegion = ProofDynRegion<'normal>;
-
-    type ManagerRoot = Self;
 }
 
 impl<'normal> ManagerAlloc for Prove<'normal> {
