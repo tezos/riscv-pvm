@@ -2,16 +2,17 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::mode::Mode;
+
 use super::SupervisorState;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::error::Error;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Handle `getrandom` system call. We don't support non-determinism, so we return a fixed
     /// value to the caller. The `flags` argument is ignored. One major difference from the Linux
     /// implementation is that we return fewer bytes than requested in more circumstances - most

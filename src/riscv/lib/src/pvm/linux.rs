@@ -32,6 +32,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -59,7 +60,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -184,7 +184,7 @@ enum AuxVectorKey {
     ProgramHeadersPtr = 3,
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerBase> MachineState<MC, PC, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
     where
@@ -263,7 +263,7 @@ impl<MC, PC, M> Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: ManagerBase,
+    M: Mode,
 {
     /// Load the program into memory and set the PC to its entrypoint.
     fn load_program(&mut self, program: &Program<MC>) -> Result<(), MachineError>
@@ -436,7 +436,7 @@ where
 
 /// Linux supervisor state
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct SupervisorState<M: ManagerBase> {
+pub struct SupervisorState<M: Mode> {
     /// Thread lock address
     tid_address: Atom<VirtAddr, M>,
 
@@ -456,7 +456,7 @@ pub struct SupervisorState<M: ManagerBase> {
     stack_guard: Atom<Range<VirtAddr>, M>,
 }
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Allocate a new supervisor state.
     pub fn new() -> Self
     where
@@ -1052,7 +1052,7 @@ impl<M: ManagerClone> CloneState for SupervisorState<M> {
 
 impl<M, F> Foldable<F> for SupervisorState<M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<VirtAddr, M>: Foldable<F>,
     Atom<Range<VirtAddr>, M>: Foldable<F>,

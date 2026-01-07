@@ -24,6 +24,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -59,7 +60,6 @@ use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -151,7 +151,7 @@ impl Elem for LinuxSigAction {
 
 /// Information to support handling each supported signal
 #[perfect_derive(PartialEq, Eq)]
-pub struct SignalActions<M: ManagerBase> {
+pub struct SignalActions<M: Mode> {
     /// An array of [VirtAddr]s, one action for each supported signal
     actions: [Atom<VirtAddr, M>; SignalIndex::COUNT],
     /// An array of bitmasks, one set of flags for each supported signal
@@ -216,7 +216,7 @@ impl<M: ManagerWrite> SignalActions<M> {
 
 impl<M, F> Foldable<F> for SignalActions<M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<VirtAddr, M>: Foldable<F>,
     Atom<u32, M>: Foldable<F>,
@@ -385,7 +385,7 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     fn signal_action(&self, signal: Signal) -> LinuxSigAction
     where
         M: ManagerRead,
@@ -433,7 +433,7 @@ impl<M: ManagerAlloc> Default for SignalActions<M> {
     }
 }
 
-impl<M: ManagerBase> SignalActions<M> {
+impl<M: Mode> SignalActions<M> {
     /// Reset to the default state
     pub fn reset(&mut self)
     where
@@ -458,7 +458,7 @@ impl SignalActions<Normal> {
     }
 }
 
-impl<M: ManagerBase> NewState<M> for SignalActions<M> {
+impl<M: Mode> NewState<M> for SignalActions<M> {
     /// Allocate a new [SignalActions]
     fn new() -> Self
     where
@@ -677,7 +677,7 @@ impl TryFrom<u64> for SigsetTSizeEightBytes {
     }
 }
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Handle `sigaltstack` system call. The new signal stack configuration is discarded. If the
     /// old signal stack configuration is requested, it will be zeroed out.
     pub(super) fn handle_sigaltstack(
@@ -789,7 +789,7 @@ impl<MC, PC, M> Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: ManagerBase,
+    M: Mode,
 {
     /// Writes a small function to call the `rt_sigreturn` system call to a provided address, then
     /// writes the address to [self.signal_actions]. This is used on returning from a signal

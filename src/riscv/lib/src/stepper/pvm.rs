@@ -15,6 +15,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -38,7 +39,6 @@ use crate::pvm::PvmStatus;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -65,7 +65,7 @@ pub enum PvmStepperError {
 pub struct PvmStepper<
     H,
     MC: MemoryConfig = M1G,
-    M: ManagerBase = Normal,
+    M: Mode = Normal,
     PC: PageCache<MC, M> = PageCacheInterpreted<MC>,
 > {
     pvm: Pvm<MC, PC, M>,

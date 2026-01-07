@@ -15,6 +15,7 @@ use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use listener::MemoryGovernanceListener;
 use octez_riscv_data::merkle_proof;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -24,7 +25,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use super::registers::XValue;
 use crate::pvm::linux;
 use crate::state::NewState;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -213,7 +213,7 @@ impl From<BadMemoryAccess> for SbiError {
 pub struct MemoryGovernanceError;
 
 /// Instance of memory
-pub trait Memory<M: ManagerBase>: NewState<M> + Sized {
+pub trait Memory<M: Mode>: NewState<M> + Sized {
     /// Read an element in the region. `address` is in bytes.
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
@@ -322,7 +322,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     const TOTAL_BYTES: NonZeroUsize;
 
     /// Memory instance
-    type State<M: ManagerBase>: Memory<M>;
+    type State<M: Mode>: Memory<M>;
 
     /// Parse the proof to obtain a memory instance.
     fn state_from_proof<D: merkle_proof::Deserialiser>(

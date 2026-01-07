@@ -28,6 +28,7 @@ use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -48,7 +49,6 @@ use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state::NewState;
 use crate::state_backend;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
@@ -103,7 +103,7 @@ pub(crate) type PvmProve<'a, MC> = Pvm<MC, EmptyPageCache, Prove<'a>>;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct Pvm<MC: MemoryConfig, PC, M: ManagerBase> {
+pub struct Pvm<MC: MemoryConfig, PC, M: Mode> {
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
@@ -119,14 +119,14 @@ impl<MC, PC, M> Default for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: state_backend::ManagerBase + state_backend::ManagerAlloc,
+    M: state_backend::ManagerAlloc,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: state_backend::ManagerBase> Pvm<MC, PC, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Allocate a new PVM.
     pub fn new() -> Self
     where
@@ -404,7 +404,7 @@ impl<MC, PC, M, F> Foldable<F> for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     machine_state::MachineState<MC, PC, M>: Foldable<F>,
     RevealRequest<M>: Foldable<F>,
@@ -570,7 +570,7 @@ mod tests {
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
 
-    impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: state_backend::ManagerBase> Pvm<MC, PC, M> {
+    impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
         /// Handle an exception using the defined Execution Environment.
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool

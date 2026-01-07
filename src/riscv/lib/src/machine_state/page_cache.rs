@@ -33,6 +33,7 @@ pub use empty::EmptyPageCache;
 pub use interpreted::Interpreted;
 pub use interpreted::InterpretedCompiler;
 pub use jitted::Jitted;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use state::PageCacheImpl;
 
@@ -46,7 +47,6 @@ use super::memory::MemoryConfig;
 use super::memory::address_to_page_offset;
 use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -100,7 +100,7 @@ pub fn address_to_halfword_index(address: Address) -> usize {
 ///
 /// Page entrypoints exist at the start of each _halfword_ within a page slot. Since the
 /// instruction pc is always halfword-aligned, a populated
-pub trait PageCache<MC: MemoryConfig, M: ManagerBase>: MemoryGovernanceListener {
+pub trait PageCache<MC: MemoryConfig, M: Mode>: MemoryGovernanceListener {
     /// Instantiate a new page cache instance.
     fn new() -> Self;
 
@@ -120,7 +120,7 @@ pub trait PageCache<MC: MemoryConfig, M: ManagerBase>: MemoryGovernanceListener 
 /// against the [machine state].
 ///
 /// [machine state]: MachineCoreState
-pub trait CodePage<'a, MC: MemoryConfig, M: ManagerBase> {
+pub trait CodePage<'a, MC: MemoryConfig, M: Mode> {
     /// Execute instructions from a code page against the
     /// machine state.
     ///

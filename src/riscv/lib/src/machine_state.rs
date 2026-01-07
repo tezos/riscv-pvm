@@ -38,6 +38,7 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -73,13 +74,13 @@ use crate::state_backend::ManagerWrite;
 /// Certain instructions (e.g. `FENCE.I` may invalidate other parts of the state, but this are
 /// small in number).
 #[perfect_derive(PartialEq, Eq)]
-pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
+pub struct MachineCoreState<MC: memory::MemoryConfig, M: Mode> {
     pub hart: HartState<M>,
     pub main_memory: MC::State<M>,
     pub signal_actions: SignalActions<M>,
 }
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     /// Update the hart's pc given the update and explicitly given the current value of pc
     #[inline]
     pub(crate) fn update_pc(&mut self, instr_pc: Address, update: ProgramCounterUpdate<Address>)
@@ -161,7 +162,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
 impl<MC, M, F> Foldable<F> for MachineCoreState<MC, M>
 where
     MC: MemoryConfig,
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
     HartState<M>: Foldable<F>,
     MC::State<M>: Foldable<F>,
@@ -202,7 +203,7 @@ where
 pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
     NonZeroU64::new(16).expect("Alignment must be non-zero");
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: Mode> NewState<M> for MachineCoreState<MC, M> {
     fn new() -> Self
     where
         M: backend::ManagerAlloc,
@@ -271,7 +272,7 @@ where
 /// RISC-V machine state
 ///
 /// The machine state contains everything required to fetch & run instructions.
-pub struct MachineState<MC: memory::MemoryConfig, PC, M: backend::ManagerBase> {
+pub struct MachineState<MC: memory::MemoryConfig, PC, M: Mode> {
     pub core: MachineCoreState<MC, M>,
     pub page_cache: PC,
 }
@@ -354,7 +355,7 @@ impl<MC, PC, M> PartialEq for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: backend::ManagerBase,
+    M: Mode,
     MachineCoreState<MC, M>: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -366,7 +367,7 @@ impl<MC, PC, M> Eq for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: backend::ManagerBase,
+    M: Mode,
     MachineCoreState<MC, M>: PartialEq,
 {
 }
@@ -419,20 +420,15 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-impl<
-    MC: memory::MemoryConfig,
-    PC: PageCache<MC, M>,
-    M: backend::ManagerBase + backend::ManagerAlloc,
-> Default for MachineState<MC, PC, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerAlloc> Default
+    for MachineState<MC, PC, M>
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerBase>
-    MachineState<MC, PC, M>
-{
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
     /// Allocate a new machine state.
     pub fn new() -> Self
     where
@@ -785,7 +781,7 @@ impl<MC, PC, M, F> Foldable<F> for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: backend::ManagerBase,
+    M: Mode,
     F: Fold,
     MachineCoreState<MC, M>: Foldable<F>,
 {
@@ -816,6 +812,7 @@ pub(crate) mod test_helpers {
     use std::ops::Deref;
     use std::ops::DerefMut;
 
+    use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
@@ -823,7 +820,6 @@ pub(crate) mod test_helpers {
     use super::MachineState;
     use super::page_cache::EmptyPageCache;
     use crate::machine_state::memory::M4K;
-    use crate::state_backend::ManagerBase;
 
     /// A wrapper to use a type `T` from either a mutable reference or an owned value.
     pub enum RefMutOrOwned<'a, T> {
@@ -856,7 +852,7 @@ pub(crate) mod test_helpers {
 
     /// Trait used to initialise a specific object - [`TestMachineStateOf<M>`] - with respect to a
     /// backend type.
-    pub trait ReinitMachine<M: ManagerBase>: Sized {
+    pub trait ReinitMachine<M: Mode> {
         /// Provided a dirty state, reinitialize the machine state as if it was just created.
         fn reinit_machine_state(
             dirty_state: RefMut<TestMachineOf<M>>,
@@ -867,7 +863,7 @@ pub(crate) mod test_helpers {
     ///
     /// It is useful to choose how objects are reinitialised in tests to improve performance, for
     /// example the [`Prove`] would rather be newly created than be reset or cloned.
-    pub trait ManagerTestInit: ManagerBase {
+    pub trait ManagerTestInit: Mode {
         /// This type is used to downcast the initialisation function to the actual type that is the
         /// subject of initialisation.
         type TestMachine: ReinitMachine<Self>;
@@ -881,7 +877,7 @@ pub(crate) mod test_helpers {
     }
 
     // This is the place where we choose _what_ we are interested in initialising.
-    impl<M: ManagerBase> ManagerTestInit for M
+    impl<M: Mode> ManagerTestInit for M
     where
         TestMachineOf<M>: ReinitMachine<M>,
     {

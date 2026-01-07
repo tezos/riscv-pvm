@@ -21,6 +21,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -31,7 +32,6 @@ use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -41,11 +41,11 @@ use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct PagePermissions<const PAGES: usize, M: ManagerBase> {
+pub struct PagePermissions<const PAGES: usize, M: Mode> {
     pages: Box<[Atom<bool, M>; PAGES]>,
 }
 
-impl<const PAGES: usize, M: ManagerBase> PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     /// Check if the memory at `address..address+length` can be accessed.
     ///
     /// # Safety
@@ -129,7 +129,7 @@ impl<const PAGES: usize> PagePermissions<PAGES, Normal> {
     }
 }
 
-impl<const PAGES: usize, M: ManagerBase> NewState<M> for PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: Mode> NewState<M> for PagePermissions<PAGES, M> {
     fn new() -> Self
     where
         M: ManagerAlloc,
@@ -163,7 +163,7 @@ impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, 
 
 impl<const PAGES: usize, M, F> Foldable<F> for PagePermissions<PAGES, M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<bool, M>: Foldable<F>,
 {

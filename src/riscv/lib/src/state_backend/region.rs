@@ -12,11 +12,11 @@ pub(crate) mod tests {
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_tree::MerkleTree;
+    use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use crate::default::ConstDefault;
-    use crate::state_backend::ManagerBase;
     use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
@@ -36,12 +36,12 @@ pub(crate) mod tests {
 
     #[test]
     fn test_struct_example() {
-        struct Foo<M: ManagerBase> {
+        struct Foo<M: Mode> {
             bar: Atom<u64, M>,
             qux: Atom<[u8; 64], M>,
         }
 
-        impl<F: Fold, M: ManagerBase> Foldable<F> for Foo<M>
+        impl<F: Fold, M: Mode> Foldable<F> for Foo<M>
         where
             Atom<u64, M>: Foldable<F>,
             Atom<[u8; 64], M>: Foldable<F>,

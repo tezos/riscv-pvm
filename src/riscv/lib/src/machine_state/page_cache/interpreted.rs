@@ -10,6 +10,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use octez_riscv_data::mode::Mode;
+
 use super::code_page_entry::CodePageEntry;
 use crate::exceptions::Exception;
 use crate::machine_state::MachineCoreState;
@@ -18,7 +20,6 @@ use crate::machine_state::instruction::Instruction;
 use crate::machine_state::memory::Address;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::router::RouterEq;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -47,7 +48,7 @@ pub struct Interpreted<MC, M> {
     _pd: PhantomData<(MC, M)>,
 }
 
-impl<MC: MemoryConfig, M: ManagerBase> CodePageEntry<MC, M> for Interpreted<MC, M> {
+impl<MC: MemoryConfig, M: Mode> CodePageEntry<MC, M> for Interpreted<MC, M> {
     type Compiler = InterpretedCompiler;
 
     type CompilerContext = ();

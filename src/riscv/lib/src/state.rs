@@ -4,19 +4,20 @@
 
 use std::array;
 
+use octez_riscv_data::mode::Mode;
+
 use crate::array_utils::boxed_from_fn;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 
 /// Methods for creating a new state without additional information
-pub trait NewState<M: ManagerBase> {
+pub trait NewState<M: Mode> {
     /// Create a new state.
     fn new() -> Self
     where
         M: ManagerAlloc;
 }
 
-impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for [T; LEN] {
+impl<T: NewState<M>, const LEN: usize, M: Mode> NewState<M> for [T; LEN] {
     fn new() -> Self
     where
         M: ManagerAlloc,
@@ -35,7 +36,7 @@ impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for [T; LEN] 
 //
 // This comes with a small trade-off, we loose out on the `Box<_>` implementation of `NewState`.
 // However, this is not a problem since we can always use `Box::new` independently.
-impl<T: NewState<M>, const LEN: usize, M: ManagerBase> NewState<M> for Box<[T; LEN]> {
+impl<T: NewState<M>, const LEN: usize, M: Mode> NewState<M> for Box<[T; LEN]> {
     fn new() -> Self
     where
         M: ManagerAlloc,

@@ -18,6 +18,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -36,7 +37,7 @@ use crate::state_context::projection::impl_projection;
 
 /// RISC-V hart state
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct HartState<M: backend::ManagerBase> {
+pub struct HartState<M: Mode> {
     /// Integer registers
     pub xregisters: registers::XRegisters<M>,
 
@@ -53,7 +54,7 @@ pub struct HartState<M: backend::ManagerBase> {
     pub reservation_set: ReservationSet<M>,
 }
 
-impl<M: backend::ManagerBase> HartState<M> {
+impl<M: Mode> HartState<M> {
     /// Reset the hart state.
     pub fn reset(&mut self, pc: Address)
     where
@@ -80,7 +81,7 @@ impl HartState<Normal> {
     }
 }
 
-impl<M: backend::ManagerBase> NewState<M> for HartState<M> {
+impl<M: Mode> NewState<M> for HartState<M> {
     fn new() -> Self
     where
         M: backend::ManagerAlloc,
@@ -107,7 +108,7 @@ impl<M: backend::ManagerClone> CloneState for HartState<M> {
     }
 }
 
-impl<M: backend::ManagerBase, F: Fold> Foldable<F> for HartState<M>
+impl<M: Mode, F: Fold> Foldable<F> for HartState<M>
 where
     registers::XRegisters<M>: Foldable<F>,
     registers::FRegisters<M>: Foldable<F>,

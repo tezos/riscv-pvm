@@ -18,6 +18,8 @@
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
+use octez_riscv_data::mode::Mode;
+
 use super::SupervisorState;
 use super::addr::PageAligned;
 use super::addr::VirtAddr;
@@ -34,7 +36,6 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::page_cache::PageCache;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -44,7 +45,7 @@ const STACK_PAGES: u64 = 0x2000;
 /// Maximum stack size in bytes
 pub const STACK_SIZE: u64 = PAGE_SIZE.get() * STACK_PAGES;
 
-impl<M: ManagerBase> SupervisorState<M> {
+impl<M: Mode> SupervisorState<M> {
     /// Handle `brk` system call.
     ///
     /// We do not allow moving the program break. This system call can only be used to query the

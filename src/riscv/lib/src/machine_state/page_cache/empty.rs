@@ -4,6 +4,8 @@
 
 //! A dummy version of the page cache for use in proof and verify modes.
 
+use octez_riscv_data::mode::Mode;
+
 use super::CodePage;
 use super::MachineCoreState;
 use super::PageCache;
@@ -13,14 +15,13 @@ use super::memory::Address;
 use super::memory::MemoryConfig;
 use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
 /// A page cache that does nothing. Used in proof and verify modes.
 pub struct EmptyPageCache;
 
-impl<MC: MemoryConfig, M: ManagerBase> PageCache<MC, M> for EmptyPageCache {
+impl<MC: MemoryConfig, M: Mode> PageCache<MC, M> for EmptyPageCache {
     fn new() -> Self {
         EmptyPageCache
     }
@@ -50,7 +51,7 @@ impl MemoryGovernanceListener for EmptyPageCache {
 
 enum NoCodePage {}
 
-impl<'a, MC: MemoryConfig, M: ManagerBase> CodePage<'a, MC, M> for NoCodePage {
+impl<'a, MC: MemoryConfig, M: Mode> CodePage<'a, MC, M> for NoCodePage {
     fn run(
         &mut self,
         _core: &mut MachineCoreState<MC, M>,

@@ -7,7 +7,6 @@ use std::ops::Bound;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerRead;
 
 pub mod pvm;
@@ -89,7 +88,7 @@ pub trait Stepper {
     type MemoryConfig: MemoryConfig;
 
     /// State backend with which the stepper was instantiated
-    type Manager: ManagerBase + ManagerRead;
+    type Manager: ManagerRead;
 
     /// Obtain a reference to the underlying machine state.
     fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager>;

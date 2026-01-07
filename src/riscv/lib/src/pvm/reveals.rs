@@ -17,6 +17,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -25,21 +26,20 @@ use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
 
 /// Request content of reveal
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct RevealRequest<M: ManagerBase> {
+pub struct RevealRequest<M: Mode> {
     /// Reveal request payload
     pub bytes: Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>,
     /// Size of reveal request payload
     pub size: Atom<u64, M>,
 }
 
-impl<M: ManagerBase> RevealRequest<M> {
+impl<M: Mode> RevealRequest<M> {
     /// Read the reveal request as a vector.
     pub fn to_vec(&self) -> Vec<u8>
     where
@@ -59,7 +59,7 @@ impl RevealRequest<Normal> {
     }
 }
 
-impl<M: ManagerBase> NewState<M> for RevealRequest<M> {
+impl<M: Mode> NewState<M> for RevealRequest<M> {
     fn new() -> Self
     where
         M: ManagerAlloc,
@@ -82,7 +82,7 @@ impl<M: ManagerClone> CloneState for RevealRequest<M> {
 
 impl<M, F> Foldable<F> for RevealRequest<M>
 where
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,

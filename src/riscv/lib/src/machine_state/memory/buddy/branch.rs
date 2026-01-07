@@ -19,6 +19,7 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
@@ -28,7 +29,6 @@ use super::Buddy;
 use super::BuddyConfig;
 use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
-use crate::state_backend::ManagerBase;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -60,7 +60,7 @@ pub struct FreeInfo {
 pub struct BuddyBranch2Config<B>(PhantomData<B>);
 
 impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
-    type Buddy<M: ManagerBase> = BuddyBranch2<B::Buddy<M>, M>;
+    type Buddy<M: Mode> = BuddyBranch2<B::Buddy<M>, M>;
 
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>> {
         BuddyBranch2 {
@@ -87,13 +87,13 @@ impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
 
 /// Branch in a Buddy-style memory manager tree
 #[perfect_derive(PartialEq, Eq)]
-pub struct BuddyBranch2<B, M: ManagerBase> {
+pub struct BuddyBranch2<B, M: Mode> {
     free_info: Atom<FreeInfo, M>,
     left: Box<B>,
     right: Box<B>,
 }
 
-impl<B: Buddy<M>, M: ManagerBase> BuddyBranch2<B, M> {
+impl<B: Buddy<M>, M: Mode> BuddyBranch2<B, M> {
     fn refresh(&mut self)
     where
         M: ManagerRead + ManagerWrite,
@@ -112,7 +112,7 @@ impl<B: Buddy<M>, M: ManagerBase> BuddyBranch2<B, M> {
 impl<B, M> NewState<M> for BuddyBranch2<B, M>
 where
     B: Buddy<M>,
-    M: ManagerBase,
+    M: Mode,
 {
     fn new() -> Self
     where
@@ -136,7 +136,7 @@ where
 impl<B, M> Buddy<M> for BuddyBranch2<B, M>
 where
     B: Buddy<M>,
-    M: ManagerBase,
+    M: Mode,
 {
     const PAGES: u64 = B::PAGES * 2;
 
@@ -329,7 +329,7 @@ impl<C, B: Decode<C>> Decode<C> for BuddyBranch2<B, Normal> {
 impl<B, M, F> Foldable<F> for BuddyBranch2<B, M>
 where
     B: Foldable<F>,
-    M: ManagerBase,
+    M: Mode,
     F: Fold,
     Atom<FreeInfo, M>: Foldable<F>,
 {
