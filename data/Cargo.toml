@@ -14,8 +14,8 @@ derive_more.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 perfect-derive.workspace = true
+trait-set.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-trait-set.workspace = true
 rand.workspace = true

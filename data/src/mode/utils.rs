@@ -7,6 +7,8 @@
 use std::ops::Deref;
 use std::panic::resume_unwind;
 
+use crate::components::atom::AtomMode;
+
 /// Source for a state component, either borrowed or owned
 ///
 /// We use this type to store the source version of the underlying proof data. Merkle tree proofs
@@ -125,4 +127,31 @@ pub fn catch_not_found_and_more<R, F: FnOnce() -> R + std::panic::UnwindSafe>(
             Err(other) => CaughtNotFoundOrPanic::Other(other),
         }),
     }
+}
+
+trait_set::trait_set! {
+    /// Mode for all tests
+    ///
+    /// Each state component comes with a small set of mode-constraining traits. When a component
+    /// is used in tests, it is best to mention those traits in this trait alias, so that they are
+    /// available to all tests.
+    pub trait TestMode = AtomMode;
+}
+
+/// Generate a test against all modes.
+#[macro_export]
+macro_rules! mode_test {
+    ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident, $expr:block) => {
+        $(#[$attr])*
+        #[test]
+        fn $fun_name() {
+            fn inner<$ty_name: $crate::mode::utils::TestMode>() {
+                $expr
+            }
+
+            inner::<$crate::mode::Normal>();
+            inner::<$crate::mode::Prove>();
+            inner::<$crate::mode::Verify>();
+        }
+    };
 }

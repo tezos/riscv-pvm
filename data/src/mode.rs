@@ -106,6 +106,3 @@ pub trait Modal {
     /// Representation in [`Verify`] mode
     type Verify;
 }
-
-#[cfg(test)]
-pub(crate) mod tests;
