@@ -30,7 +30,6 @@ mod tests {
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::nz;
-    use crate::state::NewState;
 
     backend_test!(test_cjr, F, {
         let scenarios = [
@@ -44,7 +43,7 @@ mod tests {
             ),
         ];
         for (init_pc, init_rs1, rs1, res_pc) in scenarios {
-            let mut state = MachineCoreState::<M4K, F>::new();
+            let mut state = MachineCoreState::<M4K, F>::default();
 
             // Test C.JR
             // save program counter and value for rs1.

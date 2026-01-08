@@ -30,6 +30,10 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::machine_state::backend;
+use crate::state_context::projection::AtomProj;
+use crate::state_context::projection::MachineCoreCons;
+use crate::state_context::projection::impl_projection;
+
 /// Executing a LR.x instructions registers a reservation set on the address
 /// from which data was loaded. The success of a SC.x instruction is conditional
 /// on there being a valid reservation which includes the word or doubleword
@@ -40,12 +44,7 @@ use crate::machine_state::backend;
 /// that a hart can only hold one reservation at a time, and that an SC can only
 /// pair with the most recent LR, and LR with the next following SC, in program
 /// order."
-use crate::state::NewState;
-use crate::state_context::projection::AtomProj;
-use crate::state_context::projection::MachineCoreCons;
-use crate::state_context::projection::impl_projection;
-
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
 pub struct ReservationSet<M: Mode> {
     pub(crate) start_addr: Atom<u64, M>,
 }
@@ -125,17 +124,6 @@ impl ReservationSet<Normal> {
     pub fn start_proof(&self) -> ReservationSet<Prove<'_>> {
         ReservationSet {
             start_addr: self.start_addr.start_proof(),
-        }
-    }
-}
-
-impl<M: Mode> NewState<M> for ReservationSet<M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        ReservationSet {
-            start_addr: Atom::default(),
         }
     }
 }

@@ -711,7 +711,6 @@ mod test {
     use crate::backend_test;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
-    use crate::state::NewState;
 
     #[test]
     fn test_rounding_mode_from_repr() {
@@ -739,7 +738,7 @@ mod test {
             r1_val in any::<u64>(),
             rm in rounding_mode_strategy(),
         )| {
-            let mut state = MachineCoreState::<M4K, F>::new();
+            let mut state = MachineCoreState::<M4K, F>::default();
 
             let fval = match rm {
                 InstrRoundingMode::Static(rm) => Double::from_u128_r(r1_val as u128, rm.into()),

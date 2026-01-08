@@ -31,7 +31,6 @@ use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::state::PageCacheImpl;
 use crate::machine_state::registers;
 use crate::program::Program;
-use crate::state::NewState;
 
 #[derive(Clone, Debug)]
 pub enum TestStepperResult {
@@ -104,8 +103,8 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> TestStepper<MC, PC> {
         program: &[u8],
     ) -> Result<(Self, BTreeMap<u64, String>), TestStepperError> {
         let mut stepper = Self {
-            posix_state: PosixState::<Normal>::new(),
-            machine_state: MachineState::new(),
+            posix_state: PosixState::<Normal>::default(),
+            machine_state: MachineState::default(),
         };
 
         // The interpreter needs a program to run.

@@ -59,7 +59,6 @@ use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -435,7 +434,7 @@ where
 }
 
 /// Linux supervisor state
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
 pub struct SupervisorState<M: Mode> {
     /// Thread lock address
     tid_address: Atom<VirtAddr, M>,
@@ -457,21 +456,6 @@ pub struct SupervisorState<M: Mode> {
 }
 
 impl<M: Mode> SupervisorState<M> {
-    /// Allocate a new supervisor state.
-    pub fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        SupervisorState {
-            tid_address: Atom::default(),
-            exited: false,
-            exit_code: 0,
-            program: Atom::default(),
-            heap: Atom::default(),
-            stack_guard: Atom::default(),
-        }
-    }
-
     /// Handle a Linux system call.
     pub fn handle_system_call<MC, PC>(
         &mut self,
@@ -1031,12 +1015,6 @@ impl SupervisorState<Normal> {
     }
 }
 
-impl<M: ManagerAlloc> Default for SupervisorState<M> {
-    fn default() -> Self {
-        SupervisorState::new()
-    }
-}
-
 impl<M: ManagerClone> CloneState for SupervisorState<M> {
     fn clone_state(&self) -> Self {
         Self {
@@ -1153,8 +1131,8 @@ mod tests {
         type MemLayout = M4K;
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get();
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::<F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::<F>::default();
 
         machine_state
             .core
@@ -1183,14 +1161,14 @@ mod tests {
     backend_test!(ppoll_init_fds, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
 
         for fd in [0i32, 1, 2] {
-            let mut supervisor_state = SupervisorState::<F>::new();
+            let mut supervisor_state = SupervisorState::<F>::default();
 
             let base_address = 0x10;
             machine_state
@@ -1246,13 +1224,13 @@ mod tests {
     backend_test!(rt_sigaction_with_handler, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
 
-        let mut supervisor_state = SupervisorState::<F>::new();
+        let mut supervisor_state = SupervisorState::<F>::default();
 
         // The handler being stored will be written to this address
         let action = VirtAddr::new(0x20);
@@ -1369,13 +1347,13 @@ mod tests {
     backend_test!(rt_sigaction_ignore, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
 
-        let mut supervisor_state = SupervisorState::<F>::new();
+        let mut supervisor_state = SupervisorState::<F>::default();
 
         let mut do_ignore = |signal: Signal| {
             // Write the initial stack pointer and program counter.
@@ -1474,8 +1452,8 @@ mod tests {
     backend_test!(sigaltstack_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::<F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::<F>::default();
 
         // System call number
         machine_state
@@ -1504,8 +1482,8 @@ mod tests {
     backend_test!(sched_getaffinity_set_sizes, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::<F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::<F>::default();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
@@ -1582,8 +1560,8 @@ mod tests {
     backend_test!(sched_getaffinity_zero_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::default();
 
         // Mask pointer (must be non-zero)
         let mask_address = VirtAddr::new(0x100);
@@ -1631,8 +1609,8 @@ mod tests {
     backend_test!(sched_getaffinity_unreasonable_set_size, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::default();
 
         // Mask pointer (must be non-zero)
         let mask_address = VirtAddr::new(0x100);
@@ -1698,8 +1676,8 @@ mod tests {
     backend_test!(rt_sigaction_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::default();
 
         // System call number
         machine_state
@@ -1747,8 +1725,8 @@ mod tests {
     backend_test!(rt_sigprocmask_zero_parameter, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
-        let mut supervisor_state = SupervisorState::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
+        let mut supervisor_state = SupervisorState::default();
 
         // System call number
         machine_state
@@ -1796,13 +1774,13 @@ mod tests {
     backend_test!(clock_gettime_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
 
-        let mut supervisor_state = SupervisorState::new();
+        let mut supervisor_state = SupervisorState::default();
 
         // System call number
         machine_state
@@ -1859,13 +1837,13 @@ mod tests {
     backend_test!(gettimeofday_fills_with_zeros, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Make sure everything is readable and writable. Otherwise, we'd get access faults.
         machine_state.set_all_readable_writeable();
 
-        let mut supervisor_state = SupervisorState::new();
+        let mut supervisor_state = SupervisorState::default();
 
         // System call number
         machine_state
@@ -1939,7 +1917,7 @@ mod tests {
     backend_test!(mmap_returns_enomem_when_allocation_fails, F, {
         type MemLayout = M4K;
 
-        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::new();
+        let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
         machine_state.reset();
 
         // Allocate all memory to ensure subsequent allocations will fail
@@ -1954,7 +1932,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut supervisor_state = SupervisorState::new();
+        let mut supervisor_state = SupervisorState::default();
 
         // Set up necessary registers for mmap
         machine_state

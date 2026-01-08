@@ -61,7 +61,6 @@ use crate::pvm::linux::signals::SignalActions;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
-use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -203,15 +202,12 @@ where
 pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
     NonZeroU64::new(16).expect("Alignment must be non-zero");
 
-impl<MC: memory::MemoryConfig, M: Mode> NewState<M> for MachineCoreState<MC, M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
+impl<MC: memory::MemoryConfig, M: backend::ManagerAlloc> Default for MachineCoreState<MC, M> {
+    fn default() -> Self {
         Self {
-            hart: HartState::new(),
-            main_memory: NewState::new(),
-            signal_actions: SignalActions::new(),
+            hart: HartState::default(),
+            main_memory: Memory::default(),
+            signal_actions: SignalActions::default(),
         }
     }
 }
@@ -424,22 +420,14 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerAlloc> D
     for MachineState<MC, PC, M>
 {
     fn default() -> Self {
-        Self::new()
+        Self {
+            core: MachineCoreState::default(),
+            page_cache: PC::new(),
+        }
     }
 }
 
 impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
-    /// Allocate a new machine state.
-    pub fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        Self {
-            core: MachineCoreState::new(),
-            page_cache: PC::new(),
-        }
-    }
-
     /// Reset the machine state.
     pub fn reset(&mut self)
     where
@@ -893,7 +881,7 @@ pub(crate) mod test_helpers {
 
     impl<'normal> ReinitMachine<Prove<'normal>> for TestMachineOf<Prove<'normal>> {
         fn reinit_machine_state(_dirty_state: RefMut<Self>) -> RefMutOrOwned<Self> {
-            let new_state = MachineState::new();
+            let new_state = MachineState::default();
             RefMutOrOwned::Owned(new_state)
         }
     }
@@ -955,7 +943,7 @@ mod tests {
     use crate::pvm::linux::signals::SignalError;
 
     backend_test!(test_step, F, {
-        let state = TestMachineOf::<F>::new();
+        let state = TestMachineOf::<F>::default();
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -1008,7 +996,7 @@ mod tests {
     });
 
     backend_test!(test_step_env_exc, F, {
-        let state = TestMachineOf::<F>::new();
+        let state = TestMachineOf::<F>::default();
 
         let state_cell = std::cell::RefCell::new(state);
 
@@ -1034,7 +1022,7 @@ mod tests {
     });
 
     backend_test!(test_step_access_exception, F, {
-        let state = TestMachineOf::<F>::new();
+        let state = TestMachineOf::<F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -1059,7 +1047,7 @@ mod tests {
     #[test]
     fn test_page_cache_state() {
         let base_state = {
-            let mut state = Pvm::<M64M, PageCacheInterpreted<_>, Normal>::new();
+            let mut state = Pvm::<M64M, PageCacheInterpreted<_>, Normal>::default();
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
@@ -1141,7 +1129,7 @@ mod tests {
 
     // Ensure that cloning the machine state does not result in a stack overflow
     backend_test!(test_machine_state_cloneable, F, {
-        let state = MachineState::<M1M, EmptyPageCache, F>::new();
+        let state = MachineState::<M1M, EmptyPageCache, F>::default();
 
         let second = state.clone();
 
@@ -1171,7 +1159,7 @@ mod tests {
                         write_upper: bool,
                         expected_pc: Address,
                         succeeds: bool| {
-            let mut state = MachineState::<M8K, PageCacheInterpreted<_>, Normal>::new();
+            let mut state = MachineState::<M8K, PageCacheInterpreted<_>, Normal>::default();
 
             state.core.hart.pc.write(initial_pc);
 
@@ -1243,7 +1231,7 @@ mod tests {
     }
 
     backend_test!(test_signal_context, F, {
-        let mut state = MachineState::<M4K, EmptyPageCache, F>::new();
+        let mut state = MachineState::<M4K, EmptyPageCache, F>::default();
 
         state.reset();
         state.set_all_readable_writeable();
@@ -1262,7 +1250,7 @@ mod tests {
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
     backend_test!(test_signal_index_fix, F, {
-        let mut state = MachineState::<M4K, EmptyPageCache, F>::new();
+        let mut state = MachineState::<M4K, EmptyPageCache, F>::default();
 
         state.reset();
         state.set_all_readable_writeable();

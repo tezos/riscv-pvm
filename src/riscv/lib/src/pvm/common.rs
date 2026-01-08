@@ -47,7 +47,6 @@ use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
-use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofTree;
@@ -122,20 +121,10 @@ where
     M: state_backend::ManagerAlloc,
 {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
-    /// Allocate a new PVM.
-    pub fn new() -> Self
-    where
-        M: state_backend::ManagerAlloc,
-    {
         Self {
-            machine_state: machine_state::MachineState::new(),
-            reveal_request: RevealRequest::new(),
-            system_state: linux::SupervisorState::new(),
+            machine_state: machine_state::MachineState::default(),
+            reveal_request: RevealRequest::default(),
+            system_state: linux::SupervisorState::default(),
             version: Atom::new(INITIAL_VERSION),
             status: Atom::default(),
             tick: Atom::default(),
@@ -144,7 +133,9 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
             level_is_set: Atom::default(),
         }
     }
+}
 
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Reset the PVM.
     pub fn reset(&mut self)
     where
@@ -594,7 +585,7 @@ mod tests {
         type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, Normal>::new();
+        let mut pvm = Pvm::<MC, PC, Normal>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -700,7 +691,7 @@ mod tests {
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, PC, Normal>::new();
+            let mut pvm = Pvm::<MC, PC, Normal>::default();
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -745,7 +736,7 @@ mod tests {
         type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -815,7 +806,7 @@ mod tests {
         type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

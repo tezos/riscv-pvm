@@ -58,7 +58,6 @@ use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
-use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -427,12 +426,6 @@ impl<MC: MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     }
 }
 
-impl<M: ManagerAlloc> Default for SignalActions<M> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<M: Mode> SignalActions<M> {
     /// Reset to the default state
     pub fn reset(&mut self)
@@ -458,12 +451,8 @@ impl SignalActions<Normal> {
     }
 }
 
-impl<M: Mode> NewState<M> for SignalActions<M> {
-    /// Allocate a new [SignalActions]
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
+impl<M: ManagerAlloc> Default for SignalActions<M> {
+    fn default() -> Self {
         SignalActions::<M> {
             actions: core::array::from_fn(|_| Atom::new(VirtAddr::new(0))),
             flags: core::array::from_fn(|_| Atom::new(0u32)),
@@ -888,7 +877,7 @@ mod tests {
         type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::default();
 
         pvm.machine_state.reset();
 
@@ -965,7 +954,7 @@ mod tests {
         type PC = EmptyPageCache;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::new();
+        let mut pvm = Pvm::<MC, PC, F>::default();
 
         pvm.machine_state.reset();
 

@@ -24,7 +24,7 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
 use crate::pvm::linux;
-use crate::state::NewState;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -213,7 +213,12 @@ impl From<BadMemoryAccess> for SbiError {
 pub struct MemoryGovernanceError;
 
 /// Instance of memory
-pub trait Memory<M: Mode>: NewState<M> + Sized {
+pub trait Memory<M: Mode>: Sized {
+    /// Create a new memory instance.
+    fn default() -> Self
+    where
+        M: ManagerAlloc;
+
     /// Read an element in the region. `address` is in bytes.
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where

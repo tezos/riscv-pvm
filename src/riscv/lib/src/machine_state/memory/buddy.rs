@@ -31,7 +31,7 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyConfigProxy;
 
-use crate::state::NewState;
+use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerSerialise;
@@ -50,9 +50,14 @@ pub trait BuddyConfig: 'static {
 }
 
 /// Buddy-style memory manager
-pub trait Buddy<M: Mode>: NewState<M> {
+pub trait Buddy<M: Mode> {
     /// Number of pages being managed
     const PAGES: u64;
+
+    /// Create a new Buddy-style memory manager.
+    fn default() -> Self
+    where
+        M: ManagerAlloc;
 
     /// Allocate a number of pages. Returns the index of the first page in the allocated range.
     fn allocate(&mut self, pages: u64) -> Option<u64>
@@ -127,7 +132,7 @@ mod tests {
     backend_test!(buddy_alloc_only, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
-        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::new();
+        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
 
         let total_pages = state.longest_free_sequence();
 
@@ -151,7 +156,7 @@ mod tests {
     backend_test!(buddy_alloc_dealloc, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
-        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::new();
+        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
 
         let total_pages = state.longest_free_sequence();
 
@@ -185,7 +190,7 @@ mod tests {
     backend_test!(buddy_alloc_fixed, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
-        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::new();
+        let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
 
         // Create a distribution of allocation sizes that when used together would allocate all
         // available memory

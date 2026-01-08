@@ -27,7 +27,6 @@ use perfect_derive::perfect_derive;
 
 use super::Buddy;
 use super::BuddyConfig;
-use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -109,12 +108,14 @@ impl<B: Buddy<M>, M: Mode> BuddyBranch2<B, M> {
     }
 }
 
-impl<B, M> NewState<M> for BuddyBranch2<B, M>
+impl<B, M> Buddy<M> for BuddyBranch2<B, M>
 where
     B: Buddy<M>,
     M: Mode,
 {
-    fn new() -> Self
+    const PAGES: u64 = B::PAGES * 2;
+
+    fn default() -> Self
     where
         M: ManagerAlloc,
     {
@@ -127,18 +128,10 @@ where
                 right_free_start: B::PAGES,
                 right_free_end: B::PAGES,
             }),
-            left: Box::new(B::new()),
-            right: Box::new(B::new()),
+            left: Box::new(B::default()),
+            right: Box::new(B::default()),
         }
     }
-}
-
-impl<B, M> Buddy<M> for BuddyBranch2<B, M>
-where
-    B: Buddy<M>,
-    M: Mode,
-{
-    const PAGES: u64 = B::PAGES * 2;
 
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where

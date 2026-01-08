@@ -327,7 +327,6 @@ mod tests {
     use crate::parser::instruction::InstrRoundingMode;
     use crate::parser::instruction::InstrWidth;
     use crate::parser::instruction::InstrWidth::*;
-    use crate::state::NewState;
 
     type SetupHook = dyn Fn(&mut MachineCoreState<M4K, Normal>);
     type AssertHook = dyn Fn(&MachineCoreState<M4K, Normal>);
@@ -472,13 +471,13 @@ mod tests {
 
             // Create the states for the interpreted and jitted runs.
             let mut interpreted_state: TestMachineState<PageCacheInterpreted<_>> =
-                MachineState::new();
+                MachineState::default();
             interpreted_state
                 .core
                 .main_memory
                 .set_all_readable_writeable(NoopMemoryGovernanceListener);
 
-            let mut jitted_state: TestMachineState<PageCacheInlineJit<_>> = MachineState::new();
+            let mut jitted_state: TestMachineState<PageCacheInlineJit<_>> = MachineState::default();
             jitted_state
                 .core
                 .main_memory
@@ -2075,7 +2074,7 @@ mod tests {
         for failure in failure_scenarios.iter() {
             let mut jit = JIT::new().unwrap();
 
-            let mut jitted = MachineCoreState::<M4K, _>::new();
+            let mut jitted = MachineCoreState::<M4K, _>::default();
 
             let initial_pc = 0;
             jitted.hart.pc.write(initial_pc);

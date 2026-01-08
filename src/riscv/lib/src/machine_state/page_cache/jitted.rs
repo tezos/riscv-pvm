@@ -165,7 +165,6 @@ mod tests {
     use crate::machine_state::page_cache::InlineCompiler;
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::parser::instruction::InstrWidth;
-    use crate::state::NewState;
 
     /// An arbitrary number of steps to use for testing.
     const DEFAULT_TEST_MAX_STEPS: usize = 40;
@@ -177,7 +176,7 @@ mod tests {
             |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
         );
 
-        let mut core = MachineCoreState::new();
+        let mut core = MachineCoreState::default();
 
         let result = CodePageEntry::run_entrypoint(&page, &mut core, 100, DEFAULT_TEST_MAX_STEPS);
 
@@ -202,7 +201,7 @@ mod tests {
                 |_| Ok(Instruction::new_nop(InstrWidth::Compressed)),
             );
 
-            let mut core = MachineCoreState::new();
+            let mut core = MachineCoreState::default();
 
             let expected_steps = max_steps;
             let start_pc = 100;
@@ -230,7 +229,7 @@ mod tests {
             |_| Ok(Instruction::new_fence_i()),
         );
 
-        let mut core = MachineCoreState::new();
+        let mut core = MachineCoreState::default();
 
         let max_steps = DEFAULT_TEST_MAX_STEPS;
 
@@ -271,7 +270,7 @@ mod tests {
             },
         );
 
-        let mut core = MachineCoreState::new();
+        let mut core = MachineCoreState::default();
 
         // Run Noops only
         let result = CodePageEntry::run_entrypoint(&page, &mut core, 0, DEFAULT_TEST_MAX_STEPS);

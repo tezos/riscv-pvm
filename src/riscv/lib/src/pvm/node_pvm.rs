@@ -24,7 +24,6 @@ use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
-use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::storage;
@@ -42,7 +41,7 @@ type NodePvmPageCache = PageCacheInterpreted<NodePvmMemConfig>;
 
 type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
 
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, Default)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
 pub struct NodePvm<M: Mode = Normal, PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache> {
@@ -163,7 +162,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
 impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
     /// Construct an empty PVM state.
     pub fn empty() -> Self {
-        Self::new()
+        Self::default()
     }
 
     /// Compute the root hash of the PVM state.
@@ -232,17 +231,6 @@ impl PartialEq for NodePvm {
 }
 
 impl Eq for NodePvm {}
-
-impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NewState<M> for NodePvm<M, PC> {
-    fn new() -> Self
-    where
-        M: state_backend::ManagerAlloc,
-    {
-        Self {
-            state: Box::new(NodePvmState::<M, PC>::new()),
-        }
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum PvmStorageError {

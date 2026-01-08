@@ -27,7 +27,6 @@ use super::Buddy;
 use super::BuddyConfig;
 use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Config;
-use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -103,25 +102,19 @@ macro_rules! combined_buddy_branch {
             }
         }
 
-        impl<B, M> NewState<M> for $name<B, M>
-        where
-            B: Buddy<M>,
-            M: Mode,
-        {
-            fn new() -> Self
-            where
-                M: ManagerAlloc,
-            {
-                Self(NewState::new())
-            }
-        }
-
         impl<B, M> Buddy<M> for $name<B, M>
         where
             B: Buddy<M>,
             M: Mode,
         {
             const PAGES: u64 = <$buddy1<$buddy2<B, M>, M> as Buddy<M>>::PAGES;
+
+            fn default() -> Self
+            where
+                M: ManagerAlloc,
+            {
+                Self(Buddy::default())
+            }
 
             fn allocate(&mut self, pages: u64) -> Option<u64>
             where
