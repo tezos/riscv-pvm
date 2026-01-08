@@ -32,6 +32,8 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -247,7 +249,9 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineC
     }
 }
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerSerialise> Encode for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: EncodeAtomMode + EncodeDataSpaceMode> Encode
+    for MachineCoreState<MC, M>
+{
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.hart.encode(encoder)?;
         self.main_memory.encode(encoder)?;
@@ -330,7 +334,7 @@ impl<MC, PC, M> Encode for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: backend::ManagerSerialise,
+    M: EncodeAtomMode + EncodeDataSpaceMode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.core.encode(encoder)

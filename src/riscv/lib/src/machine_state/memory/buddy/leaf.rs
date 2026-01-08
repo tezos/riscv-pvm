@@ -11,6 +11,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -30,7 +31,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Config for a leaf of a tree that forms a Buddy-style memory manager
@@ -197,13 +197,13 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
-        M: ManagerSerialise,
+        M: EncodeAtomMode,
     {
         Encode::encode(self, encoder)
     }
 }
 
-impl<const PAGES: u64, M: ManagerSerialise> Encode for BuddyLeaf<PAGES, M> {
+impl<const PAGES: u64, M: EncodeAtomMode> Encode for BuddyLeaf<PAGES, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.set.encode(encoder)
     }

@@ -23,6 +23,7 @@ mod leaf;
 mod proxy;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
@@ -34,7 +35,6 @@ pub use proxy::BuddyConfigProxy;
 use crate::state::NewState;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Configuration for a Buddy-style memory manager
@@ -93,7 +93,7 @@ pub trait Buddy<M: Mode>: NewState<M> {
     /// Serialise the memory manager state.
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
-        M: ManagerSerialise;
+        M: EncodeAtomMode;
 }
 
 #[cfg(test)]

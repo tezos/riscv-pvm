@@ -17,6 +17,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -167,7 +168,7 @@ impl FromProof for ReservationSet<Verify> {
     }
 }
 
-impl<M: backend::ManagerSerialise> Encode for ReservationSet<M> {
+impl<M: EncodeAtomMode> Encode for ReservationSet<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.start_addr.encode(encoder)?;
         Ok(())

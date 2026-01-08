@@ -10,6 +10,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -28,7 +29,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 
 /// Request content of reveal
 #[perfect_derive(Clone, PartialEq, Eq)]
@@ -106,7 +106,7 @@ impl FromProof for RevealRequest<Verify> {
     }
 }
 
-impl<M: ManagerSerialise> Encode for RevealRequest<M> {
+impl<M: EncodeAtomMode> Encode for RevealRequest<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.bytes.encode(encoder)?;
         self.size.encode(encoder)?;

@@ -13,6 +13,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
@@ -34,7 +35,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::NarrowlySized;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
@@ -155,7 +155,7 @@ impl<C, const PAGES: usize> Decode<C> for PagePermissions<PAGES, Normal> {
     }
 }
 
-impl<const PAGES: usize, M: ManagerSerialise> Encode for PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: EncodeAtomMode> Encode for PagePermissions<PAGES, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.pages.encode(encoder)
     }

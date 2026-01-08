@@ -11,6 +11,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -147,7 +148,7 @@ impl FromProof for HartState<Verify> {
     }
 }
 
-impl<M: backend::ManagerSerialise> Encode for HartState<M> {
+impl<M: EncodeAtomMode> Encode for HartState<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.xregisters.encode(encoder)?;
         self.fregisters.encode(encoder)?;

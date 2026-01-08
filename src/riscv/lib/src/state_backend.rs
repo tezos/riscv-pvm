@@ -35,10 +35,8 @@ pub mod verify_backend;
 pub use elems::*;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
-use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
-use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 pub use proof_layout::*;
 use trait_set::trait_set;
 
@@ -54,9 +52,6 @@ trait_set! {
 
     /// Manager with write capabilities
     pub trait ManagerWrite = AtomMode + DataSpaceMode;
-
-    /// Manager with the ability to serialise regions
-    pub trait ManagerSerialise = EncodeAtomMode + EncodeDataSpaceMode;
 
     /// Manager with the ability to clone regions
     pub trait ManagerClone = CloneAtomMode + CloneDataSpaceMode;

@@ -13,6 +13,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
@@ -31,7 +32,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Generate a new combined Buddy branch.
@@ -48,7 +48,7 @@ macro_rules! combined_buddy_branch {
             impl<B, M> Encode for [<$name Alloc>]<B, M>
             where
                 B: BuddyConfig,
-                M: ManagerSerialise,
+                M: EncodeAtomMode,
                 <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>: Encode,
             {
 
@@ -91,7 +91,7 @@ macro_rules! combined_buddy_branch {
         #[perfect_derive::perfect_derive(PartialEq, Eq)]
         pub struct $name<B, M: Mode>($buddy1<$buddy2<B, M>, M>);
 
-        impl<B: Buddy<M>, M: ManagerSerialise> Encode for $name<B, M> {
+        impl<B: Buddy<M>, M: EncodeAtomMode> Encode for $name<B, M> {
             fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
                 Buddy::encode(&self.0, encoder)
             }
@@ -174,7 +174,7 @@ macro_rules! combined_buddy_branch {
 
             fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
             where
-                M: ManagerSerialise,
+                M: EncodeAtomMode,
             {
                 Encode::encode(self, encoder)
             }
