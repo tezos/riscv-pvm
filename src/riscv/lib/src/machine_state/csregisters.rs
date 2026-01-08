@@ -16,6 +16,7 @@ use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -408,7 +409,7 @@ impl FromProof for CSRegisters<Verify> {
     }
 }
 
-impl<M: backend::ManagerSerialise> Encode for CSRegisters<M> {
+impl<M: EncodeAtomMode> Encode for CSRegisters<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.fflags.encode(encoder)?;
         self.frm.encode(encoder)?;

@@ -13,6 +13,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -31,7 +32,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Information about what is free in each buddy
@@ -301,13 +301,13 @@ where
 
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
-        M: ManagerSerialise,
+        M: EncodeAtomMode,
     {
         Encode::encode(self, encoder)
     }
 }
 
-impl<B: Buddy<M>, M: ManagerSerialise> Encode for BuddyBranch2<B, M> {
+impl<B: Buddy<M>, M: EncodeAtomMode> Encode for BuddyBranch2<B, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.free_info.encode(encoder)?;
         self.left.encode(encoder)?;

@@ -17,6 +17,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -62,7 +63,6 @@ use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Errors relating to handling signals
@@ -253,7 +253,7 @@ impl FromProof for SignalActions<Verify> {
     }
 }
 
-impl<M: ManagerSerialise> Encode for SignalActions<M> {
+impl<M: EncodeAtomMode> Encode for SignalActions<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.actions.encode(encoder)?;
         self.flags.encode(encoder)?;

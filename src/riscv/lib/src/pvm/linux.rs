@@ -25,6 +25,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -62,7 +63,6 @@ use crate::pvm::linux::signals::Signal;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerSerialise;
 use crate::state_backend::ManagerWrite;
 
 /// Thread identifier for the main thread
@@ -1087,7 +1087,7 @@ impl FromProof for SupervisorState<Verify> {
     }
 }
 
-impl<M: ManagerSerialise> Encode for SupervisorState<M> {
+impl<M: EncodeAtomMode> Encode for SupervisorState<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.tid_address.encode(encoder)?;
         self.program.encode(encoder)?;
