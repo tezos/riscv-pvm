@@ -14,6 +14,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -29,7 +30,6 @@ use super::Buddy;
 use super::BuddyConfig;
 use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Config;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -160,7 +160,7 @@ macro_rules! combined_buddy_branch {
 
             fn clone_state(&self) -> Self
             where
-                M: ManagerClone,
+                M: CloneAtomMode,
             {
                 $name(self.0.clone_state())
             }

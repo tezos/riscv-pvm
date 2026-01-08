@@ -11,6 +11,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -81,7 +82,7 @@ impl HartState<Normal> {
     }
 }
 
-impl<M: backend::ManagerClone> CloneState for HartState<M> {
+impl<M: CloneAtomMode> CloneState for HartState<M> {
     fn clone_state(&self) -> Self {
         Self {
             xregisters: self.xregisters.clone_state(),

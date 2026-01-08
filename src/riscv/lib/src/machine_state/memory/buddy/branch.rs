@@ -14,6 +14,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -29,7 +30,6 @@ use perfect_derive::perfect_derive;
 
 use super::Buddy;
 use super::BuddyConfig;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -283,7 +283,7 @@ where
 
     fn clone_state(&self) -> Self
     where
-        M: ManagerClone,
+        M: CloneAtomMode,
     {
         Self {
             free_info: self.free_info.clone(),

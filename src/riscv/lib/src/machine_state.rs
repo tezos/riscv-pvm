@@ -33,7 +33,9 @@ use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
@@ -227,7 +229,9 @@ impl<MC: memory::MemoryConfig> MachineCoreState<MC, Normal> {
     }
 }
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> Clone
+    for MachineCoreState<MC, M>
+{
     fn clone(&self) -> Self {
         Self {
             hart: self.hart.clone(),
@@ -237,7 +241,9 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
     }
 }
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerClone> CloneState for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> CloneState
+    for MachineCoreState<MC, M>
+{
     fn clone_state(&self) -> Self {
         Self {
             hart: self.hart.clone_state(),
@@ -279,7 +285,7 @@ pub struct MachineState<MC: memory::MemoryConfig, PC, M: Mode> {
     pub page_cache: PC,
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> Clone
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode> Clone
     for MachineState<MC, PC, M>
 {
     // TODO: RV-806: implement Clone on PageCache
@@ -301,8 +307,8 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> MachineState<MC, PC, N
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerClone> CloneState
-    for MachineState<MC, PC, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode>
+    CloneState for MachineState<MC, PC, M>
 {
     fn clone_state(&self) -> Self {
         Self {

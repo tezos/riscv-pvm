@@ -18,6 +18,7 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -60,7 +61,6 @@ use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -149,7 +149,7 @@ impl Elem for LinuxSigAction {
 // used for the member's type.
 
 /// Information to support handling each supported signal
-#[perfect_derive(PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq)]
 pub struct SignalActions<M: Mode> {
     /// An array of [VirtAddr]s, one action for each supported signal
     actions: [Atom<VirtAddr, M>; SignalIndex::COUNT],
@@ -463,19 +463,7 @@ impl<M: AtomMode> Default for SignalActions<M> {
     }
 }
 
-impl<M: ManagerClone> Clone for SignalActions<M> {
-    fn clone(&self) -> Self {
-        SignalActions::<M> {
-            actions: self.actions.clone(),
-            flags: self.flags.clone(),
-            restorer: self.restorer.clone(),
-            masks: self.masks.clone(),
-            thread_mask: self.thread_mask.clone(),
-        }
-    }
-}
-
-impl<M: ManagerClone> CloneState for SignalActions<M> {
+impl<M: CloneAtomMode> CloneState for SignalActions<M> {
     fn clone_state(&self) -> Self {
         Self {
             actions: self.actions.clone_state(),

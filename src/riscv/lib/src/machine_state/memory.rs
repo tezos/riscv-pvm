@@ -15,7 +15,9 @@ use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use listener::MemoryGovernanceListener;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::merkle_proof;
@@ -28,7 +30,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
 use crate::pvm::linux;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -254,7 +255,7 @@ pub trait Memory<M: Mode>: Sized {
     /// Clone the persistent memory state.
     fn clone_state(&self) -> Self
     where
-        M: ManagerClone;
+        M: CloneAtomMode + CloneDataSpaceMode;
 
     /// Zero-out all memory.
     fn reset(&mut self, listener: impl MemoryGovernanceListener)
