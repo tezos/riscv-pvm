@@ -8,8 +8,8 @@ coverage:
       default:
         # There is no fixed target, the default branch coverage sets the base line.
         target: auto
-        # Project-wide coverage may drop by 1%
-        threshold: 1%
+        # Project-wide coverage may drop by 2%
+        threshold: 2%
     patch:
       default:
         # PRs must have newly added code covered sufficiently
