@@ -24,6 +24,7 @@ mod proxy;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::SuspendedResult;
@@ -33,7 +34,6 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyConfigProxy;
 
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -93,7 +93,7 @@ pub trait Buddy<M: Mode> {
     /// Clone the persistent state of the memory manager.
     fn clone_state(&self) -> Self
     where
-        M: ManagerClone;
+        M: CloneAtomMode;
 
     /// Serialise the memory manager state.
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>

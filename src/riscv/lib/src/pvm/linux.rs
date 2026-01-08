@@ -25,6 +25,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -60,7 +61,6 @@ use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -1015,7 +1015,7 @@ impl SupervisorState<Normal> {
     }
 }
 
-impl<M: ManagerClone> CloneState for SupervisorState<M> {
+impl<M: CloneAtomMode> CloneState for SupervisorState<M> {
     fn clone_state(&self) -> Self {
         Self {
             tid_address: self.tid_address.clone_state(),

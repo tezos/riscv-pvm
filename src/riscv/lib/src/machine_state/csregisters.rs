@@ -16,6 +16,7 @@ use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -361,7 +362,7 @@ impl CSRegisters<Normal> {
     }
 }
 
-impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
+impl<M: CloneAtomMode> CloneState for CSRegisters<M> {
     fn clone_state(&self) -> Self {
         Self {
             fflags: self.fflags.clone_state(),

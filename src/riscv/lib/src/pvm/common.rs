@@ -16,7 +16,9 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
@@ -52,7 +54,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -379,7 +380,9 @@ where
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerClone> CloneState for Pvm<MC, PC, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode> CloneState
+    for Pvm<MC, PC, M>
+{
     fn clone_state(&self) -> Self {
         Self {
             machine_state: self.machine_state.clone_state(),

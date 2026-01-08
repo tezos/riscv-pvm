@@ -9,6 +9,8 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::CloneAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
@@ -39,7 +41,6 @@ use crate::pvm::PvmStatus;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::OwnedProofPart;
@@ -242,7 +243,7 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerRead + Manag
     /// Re-bind the PVM type by cloning the underlying regions.
     pub fn rebind_via_clone(&mut self)
     where
-        M: ManagerClone,
+        M: CloneAtomMode + CloneDataSpaceMode,
     {
         self.pvm = self.pvm.clone_state();
     }

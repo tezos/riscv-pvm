@@ -34,8 +34,6 @@ pub mod verify_backend;
 
 pub use elems::*;
 use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::atom::CloneAtomMode;
-use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 pub use proof_layout::*;
 use trait_set::trait_set;
@@ -46,16 +44,14 @@ trait_set! {
 
     /// Manager with write capabilities
     pub trait ManagerWrite = AtomMode + DataSpaceMode;
-
-    /// Manager with the ability to clone regions
-    pub trait ManagerClone = CloneAtomMode + CloneDataSpaceMode;
 }
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::components::atom::CloneAtomMode;
+    use octez_riscv_data::components::data_space::CloneDataSpaceMode;
     use trait_set::trait_set;
 
-    use super::ManagerClone;
     use super::ManagerRead;
     use super::ManagerWrite;
     use crate::machine_state::test_helpers::ManagerTestInit;
@@ -89,7 +85,8 @@ pub(crate) mod test_helpers {
         /// Used for testing.
         pub trait TestBackendFactory = ManagerRead
             + ManagerWrite
-            + ManagerClone
+            + CloneAtomMode
+            + CloneDataSpaceMode
             + ManagerTestInit
             ;
     }

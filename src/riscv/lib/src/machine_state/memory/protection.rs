@@ -14,6 +14,7 @@ use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -32,7 +33,6 @@ use perfect_derive::perfect_derive;
 use super::Address;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
-use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 use crate::state_backend::NarrowlySized;
@@ -136,7 +136,7 @@ impl<const PAGES: usize, M: AtomMode> Default for PagePermissions<PAGES, M> {
     }
 }
 
-impl<const PAGES: usize, M: ManagerClone> CloneState for PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: CloneAtomMode> CloneState for PagePermissions<PAGES, M> {
     fn clone_state(&self) -> Self {
         Self {
             pages: self.pages.clone_state(),
