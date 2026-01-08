@@ -36,14 +36,11 @@
 //! [Prove]: octez_riscv_data::mode::Prove
 
 mod elems;
-pub mod normal_backend;
 pub mod proof_backend;
 pub(crate) mod proof_layout;
 mod region;
 pub mod verify_backend;
 
-use bincode::enc::Encoder;
-use bincode::error::EncodeError;
 pub use elems::*;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -52,137 +49,30 @@ use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::mode::Mode;
-use octez_riscv_data::serialisation::elem::Elem;
 pub use proof_layout::*;
+use trait_set::trait_set;
 
-/// Manager of the state backend storage
-pub trait ManagerBase: Mode + Sized {
-    /// Dynamic region represents a fixed-sized byte vector that has been allocated in the state storage
-    type DynRegion;
-}
+trait_set! {
+    /// Manager of the state backend storage
+    pub trait ManagerBase = Mode + Sized;
 
-/// Manager with allocation capabilities
-///
-/// Any `ManagerAlloc` inherently has read & write capabilities,
-/// since the manager creates the values on the first allocation.
-pub trait ManagerAlloc: ManagerRead + ManagerWrite {
-    /// Allocate a dynamic region in the state storage.
-    fn allocate_dyn_region(len: usize) -> Self::DynRegion;
-}
-
-/// Manager with read capabilities
-pub trait ManagerRead: ManagerBase + AtomMode + DataSpaceMode {
-    /// Read the length of the dynamic region in bytes.
-    fn dyn_region_len(region: &Self::DynRegion) -> usize;
-
-    /// Read an element in the region. `address` is in bytes.
+    /// Manager with allocation capabilities
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure the access is within bounds.
-    ///
-    /// ```text
-    /// address + E:STORED <= region.len()
-    /// ```
-    unsafe fn dyn_region_read<E: Elem>(region: &Self::DynRegion, address: usize) -> E;
+    /// Any `ManagerAlloc` inherently has read & write capabilities,
+    /// since the manager creates the values on the first allocation.
+    pub trait ManagerAlloc = AtomMode + DataSpaceMode;
 
-    /// Read elements from the region. `address` is in bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the read would go out of bounds.
-    fn dyn_region_read_all<E: Elem>(region: &Self::DynRegion, address: usize, values: &mut [E]) {
-        if values.is_empty() {
-            return;
-        }
+    /// Manager with read capabilities
+    pub trait ManagerRead = AtomMode + DataSpaceMode;
 
-        assert!(
-            values
-                .len()
-                .checked_mul(E::STORED_SIZE.get())
-                .expect("Total length should not overflow")
-                .checked_add(address)
-                .expect("End address should not overflow")
-                <= Self::dyn_region_len(region),
-        );
+    /// Manager with write capabilities
+    pub trait ManagerWrite = AtomMode + DataSpaceMode;
 
-        for (i, value) in values.iter_mut().enumerate() {
-            // SAFETY: The assertion above ensures all reads are within bounds.
-            unsafe {
-                *value = Self::dyn_region_read::<E>(
-                    region,
-                    E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-                )
-            };
-        }
-    }
-}
+    /// Manager with the ability to serialise regions
+    pub trait ManagerSerialise = EncodeAtomMode + EncodeDataSpaceMode;
 
-/// Manager with write capabilities
-pub trait ManagerWrite: ManagerBase + AtomMode + DataSpaceMode {
-    /// Update an element in the region. `address` is in bytes.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the access is within bounds.
-    ///
-    /// ```text
-    /// address + E:STORED <= region.len()
-    /// ```
-    unsafe fn dyn_region_write<E: Elem>(region: &mut Self::DynRegion, address: usize, value: E);
-
-    /// Update multiple elements in the region. `address` is in bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the write would go out of bounds.
-    fn dyn_region_write_all<E: Elem + Copy>(
-        region: &mut Self::DynRegion,
-        address: usize,
-        values: &[E],
-    ) where
-        Self: ManagerRead,
-    {
-        if values.is_empty() {
-            return;
-        }
-
-        assert!(
-            values
-                .len()
-                .checked_mul(E::STORED_SIZE.get())
-                .expect("Total length should not overflow")
-                .checked_add(address)
-                .expect("End address should not overflow")
-                <= Self::dyn_region_len(region)
-        );
-
-        for (i, value) in values.iter().enumerate() {
-            // SAFETY: The assertion above ensures all writes are within bounds.
-            unsafe {
-                Self::dyn_region_write::<E>(
-                    region,
-                    E::STORED_SIZE.get().wrapping_mul(i).wrapping_add(address),
-                    *value,
-                );
-            }
-        }
-    }
-}
-
-/// Manager with the ability to serialise regions
-pub trait ManagerSerialise: ManagerRead + EncodeAtomMode + EncodeDataSpaceMode {
-    /// Serialise the contents of the dynamic region.
-    fn serialise_dyn_region<E: Encoder>(
-        region: &Self::DynRegion,
-        encoder: E,
-    ) -> Result<(), EncodeError>;
-}
-
-/// Manager with the ability to clone regions
-pub trait ManagerClone: ManagerBase + CloneAtomMode + CloneDataSpaceMode {
-    /// Clone the dynamic region.
-    fn clone_dyn_region(region: &Self::DynRegion) -> Self::DynRegion;
+    /// Manager with the ability to clone regions
+    pub trait ManagerClone = CloneAtomMode + CloneDataSpaceMode;
 }
 
 #[cfg(test)]
@@ -240,6 +130,7 @@ mod tests {
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_tree::MerkleTree;
+    use octez_riscv_data::serialisation::elem::Elem;
     use rand::RngCore;
 
     use super::*;
