@@ -45,8 +45,6 @@ use perfect_derive::perfect_derive;
 use crate::default::ConstDefault;
 use crate::instruction_context::ICB;
 use crate::jit::builder::typed;
-use crate::machine_state::backend;
-use crate::state::NewState;
 use crate::state_context::StateContext;
 use crate::state_context::projection::AtomArrayProj;
 use crate::state_context::projection::MachineCoreCons;
@@ -620,7 +618,7 @@ impl typed::Typed for FValue {
 }
 
 /// Floating-point number registers
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
 pub struct FRegisters<M: Mode> {
     registers: Atom<[FValue; 32], M>,
 }
@@ -649,17 +647,6 @@ impl FRegisters<Normal> {
     pub fn start_proof(&self) -> FRegisters<Prove<'_>> {
         FRegisters {
             registers: self.registers.start_proof(),
-        }
-    }
-}
-
-impl<M: Mode> NewState<M> for FRegisters<M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        Self {
-            registers: Atom::default(),
         }
     }
 }
@@ -884,7 +871,7 @@ mod tests {
 
     #[test]
     fn test_xregister_offsets() {
-        let machine = MachineCoreState::<M4K, Normal>::new();
+        let machine = MachineCoreState::<M4K, Normal>::default();
         let machine_ptr = &machine as *const MachineCoreState<M4K, Normal>;
 
         for reg in NonZeroXRegister::iter() {

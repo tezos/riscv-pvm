@@ -89,7 +89,7 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
         origination_level: u32,
         preimages_dir: Option<Box<Path>>,
     ) -> Result<Self, PvmStepperError> {
-        let mut pvm = Pvm::new();
+        let mut pvm = Pvm::default();
 
         let program = Program::<MC>::from_elf(program)?;
 

@@ -34,7 +34,6 @@ use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed;
-use crate::state::NewState;
 use crate::state_backend as backend;
 
 /// CSR index
@@ -170,7 +169,7 @@ const FRM_SHIFT: usize = 5;
 const FFLAGS_MASK: CSRRepr = 0b11111;
 
 /// Cntrol and State Registers (CSRs)
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
 pub struct CSRegisters<M: Mode> {
     /// Floating-point exception flags
     pub fflags: Atom<FloatExceptionFlags, M>,
@@ -362,18 +361,6 @@ impl CSRegisters<Normal> {
     }
 }
 
-impl<M: Mode> NewState<M> for CSRegisters<M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        Self {
-            fflags: Atom::default(),
-            frm: Atom::default(),
-        }
-    }
-}
-
 impl<M: backend::ManagerClone> CloneState for CSRegisters<M> {
     fn clone_state(&self) -> Self {
         Self {
@@ -434,7 +421,6 @@ mod tests {
     use crate::exceptions::Exception;
     use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::csregisters::CSRegisters;
-    use crate::state::NewState;
 
     /// Checks that `reg` is write-able.
     ///
@@ -471,7 +457,7 @@ mod tests {
     }
 
     backend_test!(test_fcsr, F, {
-        let mut csrs = CSRegisters::<F>::new();
+        let mut csrs = CSRegisters::<F>::default();
 
         // check starting values
         assert_eq!(0, csrs.read(CSRegister::fcsr));

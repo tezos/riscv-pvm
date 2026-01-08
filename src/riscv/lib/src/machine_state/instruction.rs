@@ -2401,7 +2401,6 @@ mod test {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::NonZeroXRegister;
     use crate::parser::instruction::InstrWidth;
-    use crate::state::NewState;
 
     // Test that the run_jump_pc function produces a ProgramCounterUpdate::Relative
     // with the correct value, and that the PC does not change in the state.
@@ -2414,7 +2413,7 @@ mod test {
             (u64::MAX - 1, 100),
         ];
         for (init_pc, imm) in test_case {
-            let mut state = MachineCoreState::<M4K, F>::new();
+            let mut state = MachineCoreState::<M4K, F>::default();
             let res_pcupdate = Ok(ProgramCounterUpdate::Relative(imm));
 
             state.hart.pc.write(init_pc);
@@ -2442,7 +2441,7 @@ mod test {
         ];
 
         for (init_pc, imm, rd, width) in test_cases {
-            let mut state = MachineCoreState::<M4K, F>::new();
+            let mut state = MachineCoreState::<M4K, F>::default();
 
             // Test JumpAndLinkPC
             let res_pcupdate = Ok(ProgramCounterUpdate::Relative(imm));

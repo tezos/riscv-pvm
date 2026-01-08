@@ -467,7 +467,6 @@ mod tests {
     use crate::machine_state::page_cache::state::PageEntry;
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
-    use crate::state::NewState;
     use crate::state_backend::test_helpers::TestBackendFactory;
 
     fn count_active_pages<CPE: CodePageEntry<MC, M>, MC: MemoryConfig, M: Mode>(
@@ -524,7 +523,7 @@ mod tests {
     }
 
     backend_test!(test_populate_cache, F, {
-        let mut state = MachineCoreState::<M4K, F>::new();
+        let mut state = MachineCoreState::<M4K, F>::default();
         let mut cache = PageCacheImpl::<Interpreted<_, _>, M4K, F>::new();
 
         // populating a non R+X page should fail
@@ -586,7 +585,7 @@ mod tests {
     backend_test!(populate_from_memory, F, {
         type MemConfig = M8K;
 
-        let state = MachineCoreState::<MemConfig, F>::new();
+        let state = MachineCoreState::<MemConfig, F>::default();
         let state = &std::cell::RefCell::new(state);
 
         let cache =
@@ -701,7 +700,7 @@ mod tests {
             page: &mut page_entry,
         });
 
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state = &RefCell::new(state);
 
         let page_size = memory::PAGE_SIZE.get();
@@ -763,7 +762,7 @@ mod tests {
             page: &mut page_entry,
         });
 
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state = &RefCell::new(state);
 
         let page_size = memory::PAGE_SIZE.get();
@@ -864,7 +863,7 @@ mod tests {
             page: &mut page_entry,
         });
 
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state = &RefCell::new(state);
 
         // run, exits on PcUpdate::Set

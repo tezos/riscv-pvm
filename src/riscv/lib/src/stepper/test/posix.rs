@@ -5,14 +5,13 @@
 use std::ops::ControlFlow;
 
 use octez_riscv_data::mode::Mode;
+use perfect_derive::perfect_derive;
 
 use crate::machine_state::MachineState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a7;
-use crate::state::NewState;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
 
@@ -26,6 +25,7 @@ pub enum BreakReason {
 }
 
 /// Posix execution environment state
+#[perfect_derive(Default)]
 pub struct PosixState<M: Mode> {
     _pd: std::marker::PhantomData<M>,
 }
@@ -62,17 +62,6 @@ impl<M: Mode> PosixState<M> {
             _ => ControlFlow::Break(BreakReason::Error(format!(
                 "Unknown system call number {a7_val}"
             ))),
-        }
-    }
-}
-
-impl<M: Mode> NewState<M> for PosixState<M> {
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        PosixState {
-            _pd: std::marker::PhantomData,
         }
     }
 }

@@ -40,14 +40,13 @@ mod tests {
     use crate::backend_test;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::registers::nz;
-    use crate::state::NewState;
 
     backend_test!(test_caddiw, F, {
         proptest!(|(
             imm in any::<i64>(),
             reg_val in any::<i64>())|
         {
-            let mut state = HartState::<F>::new();
+            let mut state = HartState::<F>::default();
 
             state.xregisters.write_nz(nz::a0, reg_val as u64);
             state.xregisters.run_caddiw(imm, nz::a0);

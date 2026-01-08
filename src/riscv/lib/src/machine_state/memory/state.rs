@@ -32,7 +32,6 @@ use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
-use crate::state::NewState;
 use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
@@ -115,31 +114,25 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     }
 }
 
-impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> NewState<M>
-    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
-where
-    B: NewState<M>,
-    M: Mode,
-{
-    fn new() -> Self
-    where
-        M: ManagerAlloc,
-    {
-        MemoryImpl {
-            data: DataSpace::new(TOTAL_BYTES),
-            readable_pages: PagePermissions::new(),
-            writable_pages: PagePermissions::new(),
-            executable_pages: PagePermissions::new(),
-            allocated_pages: B::new(),
-        }
-    }
-}
 impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> Memory<M>
     for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 where
     B: Buddy<M>,
     M: Mode,
 {
+    fn default() -> Self
+    where
+        M: ManagerAlloc,
+    {
+        MemoryImpl {
+            data: DataSpace::new(TOTAL_BYTES),
+            readable_pages: PagePermissions::default(),
+            writable_pages: PagePermissions::default(),
+            executable_pages: PagePermissions::default(),
+            allocated_pages: B::default(),
+        }
+    }
+
     #[inline]
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
@@ -525,7 +518,6 @@ pub mod tests {
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
-    use crate::state::NewState;
 
     #[test]
     fn bounds_check() {
@@ -543,7 +535,7 @@ pub mod tests {
         use crate::machine_state::memory::PAGE_SIZE;
         use crate::machine_state::memory::Permissions;
 
-        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::default();
 
         // Write a pattern to ensure memory contains non-zero values
         for i in 0..PAGE_SIZE.get() {
@@ -581,7 +573,7 @@ pub mod tests {
     });
 
     backend_test!(test_endianness, F, {
-        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::default();
 
         memory
             .write_instruction_unchecked(0, 0x1122334455667788u64)
@@ -614,9 +606,9 @@ pub mod tests {
     });
 
     backend_test!(test_memory_reset, F, {
-        let clean_memory = <<M4K as MemoryConfig>::State<F>>::new();
+        let clean_memory = <<M4K as MemoryConfig>::State<F>>::default();
 
-        let mut memory = <<M4K as MemoryConfig>::State<F>>::new();
+        let mut memory = <<M4K as MemoryConfig>::State<F>>::default();
 
         // setting readable permissions should reset
         memory.set_all_readable_writeable(NoopMemoryGovernanceListener);

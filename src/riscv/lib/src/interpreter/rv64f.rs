@@ -413,7 +413,6 @@ mod tests {
     use crate::machine_state::registers::parse_fregister;
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::t0;
-    use crate::state::NewState;
 
     backend_test!(test_fmv_f, F, {
         proptest!(|(
@@ -422,7 +421,7 @@ mod tests {
             rs1_f in (1_u8..31).prop_map(u5::new).prop_map(parse_fregister),
             rs2 in (1_u8..31).prop_map(u5::new).prop_map(parse_xregister),
         )| {
-            let mut state = HartState::<F>::new();
+            let mut state = HartState::<F>::default();
 
             state.xregisters.write(rs1, f as u64);
 
@@ -449,7 +448,7 @@ mod tests {
     });
 
     backend_test!(test_load_store, F, {
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(

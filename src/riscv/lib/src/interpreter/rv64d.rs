@@ -381,10 +381,9 @@ mod tests {
     use crate::machine_state::registers::parse_fregister;
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::t0;
-    use crate::state::NewState;
 
     backend_test!(test_fmv_d, F, {
-        let state = HartState::<F>::new();
+        let state = HartState::<F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -408,7 +407,7 @@ mod tests {
     });
 
     backend_test!(test_load_store, F, {
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(

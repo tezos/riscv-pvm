@@ -688,16 +688,14 @@ pub(crate) mod test {
     use crate::machine_state::registers::a2;
     use crate::machine_state::registers::a3;
     use crate::machine_state::registers::a7;
-    use crate::state::NewState;
 
     macro_rules! test_atomic_loadstore {
         ($name:ident, $lr: expr, $sc: expr, $align: expr, $t: ident) => {
             backend_test!($name, F, {
                 use $crate::machine_state::registers::nz;
                 use $crate::machine_state::memory::M4K;
-                use $crate::state::NewState;
 
-                let state = MachineCoreState::<M4K, F>::new();
+                let state = MachineCoreState::<M4K, F>::default();
                 let state_cell = std::cell::RefCell::new(state);
 
                 proptest!(|(
@@ -741,9 +739,8 @@ pub(crate) mod test {
         ($(#[$m:meta])* $name: ident, $instr: path, $f: expr, $align: expr, $t: ty) => {
             backend_test!($name, F, {
                 use $crate::machine_state::memory::M4K;
-                use $crate::state::NewState;
 
-                let state = MachineCoreState::<M4K, F>::new();
+                let state = MachineCoreState::<M4K, F>::default();
                 let state_cell = std::cell::RefCell::new(state);
 
                 proptest!(|(
@@ -953,7 +950,7 @@ pub(crate) mod test {
     );
 
     backend_test!(test_alignment, F, {
-        let mut state = MachineCoreState::<M4K, F>::new();
+        let mut state = MachineCoreState::<M4K, F>::default();
         state
             .main_memory
             .set_all_readable_writeable(NoopMemoryGovernanceListener);

@@ -66,11 +66,10 @@ mod tests {
     use crate::machine_state::registers::nz;
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::FenceSet;
-    use crate::state::NewState;
 
     backend_test!(test_bitwise, F, {
         proptest!(|(val in any::<u64>(), imm in any::<u64>())| {
-            let mut state = MachineCoreState::<M4K, F>::new();
+            let mut state = MachineCoreState::<M4K, F>::default();
 
             // The sign-extension of an immediate on 12 bits has bits 31:11 equal the sign-bit
             let prefix_mask = 0xFFFF_FFFF_FFFF_F800;
@@ -88,14 +87,14 @@ mod tests {
     });
 
     backend_test!(test_ebreak, F, {
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
 
         let ret_val = state.hart.run_ebreak();
         assert_eq!(ret_val, Exception::Breakpoint);
     });
 
     backend_test!(test_fence, F, {
-        let state = MachineCoreState::<M4K, F>::new();
+        let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
         proptest!(|(
@@ -117,7 +116,7 @@ mod tests {
     });
 
     backend_test!(test_ecall, F, {
-        let state = HartState::<F>::new();
+        let state = HartState::<F>::default();
 
         let instr_res = state.run_ecall();
         assert!(instr_res == Exception::EnvCall);

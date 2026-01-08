@@ -30,14 +30,13 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::registers;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::reservation_set::ReservationSet;
-use crate::state::NewState;
 use crate::state_backend as backend;
 use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
 
 /// RISC-V hart state
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(Clone, PartialEq, Eq, Default)]
 pub struct HartState<M: Mode> {
     /// Integer registers
     pub xregisters: registers::XRegisters<M>,
@@ -78,21 +77,6 @@ impl HartState<Normal> {
             csregisters: self.csregisters.start_proof(),
             pc: self.pc.start_proof(),
             reservation_set: self.reservation_set.start_proof(),
-        }
-    }
-}
-
-impl<M: Mode> NewState<M> for HartState<M> {
-    fn new() -> Self
-    where
-        M: backend::ManagerAlloc,
-    {
-        Self {
-            xregisters: registers::XRegisters::default(),
-            fregisters: registers::FRegisters::new(),
-            csregisters: csregisters::CSRegisters::new(),
-            pc: Atom::default(),
-            reservation_set: ReservationSet::new(),
         }
     }
 }
