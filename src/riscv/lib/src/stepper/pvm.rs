@@ -77,7 +77,6 @@ pub struct PvmStepper<
 }
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
-// TODO RV-849: use `EmptyPageCache` for verify mode
 type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify, EmptyPageCache>;
 
 impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
@@ -300,7 +299,6 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
         stepper.verify_proof_internal(proof_tree, proof.final_state_hash())
     }
 
-    // TODO RV-849: replace with `EmptyPageCache`
     fn to_verify_stepper(
         &self,
         pvm: Pvm<MC, EmptyPageCache, Verify>,
