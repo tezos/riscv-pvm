@@ -71,6 +71,8 @@ impl Database {
     /// Read a portion of the value associated with the provided key. The read data will be written
     /// into `data`. `offset` specifies from where in the associated value to start reading.
     ///
+    /// Returns the number of bytes read.
+    ///
     /// Fails if:
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
@@ -118,10 +120,6 @@ impl Database {
     }
 
     /// Try to create a cheap clone of the Database.
-    #[cfg_attr(
-        not(feature = "bench"),
-        expect(dead_code, reason = "Only currently used in benchmarks")
-    )]
     pub fn try_clone_with(
         &self,
         handle: &Handle,
