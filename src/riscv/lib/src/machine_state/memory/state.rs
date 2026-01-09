@@ -12,8 +12,10 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::DataSpace;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -32,7 +34,6 @@ use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -122,7 +123,7 @@ where
 {
     fn default() -> Self
     where
-        M: ManagerAlloc,
+        M: AtomMode + DataSpaceMode,
     {
         MemoryImpl {
             data: DataSpace::new(TOTAL_BYTES),

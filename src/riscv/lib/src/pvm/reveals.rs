@@ -10,6 +10,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -25,7 +26,6 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 
@@ -58,7 +58,7 @@ impl RevealRequest<Normal> {
     }
 }
 
-impl<M: ManagerAlloc> Default for RevealRequest<M> {
+impl<M: AtomMode> Default for RevealRequest<M> {
     fn default() -> Self {
         Self {
             bytes: Atom::new([0; REVEAL_REQUEST_MAX_SIZE]),

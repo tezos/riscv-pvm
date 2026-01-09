@@ -11,6 +11,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -27,7 +28,6 @@ use perfect_derive::perfect_derive;
 use super::Buddy;
 use super::BuddyConfig;
 use crate::bits::ones;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -64,7 +64,7 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn default() -> Self
     where
-        M: ManagerAlloc,
+        M: AtomMode,
     {
         Self {
             set: Atom::default(),
