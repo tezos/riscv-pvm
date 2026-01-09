@@ -35,14 +35,13 @@ cfg_if::cfg_if! {
         pub mod repo;
         pub mod random;
     } else {
-        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         mod database;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         mod merkle_layer;
         mod merkle_worker;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         pub(crate) mod persistence_layer;
-        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         mod repo;
+        pub mod registry;
     }
 }
