@@ -17,6 +17,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -59,7 +60,6 @@ use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
-use crate::state_backend::ManagerAlloc;
 use crate::state_backend::ManagerClone;
 use crate::state_backend::ManagerRead;
 use crate::state_backend::ManagerWrite;
@@ -451,7 +451,7 @@ impl SignalActions<Normal> {
     }
 }
 
-impl<M: ManagerAlloc> Default for SignalActions<M> {
+impl<M: AtomMode> Default for SignalActions<M> {
     fn default() -> Self {
         SignalActions::<M> {
             actions: core::array::from_fn(|_| Atom::new(VirtAddr::new(0))),

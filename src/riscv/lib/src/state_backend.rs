@@ -41,12 +41,6 @@ pub use proof_layout::*;
 use trait_set::trait_set;
 
 trait_set! {
-    /// Manager with allocation capabilities
-    ///
-    /// Any `ManagerAlloc` inherently has read & write capabilities,
-    /// since the manager creates the values on the first allocation.
-    pub trait ManagerAlloc = AtomMode + DataSpaceMode;
-
     /// Manager with read capabilities
     pub trait ManagerRead = AtomMode + DataSpaceMode;
 
@@ -61,7 +55,6 @@ trait_set! {
 pub(crate) mod test_helpers {
     use trait_set::trait_set;
 
-    use super::ManagerAlloc;
     use super::ManagerClone;
     use super::ManagerRead;
     use super::ManagerWrite;
@@ -97,7 +90,6 @@ pub(crate) mod test_helpers {
         pub trait TestBackendFactory = ManagerRead
             + ManagerWrite
             + ManagerClone
-            + ManagerAlloc
             + ManagerTestInit
             ;
     }

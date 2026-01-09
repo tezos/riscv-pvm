@@ -15,7 +15,9 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -120,7 +122,7 @@ impl<MC, PC, M> Default for Pvm<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: state_backend::ManagerAlloc,
+    M: AtomMode + DataSpaceMode,
 {
     fn default() -> Self {
         Self {

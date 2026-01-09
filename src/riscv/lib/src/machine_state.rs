@@ -32,7 +32,9 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -204,7 +206,7 @@ where
 pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
     NonZeroU64::new(16).expect("Alignment must be non-zero");
 
-impl<MC: memory::MemoryConfig, M: backend::ManagerAlloc> Default for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: AtomMode + DataSpaceMode> Default for MachineCoreState<MC, M> {
     fn default() -> Self {
         Self {
             hart: HartState::default(),
@@ -420,7 +422,7 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: backend::ManagerAlloc> Default
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode> Default
     for MachineState<MC, PC, M>
 {
     fn default() -> Self {
