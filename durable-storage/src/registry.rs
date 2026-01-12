@@ -268,7 +268,7 @@ mod tests {
             );
             let mut buf = vec![0u8; value.len()];
             registry.databases[db_index]
-                .read(key, 0, &mut buf)
+                .read(key, 0, buf.as_mut_slice())
                 .expect("Reading from destination should succeed");
             assert_eq!(&buf, value);
         }
