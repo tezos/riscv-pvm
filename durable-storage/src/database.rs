@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use bytes::BufMut;
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use tokio::runtime::Handle;
@@ -74,14 +75,19 @@ impl Database {
     }
 
     /// Read a portion of the value associated with the provided key. The read data will be written
-    /// into `data`. `offset` specifies from where in the associated value to start reading.
+    /// into `output`. `offset` specifies from where in the associated value to start reading.
     ///
     /// Returns the number of bytes read.
     ///
     /// Fails if:
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
-    pub fn read(&self, key: &Key, offset: usize, data: &mut [u8]) -> Result<usize, DatabaseError> {
+    pub fn read(
+        &self,
+        key: &Key,
+        offset: usize,
+        mut output: impl BufMut,
+    ) -> Result<usize, DatabaseError> {
         let value = self.persistent.get(key.as_ref())?;
         let value_ref = value.as_ref();
 
@@ -89,12 +95,13 @@ impl Database {
             return Err(DatabaseError::OffsetTooLarge);
         }
 
-        let source_slice = &value_ref[offset..];
-        let bytes_to_copy = std::cmp::min(data.len(), source_slice.len());
+        let end = offset
+            .saturating_add(output.remaining_mut())
+            .min(value_ref.len());
 
-        data[..bytes_to_copy].copy_from_slice(&source_slice[..bytes_to_copy]);
-
-        Ok(bytes_to_copy)
+        let source_slice = &value_ref[offset..end];
+        output.put_slice(source_slice);
+        Ok(end)
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
@@ -451,13 +458,13 @@ mod tests {
                 );
 
                 // The offset is bigger than the value
-                prop_assert!(database.read(&key, data.len() + 1, &mut read_data).is_err());
+                prop_assert!(database.read(&key, data.len() + 1, read_data.as_mut_slice()).is_err());
                 prop_assert_eq!(read_data, read_data_before);
 
                 // Partial value write, where the output parameter is smaller than the data.
                 prop_assert_eq!(
                     database
-                        .read(&key, 0, &mut read_data[1..data.len()])
+                        .read(&key, 0, read_data[1..data.len()].as_mut())
                         .expect(
                             "Reading a value larger than the output parameter's size should succeed"
                         ),
@@ -469,13 +476,13 @@ mod tests {
                 let read_data_before = read_data;
 
                 database
-                    .read(&key, data.len(), &mut read_data)
+                    .read(&key, data.len(), read_data.as_mut_slice())
                     .expect("A zero-sized write should succeed");
                 prop_assert_eq!(read_data, read_data_before);
 
                 // Whole value write
                 database
-                    .read(&key, 0, &mut read_data)
+                    .read(&key, 0, read_data.as_mut_slice())
                     .expect("Writing the whole value should succeed");
                 prop_assert_eq!(&read_data[..data.len()], data.as_slice());
                 prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
@@ -483,7 +490,7 @@ mod tests {
                 // Partial value write
                 prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
                 database
-                    .read(&key, data.len() - 1, &mut read_data[1..2])
+                    .read(&key, data.len() - 1, read_data[1..2].as_mut())
                     .expect("A partial write should succeed");
                 prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
                 prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
@@ -505,7 +512,7 @@ mod tests {
         let read_data_before = read_data;
 
         // The key doesn't exist
-        assert!(database.read(&key, 0, &mut read_data).is_err());
+        assert!(database.read(&key, 0, read_data.as_mut_slice()).is_err());
         assert_eq!(read_data_before, read_data);
     }
 
