@@ -6,6 +6,7 @@ members = [
   "data",
   "tools/sandbox",
   "tools/analyse-jit-functions",
+  "tools/gen-etherlink-store-accesses",
   "test-utils",
 ]
 exclude = ["kernels"]
