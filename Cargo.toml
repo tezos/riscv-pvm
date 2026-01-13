@@ -25,19 +25,19 @@ broken_intra_doc_links = "deny"
 private_intra_doc_links = "allow"
 
 [workspace.dependencies]
-anyhow = "1.0"
+anyhow = "1.0.100"
 arbitrary-int = "2.0.0"
-bincode = "2.0"
+bincode = "2.0.1"
 blake3 = "1.8.3"
 bytes = "1.11.0"
 capstone = "0.14"
 cfg-if = "1.0.4"
 comfy-table = "7.2.2"
 const_format = "0.2"
-cranelift = "0.120.2"
-cranelift-jit = "0.120.1"
-cranelift-module = "0.120.1"
-cranelift-native = "0.120.2"
+cranelift = "0.127.1"
+cranelift-jit = "0.127.1"
+cranelift-module = "0.127.1"
+cranelift-native = "0.127.1"
 criterion = "0.8.1"
 ed25519-dalek = "2.2.0"
 elf = "0.8.0"
@@ -63,7 +63,7 @@ quanta = "0.12.6"
 rand = "0.9.2"
 range-collections = "0.4.6"
 rustc-demangle = "0.1"
-rocksdb = "0.24.0"
+rocksdb = "0.43.0"
 rustc_apfloat = "0.2.3"
 serde_json = "1.0.149"
 sha2 = "0.10.9"
@@ -121,7 +121,7 @@ version = "1.1.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1"
+version = "1.49"
 features = ["full"]
 
 [workspace.dependencies.octez-riscv]
