@@ -34,15 +34,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use proptest::arbitrary::any;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
-    use crate::backend_test;
     use crate::machine_state::hart_state::HartState;
     use crate::machine_state::registers::nz;
 
-    backend_test!(test_caddiw, F, {
+    mode_test!(test_caddiw, F, {
         proptest!(|(
             imm in any::<i64>(),
             reg_val in any::<i64>())|

@@ -387,7 +387,7 @@ impl TryFrom<XRegister> for NonZeroXRegister {
     }
 }
 
-/// ABI register names for NonZeroXRegister types used in backend tests.
+/// ABI register names for NonZeroXRegister types used in mode tests.
 pub mod nz {
     use super::NonZeroXRegister;
 
@@ -761,16 +761,16 @@ pub fn write_fregister<I: ICB>(icb: &mut I, reg: FRegister, value: I::FValue) {
 #[cfg(test)]
 mod tests {
     use arbitrary_int::traits::Integer;
+    use octez_riscv_data::mode_test;
     use strum::IntoEnumIterator;
 
     use super::*;
-    use crate::backend_test;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::state_context::projection::Projection;
     use crate::state_context::projection::ProjectionOffset;
 
-    backend_test!(test_zero, F, {
+    mode_test!(test_zero, F, {
         let mut registers = XRegisters::<F>::default();
 
         // x0 should always read 0.
@@ -786,7 +786,7 @@ mod tests {
         x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, x31,
     ];
 
-    backend_test!(test_arbitrary_register, F, {
+    mode_test!(test_arbitrary_register, F, {
         let mut registers = XRegisters::<F>::default();
 
         // Initialise the registers with something.
@@ -812,7 +812,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_try_read_u32, F, {
+    mode_test!(test_try_read_u32, F, {
         let mut registers = XRegisters::<F>::default();
 
         // Reading an integer that is too large should fail

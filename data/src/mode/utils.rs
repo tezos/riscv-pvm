@@ -8,6 +8,8 @@ use std::ops::Deref;
 use std::panic::resume_unwind;
 
 use crate::components::atom::AtomMode;
+use crate::components::atom::CloneAtomMode;
+use crate::components::data_space::CloneDataSpaceMode;
 use crate::components::data_space::DataSpaceMode;
 
 /// Source for a state component, either borrowed or owned
@@ -136,17 +138,17 @@ trait_set::trait_set! {
     /// Each state component comes with a small set of mode-constraining traits. When a component
     /// is used in tests, it is best to mention those traits in this trait alias, so that they are
     /// available to all tests.
-    pub trait TestMode = AtomMode + DataSpaceMode;
+    pub trait TestMode = AtomMode + CloneAtomMode + DataSpaceMode + CloneDataSpaceMode;
 }
 
 /// Generate a test against all modes.
 #[macro_export]
 macro_rules! mode_test {
-    ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident, $expr:block) => {
+    ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?, $expr:block) => {
         $(#[$attr])*
         #[test]
         fn $fun_name() {
-            fn inner<$ty_name: $crate::mode::utils::TestMode>() {
+            fn inner<$ty_name: $crate::mode::utils::TestMode $(+ $ty_bound)?>() {
                 $expr
             }
 

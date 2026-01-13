@@ -725,12 +725,12 @@ pub fn run_x32_rem_unsigned(
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use proptest::arbitrary::any;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
     use super::*;
-    use crate::backend_test;
     use crate::instruction_context::Shift;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
@@ -744,7 +744,7 @@ mod tests {
     use crate::machine_state::registers::t2;
     use crate::machine_state::registers::t3;
 
-    backend_test!(test_negate, F, {
+    mode_test!(test_negate, F, {
         let rs2val_rd_res = [
             (0_u64, nz::t3, 0_u64),
             (0xFFFF_FFFF_FFF0_0420, nz::t2, 0x0000_0000_000F_FBE0),
@@ -760,7 +760,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_x64_add_mv, F, {
+    mode_test!(test_x64_add_mv, F, {
         let imm_rs1_res = [
             (0_i64, 0_u64, 0_u64),
             (0, 0xFFF0_0420, 0xFFF0_0420),
@@ -783,7 +783,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_x64_add_sub, F, {
+    mode_test!(test_x64_add_sub, F, {
         let imm_rs1_rd_res = [
             (0_i64, 0_u64, nz::t3, 0_u64),
             (0, 0xFFF0_0420, nz::t2, 0xFFF0_0420),
@@ -823,7 +823,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_sub_word, F, {
+    mode_test!(test_sub_word, F, {
         proptest!(|(
             v1 in any::<i64>(),
             v2 in any::<i64>())|
@@ -842,7 +842,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_bitwise_reg, F, {
+    mode_test!(test_bitwise_reg, F, {
         proptest!(|(v1 in any::<u64>(), v2 in any::<u64>())| {
             let mut state = MachineCoreState::<M4K, F>::default();
 
@@ -865,7 +865,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_set_less_than, F, {
+    mode_test!(test_set_less_than, F, {
         let mut core = MachineCoreState::<M4K, F>::default();
 
         let v1_v2_exp_expu = [
@@ -943,7 +943,7 @@ mod tests {
         };
     }
 
-    backend_test!(test_x64_shift, F, {
+    mode_test!(test_x64_shift, F, {
         let mut state = MachineCoreState::<M4K, F>::default();
 
         // imm = 0
@@ -1124,7 +1124,7 @@ mod tests {
         };
     }
 
-    backend_test!(test_x32_shift, F, {
+    mode_test!(test_x32_shift, F, {
         let mut state = MachineCoreState::<M4K, F>::default();
 
         test_both_x32_shift_instr!(
@@ -1249,7 +1249,7 @@ mod tests {
         );
     });
 
-    backend_test!(test_bitwise_instruction, F, {
+    mode_test!(test_bitwise_instruction, F, {
         proptest!(|(val1 in any::<u64>(), val2 in any::<u64>())| {
             let mut state = MachineCoreState::<M4K, F>::default();
 
@@ -1281,7 +1281,7 @@ mod tests {
         })
     });
 
-    backend_test!(test_x64_div_signed, F, {
+    mode_test!(test_x64_div_signed, F, {
         proptest!(|(
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
@@ -1301,7 +1301,7 @@ mod tests {
         })
     });
 
-    backend_test!(test_x64_div_unsigned, F, {
+    mode_test!(test_x64_div_unsigned, F, {
         proptest!(|(
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
@@ -1321,7 +1321,7 @@ mod tests {
         })
     });
 
-    backend_test!(test_x32_div_signed, F, {
+    mode_test!(test_x32_div_signed, F, {
         proptest!(|(
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
@@ -1341,7 +1341,7 @@ mod tests {
         })
     });
 
-    backend_test!(test_x32_div_unsigned, F, {
+    mode_test!(test_x32_div_unsigned, F, {
         proptest!(|(
             r1_val in any::<u64>(),
             r2_val in any::<u64>(),
@@ -1370,7 +1370,7 @@ mod tests {
         };
     }
 
-    backend_test!(test_x64_mul_high, F, {
+    mode_test!(test_x64_mul_high, F, {
         let mut state = MachineCoreState::<M4K, F>::default();
 
         // MULH (Signed × Signed)

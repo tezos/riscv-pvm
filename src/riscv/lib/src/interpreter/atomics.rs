@@ -675,10 +675,10 @@ pub(crate) mod test {
     use std::ops::BitOr;
     use std::ops::BitXor;
 
+    use octez_riscv_data::mode_test;
     use proptest::prelude::*;
 
     use super::*;
-    use crate::backend_test;
     use crate::interpreter::integer::run_addi;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
@@ -691,7 +691,7 @@ pub(crate) mod test {
 
     macro_rules! test_atomic_loadstore {
         ($name:ident, $lr: expr, $sc: expr, $align: expr, $t: ident) => {
-            backend_test!($name, F, {
+            octez_riscv_data::mode_test!($name, F, {
                 use $crate::machine_state::registers::nz;
                 use $crate::machine_state::memory::M4K;
 
@@ -737,7 +737,7 @@ pub(crate) mod test {
 
     macro_rules! test_atomic {
         ($(#[$m:meta])* $name: ident, $instr: path, $f: expr, $align: expr, $t: ty) => {
-            backend_test!($name, F, {
+            octez_riscv_data::mode_test!($name, F, {
                 use $crate::machine_state::memory::M4K;
 
                 let state = MachineCoreState::<M4K, F>::default();
@@ -949,7 +949,7 @@ pub(crate) mod test {
         u32
     );
 
-    backend_test!(test_alignment, F, {
+    mode_test!(test_alignment, F, {
         let mut state = MachineCoreState::<M4K, F>::default();
         state
             .main_memory

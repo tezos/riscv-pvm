@@ -416,9 +416,9 @@ impl<C> bincode::Decode<C> for CSRegisters<Normal> {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use strum::IntoEnumIterator;
 
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::csregisters::CSRegister;
     use crate::machine_state::csregisters::CSRegisters;
@@ -457,7 +457,7 @@ mod tests {
         }
     }
 
-    backend_test!(test_fcsr, F, {
+    mode_test!(test_fcsr, F, {
         let mut csrs = CSRegisters::<F>::default();
 
         // check starting values

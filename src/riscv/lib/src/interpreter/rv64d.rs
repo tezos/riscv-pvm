@@ -369,9 +369,9 @@ where
 #[cfg(test)]
 mod tests {
     use arbitrary_int::u5;
+    use octez_riscv_data::mode_test;
     use proptest::prelude::*;
 
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
@@ -383,7 +383,7 @@ mod tests {
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::t0;
 
-    backend_test!(test_fmv_d, F, {
+    mode_test!(test_fmv_d, F, {
         let state = HartState::<F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
@@ -407,7 +407,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_load_store, F, {
+    mode_test!(test_load_store, F, {
         let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 

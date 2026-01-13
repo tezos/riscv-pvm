@@ -26,13 +26,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::backend_test;
+    use octez_riscv_data::mode_test;
+
     use crate::interpreter::branching::run_jr;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::registers::nz;
 
-    backend_test!(test_cjr, F, {
+    mode_test!(test_cjr, F, {
         let scenarios = [
             (42, 2, nz::a2, 2),
             (u64::MAX - 1, -200_i64 as u64, nz::a2, -200_i64 as u64),

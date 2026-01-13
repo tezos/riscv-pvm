@@ -543,6 +543,7 @@ where
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode_test;
     use proptest::proptest;
     use rand::Fill;
     use rand::rng;
@@ -552,7 +553,6 @@ mod tests {
     use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 
     use super::*;
-    use crate::backend_test;
     use crate::machine_state::memory;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::Memory;
@@ -737,7 +737,7 @@ mod tests {
         });
     }
 
-    backend_test!(test_reveal, F, {
+    mode_test!(test_reveal, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
 
@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(reveal_result_buffer, reveal_data);
     });
 
-    backend_test!(test_reveal_insufficient_buffer_size, F, {
+    mode_test!(test_reveal_insufficient_buffer_size, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
 

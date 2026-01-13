@@ -194,9 +194,9 @@ pub fn run_branch_compare_zero<I: ICB>(
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use proptest::prelude::*;
 
-    use crate::backend_test;
     use crate::instruction_context::Predicate;
     use crate::interpreter::branching::run_j_absolute;
     use crate::interpreter::branching::run_jalr;
@@ -209,7 +209,7 @@ mod tests {
     use crate::machine_state::registers::nz;
     use crate::parser::instruction::InstrWidth;
 
-    backend_test!(test_jalr, F, {
+    mode_test!(test_jalr, F, {
         let ipc_imm_irs1_rs1_rd_fpc_frd = [
             (42, 42, 4, nz::a2, nz::t1, 46, 46),
             (0, 1001, 100, nz::a1, nz::t1, 1100, 4),
@@ -278,7 +278,7 @@ mod tests {
         }
     });
 
-    backend_test!(test_auipc, F, {
+    mode_test!(test_auipc, F, {
         let pc_imm_res_rd = [
             (0, 0, 0, nz::a2),
             (0, 0xFF_FFF0_0000, 0xFF_FFF0_0000, nz::a0),
@@ -328,7 +328,7 @@ mod tests {
         };
     }
 
-    backend_test!(test_beq_bne, F, {
+    mode_test!(test_beq_bne, F, {
         proptest!(|(
             init_pc in any::<u64>(),
             imm in any::<i64>(),
@@ -378,7 +378,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_bge_blt, F, {
+    mode_test!(test_bge_blt, F, {
         proptest!(|(
             init_pc in any::<u64>(),
             imm in any::<i64>(),
@@ -419,7 +419,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_b, F, {
+    mode_test!(test_b, F, {
         proptest!(|(
             init_pc in any::<u64>(),
             imm in any::<i64>(),
@@ -452,7 +452,7 @@ mod tests {
         })
     });
 
-    backend_test!(test_bge_ble_u, F, {
+    mode_test!(test_bge_ble_u, F, {
         proptest!(|(
             init_pc in any::<u64>(),
             imm in any::<i64>(),
@@ -505,7 +505,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_beqz_bnez, F, {
+    mode_test!(test_beqz_bnez, F, {
         proptest!(|(
             init_pc in any::<u64>(),
             imm in any::<i64>(),

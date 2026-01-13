@@ -100,11 +100,11 @@ pub trait Buddy<M: Mode> {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use rand::Rng;
     use rand::seq::SliceRandom;
 
     use super::*;
-    use crate::backend_test;
 
     fn distribute(mut total: u64, min: u64) -> Vec<u64> {
         let mut rng = rand::rng();
@@ -126,7 +126,7 @@ mod tests {
         steps
     }
 
-    backend_test!(buddy_alloc_only, F, {
+    mode_test!(buddy_alloc_only, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
         let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
@@ -150,7 +150,7 @@ mod tests {
         }
     });
 
-    backend_test!(buddy_alloc_dealloc, F, {
+    mode_test!(buddy_alloc_dealloc, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
         let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
@@ -184,7 +184,7 @@ mod tests {
         }
     });
 
-    backend_test!(buddy_alloc_fixed, F, {
+    mode_test!(buddy_alloc_fixed, F, {
         type BuddyHeapConfig = BuddyConfigProxy<{ 1024 * 1024 }>;
 
         let mut state = <BuddyHeapConfig as BuddyConfig>::Buddy::<F>::default();
