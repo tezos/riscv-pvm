@@ -170,7 +170,6 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::write`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in later Database change"))]
     pub(crate) fn write(&self, key: Key, offset: usize, value: Bytes) {
         self.sender
             .send(Command::Write { key, offset, value })

@@ -36,9 +36,6 @@ pub enum DatabaseError {
     #[error("The offset is too large")]
     OffsetTooLarge,
 
-    #[error("The provided key is expected to exist but does not")]
-    KeyNotFound,
-
     #[error("Merkle worker error: {0}")]
     MerkleWorker(#[from] MerkleWorkerError),
 
@@ -92,6 +89,15 @@ impl Database {
         Ok(bytes_to_copy)
     }
 
+    /// Inserts the value associated with the provided key, replacing any data already associated
+    /// with the key.
+    pub fn set(&mut self, key: Key, data: Bytes) -> Result<usize, DatabaseError> {
+        let written = data.len();
+        self.persistent.set(&key, &data)?;
+        self.merkle.set(key, data);
+        Ok(written)
+    }
+
     /// Try to construct a new Database
     pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
         let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
@@ -103,20 +109,35 @@ impl Database {
     /// writing within the associated value, appending if it is equal to the length. Non-existent
     /// keys have the implicit length 0, so they are writeable.
     ///
+    /// Non-zero offsets require checking the existence and length of an existing value, making
+    /// them more expensive.
+    ///
     /// Fails if:
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
+    ///  - The offset plus the length of the data would overflow.
     pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, DatabaseError> {
-        if offset != 0 {
-            let value = None;
-            // TODO : Implement [`MerkleLayer::node::get_mut`] in RV-827
-            value.ok_or(DatabaseError::KeyNotFound)?
-        } else {
-            let written = data.len();
-            self.persistent.set(&key, &data)?;
-            self.merkle.set(key, data);
-            Ok(written)
+        // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
+        // operation to check if the existing value length is shorter than the offset.
+        //
+        if offset > 0 {
+            // `key_may_exist` uses a Bloom filter, which is cheaper than the 'get' operation.
+            if !self.persistent.key_may_exist(&key) {
+                return Err(DatabaseError::OffsetTooLarge);
+            }
+
+            // Checking the length of a value requires a full retrieval. Returns an error if the
+            // key does not exist.
+            let len = self.value_length(&key)?;
+            if offset > len || offset.checked_add(data.len()).is_none() {
+                return Err(DatabaseError::OffsetTooLarge);
+            }
         }
+
+        let written = data.len();
+        self.persistent.write(&key, offset, &data)?;
+        self.merkle.write(key, offset, data);
+        Ok(written)
     }
 
     /// Try to create a cheap clone of the Database.
@@ -182,7 +203,7 @@ mod tests {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let expected_written = data.len();
                 let result = database
-                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
                 prop_assert_eq!(result, expected_written);
@@ -216,7 +237,7 @@ mod tests {
         for (key, data) in keys.iter().zip(data.iter()) {
             let expected_written = data.len();
             let result = database
-                .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                .set(key.clone(), Bytes::copy_from_slice(data))
                 .expect("Writing should succeed");
             assert!(
                 database
@@ -264,7 +285,7 @@ mod tests {
                     seen.insert(key.clone()));
 
                 let result = database
-                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
 
@@ -296,7 +317,7 @@ mod tests {
                 let before = database.hash();
 
                 let result = database
-                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
 
                 prop_assert_eq!(result, expected_written);
@@ -328,14 +349,14 @@ mod tests {
         let mutated_data = [3, 2, 1];
 
         database
-            .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
+            .set(key.clone(), Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
 
         let before = database.hash();
 
         // Mutate the same key
         database
-            .write(key.clone(), 0, Bytes::copy_from_slice(&mutated_data))
+            .set(key.clone(), Bytes::copy_from_slice(&mutated_data))
             .expect("Writing should succeed");
 
         let after = database.hash();
@@ -344,7 +365,7 @@ mod tests {
         // Revert the value of the same key to the original value and check the hash reverts to the
         // same value.
         database
-            .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
+            .set(key.clone(), Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
         let reverted = database.hash();
         assert_eq!(before, reverted);
@@ -366,11 +387,11 @@ mod tests {
 
                 let read_data_before = read_data;
 
-                // Write the data
+                // Set the data
                 prop_assert_eq!(
                     database
-                        .write(key.clone(), 0, Bytes::copy_from_slice(data))
-                        .expect("Writing should succeed"),
+                        .set(key.clone(), Bytes::copy_from_slice(data))
+                        .expect("Setting should succeed"),
                     data.len()
                 );
 
@@ -449,7 +470,7 @@ mod tests {
 
                 prop_assert_eq!(
                     database
-                        .write(key.clone(), 0, Bytes::copy_from_slice(&data))
+                        .set(key.clone(), Bytes::copy_from_slice(&data))
                         .expect("Writing should succeed"),
                     data.len()
                 );
@@ -465,8 +486,10 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_database_write_zero_offset(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                           data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
+        fn test_database_write(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..10),
+                               offsets in prop::collection::vec(0..10usize, 0..10),
+                               initial_data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
+                               patch in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10), ) {
 
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -474,16 +497,99 @@ mod tests {
             let handle = runtime.handle();
             let mut database = new_database(handle);
 
-            for (key, data) in keys.iter().zip(data.iter()) {
+            for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data = Bytes::copy_from_slice(data);
-                let expected_written = data.len();
-                let result = database
-                    .write(key, 0, data)
-                    .expect("Writing should succeed");
 
-                prop_assert_eq!(result, expected_written);
+                let initial_data = Bytes::copy_from_slice(initial_data);
+                assert!(database.set(key.clone(), initial_data.clone()).is_ok());
+
+                let patch = Bytes::copy_from_slice(patch);
+                let expected_written = patch.len();
+                let result = database.write(key.clone(), *offset, patch.clone());
+                if *offset > initial_data.len() {
+                    prop_assert!(result.is_err());
+                } else {
+                    prop_assert_eq!(result.unwrap(), expected_written);
+                    let expected_length = std::cmp::max(initial_data.len(), offset + patch.len());
+                    prop_assert_eq!(database.value_length(&key).unwrap(), expected_length);
+                }
             }
         }
+    }
+
+    #[test]
+    fn test_database_write_new_nonzero_offset() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::copy_from_slice(&[]);
+
+        assert!(database.write(key.clone(), 1, data).is_err());
+    }
+
+    #[test]
+    fn test_database_write_no_truncation() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::from("a long value");
+        let data2 = Bytes::from("good");
+        let data3 = Bytes::from("nother");
+
+        assert!(database.set(key.clone(), data.clone()).is_ok());
+        assert!(database.write(key.clone(), 2, data2).is_ok());
+        let mut output = vec![0; data.len()];
+        assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
+        assert_eq!(output.as_slice(), "a good value".as_bytes());
+
+        assert!(database.write(key.clone(), 0, data3).is_ok());
+        let mut output = vec![0; data.len()];
+        assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
+        assert_eq!(output.as_slice(), "nother value".as_bytes());
+    }
+
+    #[test]
+    fn test_database_write_offset_append() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::copy_from_slice(&[1, 2, 3]);
+
+        assert!(database.set(key.clone(), data.clone()).is_ok());
+        assert!(
+            database
+                .write(key.clone(), data.len(), data.clone())
+                .is_ok()
+        );
+        let mut output = vec![0; 2 * data.len()];
+        assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
+        assert_eq!(output.as_slice(), [1, 2, 3, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_database_write_oversized_offset() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let mut database = new_database(handle);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::copy_from_slice(&[]);
+
+        assert!(database.set(key.clone(), data.clone()).is_ok());
+        assert!(database.write(key.clone(), data.len() + 1, data).is_err());
     }
 }
