@@ -92,7 +92,7 @@ jobs:
 
       - name: Nix cache
         id: nix-cache
-        uses: nix-community/cache-nix-action@v6
+        uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-v2
           restore-prefixes-first-match: |
