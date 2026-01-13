@@ -7,7 +7,7 @@
 //! This module provides a projection system that allows safe access to nested components
 //! within complex state structures. It uses type constructors to work around Rust's
 //! limitations with higher-kinded types, enabling generic projections that work across
-//! different memory configurations and state backend managers.
+//! different memory configurations and modes.
 
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -45,7 +45,7 @@ pub trait TypeCons {
     type Applied<MC: MemoryConfig, M: Mode>;
 }
 
-/// Apply a type constructor `TC` to memory config `MC` and manager `M`.
+/// Apply a type constructor `TC` to memory config `MC` and mode `M`.
 pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
 
 /// Type constructor [`Box`]

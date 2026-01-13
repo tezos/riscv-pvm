@@ -162,10 +162,10 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> TestStepper<MC, PC> {
 impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Stepper for TestStepper<MC, PC> {
     type MemoryConfig = MC;
 
-    type Manager = Normal;
+    type Mode = Normal;
 
     #[inline(always)]
-    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager> {
+    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Mode> {
         &self.machine_state.core
     }
 
