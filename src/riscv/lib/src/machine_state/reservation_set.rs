@@ -17,6 +17,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
@@ -31,7 +32,6 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
-use crate::machine_state::backend;
 use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -78,7 +78,7 @@ impl<M: Mode> ReservationSet<M> {
     /// Unset any reservation
     pub fn reset(&mut self)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         self.write(UNSET_VALUE);
     }
@@ -86,7 +86,7 @@ impl<M: Mode> ReservationSet<M> {
     #[inline(always)]
     fn write(&mut self, addr: u64)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         self.start_addr.write(addr)
     }
@@ -94,7 +94,7 @@ impl<M: Mode> ReservationSet<M> {
     #[inline(always)]
     fn read(&self) -> u64
     where
-        M: backend::ManagerRead,
+        M: AtomMode,
     {
         self.start_addr.read()
     }
@@ -103,7 +103,7 @@ impl<M: Mode> ReservationSet<M> {
     #[inline]
     pub fn set(&mut self, addr: u64)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         self.write(addr.bitand(RES_SET_BITMASK));
     }
@@ -111,7 +111,7 @@ impl<M: Mode> ReservationSet<M> {
     /// Check wether the `addr` is within the reservation set
     pub fn test_and_unset(&mut self, addr: u64) -> bool
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode,
     {
         let start_addr = self.read();
         // Regardless of success or failure, executing an SC.x instruction

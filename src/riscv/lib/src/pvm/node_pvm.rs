@@ -6,6 +6,8 @@
 use std::ops::Bound;
 use std::path::Path;
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -24,7 +26,6 @@ use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
-use crate::state_backend;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::storage;
 use crate::storage::Repo;
@@ -72,21 +73,21 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
 
     pub fn get_status(&self) -> PvmStatus
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.with_backend(|pvm| pvm.status())
     }
 
     pub fn get_tick(&self) -> u64
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.with_backend(|pvm| pvm.tick.read())
     }
 
     pub fn get_current_level(&self) -> Option<u32>
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.with_backend(|pvm| {
             if pvm.level_is_set.read() {
@@ -99,7 +100,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
 
     pub fn get_message_counter(&self) -> u64
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.with_backend(|pvm| pvm.message_counter.read())
     }
@@ -107,14 +108,14 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
     /// Get the reveal request from the PVM state
     pub fn get_reveal_request(&self) -> Vec<u8>
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.with_backend(|pvm| pvm.reveal_request())
     }
 
     pub fn install_boot_sector(&mut self, kernel: &[u8])
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.with_backend_mut(|pvm| {
             let program = Program::from_elf(kernel).expect("Failed to parse boot sector ELF");
@@ -125,21 +126,21 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
 
     pub fn compute_step(&mut self, pvm_hooks: impl PvmHooks)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_one(pvm_hooks))
     }
 
     pub fn compute_step_many(&mut self, pvm_hooks: impl PvmHooks, max_steps: usize) -> i64
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_max(pvm_hooks, Bound::Included(max_steps))) as i64
     }
 
     pub fn set_input(&mut self, input: PvmInput) -> bool
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.with_backend_mut(|pvm| pvm.provide_input(input))
     }
@@ -151,7 +152,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
     /// those of an honest operator.
     pub fn insert_failure(&mut self)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode,
     {
         self.with_backend_mut(|pvm| {
             pvm.insert_failure();

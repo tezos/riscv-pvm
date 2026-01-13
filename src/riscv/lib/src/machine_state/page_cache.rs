@@ -30,6 +30,8 @@ pub use dispatch::OutlineCompiler;
 pub use empty::EmptyPageCache;
 pub use entrypoint::Entrypoint;
 pub use interpreted::InterpretedCompiler;
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::mode::Mode;
 use state::PageCacheImpl;
 
@@ -43,8 +45,6 @@ use super::memory::MemoryConfig;
 use super::memory::address_to_page_offset;
 use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Type alias for the default [`PageCache`] implementation with interpreted dispatch only.
 ///
@@ -110,12 +110,12 @@ pub trait PageCache<MC: MemoryConfig, M: Mode>: MemoryGovernanceListener {
     /// page will contain the code for `addr`.
     fn get_code_page(&mut self, addr: Address) -> Option<impl CodePage<'_, MC, M>>
     where
-        M: ManagerRead;
+        M: AtomMode + DataSpaceMode;
 
     /// Populate a page with instruction and dispatch information, if the page has R+X permissions only.
     fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 }
 
 /// A code page contains instructions that can be executed
@@ -136,7 +136,7 @@ pub trait CodePage<'a, MC: MemoryConfig, M: Mode> {
         max_steps: usize,
     ) -> StepManyResult<Exception>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 }
 
 /// In interpreted mode, run up to `max_steps` instructions starting from `instr_pc` in the
@@ -150,7 +150,7 @@ pub(crate) fn run_code_page_interpreted<I, MC, M>(
 where
     I: AsRef<Instruction>,
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let mut result = StepManyResult::ZERO;
 

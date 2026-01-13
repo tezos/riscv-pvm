@@ -4,6 +4,8 @@
 
 //! Implementations of system calls related to file descriptors
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -16,8 +18,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters;
 use crate::pvm::linux::parameters::FileDescriptorWriteable;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 impl<M: Mode> SupervisorState<M> {
     /// Handle `ioctl` system call.
@@ -47,7 +47,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead,
+        M: AtomMode + DataSpaceMode,
     {
         // Limit how much data we can write to prevent proof-size explosion
         let length = length.min(PAGE_SIZE.get());
@@ -79,7 +79,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // `write` takes an unsigned int as the first parameter, which is then converted to a FileDescriptorWriteable
         self.write_to_fd(core, hooks, fd, addr, length)
@@ -98,7 +98,7 @@ impl<M: Mode> SupervisorState<M> {
         len: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // `writev` takes an unsigned long as the first parameter
 
@@ -166,7 +166,7 @@ impl<M: Mode> SupervisorState<M> {
         num_fds: parameters::FileDescriptorCount,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // The file descriptors are passed as `struct pollfd[]`.
         //

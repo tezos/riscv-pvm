@@ -10,6 +10,7 @@ use std::ops::Neg;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::components::atom::AtomMode;
 use rustc_apfloat::Float;
 use rustc_apfloat::FloatConvert;
 use rustc_apfloat::Round;
@@ -28,7 +29,6 @@ use crate::machine_state::registers::XRegister;
 use crate::machine_state::registers::read_xregister;
 use crate::machine_state::registers::write_fregister;
 use crate::parser::instruction::InstrRoundingMode;
-use crate::state_backend as backend;
 
 pub trait FloatExt: Float + Into<FValue> + Copy + Neg + From<FValue> {
     /// The canonical NaN has a positive sign and all
@@ -47,7 +47,7 @@ pub trait FloatExt: Float + Into<FValue> + Copy + Neg + From<FValue> {
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// `FCLASS.*` instruction.
     ///
@@ -658,7 +658,7 @@ impl Default for FloatExceptionFlags {
 
 impl<M> CSRegisters<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// Set the `invalid_operation` exception flag for floating-point operations.
     fn set_invalid_float_operation(&mut self) {

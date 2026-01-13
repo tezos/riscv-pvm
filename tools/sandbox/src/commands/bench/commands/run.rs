@@ -15,10 +15,11 @@ use octez_riscv::machine_state::memory::M1G;
 use octez_riscv::machine_state::memory::Memory;
 use octez_riscv::parser::instruction::Instr;
 use octez_riscv::parser::parse;
-use octez_riscv::state_backend::ManagerRead;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 
 use crate::cli::BenchMode;
 use crate::cli::BenchRunOptions;
@@ -38,7 +39,7 @@ use crate::format_status;
 /// Assumes the program counter will be a multiple of 2.
 fn get_current_instr<S: Stepper>(stepper: &S) -> Result<Instr, InstrGetError>
 where
-    S::Manager: ManagerRead,
+    S::Manager: AtomMode + DataSpaceMode,
 {
     let machine_state = stepper.machine_state();
     let get_half_instr = |raw_pc: Address| -> Result<u16, InstrGetError> {

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -9,8 +11,6 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
 use crate::pvm::linux::error::Error;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 impl<M: Mode> SupervisorState<M> {
     /// Handle `getrandom` system call. We don't support non-determinism, so we return a fixed
@@ -26,7 +26,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let actual_length = length.min(RANDOM.len() as u64);
         let data = &RANDOM[..actual_length as usize];

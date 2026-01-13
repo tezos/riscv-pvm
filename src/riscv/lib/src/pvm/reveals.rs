@@ -27,8 +27,6 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 
-use crate::state_backend::ManagerRead;
-
 /// Request content of reveal
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct RevealRequest<M: Mode> {
@@ -42,7 +40,7 @@ impl<M: Mode> RevealRequest<M> {
     /// Read the reveal request as a vector.
     pub fn to_vec(&self) -> Vec<u8>
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         self.bytes[..self.size.read() as usize].to_vec()
     }

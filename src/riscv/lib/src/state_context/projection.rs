@@ -20,13 +20,12 @@ use cranelift::prelude::InstBuilder;
 use cranelift::prelude::MemFlags;
 use cranelift::prelude::isa::TargetFrontendConfig;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Helper for type equality for higher-kinded types
 ///
@@ -190,13 +189,13 @@ pub trait Projection {
     type Parameter;
 
     /// Obtain a reference to the target value within the subject value.
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> &'a Self::Target;
 
     /// Read the target value from the subject value.
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> Self::Target
@@ -204,7 +203,7 @@ pub trait Projection {
         Self::Target: Copy;
 
     /// Obtain a mutable reference to the target value within the subject value.
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
         value: Self::Target,
@@ -227,7 +226,7 @@ impl<P: Projection> Projection for BoxProj<P> {
     type Parameter = P::Parameter;
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> &'a Self::Target {
@@ -235,7 +234,7 @@ impl<P: Projection> Projection for BoxProj<P> {
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> Self::Target
@@ -246,7 +245,7 @@ impl<P: Projection> Projection for BoxProj<P> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
         value: Self::Target,
@@ -283,7 +282,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
     type Parameter = ArrayProjParam<P::Parameter>;
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> &'a Self::Target {
@@ -292,7 +291,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
     ) -> Self::Target
@@ -304,7 +303,7 @@ impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         param: Self::Parameter,
         value: Self::Target,
@@ -344,7 +343,7 @@ impl<T: 'static> Projection for AtomProj<T> {
     type Parameter = ();
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a Atom<T, M>,
         _param: Self::Parameter,
     ) -> &'a Self::Target {
@@ -352,7 +351,7 @@ impl<T: 'static> Projection for AtomProj<T> {
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a Atom<T, M>,
         _param: Self::Parameter,
     ) -> Self::Target
@@ -363,7 +362,7 @@ impl<T: 'static> Projection for AtomProj<T> {
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a mut Atom<T, M>,
         _param: Self::Parameter,
         value: Self::Target,
@@ -388,7 +387,7 @@ impl<T: Clone + 'static, const LEN: usize> Projection for AtomArrayProj<T, LEN> 
     type Parameter = usize;
 
     #[inline]
-    fn project_ref<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_ref<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         index: Self::Parameter,
     ) -> &'a Self::Target {
@@ -396,7 +395,7 @@ impl<T: Clone + 'static, const LEN: usize> Projection for AtomArrayProj<T, LEN> 
     }
 
     #[inline]
-    fn project_read<'a, MC: MemoryConfig, M: ManagerRead + 'a>(
+    fn project_read<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a ApplyCons<Self::Subject, MC, M>,
         index: Self::Parameter,
     ) -> Self::Target
@@ -407,7 +406,7 @@ impl<T: Clone + 'static, const LEN: usize> Projection for AtomArrayProj<T, LEN> 
     }
 
     #[inline]
-    fn project_write<'a, MC: MemoryConfig, M: ManagerWrite + 'a>(
+    fn project_write<'a, MC: MemoryConfig, M: AtomMode + 'a>(
         state: &'a mut ApplyCons<Self::Subject, MC, M>,
         index: Self::Parameter,
         value: Self::Target,
@@ -447,7 +446,7 @@ macro_rules! impl_projection {
             fn project_ref<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerRead + 'a,
+                M: octez_riscv_data::components::atom::AtomMode + 'a,
             >(
                 state: &'a $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
                 param: Self::Parameter,
@@ -462,7 +461,7 @@ macro_rules! impl_projection {
             fn project_read<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerRead + 'a,
+                M: octez_riscv_data::components::atom::AtomMode + 'a,
             >(
                 state: &'a $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
                 param: Self::Parameter,
@@ -477,7 +476,7 @@ macro_rules! impl_projection {
             fn project_write<
                 'a,
                 MC: $crate::machine_state::memory::MemoryConfig,
-                M: $crate::state_backend::ManagerWrite + 'a,
+                M: octez_riscv_data::components::atom::AtomMode + 'a,
             >(
                 state: &'a mut $crate::state_context::projection::ApplyCons<Self::Subject, MC, M>,
                 param: Self::Parameter,

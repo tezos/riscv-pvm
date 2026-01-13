@@ -11,6 +11,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
@@ -31,7 +32,6 @@ use crate::machine_state::memory::Address;
 use crate::machine_state::registers;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::reservation_set::ReservationSet;
-use crate::state_backend as backend;
 use crate::state_context::projection::AtomProj;
 use crate::state_context::projection::MachineCoreCons;
 use crate::state_context::projection::impl_projection;
@@ -59,7 +59,7 @@ impl<M: Mode> HartState<M> {
     /// Reset the hart state.
     pub fn reset(&mut self, pc: Address)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         self.xregisters.reset();
         self.fregisters.reset();

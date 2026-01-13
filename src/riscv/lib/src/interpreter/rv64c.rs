@@ -7,13 +7,14 @@
 //!
 //! U:C-16
 
+use octez_riscv_data::components::atom::AtomMode;
+
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XRegisters;
-use crate::state_backend as backend;
 
 impl<M> XRegisters<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// `C.ADDIW` CI-type compressed instruction
     ///

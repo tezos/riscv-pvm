@@ -67,9 +67,6 @@ use crate::pvm::linux::signals::SignalActions;
 use crate::range_utils::bound_saturating_sub;
 use crate::range_utils::less_than_bound;
 use crate::range_utils::unwrap_bound;
-use crate::state_backend as backend;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// The part of the machine state required to run (almost all) instructions.
 ///
@@ -90,7 +87,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     #[inline]
     pub(crate) fn update_pc(&mut self, instr_pc: Address, update: ProgramCounterUpdate<Address>)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         let pc = match update {
             ProgramCounterUpdate::Set(address) => address,
@@ -104,7 +101,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.hart.reset(memory::FIRST_ADDRESS);
         self.main_memory.reset(listener);
@@ -118,7 +115,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
         phys_addr: Address,
     ) -> Result<memory::InstructionData<u16>, Exception>
     where
-        M: backend::ManagerRead,
+        M: AtomMode + DataSpaceMode,
     {
         self.main_memory
             .read_exec(phys_addr)
@@ -131,7 +128,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     #[inline]
     fn fetch_instr(&self, addr: Address) -> Result<memory::InstructionData<Instruction>, Exception>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let lower = self.fetch_instr_halfword(addr)?;
 
@@ -443,7 +440,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     /// Reset the machine state.
     pub fn reset(&mut self)
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let listener = &mut self.page_cache;
         self.core.reset(listener);
@@ -466,7 +463,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     /// *not* writable.
     fn run_instr_at(&mut self, addr: Address) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let memory::InstructionData {
             data: instr,
@@ -491,7 +488,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     #[inline]
     pub fn step(&mut self) -> Result<(), Exception>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         match self.step_max_inner(1).error {
             Some(error) => Err(error),
@@ -501,7 +498,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
 
     pub(super) fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -543,7 +540,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     #[inline]
     pub fn step_max(&mut self, max_steps: Bound<usize>) -> StepManyResult<Exception>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -574,7 +571,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let mut steps = 0usize;
 
@@ -612,7 +609,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         match cause {
             Exception::EnvCall => return handle(self),
@@ -661,7 +658,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let instr_pc = self.core.hart.pc.read();
         let result = self
@@ -700,7 +697,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         program: &Program<MC>,
     ) -> Result<(Address, Address), MachineError>
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let program_start = program.segments.keys().min().copied().unwrap_or(0);
         let program_end = program
@@ -757,7 +754,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
 
     fn dispatch_signal_or_trap(&mut self, signal: Signal)
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         if self.core.dispatch_signal(signal).is_err() {
             self.core.hart.pc.write(0);
@@ -770,7 +767,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     ) where
         MB: memory::buddy::Buddy<M>,
         MC: MemoryConfig<State<M> = memory::state::MemoryImpl<PAGES, TOTAL_BYTES, MB, M>>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let (main_memory, listener) = self.memory_with_listener();
         main_memory.set_all_readable_writeable(listener);

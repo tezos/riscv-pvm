@@ -6,6 +6,7 @@
 //!
 //! Chapter 2 - Unprivileged spec
 
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::mode::Mode;
 
 use crate::exceptions::Exception;
@@ -13,11 +14,10 @@ use crate::machine_state::MachineCoreState;
 use crate::machine_state::hart_state::HartState;
 use crate::machine_state::memory;
 use crate::parser::instruction::FenceSet;
-use crate::state_backend as backend;
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// `EBREAK` instruction
     pub fn run_ebreak(&self) -> Exception {

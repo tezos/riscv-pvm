@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::serialisation::elem::Elem;
 
 use crate::exceptions::Exception;
@@ -11,12 +13,11 @@ use crate::machine_state::memory;
 use crate::machine_state::memory::BadMemoryAccess;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::registers::XRegister;
-use crate::state_backend as backend;
 
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     /// Generic read function for loading `T::STORED_SIZE` bytes from `address`
     pub(super) fn read_from_address<T: Elem>(&mut self, address: u64) -> Result<T, Exception> {

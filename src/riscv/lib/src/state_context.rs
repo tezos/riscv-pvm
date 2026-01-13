@@ -13,14 +13,14 @@
 
 pub(crate) mod projection;
 
+use octez_riscv_data::components::atom::AtomMode;
+
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::NonZeroXRegister;
 use crate::machine_state::registers::XValue;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Context for accessing parts of the PVM state
 pub trait StateContext {
@@ -49,7 +49,7 @@ pub trait StateContext {
     fn reservation_set_write(&mut self, value: Self::Value<u64>);
 }
 
-impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> StateContext for MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: AtomMode> StateContext for MachineCoreState<MC, M> {
     type Value<R> = R;
 
     #[inline]
@@ -97,7 +97,7 @@ pub(crate) trait PcWriteContext {
     fn pc_write(&mut self, value: Self::Value<XValue>);
 }
 
-impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> PcWriteContext for MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: AtomMode> PcWriteContext for MachineCoreState<MC, M> {
     type Value<R> = R;
 
     #[inline]

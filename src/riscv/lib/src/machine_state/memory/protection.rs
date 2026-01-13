@@ -33,8 +33,6 @@ use perfect_derive::perfect_derive;
 use super::Address;
 use super::address_to_page_index;
 use crate::array_utils::boxed_from_fn;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 use crate::state_backend::NarrowlySized;
 use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
@@ -54,7 +52,7 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     #[inline]
     pub unsafe fn can_access(&self, pages: RangeInclusive<u64>) -> bool
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         for page in pages {
             if unsafe { !self.pages.get_unchecked(page as usize).read() } {
@@ -77,7 +75,7 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     pub unsafe fn can_access_narrow<E>(&self, address: Address) -> bool
     where
         E: NarrowlySized,
-        M: ManagerRead,
+        M: AtomMode,
     {
         let start_page = address_to_page_index(address);
         if unsafe { !self.pages.get_unchecked(start_page).read() } {
@@ -95,7 +93,7 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     /// Change the access permissions for the given range.
     pub fn modify_access(&mut self, pages: RangeInclusive<u64>, accessible: bool)
     where
-        M: ManagerWrite,
+        M: AtomMode,
     {
         pages.filter(|&page| page < PAGES as u64).for_each(|page| {
             self.pages[page as usize].write(accessible);
@@ -105,7 +103,7 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     /// Reset access permissions on all pages.
     pub fn reset(&mut self)
     where
-        M: ManagerWrite,
+        M: AtomMode,
     {
         self.pages.iter_mut().for_each(|page| page.write(false));
     }

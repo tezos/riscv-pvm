@@ -15,8 +15,6 @@ use super::memory::Address;
 use super::memory::MemoryConfig;
 use super::memory::listener::MemoryGovernanceListener;
 use crate::exceptions::Exception;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// A page cache that does nothing. Used in proof and verify modes.
 pub struct EmptyPageCache;
@@ -26,18 +24,11 @@ impl<MC: MemoryConfig, M: Mode> PageCache<MC, M> for EmptyPageCache {
         EmptyPageCache
     }
 
-    fn get_code_page(&mut self, _addr: Address) -> Option<impl CodePage<'_, MC, M>>
-    where
-        M: ManagerRead,
-    {
+    fn get_code_page(&mut self, _addr: Address) -> Option<impl CodePage<'_, MC, M>> {
         Option::<NoCodePage>::None
     }
 
-    fn populate_page(&mut self, _addr: Address, _core: &MachineCoreState<MC, M>)
-    where
-        M: ManagerRead + ManagerWrite,
-    {
-    }
+    fn populate_page(&mut self, _addr: Address, _core: &MachineCoreState<MC, M>) {}
 }
 
 impl MemoryGovernanceListener for EmptyPageCache {

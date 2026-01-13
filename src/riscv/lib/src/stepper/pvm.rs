@@ -9,8 +9,10 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
@@ -41,8 +43,6 @@ use crate::pvm::PvmStatus;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
@@ -154,7 +154,7 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerRead + ManagerWrite>
+impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode>
     PvmStepper<H, MC, M, PC>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
@@ -249,7 +249,7 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: ManagerRead + Manag
     }
 }
 
-impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
+impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
     PvmStepper<H, MC, M, PC>
 {
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
@@ -322,7 +322,7 @@ impl<H, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, M: ManagerRead + ManagerWrite, PC: PageCache<MC, M>>
+impl<H: PvmHooks, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
     PvmStepper<H, MC, M, PC>
 {
     /// Perform one evaluation step.

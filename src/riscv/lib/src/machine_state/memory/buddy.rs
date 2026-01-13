@@ -34,9 +34,6 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 pub use proxy::BuddyConfigProxy;
 
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
-
 /// Configuration for a Buddy-style memory manager
 pub trait BuddyConfig: 'static {
     /// Buddy-style memory manager implementation
@@ -62,33 +59,33 @@ pub trait Buddy<M: Mode> {
     /// Allocate a number of pages. Returns the index of the first page in the allocated range.
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode;
 
     /// Allocate a fixed range of pages. If `replace` is `true`, the range is allocated even if it
     /// overlaps an existing allocation.
     fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode;
 
     /// Deallocate a range of pages.
     fn deallocate(&mut self, idx: u64, pages: u64)
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode;
 
     /// Count the largest sequence of free pages.
     fn longest_free_sequence(&self) -> u64
     where
-        M: ManagerRead;
+        M: AtomMode;
 
     /// Count the number of free pages at the start of the managed area.
     fn count_free_start(&self) -> u64
     where
-        M: ManagerRead;
+        M: AtomMode;
 
     /// Count the number of free pages at the end of the managed area.
     fn count_free_end(&self) -> u64
     where
-        M: ManagerRead;
+        M: AtomMode;
 
     /// Clone the persistent state of the memory manager.
     fn clone_state(&self) -> Self

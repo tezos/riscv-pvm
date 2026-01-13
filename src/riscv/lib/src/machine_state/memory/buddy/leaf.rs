@@ -29,8 +29,6 @@ use perfect_derive::perfect_derive;
 use super::Buddy;
 use super::BuddyConfig;
 use crate::bits::ones;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Config for a leaf of a tree that forms a Buddy-style memory manager
 pub struct BuddyLeafConfig<const PAGES: u64>;
@@ -73,7 +71,7 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if pages == 0 || pages > Self::PAGES {
             return None;
@@ -98,7 +96,7 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if pages == 0 || pages > Self::PAGES.saturating_sub(idx) {
             return None;
@@ -128,7 +126,7 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn deallocate(&mut self, idx: u64, pages: u64)
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if pages == 0 || pages > Self::PAGES.saturating_sub(idx) {
             return;
@@ -150,7 +148,7 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn longest_free_sequence(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         let set = self.set.read();
 
@@ -168,14 +166,14 @@ impl<const PAGES: u64, M: Mode> Buddy<M> for BuddyLeaf<PAGES, M> {
 
     fn count_free_start(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         Self::PAGES.min(self.set.read().trailing_zeros() as u64)
     }
 
     fn count_free_end(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         let leading_unused_bits = (u64::BITS as u64)
             .checked_sub(Self::PAGES)

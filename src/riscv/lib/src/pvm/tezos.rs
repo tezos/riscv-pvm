@@ -32,6 +32,9 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 /// To limit size of proofs in refutation games
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
+
 use super::PvmStatus;
 use super::reveals::RevealRequest;
 use crate::machine_state::MachineCoreState;
@@ -44,18 +47,16 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Write the SBI error code as the return value.
 #[inline]
-fn sbi_return_error<M: ManagerWrite>(xregisters: &mut XRegisters<M>, code: SbiError) {
+fn sbi_return_error<M: AtomMode>(xregisters: &mut XRegisters<M>, code: SbiError) {
     xregisters.write(a0, code as i64 as u64);
 }
 
 /// Write an arbitrary value as single return value.
 #[inline]
-fn sbi_return1<M: ManagerWrite>(xregisters: &mut XRegisters<M>, value: XValue) {
+fn sbi_return1<M: AtomMode>(xregisters: &mut XRegisters<M>, value: XValue) {
     // The SBI caller interprets the return value as a [i64]. We don't want the value to be
     // interpreted as negative because that indicates an error.
     if (value as i64) < 0 {
@@ -70,7 +71,7 @@ fn sbi_return1<M: ManagerWrite>(xregisters: &mut XRegisters<M>, value: XValue) {
 fn sbi_wrap<MC, M, F>(machine: &mut MachineCoreState<MC, M>, inner: F)
 where
     MC: MemoryConfig,
-    M: ManagerWrite,
+    M: AtomMode,
     F: FnOnce(&mut MachineCoreState<MC, M>) -> Result<XValue, SbiError>,
 {
     match inner(machine) {
@@ -90,7 +91,7 @@ pub fn provide_input<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     // This method should only do something when we're waiting for input.
     match status.read() {
@@ -139,7 +140,7 @@ pub fn provide_reveal_response<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     // This method should only do something when we're waiting for reveal.
     if status.read() != PvmStatus::WaitingForReveal {
@@ -173,7 +174,7 @@ where
 #[inline]
 fn handle_tezos_inbox_next<M>(status: &mut Atom<PvmStatus, M>)
 where
-    M: ManagerWrite,
+    M: AtomMode,
 {
     // Prepare the EE state for an input tick.
     status.write(PvmStatus::WaitingForInput);
@@ -184,7 +185,7 @@ where
 fn handle_tezos_ed25519_sign<MC, M>(machine: &mut MachineCoreState<MC, M>) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let arg_sk_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -213,7 +214,7 @@ fn handle_tezos_ed25519_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -243,7 +244,7 @@ fn handle_tezos_blake2b_hash256<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -267,7 +268,7 @@ fn handle_tezos_secp256k1_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -292,7 +293,7 @@ fn handle_tezos_keccak256_hash<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -318,7 +319,7 @@ fn handle_tezos_reveal<MC, M>(
     status: &mut Atom<PvmStatus, M>,
 ) where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     let request_address = machine.hart.xregisters.read(a0);
     let request_size = machine.hart.xregisters.read(a1) as usize;
@@ -341,7 +342,7 @@ fn handle_tezos_reveal<MC, M>(
 #[inline(always)]
 fn handle_not_supported<M>(xregisters: &mut XRegisters<M>)
 where
-    M: ManagerWrite,
+    M: AtomMode,
 {
     // SBI requires us to indicate that we don't support this function by returning
     // `ERR_NOT_SUPPORTED`.
@@ -355,7 +356,7 @@ pub(super) fn handle_tezos<MC, M>(
     reveal_request: &mut RevealRequest<M>,
 ) where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
     let pc = machine.hart.pc.read().wrapping_add(4);

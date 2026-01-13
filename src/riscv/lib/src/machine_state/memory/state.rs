@@ -36,8 +36,6 @@ use super::address_to_page_index;
 use super::buddy::Buddy;
 use super::listener::MemoryGovernanceListener;
 use super::protection::PagePermissions;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Machine's memory
 #[perfect_derive(PartialEq, Eq)]
@@ -76,7 +74,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     pub(crate) fn set_all_readable_writeable(&mut self, listener: impl MemoryGovernanceListener)
     where
         B: Buddy<M>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let length =
             NonZeroUsize::new(TOTAL_BYTES).expect("`TOTAL_BYTES` must be greater than zero");
@@ -97,7 +95,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     ) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let length = E::STORED_SIZE;
 
@@ -139,7 +137,7 @@ where
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead,
+        M: AtomMode + DataSpaceMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -158,7 +156,7 @@ where
     fn read_exec<E>(&self, address: Address) -> Result<super::InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead,
+        M: AtomMode + DataSpaceMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -182,7 +180,7 @@ where
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead,
+        M: AtomMode + DataSpaceMode,
     {
         let Some(values_len) = NonZeroUsize::new(values.len()) else {
             // zero-sized reads always valid
@@ -210,7 +208,7 @@ where
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -232,7 +230,7 @@ where
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let Some(values_len) = NonZeroUsize::new(values.len()) else {
             // zero-sized writes always valid
@@ -270,7 +268,7 @@ where
 
     fn reset(&mut self, mut listener: impl MemoryGovernanceListener)
     where
-        M: ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         const SIZE_OF_U64: usize = u64::STORED_SIZE.get();
 
@@ -314,7 +312,7 @@ where
         mut listener: impl MemoryGovernanceListener,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: ManagerWrite,
+        M: AtomMode,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
@@ -338,7 +336,7 @@ where
         length: NonZeroUsize,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
@@ -359,7 +357,7 @@ where
         allow_replace: bool,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         // The interface works on usize at the moment, however, going forward we'll convert all
         // length types to u64 to avoid machine-specific behavior for lengths.
@@ -396,7 +394,7 @@ where
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Mark the page range as occupied
         let address = self.allocate_pages(address_hint, length, allow_replace)?;
