@@ -30,7 +30,12 @@
 use std::mem::ManuallyDrop;
 use std::path::Path;
 
+use bincode::BorrowDecode;
+use bincode::Encode;
+use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
+use rocksdb::ColumnFamilyDescriptor;
+use rocksdb::MergeOperands;
 use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
@@ -75,6 +80,102 @@ pub enum PersistenceLayerError {
 
     #[error("Directory manager error: {0}")]
     DirectoryManager(#[from] DirectoryManagerError),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] EncodeError),
+}
+
+#[derive(BorrowDecode, Encode)]
+struct OffsetWriteMergePayload<'a> {
+    offset: usize,
+    value: &'a [u8],
+}
+
+/// Defines an atomic merge operator used when writing with an offset.
+///
+/// Called every time [`rocksdb::DBCommon::merge`] is called on a database where this has been set
+/// as a merge operator, passing in the key and the associated value's existing serialised
+/// collection of operands. Optionally returns a value representing one or more merged operands
+/// later passed to the full merge operator instead of the full collection of operands. Both
+/// operators must be able to work with the same structured data.
+///
+/// The advantage of this is in preventing unecessary work. For example, when the same part of the
+/// associated value is written to by multiple merges, only the last would need to be fully merged.
+///
+/// See: <https://github.com/facebook/rocksdb/wiki/merge-operator>
+fn offset_write_partial_merge(
+    _new_key: &[u8],
+    _left_operand: Option<&[u8]>,
+    _operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    // Currently, the API for [`Database`] requires a Get operation for any non-zero
+    // offset passed to `persistence_layer::write`. This forces RocksDB to perform a full merge,
+    // reducing the utility of merging operands with non-zero offsets.
+    //
+    // Any merge must also ensure that the work saved outweighs the work of managing operands.
+    //
+    // For these reasons, this function simply returns `None`, meaning no operand merging is
+    // currently performed.
+    None
+}
+
+/// Defines an atomic merge operator used when writing with an offset.
+///
+/// Called when the associated value is retrieved or when RocksDB performs compaction on a database
+/// where this operator has been set. Returns a value representing a single fully merged value.
+///
+/// See: <https://github.com/facebook/rocksdb/wiki/merge-operator>
+fn offset_write_full_merge(
+    _new_key: &[u8],
+    existing_value: Option<&[u8]>,
+    operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    let mut result = existing_value.map(|v| v.to_vec()).unwrap_or_default();
+
+    for mut op in operands {
+        while !op.is_empty() {
+            let decode = octez_riscv_data::serialisation::deserialise_borrowed(op);
+            let (payload, len): (OffsetWriteMergePayload, _) =
+                decode.expect("Should be a valid encoding");
+
+            // Advance the slice
+            op = &op[len..];
+
+            let offset = payload.offset;
+            let data = payload.value;
+
+            // This shouldn't happen: it's prevented by the `Database` API.
+            assert!(
+                offset <= result.len(),
+                "Oversized offset: `{offset:?}` is longer than the length of the associated item: `{:?}`",
+                result.len()
+            );
+
+            let Some(new_data_end) = offset.checked_add(data.len()) else {
+                panic!(
+                    "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
+                    data.len()
+                );
+            };
+
+            // TODO RV-888 Add support for setting a more sensible limit
+            if new_data_end > isize::MAX as usize {
+                panic!("Can't allocate {new_data_end:?} bytes");
+            }
+
+            let overwrite_end = std::cmp::min(result.len(), new_data_end);
+
+            // SAFETY: Unchecked subtraction OK as result.len() >= offset && new_data_end > offset
+            let data_copy_end = overwrite_end - offset;
+
+            result[offset..overwrite_end].copy_from_slice(&data[0..data_copy_end]);
+            if result.len() < new_data_end {
+                // SAFETY: Panics if the memory can't be allocated.
+                result.extend_from_slice(&data[data_copy_end..]);
+            }
+        }
+    }
+    Some(result)
 }
 
 /// Changes the default skip list memtable implementation to a hash linked list one.
@@ -164,8 +265,13 @@ impl PersistenceLayer {
         let new_db_path = tempdir.path().join("checkpoint");
 
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
-        let options = rocksdb_creation_options();
-        let mut db = rocksdb::DB::open(&options, &new_db_path)?;
+        let mut default_cf_opts = rocksdb_creation_options();
+        default_cf_opts.set_merge_operator(
+            "offset_write",
+            offset_write_full_merge,
+            offset_write_partial_merge,
+        );
+        let mut db = rocksdb::DB::open(&default_cf_opts, &new_db_path)?;
         db.create_cf(BLOB_CF, &rocksdb_blob_cf_creation_options())?;
 
         Ok(Self {
@@ -185,10 +291,21 @@ impl PersistenceLayer {
         // call its destroy method to avoid UB. This happens in this unit expression.
         Checkpoint::new(db)?.create_checkpoint(&checkpoint_path)?;
 
-        let temp_db =
-            rocksdb::DB::open_cf(&rocksdb_clone_as_checkpoint_options(), &checkpoint_path, [
-                BLOB_CF,
-            ])?;
+        let mut default_cf_opts = rocksdb_clone_as_checkpoint_options();
+        default_cf_opts.set_merge_operator(
+            "offset_write",
+            offset_write_full_merge,
+            offset_write_partial_merge,
+        );
+
+        let temp_db = rocksdb::DB::open_cf_descriptors(
+            &rocksdb_clone_as_checkpoint_options(),
+            &checkpoint_path,
+            [
+                ColumnFamilyDescriptor::new("default", default_cf_opts),
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
+            ],
+        )?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
@@ -212,7 +329,13 @@ impl PersistenceLayer {
             return Err(PersistenceLayerError::CommitNotFound);
         };
 
-        let db = rocksdb::DB::open_cf(&rocksdb_checkpoint_options(), &db_path, [BLOB_CF])?;
+        let default_cf_opts = rocksdb_clone_as_checkpoint_options();
+
+        let db =
+            rocksdb::DB::open_cf_descriptors(&rocksdb_clone_as_checkpoint_options(), &db_path, [
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new("default", default_cf_opts),
+            ])?;
 
         Self::clone_as_checkpoint(&db, repo)
     }
@@ -282,6 +405,23 @@ impl PersistenceLayer {
         value: impl AsRef<[u8]>,
     ) -> Result<(), PersistenceLayerError> {
         Ok(self.db_instance.put(key.as_ref(), value.as_ref())?)
+    }
+
+    /// Writes a value for the given key with a given offset.
+    pub fn write(
+        &self,
+        key: impl AsRef<[u8]>,
+        offset: usize,
+        value: impl AsRef<[u8]>,
+    ) -> Result<(), PersistenceLayerError> {
+        let payload_struct = OffsetWriteMergePayload {
+            offset,
+            value: value.as_ref(),
+        };
+        let payload = octez_riscv_data::serialisation::serialise(payload_struct)?;
+
+        self.db_instance.merge(key.as_ref(), payload)?;
+        Ok(())
     }
 
     /// Deletes a value associated with the given key.
@@ -863,6 +1003,70 @@ mod tests {
                 // Now the key should return the new value
                 let retrieved = db.get(&key).expect("Should be able to get the value");
                 assert_eq!(retrieved.as_ref(), value2.as_bytes());
+            }
+
+            {
+                // Another key should still be unset
+                let other_key = format!("other_{key}");
+                assert!(matches!(
+                    db.get(&other_key),
+                    Err(PersistenceLayerError::KeyNotFound)
+                ));
+            }
+
+            db.set(&key, &value).expect("Should be able to reset value");
+            db.write(&key, value.len(), &value2)
+                .expect("Should be able to extend the value for the same key");
+
+            {
+                // Now the key should return the new value
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                let mut new_value = value.clone();
+                new_value.insert_str(value.len(), &value2);
+                assert_eq!(retrieved.as_ref(), new_value.as_bytes());
+            }
+
+            db.set(&key, &value).expect("Should be able to reset value");
+            let start_index = value.len() - value.len() / 2;
+            db.write(&key, start_index, &value2)
+                .expect("Should be able to overwrite and extend the value for the same key");
+
+            {
+                // Now the key should return the new value
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                let mut new_value = value.as_bytes().to_vec();
+                let data = value2.as_bytes();
+
+                let overwrite_len = std::cmp::min(new_value.len() - start_index, data.len());
+                new_value[start_index..start_index + overwrite_len]
+                    .copy_from_slice(&data[..overwrite_len]);
+                if data.len() > overwrite_len {
+                    new_value.extend_from_slice(&data[overwrite_len..]);
+                }
+                assert_eq!(retrieved.as_ref(), new_value.as_slice());
+            }
+
+            db.set(&key, &value).expect("Should be able to reset value");
+            let data_to_write = &value2.as_bytes()[0..value2.len() / 2];
+            db.write(&key, 1, data_to_write)
+                .expect("Should be able to overwrite part of the value for the same key");
+
+            {
+                // Now the key should return the new value
+                let retrieved = db.get(&key).expect("Should be able to get the value");
+                let mut new_value = value.as_bytes().to_vec();
+
+                let offset = 1;
+                let overwrite_len =
+                    std::cmp::min(new_value.len().saturating_sub(offset), data_to_write.len());
+                if overwrite_len > 0 {
+                    new_value[offset..offset + overwrite_len]
+                        .copy_from_slice(&data_to_write[..overwrite_len]);
+                }
+                if data_to_write.len() > overwrite_len {
+                    new_value.extend_from_slice(&data_to_write[overwrite_len..]);
+                }
+                assert_eq!(retrieved.as_ref(), new_value.as_slice());
             }
 
             {
