@@ -10,5 +10,6 @@ pub mod hash;
 pub mod merkle_proof;
 pub mod merkle_tree;
 pub mod mode;
+pub mod partial_vec;
 pub mod serialisation;
 pub mod tree;
