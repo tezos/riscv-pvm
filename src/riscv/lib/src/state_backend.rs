@@ -43,7 +43,7 @@ pub(crate) mod test_helpers {
     use octez_riscv_data::components::data_space::DataSpaceMode;
     use trait_set::trait_set;
 
-    use crate::machine_state::test_helpers::ManagerTestInit;
+    use crate::machine_state::test_helpers::TestInitMode;
 
     /// Generate a test against all test backends.
     #[macro_export]
@@ -76,7 +76,7 @@ pub(crate) mod test_helpers {
             + DataSpaceMode
             + CloneAtomMode
             + CloneDataSpaceMode
-            + ManagerTestInit
+            + TestInitMode
             ;
     }
 }

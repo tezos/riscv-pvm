@@ -209,7 +209,7 @@ mod tests {
     /// # Safety
     ///
     /// The `test_proof` and `test_verify` function must be the same function instantiated to
-    /// different managers.
+    /// different modes.
     ///
     /// Due to Rust's limitation on higher-ranked polymorphism, we can't accept
     /// a single function and instantiate it within the function body with the respective modes

@@ -90,10 +90,10 @@ pub trait Stepper {
     type MemoryConfig: MemoryConfig;
 
     /// State backend with which the stepper was instantiated
-    type Manager: AtomMode + DataSpaceMode;
+    type Mode: AtomMode + DataSpaceMode;
 
     /// Obtain a reference to the underlying machine state.
-    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager>;
+    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Mode>;
 
     /// Result of one or more steps
     type StepResult: StepResult;

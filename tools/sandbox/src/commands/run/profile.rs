@@ -37,7 +37,7 @@ use super::sample::Symbols;
 
 /// Run profiling on the given stepper
 pub(crate) fn profile_stepper(
-    mut stepper: impl Stepper<Manager = Normal>,
+    mut stepper: impl Stepper<Mode = Normal>,
     program: &[u8],
     sample_interval: Duration,
     max_steps: Option<usize>,

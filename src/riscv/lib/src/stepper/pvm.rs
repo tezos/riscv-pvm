@@ -388,9 +388,9 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>> Stepper
 {
     type MemoryConfig = MC;
 
-    type Manager = Normal;
+    type Mode = Normal;
 
-    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager> {
+    fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Mode> {
         &self.pvm.machine_state.core
     }
 

@@ -39,7 +39,7 @@ use crate::format_status;
 /// Assumes the program counter will be a multiple of 2.
 fn get_current_instr<S: Stepper>(stepper: &S) -> Result<Instr, InstrGetError>
 where
-    S::Manager: AtomMode + DataSpaceMode,
+    S::Mode: AtomMode + DataSpaceMode,
 {
     let machine_state = stepper.machine_state();
     let get_half_instr = |raw_pc: Address| -> Result<u16, InstrGetError> {

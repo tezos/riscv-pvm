@@ -860,7 +860,7 @@ pub(crate) mod test_helpers {
     ///
     /// It is useful to choose how objects are reinitialised in tests to improve performance, for
     /// example the [`Prove`] would rather be newly created than be reset or cloned.
-    pub trait ManagerTestInit: Mode {
+    pub trait TestInitMode: Mode {
         /// This type is used to downcast the initialisation function to the actual type that is the
         /// subject of initialisation.
         type TestMachine: ReinitMachine<Self>;
@@ -874,7 +874,7 @@ pub(crate) mod test_helpers {
     }
 
     // This is the place where we choose _what_ we are interested in initialising.
-    impl<M: Mode> ManagerTestInit for M
+    impl<M: Mode> TestInitMode for M
     where
         TestMachineOf<M>: ReinitMachine<M>,
     {
@@ -940,7 +940,7 @@ mod tests {
     use crate::machine_state::registers::sp;
     use crate::machine_state::registers::t0;
     use crate::machine_state::registers::t2;
-    use crate::machine_state::test_helpers::ManagerTestInit;
+    use crate::machine_state::test_helpers::TestInitMode;
     use crate::machine_state::test_helpers::TestMachineOf;
     use crate::parser::instruction::InstrWidth;
     use crate::parser::parse_uncompressed_instruction;
@@ -960,7 +960,7 @@ mod tests {
             pc_addr_offset in 0..250_u64,
             jump_addr in 0..250_u64,
         )| {
-            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+            let mut state = <F as TestInitMode>::reinit_machine_state(
                 state_cell.borrow_mut(),
             );
 
@@ -1012,7 +1012,7 @@ mod tests {
         proptest!(|(
             pc_addr_offset in 0..200_u64
         )| {
-            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+            let mut state = <F as TestInitMode>::reinit_machine_state(
                 state_cell.borrow_mut(),
             );
 
@@ -1037,7 +1037,7 @@ mod tests {
         proptest!(|(
             pc_addr_offset in 0..200_u64,
         )| {
-            let mut state = <F as ManagerTestInit>::reinit_machine_state(
+            let mut state = <F as TestInitMode>::reinit_machine_state(
                 state_cell.borrow_mut(),
             );
 
