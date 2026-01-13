@@ -97,10 +97,11 @@ To complete the dependency update process:
 
 ### bincode
 The bincode crate has been marked as **unmaintained** as of version 3.0. We're staying on version 2.0.1, which is the last functional version. Consider migrating to alternatives like:
-- wincode (bincode-compatible)
-- postcard
-- bitcode
-- rkyv
+- wincode (bincode-compatible drop-in replacement)
+- oxicode (modern successor to bincode with binary compatibility)
+- postcard (minimal size, no_std compatible)
+- bitcode (high performance with zero-copy)
+- rkyv (zero-copy deserialization for IPC/memory-mapped files)
 
 ### rocksdb
 The rocksdb update from 0.24.0 to 0.43.0 includes several breaking changes:
