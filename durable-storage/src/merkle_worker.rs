@@ -5,8 +5,8 @@
 //! Asynchronous Merkle layer worker
 //!
 //! This module provides a Merkle worker that processes Merkle layer commands asynchronously in a
-//! background thread. It allows non-blocking `set` and `delete` operations while still providing
-//! synchronous access to `hash` and `commit` operations.
+//! background thread. It allows non-blocking `set`, `write` and `delete` operations while still
+//! providing synchronous access to `hash` and `commit` operations.
 
 use std::sync::Arc;
 
@@ -24,6 +24,13 @@ use crate::persistence_layer::PersistenceLayer;
 
 /// Commands that can be sent to the Merkle worker background thread
 enum Command {
+    /// Write to the value associated with a key using the given offset.
+    Write {
+        key: Key,
+        offset: usize,
+        value: Bytes,
+    },
+
     /// Set the value associated with a key.
     Set { key: Key, value: Bytes },
 
@@ -54,7 +61,7 @@ enum Command {
 
 /// Merkle worker that processes commands asynchronously in a background thread
 ///
-/// It works like the [`MerkleLayer`] but does not block on `set` and `delete` operations.
+/// It works like the [`MerkleLayer`] but does not block on `set`, `write` and `delete` operations.
 pub struct MerkleWorker {
     /// Send end of the command channel that is connected to the background worker thread
     sender: mpsc::UnboundedSender<Command>,
@@ -132,6 +139,8 @@ impl MerkleWorker {
 
             while let Some(cmd) = receiver.recv().await {
                 match cmd {
+                    Command::Write { key, offset, value } => layer.write(&key, offset, value),
+
                     Command::Set { key, value } => layer.set(&key, value),
 
                     Command::Delete { key } => layer.delete(&key),
@@ -158,6 +167,14 @@ impl MerkleWorker {
         });
 
         MerkleWorker { sender }
+    }
+
+    /// Non-blocking version of [`MerkleLayer::write`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "Used in later Database change"))]
+    pub(crate) fn write(&self, key: Key, offset: usize, value: Bytes) {
+        self.sender
+            .send(Command::Write { key, offset, value })
+            .expect("Merkle worker should be alive");
     }
 
     /// Non-blocking version of [`MerkleLayer::set`].
@@ -234,8 +251,18 @@ mod tests {
 
     #[derive(Debug, Clone)]
     enum TestCommand {
-        Set { key: Key, value: Bytes },
-        Delete { key: Key },
+        Write {
+            key: Key,
+            offset: usize,
+            value: Bytes,
+        },
+        Set {
+            key: Key,
+            value: Bytes,
+        },
+        Delete {
+            key: Key,
+        },
         Hash,
         Commit,
         Clone,
@@ -250,6 +277,11 @@ mod tests {
             layer: &mut MerkleLayer,
         ) {
             match self {
+                Self::Write { key, offset, value } => {
+                    layer.write(&key, offset, value.clone());
+                    worker.write(key, offset, value);
+                }
+
                 Self::Set { key, value } => {
                     layer.set(&key, value.clone());
                     worker.set(key, value);
@@ -291,6 +323,16 @@ mod tests {
         }
 
         fn strategy() -> impl Strategy<Value = Self> {
+            let write = (key_strategy(), value_strategy())
+                // Writing to a non-zero offset requires an existing value. Rather than bookkeeping
+                // keys, we just stick to a zero offset and leave testing non-zero offsets to the
+                // Merkle layer tests.
+                .prop_map(|(key, value)| TestCommand::Write {
+                    key,
+                    offset: 0,
+                    value,
+                });
+
             let set = (key_strategy(), value_strategy())
                 .prop_map(|(key, value)| TestCommand::Set { key, value });
 
@@ -304,7 +346,8 @@ mod tests {
 
             // The frequencies are chosen to reflect a typical workload.
             proptest::prop_oneof![
-                500 => set,
+                250 => write,
+                250 => set,
                 50 => delete,
                 10 => clone,
                 10 => hash,
