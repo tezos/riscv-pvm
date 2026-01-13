@@ -108,6 +108,11 @@ impl MerkleLayer {
     pub fn set(&mut self, key: &Key, data: Bytes) {
         self.tree.set(key, data)
     }
+
+    /// Writes the data to the node associated with a given [Key] with the given offset.
+    pub fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
+        self.tree.write(key, offset, data)
+    }
 }
 
 #[cfg(test)]
@@ -382,7 +387,7 @@ mod tests {
         ml.set(&key, data2.clone());
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), data2.clone().into());
+        let node = MavlNode::new(key.clone(), data2.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -915,6 +920,89 @@ mod tests {
 
                 prop_assert_eq!(before_hash == ml.hash(), seen.contains(&key));
                 seen.insert(key);
+            }
+
+            ml.tree.check();
+        }
+    }
+
+    #[test]
+    fn test_mavl_write_new_value() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::from("write_new_value");
+        let mut ml = new_merkle_layer();
+        let old_hash = ml.hash();
+        ml.write(&key, 0, data.clone());
+
+        let node = MavlNode::new(key.clone(), data.into());
+        let get_node = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(&get_node, &node.data());
+        assert_ne!(old_hash, ml.hash());
+        ml.tree.check();
+    }
+
+    #[test]
+    fn test_mavl_write_no_truncation() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::from("a long value");
+        let data2 = Bytes::from("good");
+        let mut ml = new_merkle_layer();
+        ml.set(&key, data.clone());
+        let old_hash = ml.hash();
+
+        let data_len = data.len();
+        let node = MavlNode::new(key.clone(), data.into());
+        let get_node = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(&get_node, &node.data());
+
+        ml.write(&key, 2, data2.clone());
+        assert_ne!(old_hash, ml.hash());
+        assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
+        let node = MavlNode::new(key.clone(), Bytes::from("a good value").into());
+        let get_node = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully");
+
+        assert_eq!(get_node.len(), data_len);
+        assert_eq!(&get_node, &node.data());
+        ml.tree.check();
+    }
+
+    proptest! {
+        #[test]
+        fn test_mavl_write_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..10)) {
+            let data = Bytes::from(vec![0; 500]);
+            let alternating = Bytes::from([1, 0]
+                .iter()
+                .cycle()
+                .take(500)
+                .cloned()
+                .collect::<Vec<_>>());
+
+            let mut ml = new_merkle_layer();
+            let old_hash = ml.hash();
+
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                ml.set(&key, data.clone());
+                for offset in 0..250 {
+                    ml.write(&key, offset * 2, Bytes::from(vec![1]));
+                }
+            }
+
+            if !keys.is_empty() {
+                assert_ne!(old_hash, ml.hash());
+            }
+
+            for bytes in &keys {
+                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &alternating);
             }
 
             ml.tree.check();

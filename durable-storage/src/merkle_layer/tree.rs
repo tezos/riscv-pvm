@@ -14,6 +14,7 @@ use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
 use super::node::set;
+use super::node::write;
 use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
@@ -72,6 +73,11 @@ impl Avl {
     /// Set the value of a node in the tree with a given key.
     pub fn set(&mut self, key: &Key, data: Bytes) {
         set(&mut self.root, key, data);
+    }
+
+    /// Writes the data to the node associated with a given [Key] with the given offset.
+    pub fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
+        write(&mut self.root, key, offset, data);
     }
 }
 
