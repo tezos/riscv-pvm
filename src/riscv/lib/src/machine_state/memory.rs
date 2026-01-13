@@ -30,8 +30,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::registers::XValue;
 use crate::pvm::linux;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Number of bits needed so you can address every byte in a page
 pub const OFFSET_BITS: NonZeroU64 = NonZeroU64::new(12).expect("OFFSET_BITS is non-zero");
@@ -226,31 +224,31 @@ pub trait Memory<M: Mode>: Sized {
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead;
+        M: AtomMode + DataSpaceMode;
 
     /// Read an element in the region that will be used in execution. `address` is in bytes.
     fn read_exec<E>(&self, address: Address) -> Result<InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead;
+        M: AtomMode + DataSpaceMode;
 
     /// Read elements from the region. `address` is in bytes.
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead;
+        M: AtomMode + DataSpaceMode;
 
     /// Update an element in the region. `address` is in bytes.
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 
     /// Update multiple elements in the region. `address` is in bytes.
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 
     /// Clone the persistent memory state.
     fn clone_state(&self) -> Self
@@ -260,7 +258,7 @@ pub trait Memory<M: Mode>: Sized {
     /// Zero-out all memory.
     fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
-        M: ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 
     /// Protect the pages that belong to the given address range.
     fn protect_pages(
@@ -271,7 +269,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerWrite;
+        M: AtomMode;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(
@@ -281,7 +279,7 @@ pub trait Memory<M: Mode>: Sized {
         allow_replace: bool,
     ) -> Result<Address, MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode;
 
     /// Allocate pages for the given address range.
     fn deallocate_pages(
@@ -290,7 +288,7 @@ pub trait Memory<M: Mode>: Sized {
         length: NonZeroUsize,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode;
 
     /// Allocate pages for the given address range and amend the protections for them.
     fn allocate_and_protect_pages(
@@ -302,7 +300,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite;
+        M: AtomMode + DataSpaceMode;
 
     /// Free the pages in that address range and make sure the range is no longer accessible.
     fn deallocate_and_protect_pages(
@@ -312,7 +310,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         self.deallocate_pages(address, length)?;
         self.protect_pages(address, length, Permissions::NONE, listener)

@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::num::TryFromIntError;
 
 use arbitrary_int::TryNewError;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::mode::Mode;
 
 use crate::machine_state::memory::BadMemoryAccess;
@@ -13,7 +14,6 @@ use crate::machine_state::memory::MemoryGovernanceError;
 use crate::machine_state::registers::XRegisters;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::a0;
-use crate::state_backend::ManagerWrite;
 
 /// Linux system call error codes
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -113,7 +113,7 @@ impl<M: Mode> XRegisters<M> {
     /// Write the error result of a system call to the return value register.
     pub fn write_system_call_error(&mut self, error: Error)
     where
-        M: ManagerWrite,
+        M: AtomMode,
     {
         self.write(a0, error.into_xvalue());
     }

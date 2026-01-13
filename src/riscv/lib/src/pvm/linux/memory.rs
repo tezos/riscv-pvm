@@ -18,6 +18,8 @@
 use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -36,8 +38,6 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::memory::PAGE_SIZE;
 use crate::machine_state::memory::Permissions;
 use crate::machine_state::page_cache::PageCache;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Number of pages that make up the stack
 const STACK_PAGES: u64 = 0x2000;
@@ -58,7 +58,7 @@ impl<M: Mode> SupervisorState<M> {
     /// See: <https://man7.org/linux/man-pages/man2/brk.2.html>
     pub(super) fn handle_brk(&self) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         // The program break may not be moved
         Ok(self.program.end.to_machine_address())
@@ -87,7 +87,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
             let (main_memory, listener) = state.memory_with_listener();
@@ -119,7 +119,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // We don't allow shared mappings
         match flags.visibility {
@@ -177,7 +177,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // TODO: RV-561: use u64 everywhere in the PVM
         let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");

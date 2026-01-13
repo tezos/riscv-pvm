@@ -18,6 +18,8 @@ use std::fmt::Debug;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -63,8 +65,6 @@ use crate::parser::instruction::InstrRoundingMode;
 use crate::parser::instruction::InstrWidth;
 use crate::parser::instruction::XRegToFRegArgs;
 use crate::parser::instruction::XRegToFRegArgsWithRounding;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// An instruction formed of an opcode and flat arguments.
 ///
@@ -339,7 +339,7 @@ impl OpCode {
     pub(super) fn to_run<MC, M>(self) -> RunInstr<MC, M>
     where
         MC: MemoryConfig,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         match self {
             Self::X64Add => Args::run_x64_add,
@@ -678,7 +678,7 @@ impl Instruction {
     ) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
         MC: MemoryConfig,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         (self.opcode.to_run())(&self.args, core)
     }
@@ -852,7 +852,7 @@ macro_rules! impl_fload_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.$fn(self.imm, self.rs1.x, self.rd.f)
                 .map(|_| Next(self.width))
@@ -893,7 +893,7 @@ macro_rules! impl_fstore_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.$fn(self.imm, self.rs1.x, self.rs2.f)
                 .map(|_| Next(self.width))
@@ -995,7 +995,7 @@ macro_rules! impl_f_x_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.x, self.rd.f);
             Ok(Next(self.width))
@@ -1009,7 +1009,7 @@ macro_rules! impl_f_x_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.x, self.rm, self.rd.f);
             Ok(Next(self.width))
@@ -1033,7 +1033,7 @@ macro_rules! impl_x_f_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.f, self.rd.x);
             Ok(Next(self.width))
@@ -1047,7 +1047,7 @@ macro_rules! impl_x_f_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: ManagerRead + ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.f, self.rm, self.rd.x);
             Ok(Next(self.width))
@@ -1061,8 +1061,10 @@ macro_rules! impl_f_r_type {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
-where
-MC: MemoryConfig, M: ManagerRead + ManagerWrite {
+        where
+            MC: MemoryConfig,
+            M: AtomMode + DataSpaceMode
+        {
             core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.f);
             Ok(Next(self.width))
         }
@@ -1073,8 +1075,10 @@ MC: MemoryConfig, M: ManagerRead + ManagerWrite {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
-where
-MC: MemoryConfig, M: ManagerRead + ManagerWrite {
+        where
+            MC: MemoryConfig,
+            M: AtomMode + DataSpaceMode
+        {
             core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.x);
             Ok(Next(self.width))
         }
@@ -1085,8 +1089,10 @@ MC: MemoryConfig, M: ManagerRead + ManagerWrite {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
-where
-MC: MemoryConfig, M: ManagerRead + ManagerWrite {
+        where
+            MC: MemoryConfig,
+            M: AtomMode + DataSpaceMode
+        {
             core.hart.$fn(self.rs1.f, self.rm, self.rd.f);
             Ok(Next(self.width))
         }
@@ -1097,8 +1103,10 @@ MC: MemoryConfig, M: ManagerRead + ManagerWrite {
             &self,
             core: &mut MachineCoreState<MC, M>,
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
-where
-MC: MemoryConfig, M: ManagerRead + ManagerWrite {
+        where
+            MC: MemoryConfig,
+            M: AtomMode + DataSpaceMode
+        {
             core.hart.$fn(self.rs1.f, self.rs2.f, $(self.$field,)* self.rd.f);
             Ok(Next(self.width))
         }

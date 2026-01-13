@@ -53,7 +53,6 @@ use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
-use crate::state_backend;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::merkle::merkle_tree_to_merkle_proof;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -144,7 +143,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Reset the PVM.
     pub fn reset(&mut self)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.machine_state.reset();
         self.version.write(INITIAL_VERSION);
@@ -158,7 +157,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Used for testing, corrupt the state so the following proofs will be incorrect.
     pub fn insert_failure(&mut self)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode,
     {
         // We want to just slightly modify the state without interfering with normal execution.
         let csregs = &mut self.machine_state.core.hart.csregisters;
@@ -171,7 +170,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Perform one evaluation step.
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.eval_max(hooks, Bound::Included(1));
     }
@@ -192,7 +191,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// but a page fault is not)
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Do nothing if step_bounds is less than 1
         if !less_than_bound(0, step_bounds) {
@@ -229,7 +228,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Provide input. Returns `false` if the machine state is not expecting input.
     pub(crate) fn provide_input(&mut self, input: PvmInput) -> bool
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // TODO RV-615: Remove `as u32` conversion
         match input {
@@ -246,7 +245,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// expecting a message.
     pub(crate) fn provide_inbox_message(&mut self, level: u32, counter: u32, payload: &[u8]) -> bool
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         if !tezos::provide_input(
             &mut self.status,
@@ -271,7 +270,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Returns `false` if the machine is not expecting a reveal.
     pub(crate) fn provide_reveal_response(&mut self, reveal_data: &[u8]) -> bool
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         if !tezos::provide_reveal_response(
             &mut self.status,
@@ -290,7 +289,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Get the reveal request in the machine state.
     pub(crate) fn reveal_request(&self) -> Vec<u8>
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.reveal_request.to_vec()
     }
@@ -298,7 +297,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Provide a reveal error response to the PVM
     pub fn provide_reveal_error_response(&mut self)
     where
-        M: state_backend::ManagerRead + state_backend::ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.machine_state
             .core
@@ -315,7 +314,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Get the current machine status.
     pub fn status(&self) -> PvmStatus
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         self.status.read()
     }
@@ -323,7 +322,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     /// Construct an [`InputRequest`] based on the PVM's current status and level.
     pub fn input_request(&self) -> InputRequest
     where
-        M: state_backend::ManagerRead,
+        M: AtomMode,
     {
         match self.status.read() {
             PvmStatus::Evaluating => InputRequest::NoInputRequired,
@@ -528,7 +527,7 @@ pub(crate) fn handle_system_call<MC, PC, M>(
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: state_backend::ManagerRead + state_backend::ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, status, reveal_request);
@@ -573,7 +572,7 @@ mod tests {
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
         where
-            M: state_backend::ManagerRead + state_backend::ManagerWrite,
+            M: AtomMode + DataSpaceMode,
         {
             handle_system_call(
                 &mut self.machine_state,

@@ -33,27 +33,16 @@ mod region;
 pub mod verify_backend;
 
 pub use elems::*;
-use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::data_space::DataSpaceMode;
 pub use proof_layout::*;
-use trait_set::trait_set;
-
-trait_set! {
-    /// Manager with read capabilities
-    pub trait ManagerRead = AtomMode + DataSpaceMode;
-
-    /// Manager with write capabilities
-    pub trait ManagerWrite = AtomMode + DataSpaceMode;
-}
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::atom::CloneAtomMode;
     use octez_riscv_data::components::data_space::CloneDataSpaceMode;
+    use octez_riscv_data::components::data_space::DataSpaceMode;
     use trait_set::trait_set;
 
-    use super::ManagerRead;
-    use super::ManagerWrite;
     use crate::machine_state::test_helpers::ManagerTestInit;
 
     /// Generate a test against all test backends.
@@ -83,8 +72,8 @@ pub(crate) mod test_helpers {
         /// This lets you construct backends for any layout.
         ///
         /// Used for testing.
-        pub trait TestBackendFactory = ManagerRead
-            + ManagerWrite
+        pub trait TestBackendFactory = AtomMode
+            + DataSpaceMode
             + CloneAtomMode
             + CloneDataSpaceMode
             + ManagerTestInit

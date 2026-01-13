@@ -30,8 +30,6 @@ use super::Buddy;
 use super::BuddyConfig;
 use super::branch::BuddyBranch2;
 use super::branch::BuddyBranch2Config;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Generate a new combined Buddy branch.
 macro_rules! combined_buddy_branch {
@@ -118,42 +116,42 @@ macro_rules! combined_buddy_branch {
 
             fn allocate(&mut self, pages: u64) -> Option<u64>
             where
-                M: ManagerRead + ManagerWrite,
+                M: AtomMode,
             {
                 self.0.allocate(pages)
             }
 
             fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
             where
-                M: ManagerRead + ManagerWrite,
+                M: AtomMode,
             {
                 self.0.allocate_fixed(idx, pages, replace)
             }
 
             fn deallocate(&mut self, idx: u64, pages: u64)
             where
-                M: ManagerRead + ManagerWrite,
+                M: AtomMode,
             {
                 self.0.deallocate(idx, pages)
             }
 
             fn longest_free_sequence(&self) -> u64
             where
-                M: ManagerRead,
+                M: AtomMode,
             {
                 self.0.longest_free_sequence()
             }
 
             fn count_free_start(&self) -> u64
             where
-                M: ManagerRead,
+                M: AtomMode,
             {
                 self.0.count_free_start()
             }
 
             fn count_free_end(&self) -> u64
             where
-                M: ManagerRead,
+                M: AtomMode,
             {
                 self.0.count_free_end()
             }

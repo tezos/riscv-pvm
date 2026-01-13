@@ -25,8 +25,10 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -61,8 +63,6 @@ use crate::program::Program;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::linux::parameters::ECALL_WIDTH;
 use crate::pvm::linux::signals::Signal;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Thread identifier for the main thread
 const MAIN_THREAD_ID: u64 = 1;
@@ -187,7 +187,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
     /// Add data to the stack, returning the updated stack pointer.
     fn push_stack(&mut self, align: u64, data: impl AsRef<[u8]>) -> Result<Address, MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let data = data.as_ref();
 
@@ -213,7 +213,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
         auxv: &[(AuxVectorKey, u64)],
     ) -> Result<(), MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // First we push all constants so that they are at the top of the stack
         let arg_ptrs = args
@@ -267,7 +267,7 @@ where
     /// Load the program into memory and set the PC to its entrypoint.
     fn load_program(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Reset hart state & set pc to entrypoint
         self.machine_state.core.hart.reset(program.entrypoint);
@@ -288,7 +288,7 @@ where
     /// Configure the stack for a new process.
     fn prepare_stack(&mut self) -> Result<(), MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let stack_top = VirtAddr::new(MC::TOTAL_BYTES.get() as u64);
 
@@ -352,7 +352,7 @@ where
     /// Install a Linux program and configure the Hart to start it.
     pub fn setup_linux_process(&mut self, program: &Program<MC>) -> Result<(), MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         self.load_program(program)?;
 
@@ -466,7 +466,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let pc = machine.core.hart.pc.read();
 
@@ -758,7 +758,7 @@ impl<M: Mode> SupervisorState<M> {
         tid_address: VirtAddr,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         // NOTE: `set_tid_address` is mostly important for when a thread terminates. As we don't
         // really support threading yet, we only save the address and do nothing else.
@@ -790,10 +790,7 @@ impl<M: Mode> SupervisorState<M> {
     fn handle_exit(
         &mut self,
         status: parameters::ExitStatus,
-    ) -> Result<parameters::SystemCallResultExecution, Infallible>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    ) -> Result<parameters::SystemCallResultExecution, Infallible> {
         self.exit_code = status.exit_code();
         self.exited = true;
 
@@ -810,10 +807,7 @@ impl<M: Mode> SupervisorState<M> {
         &mut self,
         _: parameters::MainThreadId,
         signal: signals::TkillSignal,
-    ) -> Result<parameters::SystemCallResultExecution, Infallible>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    ) -> Result<parameters::SystemCallResultExecution, Infallible> {
         // Indicate that we have exited
         self.exited = true;
         self.exit_code = signal.exit_code();
@@ -843,7 +837,7 @@ impl<M: Mode> SupervisorState<M> {
         tp: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Size of struct timespec (8 bytes for tv_sec + 8 bytes for tv_nsec)
         const TIMESPEC_SIZE: usize = 16;
@@ -870,7 +864,7 @@ impl<M: Mode> SupervisorState<M> {
         mask: VirtAddr,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         const SINGLE_PROCESS_PID_AFFINITY: u8 = 0b1_u8;
 
@@ -900,7 +894,7 @@ impl<M: Mode> SupervisorState<M> {
         tz: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Size of struct timeval (8 bytes for tv_sec + 8 bytes for tv_usec)
         const TIMEVAL_SIZE: usize = 16;
@@ -934,7 +928,7 @@ impl<M: Mode> SupervisorState<M> {
         old_limit: VirtAddr,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // In jstz this is only used to set the maximum size of the process stack to infinity. In
         // other programs, it can be used to set limits for system resources. Allowing programs to
@@ -1118,7 +1112,7 @@ mod tests {
     fn default_on_tezos_handler<MC, M>(core: &mut MachineCoreState<MC, M>) -> ControlFlow<()>
     where
         MC: MemoryConfig,
-        M: ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         core.hart
             .xregisters

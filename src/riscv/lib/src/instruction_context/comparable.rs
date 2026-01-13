@@ -5,13 +5,13 @@
 //! Comparison operations required for a given instruction builder context, including
 //! implementations for interpreted mode.
 
+use octez_riscv_data::components::atom::AtomMode;
+
 use super::Predicate;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::registers::XValue;
 use crate::machine_state::registers::XValue32;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Trait for comparison operations on **XValues** used in the instruction builder context `I`.
 pub trait Comparable<I: ?Sized> {
@@ -25,7 +25,7 @@ pub trait Comparable<I: ?Sized> {
 impl<MC, M> Comparable<MachineCoreState<MC, M>> for XValue
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode,
 {
     type Result = bool;
 
@@ -47,7 +47,7 @@ where
 impl<MC, M> Comparable<MachineCoreState<MC, M>> for XValue32
 where
     MC: MemoryConfig,
-    M: ManagerRead + ManagerWrite,
+    M: AtomMode,
 {
     type Result = bool;
 

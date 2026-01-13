@@ -7,13 +7,14 @@
 //!
 //! U:C-16
 
+use octez_riscv_data::components::atom::AtomMode;
+
 use crate::exceptions::Exception;
 use crate::machine_state::hart_state::HartState;
-use crate::state_backend as backend;
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// `C.EBREAK` compressed instruction
     ///

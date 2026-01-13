@@ -4,6 +4,7 @@
 
 use std::ops::ControlFlow;
 
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
@@ -12,8 +13,6 @@ use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a7;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Reason for interrupting execution
 pub enum BreakReason {
@@ -37,7 +36,7 @@ impl<M: Mode> PosixState<M> {
         machine: &mut MachineState<MC, PC, M>,
     ) -> ControlFlow<BreakReason>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         let handle_exit = |code| ControlFlow::Break(BreakReason::Exit(code));
 

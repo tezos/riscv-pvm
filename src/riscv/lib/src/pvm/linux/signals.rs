@@ -20,6 +20,7 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -61,8 +62,6 @@ use crate::pvm::linux::Address;
 use crate::pvm::linux::SupervisorState;
 use crate::pvm::linux::VirtAddr;
 use crate::pvm::linux::parameters::SystemCallResultExecution;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Errors relating to handling signals
 #[derive(Debug, Eq, thiserror::Error, PartialEq)]
@@ -166,7 +165,7 @@ pub struct SignalActions<M: Mode> {
     thread_mask: Atom<u64, M>,
 }
 
-impl<M: ManagerRead> SignalActions<M> {
+impl<M: AtomMode> SignalActions<M> {
     /// Read the action for a given signal
     pub(crate) fn read_action<T: Into<SignalIndex>>(&self, signal: T) -> VirtAddr {
         let signal_index: SignalIndex = signal.into();
@@ -193,7 +192,7 @@ impl<M: ManagerRead> SignalActions<M> {
     }
 }
 
-impl<M: ManagerWrite> SignalActions<M> {
+impl<M: AtomMode> SignalActions<M> {
     /// Write the action for a given signal
     pub(crate) fn write_action<T: Into<SignalIndex>>(&mut self, signal: T, action: VirtAddr) {
         let signal_index: SignalIndex = signal.into();
@@ -275,7 +274,7 @@ impl<C> Decode<C> for SignalActions<Normal> {
     }
 }
 
-impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: AtomMode + DataSpaceMode> MachineCoreState<MC, M> {
     /// Set the hart state to a signal handler
     pub fn dispatch_signal(&mut self, signal: Signal) -> Result<(), SignalError> {
         let handler = self.signal_actions.read_action(signal);
@@ -387,7 +386,7 @@ impl<MC: MemoryConfig, M: ManagerRead + ManagerWrite> MachineCoreState<MC, M> {
 impl<MC: MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     fn signal_action(&self, signal: Signal) -> LinuxSigAction
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         let index: SignalIndex = signal.into();
         let sa_sigaction = self.signal_actions.read_action(index);
@@ -408,7 +407,7 @@ impl<MC: MemoryConfig, M: Mode> MachineCoreState<MC, M> {
         action: LinuxSigAction,
     ) -> Result<(), SignalError>
     where
-        M: ManagerWrite,
+        M: AtomMode,
     {
         // These signals cannot have their dispositions changed, see
         // <https://www.man7.org/linux/man-pages/man7/signal.7.html>
@@ -430,7 +429,7 @@ impl<M: Mode> SignalActions<M> {
     /// Reset to the default state
     pub fn reset(&mut self)
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         self.actions
             .iter_mut()
@@ -664,7 +663,7 @@ impl<M: Mode> SupervisorState<M> {
         old: SignalActionPtr,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         /// `sizeof(struct sigaltstack)` on the Kernel side
         const SIZE_SIGALTSTACK: usize = 24;
@@ -689,7 +688,7 @@ impl<M: Mode> SupervisorState<M> {
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         if let Some(old) = old.address() {
             let old_action = core.signal_action(signal);
@@ -718,7 +717,7 @@ impl<M: Mode> SupervisorState<M> {
         _: SigsetTSizeEightBytes,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let old_mask = core.signal_actions.thread_mask.read();
 
@@ -751,7 +750,7 @@ impl<M: Mode> SupervisorState<M> {
         core: &mut MachineCoreState<impl MemoryConfig, M>,
     ) -> Result<SystemCallResultExecution, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         let pc = core.pop_signal_context().map_err(|_| Error::Fault)?;
         Ok(SystemCallResultExecution {
@@ -778,7 +777,7 @@ where
     /// functions that are dynamically written to memory by the kernel when a process is loaded.
     pub fn write_restorer(&mut self, address: VirtAddr) -> Result<VirtAddr, MachineError>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         // Encoding to write RT_SIGRETURN to a7
         // ADDI imm=RT_SIGRETURN, rs1=x0, funct3=0, rd=a7

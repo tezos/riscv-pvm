@@ -6,6 +6,8 @@
 //!
 //! Chapter 11 - "F" Standard Extension for Single-Precision Floating-Point
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use rustc_apfloat::Float;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
@@ -20,7 +22,6 @@ use crate::machine_state::registers::FRegister;
 use crate::machine_state::registers::FValue;
 use crate::machine_state::registers::XRegister;
 use crate::parser::instruction::InstrRoundingMode;
-use crate::state_backend as backend;
 
 impl From<Single> for FValue {
     fn from(f: Single) -> Self {
@@ -53,7 +54,7 @@ impl FloatExt for Single {
 
 impl<M> HartState<M>
 where
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode,
 {
     /// `FCLASS.S` F-type instruction.
     ///
@@ -351,7 +352,7 @@ where
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: backend::ManagerRead + backend::ManagerWrite,
+    M: AtomMode + DataSpaceMode,
 {
     /// `FLW` I-type instruction.
     ///

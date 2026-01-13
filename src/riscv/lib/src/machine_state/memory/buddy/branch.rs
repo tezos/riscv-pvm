@@ -30,8 +30,6 @@ use perfect_derive::perfect_derive;
 
 use super::Buddy;
 use super::BuddyConfig;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 /// Information about what is free in each buddy
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
@@ -95,7 +93,7 @@ pub struct BuddyBranch2<B, M: Mode> {
 impl<B: Buddy<M>, M: Mode> BuddyBranch2<B, M> {
     fn refresh(&mut self)
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         self.free_info.write(FreeInfo {
             left_longest_free_sequence: self.left.longest_free_sequence(),
@@ -135,7 +133,7 @@ where
 
     fn allocate(&mut self, pages: u64) -> Option<u64>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if !(1..=Self::PAGES).contains(&pages) {
             return None;
@@ -185,7 +183,7 @@ where
 
     fn allocate_fixed(&mut self, idx: u64, pages: u64, replace: bool) -> Option<()>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         if pages == 0 || pages > Self::PAGES.saturating_sub(idx) {
             return None;
@@ -222,7 +220,7 @@ where
 
     fn deallocate(&mut self, idx: u64, mut pages: u64)
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode,
     {
         // Defer to only the right buddy if the range does not cover the left side
         if idx >= B::PAGES {
@@ -246,7 +244,7 @@ where
 
     fn longest_free_sequence(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         self.free_info
             .left_free_end
@@ -257,7 +255,7 @@ where
 
     fn count_free_start(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         let free_start = self.free_info.left_free_start;
 
@@ -270,7 +268,7 @@ where
 
     fn count_free_end(&self) -> u64
     where
-        M: ManagerRead,
+        M: AtomMode,
     {
         let free_end = self.free_info.right_free_end;
 

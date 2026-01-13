@@ -16,6 +16,7 @@ use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
@@ -35,7 +36,6 @@ use crate::default::ConstDefault;
 use crate::interpreter::float::FloatExceptionFlags;
 use crate::interpreter::float::RoundingMode;
 use crate::jit::builder::typed;
-use crate::state_backend as backend;
 
 /// CSR index
 #[expect(non_camel_case_types, reason = "Consistent with RISC-V spec")]
@@ -184,7 +184,7 @@ impl<M: Mode> CSRegisters<M> {
     #[inline]
     pub fn write(&mut self, reg: CSRegister, value: CSRRepr)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         match reg {
             CSRegister::fflags => {
@@ -250,7 +250,7 @@ impl<M: Mode> CSRegisters<M> {
     #[inline]
     pub fn read(&self, reg: CSRegister) -> CSRRepr
     where
-        M: backend::ManagerRead,
+        M: AtomMode,
     {
         match reg {
             CSRegister::fflags => self.fflags.read().to_repr(),
@@ -308,7 +308,7 @@ impl<M: Mode> CSRegisters<M> {
     #[inline]
     pub fn replace(&mut self, reg: CSRegister, value: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode,
     {
         let old = self.read(reg);
         self.write(reg, value);
@@ -319,7 +319,7 @@ impl<M: Mode> CSRegisters<M> {
     #[inline]
     pub fn set_bits(&mut self, reg: CSRegister, bits: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode,
     {
         let old_value = self.read(reg);
         let new_value = old_value | bits;
@@ -331,7 +331,7 @@ impl<M: Mode> CSRegisters<M> {
     #[inline]
     pub fn clear_bits(&mut self, reg: CSRegister, bits: CSRRepr) -> CSRRepr
     where
-        M: backend::ManagerRead + backend::ManagerWrite,
+        M: AtomMode,
     {
         let old_value = self.read(reg);
         let new_value = old_value & !bits;
@@ -342,7 +342,7 @@ impl<M: Mode> CSRegisters<M> {
     /// Reset the control and state registers.
     pub fn reset(&mut self)
     where
-        M: backend::ManagerWrite,
+        M: AtomMode,
     {
         // Resets accrued floating-point exceptions
         self.fflags.write(FloatExceptionFlags::DEFAULT);

@@ -4,6 +4,8 @@
 
 //! Implementations of system calls related to the file system
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -11,8 +13,6 @@ use super::error::Error;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerRead;
-use crate::state_backend::ManagerWrite;
 
 impl<M: Mode> SupervisorState<M> {
     /// Handle the `fstatat` system call. All access to the file system is denied.
@@ -39,20 +39,14 @@ impl<M: Mode> SupervisorState<M> {
     /// Handle the `openat` system call. All access to the file system is denied.
     ///
     /// See: <https://www.man7.org/linux/man-pages/man3/openat.3p.html>
-    pub(super) fn handle_openat(&mut self) -> Result<u64, Error>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    pub(super) fn handle_openat(&mut self) -> Result<u64, Error> {
         Err(Error::Access)
     }
 
     /// Handle `close` system call. All access to the file system is denied.
     ///
     /// See <https://man7.org/linux/man-pages/man2/close.2.html>
-    pub(super) fn handle_close(&self) -> Result<u64, Error>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    pub(super) fn handle_close(&self) -> Result<u64, Error> {
         // None of the file descriptors we allow (stdout/stderr) can sensibly be closed.
         Err(Error::Access)
     }
@@ -60,10 +54,7 @@ impl<M: Mode> SupervisorState<M> {
     /// Handle `read` system call. All access to the file system is denied.
     ///
     /// See <https://man7.org/linux/man-pages/man2/read.2.html>
-    pub(super) fn handle_read(&self, length: u64) -> Result<u64, Error>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    pub(super) fn handle_read(&self, length: u64) -> Result<u64, Error> {
         if length == 0 {
             // If the length is zero then POSIX allows returning zero without reading or checking
             // for errors.
@@ -76,10 +67,7 @@ impl<M: Mode> SupervisorState<M> {
     /// Handle the `readlinkat` system call. All access to the file system is denied.
     ///
     /// See: <https://man7.org/linux/man-pages/man2/readlink.2.html>
-    pub(super) fn handle_readlinkat(&mut self) -> Result<u64, Error>
-    where
-        M: ManagerRead + ManagerWrite,
-    {
+    pub(super) fn handle_readlinkat(&mut self) -> Result<u64, Error> {
         Err(Error::Access)
     }
 
@@ -94,7 +82,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: ManagerRead + ManagerWrite,
+        M: AtomMode + DataSpaceMode,
     {
         const CWD: &[u8] = c"/".to_bytes_with_nul();
 

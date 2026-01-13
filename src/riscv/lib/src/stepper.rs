@@ -5,9 +5,11 @@
 use std::ops::AddAssign;
 use std::ops::Bound;
 
+use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
+
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
-use crate::state_backend::ManagerRead;
 
 pub mod pvm;
 #[cfg(test)]
@@ -88,7 +90,7 @@ pub trait Stepper {
     type MemoryConfig: MemoryConfig;
 
     /// State backend with which the stepper was instantiated
-    type Manager: ManagerRead;
+    type Manager: AtomMode + DataSpaceMode;
 
     /// Obtain a reference to the underlying machine state.
     fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Manager>;
