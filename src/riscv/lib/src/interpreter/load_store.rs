@@ -134,6 +134,7 @@ pub fn run_load_float<V: StoreLoadFloat, I: ICB>(
 
 #[cfg(test)]
 mod test {
+    use octez_riscv_data::mode_test;
     use proptest::arbitrary::any;
     use proptest::prelude::Strategy;
     use proptest::prop_assert;
@@ -141,7 +142,6 @@ mod test {
     use proptest::proptest;
 
     use super::*;
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
@@ -160,7 +160,7 @@ mod test {
     use crate::machine_state::registers::t3;
     use crate::machine_state::registers::t4;
 
-    backend_test!(test_run_li, F, {
+    mode_test!(test_run_li, F, {
         let imm_rdrs1_res = [
             (0_i64, nz::t3, 0_u64),
             (0xFFF0_0420, nz::t2, 0xFFF0_0420),
@@ -174,7 +174,7 @@ mod test {
         }
     });
 
-    backend_test!(test_lui, F, {
+    mode_test!(test_lui, F, {
         proptest!(|(imm in any::<i64>())| {
             let mut state = MachineCoreState::<M4K, F>::default();
             state.hart.xregisters.write(a2, 0);
@@ -191,7 +191,7 @@ mod test {
         });
     });
 
-    backend_test!(test_load_store, F, {
+    mode_test!(test_load_store, F, {
         let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
@@ -274,7 +274,7 @@ mod test {
         });
     });
 
-    backend_test!(test_loadstore_float, F, {
+    mode_test!(test_loadstore_float, F, {
         let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 

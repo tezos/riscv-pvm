@@ -512,9 +512,9 @@ fn page_range(address: Address, length: NonZeroUsize) -> RangeInclusive<u64> {
 #[cfg(test)]
 pub mod tests {
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode_test;
 
     use super::*;
-    use crate::backend_test;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::memory::listener::NoopMemoryGovernanceListener;
@@ -531,7 +531,7 @@ pub mod tests {
 
     // This test verifies that memory is fully zeroed up to the page boundary, not just the
     // requested length, when allocating memory.
-    backend_test!(test_memory_fully_zeroed_on_allocation, F, {
+    mode_test!(test_memory_fully_zeroed_on_allocation, F, {
         use crate::machine_state::memory::PAGE_SIZE;
         use crate::machine_state::memory::Permissions;
 
@@ -572,7 +572,7 @@ pub mod tests {
         }
     });
 
-    backend_test!(test_endianness, F, {
+    mode_test!(test_endianness, F, {
         let mut memory = <<M4K as MemoryConfig>::State<F>>::default();
 
         memory
@@ -605,7 +605,7 @@ pub mod tests {
         check_address!(u8, 7, 0x11);
     });
 
-    backend_test!(test_memory_reset, F, {
+    mode_test!(test_memory_reset, F, {
         let clean_memory = <<M4K as MemoryConfig>::State<F>>::default();
 
         let mut memory = <<M4K as MemoryConfig>::State<F>>::default();

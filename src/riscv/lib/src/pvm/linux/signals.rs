@@ -849,8 +849,9 @@ mod tests {
     use std::ops::Bound;
     use std::ops::ControlFlow;
 
+    use octez_riscv_data::mode_test;
+
     use super::Signal;
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::memory::M1M;
     use crate::machine_state::memory::MemoryConfig;
@@ -859,7 +860,7 @@ mod tests {
     use crate::pvm::Pvm;
     use crate::pvm::linux::VirtAddr;
 
-    backend_test!(test_step_into_handler, F, {
+    mode_test!(test_step_into_handler, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
 
@@ -936,7 +937,7 @@ mod tests {
         );
     });
 
-    backend_test!(test_jump_to_restorer, F, {
+    mode_test!(test_jump_to_restorer, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
 

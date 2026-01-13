@@ -36,52 +36,6 @@ pub use elems::*;
 pub use proof_layout::*;
 
 #[cfg(test)]
-pub(crate) mod test_helpers {
-    use octez_riscv_data::components::atom::AtomMode;
-    use octez_riscv_data::components::atom::CloneAtomMode;
-    use octez_riscv_data::components::data_space::CloneDataSpaceMode;
-    use octez_riscv_data::components::data_space::DataSpaceMode;
-    use trait_set::trait_set;
-
-    use crate::machine_state::test_helpers::TestInitMode;
-
-    /// Generate a test against all test backends.
-    #[macro_export]
-    macro_rules! backend_test {
-        ( $(#[$m:meta])* $name:ident, $fac_name:ident, $expr:block ) => {
-            $(#[$m])*
-            #[test]
-            fn $name() {
-                use octez_riscv_data::mode::Normal;
-                use octez_riscv_data::mode::Prove;
-                use octez_riscv_data::mode::Verify;
-                use $crate::state_backend::test_helpers::TestBackendFactory;
-
-                fn inner<$fac_name: TestBackendFactory>() {
-                    $expr
-                }
-
-                inner::<Normal>();
-                inner::<Prove>();
-                inner::<Verify>();
-            }
-        };
-    }
-
-    trait_set! {
-        /// This lets you construct backends for any layout.
-        ///
-        /// Used for testing.
-        pub trait TestBackendFactory = AtomMode
-            + DataSpaceMode
-            + CloneAtomMode
-            + CloneDataSpaceMode
-            + TestInitMode
-            ;
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
 

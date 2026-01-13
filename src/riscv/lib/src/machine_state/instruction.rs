@@ -2402,7 +2402,8 @@ impl From<&FCmpArgs> for Args {
 
 #[cfg(test)]
 mod test {
-    use crate::backend_test;
+    use octez_riscv_data::mode_test;
+
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::ProgramCounterUpdate;
     use crate::machine_state::instruction::Instruction;
@@ -2412,7 +2413,7 @@ mod test {
 
     // Test that the run_jump_pc function produces a ProgramCounterUpdate::Relative
     // with the correct value, and that the PC does not change in the state.
-    backend_test!(test_run_jump_pc, F, {
+    mode_test!(test_run_jump_pc, F, {
         let test_case = [
             (42, 42),
             (0, 1000),
@@ -2435,7 +2436,7 @@ mod test {
 
     // test that ProgramCounterUpdate::Relative is returned and that the PC does not change
     // in the state.
-    backend_test!(test_jumps, F, {
+    mode_test!(test_jumps, F, {
         let test_cases = [
             (42, 42, NonZeroXRegister::x1, InstrWidth::Compressed),
             (0, 1000, NonZeroXRegister::x2, InstrWidth::Uncompressed),

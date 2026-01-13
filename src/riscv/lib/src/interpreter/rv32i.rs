@@ -47,12 +47,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::mode_test;
     use proptest::prelude::any;
     use proptest::prelude::prop;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::interpreter::integer::run_andi;
     use crate::machine_state::MachineCoreState;
@@ -67,7 +67,7 @@ mod tests {
     use crate::machine_state::registers::t1;
     use crate::parser::instruction::FenceSet;
 
-    backend_test!(test_bitwise, F, {
+    mode_test!(test_bitwise, F, {
         proptest!(|(val in any::<u64>(), imm in any::<u64>())| {
             let mut state = MachineCoreState::<M4K, F>::default();
 
@@ -86,14 +86,14 @@ mod tests {
         })
     });
 
-    backend_test!(test_ebreak, F, {
+    mode_test!(test_ebreak, F, {
         let state = MachineCoreState::<M4K, F>::default();
 
         let ret_val = state.hart.run_ebreak();
         assert_eq!(ret_val, Exception::Breakpoint);
     });
 
-    backend_test!(test_fence, F, {
+    mode_test!(test_fence, F, {
         let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
@@ -115,7 +115,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_ecall, F, {
+    mode_test!(test_ecall, F, {
         let state = HartState::<F>::default();
 
         let instr_res = state.run_ecall();

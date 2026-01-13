@@ -698,6 +698,7 @@ pub fn run_f64_from_x64_unsigned<I: ICB>(
 #[cfg(test)]
 mod test {
     use XRegister::*;
+    use octez_riscv_data::mode_test;
     use proptest::arbitrary::any;
     use proptest::prelude::Just;
     use proptest::prelude::Strategy;
@@ -708,7 +709,6 @@ mod test {
     use strum::IntoEnumIterator;
 
     use super::*;
-    use crate::backend_test;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::memory::M4K;
 
@@ -733,7 +733,7 @@ mod test {
         ]
     }
 
-    backend_test!(test_f64_from_x64_unsigned, F, {
+    mode_test!(test_f64_from_x64_unsigned, F, {
         proptest!(|(
             r1_val in any::<u64>(),
             rm in rounding_mode_strategy(),

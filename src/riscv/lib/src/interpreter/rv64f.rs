@@ -397,13 +397,13 @@ fn fvalue_to_f32_bits(f: FValue) -> u32 {
 #[cfg(test)]
 mod tests {
     use arbitrary_int::u5;
+    use octez_riscv_data::mode_test;
     use proptest::prelude::*;
     use rustc_apfloat::Float;
     use rustc_apfloat::ieee::Double;
     use rustc_apfloat::ieee::Single;
 
     use super::f32_to_fvalue;
-    use crate::backend_test;
     use crate::exceptions::Exception;
     use crate::machine_state::MachineCoreState;
     use crate::machine_state::hart_state::HartState;
@@ -415,7 +415,7 @@ mod tests {
     use crate::machine_state::registers::parse_xregister;
     use crate::machine_state::registers::t0;
 
-    backend_test!(test_fmv_f, F, {
+    mode_test!(test_fmv_f, F, {
         proptest!(|(
             f in any::<f32>().prop_map(f32::to_bits),
             rs1 in (1_u8..31).prop_map(u5::new).prop_map(parse_xregister),
@@ -448,7 +448,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_load_store, F, {
+    mode_test!(test_load_store, F, {
         let state = MachineCoreState::<M4K, F>::default();
         let state_cell = std::cell::RefCell::new(state);
 

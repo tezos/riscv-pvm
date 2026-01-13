@@ -1088,6 +1088,7 @@ mod tests {
     use std::ops::Bound;
     use std::ops::ControlFlow;
 
+    use octez_riscv_data::mode_test;
     use rand::Rng;
 
     use super::parameters::AddressHint;
@@ -1095,7 +1096,6 @@ mod tests {
     use super::parameters::Flags;
     use super::parameters::Visibility;
     use super::*;
-    use crate::backend_test;
     use crate::machine_state::memory::M4K;
     use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::sp;
@@ -1121,7 +1121,7 @@ mod tests {
     }
 
     // Check that the `set_tid_address` system call is working correctly.
-    backend_test!(set_tid_address, F, {
+    mode_test!(set_tid_address, F, {
         type MemLayout = M4K;
         const MEM_BYTES: usize = MemLayout::TOTAL_BYTES.get();
 
@@ -1152,7 +1152,7 @@ mod tests {
     });
 
     // Check `ppoll` system call the way it is used in Musl and Rust's initialisation code.
-    backend_test!(ppoll_init_fds, F, {
+    mode_test!(ppoll_init_fds, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1215,7 +1215,7 @@ mod tests {
     });
 
     // Check that the `rt_sigaction` system call is working correctly for basic cases.
-    backend_test!(rt_sigaction_with_handler, F, {
+    mode_test!(rt_sigaction_with_handler, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1338,7 +1338,7 @@ mod tests {
     });
 
     // Check that the `rt_sigaction` system call can set the disposition to ignore
-    backend_test!(rt_sigaction_ignore, F, {
+    mode_test!(rt_sigaction_ignore, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1443,7 +1443,7 @@ mod tests {
     });
 
     // Check that the `sigaltstack` system call can accept 0 for the `old` parameter.
-    backend_test!(sigaltstack_zero_parameter, F, {
+    mode_test!(sigaltstack_zero_parameter, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1473,7 +1473,7 @@ mod tests {
     });
 
     // Check that the `sched_getaffinity` system call can accept different cpu set sizes.
-    backend_test!(sched_getaffinity_set_sizes, F, {
+    mode_test!(sched_getaffinity_set_sizes, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1551,7 +1551,7 @@ mod tests {
     });
 
     // Check that the `sched_getaffinity` system call fails for a zero cpusetsize
-    backend_test!(sched_getaffinity_zero_set_size, F, {
+    mode_test!(sched_getaffinity_zero_set_size, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1600,7 +1600,7 @@ mod tests {
     });
 
     // Check that the `sched_getaffinity` system call fails for an unreasonably large cpusetsize
-    backend_test!(sched_getaffinity_unreasonable_set_size, F, {
+    mode_test!(sched_getaffinity_unreasonable_set_size, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1667,7 +1667,7 @@ mod tests {
     });
 
     // Check that the `rt_sigaction system call can accept 0 for the `old` parameter.
-    backend_test!(rt_sigaction_zero_parameter, F, {
+    mode_test!(rt_sigaction_zero_parameter, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1716,7 +1716,7 @@ mod tests {
     });
 
     // Check that the `rt_sigprocmask system call can accept 0 for the `old` parameter.
-    backend_test!(rt_sigprocmask_zero_parameter, F, {
+    mode_test!(rt_sigprocmask_zero_parameter, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1765,7 +1765,7 @@ mod tests {
     });
 
     // Check that the `clock_gettime` system call fills the timespec with zeros.
-    backend_test!(clock_gettime_fills_with_zeros, F, {
+    mode_test!(clock_gettime_fills_with_zeros, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1828,7 +1828,7 @@ mod tests {
     });
 
     // Check that the `gettimeofday` system call fills the timeval and timezone with zeros.
-    backend_test!(gettimeofday_fills_with_zeros, F, {
+    mode_test!(gettimeofday_fills_with_zeros, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();
@@ -1908,7 +1908,7 @@ mod tests {
     });
 
     // Check that `mmap` returns `Error::NoMemory` when allocate_and_protect_pages fails.
-    backend_test!(mmap_returns_enomem_when_allocation_fails, F, {
+    mode_test!(mmap_returns_enomem_when_allocation_fails, F, {
         type MemLayout = M4K;
 
         let mut machine_state = MachineState::<MemLayout, EmptyPageCache, F>::default();

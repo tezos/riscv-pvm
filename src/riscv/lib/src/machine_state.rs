@@ -911,13 +911,13 @@ mod tests {
 
     use octez_riscv_data::clone::CloneState;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode_test;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
     use super::MachineState;
     use super::instruction::Instruction;
     use super::memory::Address;
-    use crate::backend_test;
     use crate::default::ConstDefault;
     use crate::exceptions::Exception;
     use crate::machine_state::RISCV_ABI_SP_ALIGNMENT;
@@ -951,7 +951,7 @@ mod tests {
     use crate::pvm::linux::signals::Signal;
     use crate::pvm::linux::signals::SignalError;
 
-    backend_test!(test_step, F, {
+    mode_test!(test_step, F: TestInitMode, {
         let state = TestMachineOf::<F>::default();
 
         let state_cell = std::cell::RefCell::new(state);
@@ -1004,7 +1004,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_step_env_exc, F, {
+    mode_test!(test_step_env_exc, F: TestInitMode, {
         let state = TestMachineOf::<F>::default();
 
         let state_cell = std::cell::RefCell::new(state);
@@ -1030,7 +1030,7 @@ mod tests {
         });
     });
 
-    backend_test!(test_step_access_exception, F, {
+    mode_test!(test_step_access_exception, F: TestInitMode, {
         let state = TestMachineOf::<F>::default();
         let state_cell = std::cell::RefCell::new(state);
 
@@ -1137,7 +1137,7 @@ mod tests {
     }
 
     // Ensure that cloning the machine state does not result in a stack overflow
-    backend_test!(test_machine_state_cloneable, F, {
+    mode_test!(test_machine_state_cloneable, F, {
         let state = MachineState::<M1M, EmptyPageCache, F>::default();
 
         let second = state.clone();
@@ -1239,7 +1239,7 @@ mod tests {
         run_test(pc_across_pages, false, true, 0, false);
     }
 
-    backend_test!(test_signal_context, F, {
+    mode_test!(test_signal_context, F, {
         let mut state = MachineState::<M4K, EmptyPageCache, F>::default();
 
         state.reset();
@@ -1258,7 +1258,7 @@ mod tests {
     });
 
     // RV-757: Test for bugfix where previously a modified stack could cause a panic.
-    backend_test!(test_signal_index_fix, F, {
+    mode_test!(test_signal_index_fix, F, {
         let mut state = MachineState::<M4K, EmptyPageCache, F>::default();
 
         state.reset();
