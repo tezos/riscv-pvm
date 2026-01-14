@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2025-2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -17,6 +17,9 @@ use xshell::cmd;
 const ETHERLINK_DIR: &str = "kernels/etherlink";
 const SANDBOX_DIR: &str = "tools/sandbox";
 const SANDBOX_BIN: &str = "riscv-sandbox";
+const GEN_STORE_ACCESSES_DIR: &str = "tools/gen-etherlink-store-accesses";
+const GEN_STORE_ACCESSES_BIN: &str = "target/release/gen-etherlink-store-accesses";
+const DS_BENCHMARK_INPUT: &str = "durable-storage/benches/store_accesses.json";
 
 const TX_COUNT: usize = 200;
 const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
@@ -57,6 +60,11 @@ enum Commands {
         /// Sampling interval in microseconds
         #[arg(short, long, default_value = "500")]
         sample_interval_us: u64,
+        #[command(flatten)]
+        common: CommonOptions,
+    },
+    /// Generate store accesses benchmark file
+    UpdateDurableStorageBenchmark {
         #[command(flatten)]
         common: CommonOptions,
     },
@@ -101,6 +109,15 @@ fn main() -> Result<()> {
             };
 
             run_profile(config, sample_interval_us)
+        }
+        Commands::UpdateDurableStorageBenchmark { common } => {
+            let config = BuildConfig {
+                tracing: true,
+                data_dir: common.data_dir,
+                ..BuildConfig::default()
+            };
+
+            run_gen_store_accesses(config)
         }
     }
 }
@@ -403,4 +420,59 @@ fn init_data_dir(config: &BuildConfig) -> Result<PathBuf> {
             Ok(temp_dir.keep())
         }
     }
+}
+
+fn run_gen_store_accesses(config: BuildConfig) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let inbox_file = repo_root.join(DEFAULT_INBOX);
+
+    let sh = Shell::new()?;
+
+    println!("[INFO]: Building RISC-V sandbox");
+    build_sandbox(&sh, &repo_root)?;
+
+    println!("[INFO]: Building Etherlink kernel with tracing");
+    build_etherlink_kernel(&sh, &repo_root, &config, &inbox_file)?;
+
+    println!("[INFO]: Building gen-etherlink-store-accesses tool");
+    build_gen_store_accesses_tool(&sh, &repo_root)?;
+
+    let data_dir = init_data_dir(&config)?;
+
+    println!("[INFO]: Running kernel to generate trace");
+    run_etherlink(&sh, &config, &repo_root, &inbox_file, &data_dir)?;
+
+    let trace_file = data_dir.join("etherlink.trace");
+    let output_file = repo_root.join(DS_BENCHMARK_INPUT);
+
+    println!("[INFO]: Generating store accesses from trace");
+    generate_store_accesses(&sh, &repo_root, &trace_file, &output_file)?;
+
+    println!(
+        "[INFO]: Store accesses written to {}",
+        output_file.display()
+    );
+
+    Ok(())
+}
+
+fn build_gen_store_accesses_tool(sh: &Shell, repo_root: &Path) -> Result<()> {
+    let tool_dir = repo_root.join(GEN_STORE_ACCESSES_DIR);
+
+    cmd!(sh, "make -C {tool_dir} build")
+        .run()
+        .context("Failed to build gen-etherlink-store-accesses tool")
+}
+
+fn generate_store_accesses(
+    sh: &Shell,
+    repo_root: &Path,
+    trace_file: &Path,
+    output_file: &Path,
+) -> Result<()> {
+    let tool = repo_root.join(GEN_STORE_ACCESSES_BIN);
+
+    cmd!(sh, "{tool} {trace_file} -o {output_file}")
+        .run()
+        .context("Failed to generate store accesses")
 }

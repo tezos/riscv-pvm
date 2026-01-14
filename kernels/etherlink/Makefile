@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023 TriliTech <contact@trili.tech>
-# SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
+# SPDX-FileCopyrightText: 2025-2026 Nomadic Labs <contact@nomadic-labs.com>
 #
 # SPDX-License-Identifier: MIT
 
@@ -82,6 +82,9 @@ trace-kernel:
 
 profile-kernel:
 	@$(XTASK) profile -s 500
+
+update-durable-storage-benchmark:
+	@$(XTASK) update-durable-storage-benchmark
 
 # Mark all targets as phony to make sure they're always executed
 .PHONY: all $(MAKECMDGOALS)
