@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
+//
+// SPDX-License-Identifier: MIT
+
 use std::hint::black_box;
 
 use bytes::Bytes;
@@ -64,6 +69,7 @@ impl From<SerialisedOperation> for Operation {
             SerialisedOperation::Has { path } => Operation::Exists {
                 key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
             },
+            SerialisedOperation::Hash { path: _ } => Operation::Hash,
             SerialisedOperation::Read { path, size }
             | SerialisedOperation::ReadAll { path, size }
             | SerialisedOperation::ReadSlice { path, size } => Operation::Read {
@@ -92,6 +98,9 @@ enum SerialisedOperation {
     Delete { path: String },
     #[serde(rename = "store_has")]
     Has { path: String },
+    #[serde(rename = "__internal_store_get_hash")]
+    #[expect(dead_code, reason = "The path of the hash is ignored")]
+    Hash { path: String },
     #[serde(rename = "store_read")]
     Read { path: String, size: usize },
     #[serde(rename = "store_read_all")]
@@ -190,7 +199,6 @@ fn setup_benchmark_state<'a>(handle: &'a Handle, repo: &'a DirectoryManager) -> 
         operations.extend_from_slice(&erc_20_transaction);
         if i % BLOCK_FREQUENCY == 0 {
             operations.extend_from_slice(&erc_20_block_creation);
-            operations.push(Operation::Hash);
         }
     }
 
