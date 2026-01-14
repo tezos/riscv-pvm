@@ -153,6 +153,11 @@
       "size": 8
     },
     {
+      "operation": "store_read_all",
+      "path": "/evm/current_block_header",
+      "size": 0
+    },
+    {
       "operation": "store_write",
       "path": "/evm/blueprints/0/nb_chunks",
       "size": 2
@@ -199,6 +204,11 @@
       "path": "/evm/sequencer_upgrade"
     },
     {
+      "operation": "store_read_all",
+      "path": "/evm/current_block_header",
+      "size": 0
+    },
+    {
       "operation": "store_has",
       "path": "/evm/blueprints/0/nb_chunks"
     },
@@ -241,53 +251,17 @@
   "transaction": [
     {
       "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
       "size": 77
     },
     {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/balance",
-      "size": 32
+      "operation": "store_read_all",
+      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code",
+      "size": 0
     },
     {
       "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/nonce",
-      "size": 8
-    },
-    {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code.hash",
-      "size": 32
-    },
-    {
-      "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
-      "size": 77
-    },
-    {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/balance"
-    },
-    {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/nonce"
-    },
-    {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code.hash"
-    },
-    {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/code"
-    },
-    {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
-      "size": 77
-    },
-    {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
       "size": 77
     },
     {
@@ -297,39 +271,23 @@
     },
     {
       "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/balance",
-      "size": 32
-    },
-    {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/nonce",
-      "size": 8
-    },
-    {
-      "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code.hash",
-      "size": 32
-    },
-    {
-      "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
+      "path": "/tmp/evm/world_state/eth_accounts/12f142944da31ab85458787aaecaf5e34128619d/info",
       "size": 77
     },
     {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/balance"
+      "operation": "store_read_all",
+      "path": "/tmp/evm/world_state/eth_codes/c1322933d9acd214e678a232707235ba28655314de4ae24f9214b6809f1466f8/code",
+      "size": 3434
     },
     {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/nonce"
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/12f142944da31ab85458787aaecaf5e34128619d/storage/53a660bc3650c8e2ac16d52c0384149d93b4a8bb3796a1b3c6a241218b21b272",
+      "size": 32
     },
     {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code.hash"
-    },
-    {
-      "operation": "store_delete",
-      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/code"
+      "operation": "store_read",
+      "path": "/tmp/evm/world_state/eth_accounts/12f142944da31ab85458787aaecaf5e34128619d/storage/08e00ad51b7ea136b939b8b13bad52c822c0f203c98e9e0f355bcdfe4b989af2",
+      "size": 32
     },
     {
       "operation": "store_read",
@@ -341,11 +299,6 @@
       "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code"
     },
     {
-      "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code",
-      "size": 0
-    },
-    {
       "operation": "store_read",
       "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
       "size": 8
@@ -362,31 +315,36 @@
     },
     {
       "operation": "store_has",
-      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/code"
+      "path": "/tmp/evm/world_state/eth_codes/c1322933d9acd214e678a232707235ba28655314de4ae24f9214b6809f1466f8/code"
     },
     {
       "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "path": "/tmp/evm/world_state/eth_codes/c1322933d9acd214e678a232707235ba28655314de4ae24f9214b6809f1466f8/ref_count",
       "size": 8
     },
     {
       "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_codes/c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470/ref_count",
+      "path": "/tmp/evm/world_state/eth_codes/c1322933d9acd214e678a232707235ba28655314de4ae24f9214b6809f1466f8/ref_count",
       "size": 8
     },
     {
       "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
-      "size": 77
+      "path": "/tmp/evm/world_state/eth_accounts/12f142944da31ab85458787aaecaf5e34128619d/storage/53a660bc3650c8e2ac16d52c0384149d93b4a8bb3796a1b3c6a241218b21b272",
+      "size": 32
+    },
+    {
+      "operation": "store_write",
+      "path": "/tmp/evm/world_state/eth_accounts/12f142944da31ab85458787aaecaf5e34128619d/storage/08e00ad51b7ea136b939b8b13bad52c822c0f203c98e9e0f355bcdfe4b989af2",
+      "size": 32
     },
     {
       "operation": "store_read",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
       "size": 77
     },
     {
       "operation": "store_write",
-      "path": "/tmp/evm/world_state/eth_accounts/d9e5c94a12f78a96640757ac97ba0c257e8aa262/info",
+      "path": "/tmp/evm/world_state/eth_accounts/f0affc80a5f69f4a9a3ee01a640873b6ba53e539/info",
       "size": 77
     },
     {
@@ -420,6 +378,10 @@
       "operation": "store_write",
       "path": "/tmp/evm/world_state/fees/backlog",
       "size": 8
+    },
+    {
+      "operation": "__internal_store_get_hash",
+      "path": "/tmp/evm/world_state/eth_accounts"
     },
     {
       "operation": "store_write_all",
@@ -542,6 +504,11 @@
       "operation": "store_read_all",
       "path": "/evm/kernel_version",
       "size": 40
+    },
+    {
+      "operation": "store_read_all",
+      "path": "/evm/chain_configurations/1337/chain_family",
+      "size": 0
     },
     {
       "operation": "store_read_slice",
