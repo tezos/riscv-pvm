@@ -428,6 +428,11 @@ impl PersistenceLayer {
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), PersistenceLayerError> {
         Ok(self.db_instance.delete(key.as_ref())?)
     }
+
+    /// Returns false if the key doesn't exist and true if it may
+    pub(crate) fn key_may_exist(&self, key: impl AsRef<[u8]>) -> bool {
+        self.db_instance.key_may_exist(key.as_ref())
+    }
 }
 
 impl Drop for PersistenceLayer {
