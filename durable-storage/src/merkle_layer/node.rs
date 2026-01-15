@@ -14,6 +14,7 @@ use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
 use super::Key;
+use super::KeySerialized;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]
@@ -36,7 +37,7 @@ pub(super) struct MavlNode {
 #[derive(Encode)]
 /// A serialisable representation of [`MavlNode`].
 struct MavlNodeHashRepresentation<'a> {
-    key: &'a Key,
+    key: KeySerialized<'a>,
     data: &'a [u8],
     // The bytes of the hash of an optional left child
     left: Option<&'a [u8; Hash::DIGEST_SIZE]>,
@@ -98,7 +99,7 @@ impl MavlNode {
     /// uncached nodes.
     pub(super) fn to_encode(&self) -> impl Encode + '_ {
         MavlNodeHashRepresentation {
-            key: &self.key,
+            key: Into::<KeySerialized<'_>>::into(&self.key),
             data: &self.data,
 
             // Recursively hashes any left child and its children

@@ -13,7 +13,7 @@ mod tree;
 #[cfg(feature = "bench")]
 pub mod tree;
 
-use bincode::Decode;
+use bincode::BorrowDecode;
 use bincode::Encode;
 use octez_riscv_data::hash::Hash;
 use tree::Avl;
@@ -33,7 +33,7 @@ impl CommitId {
 }
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Decode, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Key(Vec<u8>);
 
 impl Key {
@@ -48,6 +48,27 @@ impl Key {
 impl AsRef<[u8]> for Key {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+#[derive(BorrowDecode, Encode)]
+struct KeySerialized<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> From<&'a Key> for KeySerialized<'a> {
+    fn from(value: &'a Key) -> Self {
+        Self {
+            data: value.0.as_slice(),
+        }
+    }
+}
+
+impl<'a> TryFrom<KeySerialized<'a>> for Key {
+    type Error = MerkleLayerError;
+
+    fn try_from(value: KeySerialized) -> Result<Self, Self::Error> {
+        Key::new(value.data)
     }
 }
 
