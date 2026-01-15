@@ -249,11 +249,11 @@ mod tests {
         assert_ne!(original_hash, ml2.hash());
         assert_eq!(original_hash, ml.hash());
 
-        let old_node1 = MavlNode::new(keys[0].clone(), data[0].clone().into());
+        let old_node1 = MavlNode::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]).into());
         let new_node1 = MavlNode::new(keys[0].clone(), cow_data.into());
 
-        let node2 = MavlNode::new(keys[1].clone(), data[1].clone().into());
-        let node3 = MavlNode::new(keys[2].clone(), data[2].clone().into());
+        let node2 = MavlNode::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]).into());
+        let node3 = MavlNode::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]).into());
 
         assert_eq!(
             &old_node1.data(),
@@ -354,7 +354,7 @@ mod tests {
         ml.set(&key, data.clone());
         assert_ne!(empty_hash, ml.hash());
 
-        let node = MavlNode::new(key.clone(), data.clone());
+        let node = MavlNode::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -372,7 +372,7 @@ mod tests {
         ml.set(&key, data.clone());
         let old_hash = ml.hash();
 
-        let node = MavlNode::new(key.clone(), data.clone());
+        let node = MavlNode::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -382,7 +382,7 @@ mod tests {
         ml.set(&key, data2.clone());
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), data2.clone());
+        let node = MavlNode::new(key.clone(), data2.clone().into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -833,8 +833,8 @@ mod tests {
         assert_ne!(empty_hash, ml.hash());
         assert_ne!(full_hash, ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.clone());
-        let after_node = MavlNode::new(key.clone(), data2.clone());
+        let before_node = MavlNode::new(key.clone(), data.into());
+        let after_node = MavlNode::new(key.clone(), data2.into());
 
         let get_node = ml
             .get(&key)
@@ -871,7 +871,7 @@ mod tests {
         assert_ne!(before_hash, ml.hash());
         assert_ne!(ml2.hash(), ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.clone());
+        let before_node = MavlNode::new(key.clone(), data.into());
 
         let get_node = ml2
             .get(&key)
@@ -903,8 +903,8 @@ mod tests {
                 data_mut.clear();
                 data_mut.put_slice(&data2);
 
-                let before_node = MavlNode::new(key.clone(), data.clone());
-                let after_node = MavlNode::new(key.clone(), data2.clone());
+                let before_node = MavlNode::new(key.clone(), data.clone().into());
+                let after_node = MavlNode::new(key.clone(), data2.clone().into());
 
                 let get_node = ml
                     .get(&key)
