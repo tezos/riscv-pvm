@@ -47,6 +47,7 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
+use crate::partial_vec::PartialVec;
 use crate::serialisation::elem::Elem;
 use crate::serialisation::serialise;
 
@@ -317,8 +318,10 @@ impl Foldable<HashFold> for DataSpace<Prove<'_>> {
             let address_range = address..address_end;
 
             let mut data = self.data_space.source.data_space[address_range.clone()].to_vec();
-            for (&byte_addr, &byte) in self.data_space.writes.range(address_range) {
-                data[byte_addr - address] = byte;
+            for (index, bytes) in self.data_space.writes.defined_range(address_range.clone()) {
+                let data_from = &mut data[index..];
+                let len = bytes.len().min(data_from.len());
+                data_from[..len].copy_from_slice(&bytes[..len]);
             }
 
             Hash::hash_bytes(&data)
@@ -588,9 +591,11 @@ impl DataSpaceMode for Prove<'_> {
 
         // We need to overlay previously written bytes on to the source data. Without this step,
         // writes would not be reflected in subsequent reads.
-        let prev_bytewise_writes = this.data_space.writes.range(addr_range);
-        for (&byte_addr, &byte) in prev_bytewise_writes {
-            data[byte_addr - addr] = byte;
+        let prev_bytewise_writes = this.data_space.writes.defined_range(addr_range.clone());
+        for (index, bytes) in prev_bytewise_writes {
+            let data_from = &mut data[index..];
+            let len = bytes.len().min(data_from.len());
+            data_from[..len].copy_from_slice(&bytes[..len]);
         }
 
         unsafe { E::read_unaligned(data.as_ptr()) }
@@ -605,8 +610,7 @@ impl DataSpaceMode for Prove<'_> {
             value.write_unaligned(data.as_mut_ptr());
         }
 
-        let bytewise_writes = addr_range::<E>(addr).zip(data);
-        this.data_space.writes.extend(bytewise_writes);
+        this.data_space.writes.define(addr, data);
     }
 }
 
@@ -729,7 +733,7 @@ impl EncodeDataSpaceMode for Normal {
 
 impl EncodeDataSpaceMode for Prove<'_> {
     fn encode<E: Encoder>(this: &DataSpace<Self>, encoder: &mut E) -> Result<(), EncodeError> {
-        if this.data_space.writes.is_empty() {
+        if this.data_space.writes.is_all_undefined() {
             // If no writes were recorded, we can serialise the underlying data space as is.
             return Normal::encode(&this.data_space.source, encoder);
         }
@@ -737,17 +741,19 @@ impl EncodeDataSpaceMode for Prove<'_> {
         // This variable keeps the index of the next item from the region that should be written.
         let mut write_index = 0;
 
-        for (&index, &value) in this.data_space.writes.iter() {
+        let full_range = 0..this.data_space.unrecorded_len();
+        for (addr, data) in this.data_space.writes.defined_range(full_range) {
             // There are items before the current index that have not been written yet.
-            if write_index < index {
-                let data = &this.data_space.source.data_space[write_index..index];
+            if write_index < addr {
+                let data = &this.data_space.source.data_space[write_index..addr];
                 encoder.writer().write(data)?;
             }
 
-            encoder.writer().write(&[value])?;
+            encoder.writer().write(data)?;
 
-            // Make sure we expect to write the next item after the current.
-            write_index = index.saturating_add(1);
+            // Make sure we expect to write the next item after the current range entry in the
+            // `PartialVec`.
+            write_index = addr.saturating_add(data.len());
         }
 
         // Write the remaining items from the region that were not written yet.
@@ -771,7 +777,7 @@ struct ProveImpl<'normal> {
     reads: RefCell<RangeSet2<usize>>,
 
     /// Addresses that were written, mapped to their latest byte value
-    writes: BTreeMap<usize, u8>,
+    writes: PartialVec<u8>,
 }
 
 impl<'normal> ProveImpl<'normal> {
@@ -782,7 +788,9 @@ impl<'normal> ProveImpl<'normal> {
 
     /// Check if the length needs to be included in the proof.
     fn need_length_in_proof(&self) -> bool {
-        self.did_access_length.get() || !self.reads.borrow().is_empty() || !self.writes.is_empty()
+        self.did_access_length.get()
+            || !self.reads.borrow().is_empty()
+            || !self.writes.is_all_undefined()
     }
 
     /// Check if any byte in the given address range was accessed (read or written).
@@ -792,7 +800,7 @@ impl<'normal> ProveImpl<'normal> {
             return true;
         }
 
-        self.writes.range(addr_range).next().is_some()
+        self.writes.is_any_defined(addr_range)
     }
 }
 
