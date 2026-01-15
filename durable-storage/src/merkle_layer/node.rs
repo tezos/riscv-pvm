@@ -74,10 +74,10 @@ impl MavlNode {
     }
 
     /// Create a new leaf node from the given key and data.
-    pub(super) fn new(key: Key, data: Bytes) -> Self {
+    pub(super) fn new(key: Key, data: BytesMut) -> Self {
         MavlNode {
             key,
-            data: data.into(),
+            data,
             balance_factor: 0,
             ..Default::default()
         }
