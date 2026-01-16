@@ -435,7 +435,7 @@ mod tests {
         let tmpdir = TestableTmpdir::new();
 
         let test = |value_a: String, value_b: String| {
-            let (repo, db) = setup_test_db(&tmpdir);
+            let (_repo, db) = setup_test_db(&tmpdir);
 
             // Test: set and get first blob
             let blob_a = HashedData::from_value(value_a.as_bytes());
@@ -737,7 +737,7 @@ mod tests {
         let tmpdir = TestableTmpdir::new();
 
         let test = |key: String, value: String, value2: String| {
-            let (repo, db) = setup_test_db(&tmpdir);
+            let (_repo, db) = setup_test_db(&tmpdir);
 
             // Test: initial key should not exist
             assert!(matches!(db.get(&key), Err(PersistenceLayerError::KeyNotFound)),
