@@ -251,80 +251,63 @@ mod tests {
         true
     }
 
+    /// Helper to create a new test Merkle layer with temporary storage.
     fn new_merkle_layer() -> MerkleLayer {
         let tmpdir = TestableTmpdir::new();
-
-        let repo =
-            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-
+        let repo = DirectoryManager::new(tmpdir.path())
+            .expect("Failed to create directory manager");
         let persistence_layer = PersistenceLayer::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-
         MerkleLayer::new(persistence_layer)
+    }
+
+    /// Helper to create test keys from byte slices.
+    fn test_keys(bytes: &[&[u8]]) -> Vec<Key> {
+        bytes.iter()
+            .map(|b| Key::new(b).expect("Size less than KEY_MAX_SIZE"))
+            .collect()
     }
 
     #[test]
     fn test_mavl_cow() {
-        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
-            .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-
+        let keys = test_keys(&[&[0], &[1], &[2]]);
         let data = [vec![0; 0], vec![13; 5], vec![42; 129]];
-
         let mut ml = new_merkle_layer();
 
+        // Insert initial data
         for i in 0..keys.len() {
             ml.set(&keys[i], data[i].clone().into());
             ml.tree.check(line!());
         }
 
+        // Clone should have identical hash
         let mut ml2 = ml.clone();
         let original_hash = ml.hash();
-        assert_eq!(original_hash, ml2.hash());
+        assert_eq!(original_hash, ml2.hash(), "Cloned layer should have same hash");
 
+        // Mutating clone should not affect original
         let cow_data = "🐮<(moo!)";
         ml2.set(&keys[0], cow_data.into());
-        assert_ne!(original_hash, ml2.hash());
-        assert_eq!(original_hash, ml.hash());
+        assert_ne!(original_hash, ml2.hash(), "Clone hash should change after mutation");
+        assert_eq!(original_hash, ml.hash(), "Original hash should remain unchanged");
 
-        let old_node1 = MavlNode::new(keys[0].clone(), data[0].clone().into());
-        let new_node1 = MavlNode::new(keys[0].clone(), cow_data.into());
+        // Verify original has old data, clone has new data
+        let old_node = MavlNode::new(keys[0].clone(), data[0].clone().into());
+        let old_data = old_node.data();
+        let new_node = MavlNode::new(keys[0].clone(), cow_data.into());
+        let new_data = new_node.data();
 
-        let node2 = MavlNode::new(keys[1].clone(), data[1].clone().into());
-        let node3 = MavlNode::new(keys[2].clone(), data[2].clone().into());
+        assert_eq!(&old_data, &ml.get(&keys[0]).expect("Should retrieve from original"));
+        assert_eq!(&new_data, &ml2.get(&keys[0]).expect("Should retrieve from clone"));
 
-        assert_eq!(
-            &old_node1.data(),
-            &ml.get(&keys[0])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml:?}")
-        );
-        assert_eq!(
-            &new_node1.data(),
-            &ml2.get(&keys[0])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
-        );
-
-        assert_eq!(
-            &node2.data(),
-            &ml.get(&keys[1])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml:?}")
-        );
-        assert_eq!(
-            &node2.data(),
-            &ml2.get(&keys[1])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
-        );
-
-        assert_eq!(
-            &node3.data(),
-            &ml.get(&keys[2])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml:?}")
-        );
-        assert_eq!(
-            &node3.data(),
-            &ml2.get(&keys[2])
-                .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
-        );
+        // Verify unchanged keys have same data in both
+        for i in 1..keys.len() {
+            let expected_node = MavlNode::new(keys[i].clone(), data[i].clone().into());
+            let expected = expected_node.data();
+            assert_eq!(&expected, &ml.get(&keys[i]).expect("Should retrieve from original"));
+            assert_eq!(&expected, &ml2.get(&keys[i]).expect("Should retrieve from clone"));
+        }
 
         ml.tree.check(line!());
         ml2.tree.check(line!());
@@ -385,79 +368,63 @@ mod tests {
 
     #[test]
     fn test_mavl_create() {
-        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key = test_keys(&[&[1]])[0].clone();
         let data = Bytes::from("create");
         let mut ml = new_merkle_layer();
+
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
-        assert_ne!(empty_hash, ml.hash());
+        assert_ne!(empty_hash, ml.hash(), "Hash should change after insert");
 
-        let node = MavlNode::new(key.clone(), data.clone());
-        let get_node = ml
-            .get(&key)
-            .expect("The node should be retrieved successfully");
-
-        assert_eq!(&get_node, &node.data());
+        let expected_node = MavlNode::new(key.clone(), data.clone());
+        let expected_data = expected_node.data();
+        assert_eq!(&expected_data, &ml.get(&key).expect("Should retrieve inserted data"));
         ml.tree.check(line!());
     }
 
     #[test]
     fn test_mavl_create_existing() {
-        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let data = Bytes::from("old");
-        let data2 = Bytes::from("new");
+        let key = test_keys(&[&[1]])[0].clone();
+        let old_data = Bytes::from("old");
+        let new_data = Bytes::from("new");
         let mut ml = new_merkle_layer();
-        ml.set(&key, data.clone());
+
+        // Insert initial value
+        ml.set(&key, old_data.clone());
         let old_hash = ml.hash();
+        let expected_old_node = MavlNode::new(key.clone(), old_data.clone());
+        let expected_old = expected_old_node.data();
+        assert_eq!(&expected_old, &ml.get(&key).expect("Should retrieve old data"));
 
-        let node = MavlNode::new(key.clone(), data.clone());
-        let get_node = ml
-            .get(&key)
-            .expect("The node should be retrieved successfully");
+        // Update with new value
+        ml.set(&key, new_data.clone());
+        assert_ne!(old_hash, ml.hash(), "Hash should change after update");
+        assert!(ml.tree.is_inorder(), "Tree should remain in order after update");
 
-        assert_eq!(&get_node, &node.data());
-
-        ml.set(&key, data2.clone());
-        assert_ne!(old_hash, ml.hash());
-        assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), data2.clone());
-        let get_node = ml
-            .get(&key)
-            .expect("The node should be retrieved successfully");
-
-        assert_eq!(&get_node, &node.data());
+        let expected_new_node = MavlNode::new(key.clone(), new_data.clone());
+        let expected_new = expected_new_node.data();
+        assert_eq!(&expected_new, &ml.get(&key).expect("Should retrieve new data"));
         ml.tree.check(line!());
     }
 
     #[test]
     fn test_mavl_create_heterogenous_key() {
-        let keys = [
-            Key::new(&[255, 0]),
-            Key::new(&[0]),
-            Key::new(&[0, 0]),
-            Key::new(&[0, 0, 0]),
-        ]
-        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-
+        // Test that keys of different lengths are handled correctly
+        let keys = test_keys(&[&[255, 0], &[0], &[0, 0], &[0, 0, 0]]);
         let data = [
             Bytes::from("255, 0"),
             Bytes::from("0"),
             Bytes::from("0, 0"),
             Bytes::from("0, 0, 0"),
         ];
-
         let mut ml = new_merkle_layer();
 
         for (key, data) in keys.iter().zip(data.iter()) {
-            let old_hash = ml.hash();
+            let hash_before = ml.hash();
             ml.set(key, data.clone());
-            assert_ne!(old_hash, ml.hash());
+            assert_ne!(hash_before, ml.hash(), "Hash should change after insert");
             ml.tree.check(line!());
-            assert_eq!(
-                ml.get(key)
-                    .expect("The node should be retrieved successfully"),
-                data
-            );
+            assert_eq!(ml.get(key).expect("Should retrieve data"), data);
         }
     }
 
@@ -642,21 +609,19 @@ mod tests {
 
     #[test]
     fn test_mavl_delete() {
-        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
+        let key = test_keys(&[&[1]])[0].clone();
         let data = Bytes::from("delete");
         let mut ml = new_merkle_layer();
+
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
         let full_hash = ml.hash();
-        assert_ne!(empty_hash, full_hash);
+        assert_ne!(empty_hash, full_hash, "Hash should change after insert");
 
         ml.delete(&key);
-        assert_ne!(full_hash, ml.hash());
-        assert_eq!(empty_hash, ml.hash());
-
-        let get_node = ml.get(&key);
-
-        assert_eq!(get_node, None);
+        assert_ne!(full_hash, ml.hash(), "Hash should change after delete");
+        assert_eq!(empty_hash, ml.hash(), "Hash should revert to empty after deleting only key");
+        assert_eq!(ml.get(&key), None, "Deleted key should not exist");
         ml.tree.check(line!());
     }
 
@@ -688,58 +653,49 @@ mod tests {
         }
     }
 
+    /// Helper function to test deletion of multiple keys in specific patterns.
+    /// Used by tests that verify specific AVL tree rebalancing scenarios.
     fn test_mavl_delete_keys(keys: &[Key]) {
         let data = Bytes::from("delete");
-
         let mut ml = new_merkle_layer();
         let empty_hash = ml.hash();
 
+        // Insert all keys
         for key in keys.iter() {
             ml.set(key, data.clone());
             ml.tree.check(line!());
-            assert_eq!(
-                ml.get(key)
-                    .expect("The node should be retrieved successfully"),
-                data.as_ref()
-            );
+            assert_eq!(ml.get(key).expect("Should retrieve inserted data"), data.as_ref());
         }
 
         if !keys.is_empty() {
-            assert_ne!(empty_hash, ml.hash());
+            assert_ne!(empty_hash, ml.hash(), "Hash should change after insertions");
         }
 
+        // Delete all keys (delete twice to test idempotence)
         for key in keys.iter() {
             ml.delete(key);
             ml.tree.check(line!());
-            ml.delete(key);
-            assert_eq!(ml.get(key), None);
+            ml.delete(key);  // Second delete should be no-op
+            assert_eq!(ml.get(key), None, "Deleted key should not exist");
         }
 
-        assert_eq!(empty_hash, ml.hash());
+        assert_eq!(empty_hash, ml.hash(), "Hash should revert to empty after all deletions");
     }
 
-    // Requires replacing a node with its successor while rebalancing a node on the return path.
-    //
-    //      BEFORE        AFTER
-    //         2x           3
-    //       /   \        /   \
-    //      0     4      1     5
-    //       \   / \         /  \
-    //        1 3   5       4    6
-    //               \
-    //                6
+    /// Tests AVL deletion that requires rebalancing during node replacement.
+    /// Requires replacing a node with its successor while rebalancing a node on the return path.
+    ///
+    ///      BEFORE        AFTER
+    ///         2x           3
+    ///       /   \        /   \
+    ///      0     4      1     5
+    ///       \   / \         /  \
+    ///        1 3   5       4    6
+    ///               \
+    ///                6
     #[test]
     fn test_mavl_delete_rebalance_needed() {
-        let keys = [
-            Key::new(&[2]),
-            Key::new(&[0]),
-            Key::new(&[3]),
-            Key::new(&[4]),
-            Key::new(&[5]),
-            Key::new(&[1]),
-            Key::new(&[6]),
-        ]
-        .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
+        let keys = test_keys(&[&[2], &[0], &[3], &[4], &[5], &[1], &[6]]);
         test_mavl_delete_keys(&keys);
     }
 

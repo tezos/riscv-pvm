@@ -158,156 +158,137 @@ mod tests {
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
+    /// Helper to create a test database with a runtime handle.
     fn new_database(handle: &Handle) -> Database {
         let tmpdir = TestableTmpdir::new();
-
-        let repo =
-            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-
+        let repo = DirectoryManager::new(tmpdir.path())
+            .expect("Failed to create directory manager");
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+    }
+
+    /// Helper to create a test runtime with specified worker threads.
+    fn new_test_runtime(worker_threads: usize) -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .build()
+            .expect("Creating a Tokio runtime should succeed")
     }
 
     proptest! {
         #[test]
-        fn test_database_delete(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
+        fn test_database_delete(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+        ) {
+            let runtime = new_test_runtime(1);
+            let mut database = new_database(runtime.handle());
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let expected_written = data.len();
-                let result = database
+                let bytes_written = database
                     .write(key.clone(), 0, Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
-                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-                prop_assert_eq!(result, expected_written);
 
-                let before = database.hash();
+                prop_assert_eq!(bytes_written, data.len());
+                prop_assert!(database.exists(&key).expect("Exists check should succeed"));
+
+                let hash_before = database.hash();
                 database.delete(key.clone()).expect("Deleting should succeed");
-                let after = database.hash();
-                assert_ne!(before, after);
-                prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+                let hash_after = database.hash();
+
+                prop_assert_ne!(hash_before, hash_after, "Hash should change after deletion");
+                prop_assert!(!database.exists(&key).expect("Exists check should succeed"));
             }
         }
     }
 
     #[test]
     fn test_database_delete_nonexistent() {
-        // Receiving the hash requires a separate worker thread
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let runtime = new_test_runtime(1);
+        let mut database = new_database(runtime.handle());
 
-        // Populate a database and obtain a root hash
+        // Populate database with some data
         let keys: Vec<Key> = (1..=5)
             .map(|k| Key::new(&[k]).expect("Size less than KEY_MAX_SIZE"))
             .collect();
-
         let data: Vec<[u8; 1]> = (1..=5).map(|i| [i * 42]).collect();
 
         for (key, data) in keys.iter().zip(data.iter()) {
-            let expected_written = data.len();
-            let result = database
+            let bytes_written = database
                 .write(key.clone(), 0, Bytes::copy_from_slice(data))
                 .expect("Writing should succeed");
-            assert!(
-                database
-                    .exists(key)
-                    .expect("There should be no other `PersistenceLayerError`s")
-            );
-            assert_eq!(result, expected_written);
+            assert_eq!(bytes_written, data.len());
+            assert!(database.exists(key).expect("Exists check should succeed"));
         }
-        let before = database.hash();
 
-        // Delete a nonexistent key
+        let hash_before = database.hash();
+
+        // Delete a nonexistent key - should succeed but not change hash
         let nonexistent_key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
-        assert!(
-            !database
-                .exists(&nonexistent_key)
-                .expect("There should be no other `PersistenceLayerError`s")
-        );
-        assert!(database.delete(nonexistent_key).is_ok());
+        assert!(!database.exists(&nonexistent_key).expect("Exists check should succeed"),
+                "Nonexistent key should not exist");
+        assert!(database.delete(nonexistent_key).is_ok(),
+                "Deleting nonexistent key should succeed");
 
-        // Ensure the root hash is unchanged
-        let after = database.hash();
-        assert_eq!(before, after);
+        let hash_after = database.hash();
+        assert_eq!(hash_before, hash_after, "Hash should be unchanged when deleting nonexistent key");
     }
 
     proptest! {
         #[test]
-        fn test_database_exists(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
-
+        fn test_database_exists(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+        ) {
+            let runtime = new_test_runtime(1);
+            let mut database = new_database(runtime.handle());
             let mut seen = HashSet::new();
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data: &[u8] = data;
-                let expected_written = data.len();
+                let is_duplicate = !seen.insert(key.clone());
 
-                prop_assert_ne!(database.exists(&key)
-                        .expect("There should be no other `PersistenceLayerError`s"),
-                    seen.insert(key.clone()));
+                // Key existence should match whether we've seen it before
+                prop_assert_eq!(
+                    database.exists(&key).expect("Exists check should succeed"),
+                    is_duplicate,
+                    "Key existence should match whether it was already written"
+                );
 
-                let result = database
+                let bytes_written = database
                     .write(key.clone(), 0, Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
-                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-
-                prop_assert_eq!(result, expected_written);
+                prop_assert_eq!(bytes_written, data.len());
+                prop_assert!(database.exists(&key).expect("Exists check should succeed"));
             }
         }
     }
 
     proptest! {
         #[test]
-        fn test_database_hash(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            // Needs a thread for sending and a thread for receiving
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
-
+        fn test_database_hash(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+        ) {
+            let runtime = new_test_runtime(2);
+            let mut database = new_database(runtime.handle());
             let mut seen = HashSet::new();
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data: &[u8] = data;
-                let expected_written = data.len();
+                let hash_before = database.hash();
 
-                let before = database.hash();
-
-                let result = database
+                let bytes_written = database
                     .write(key.clone(), 0, Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
+                prop_assert_eq!(bytes_written, data.len());
 
-                prop_assert_eq!(result, expected_written);
+                let hash_after = database.hash();
 
-                let after = database.hash();
-
-                let existing_pair = !seen.insert((key, data));
-                // Avoid the edge case of an identical hash from a previously seen identical
-                // key-value pair, where no other keys were written to in between.
-                if !existing_pair {
-                    prop_assert_ne!(before, after);
+                // Hash should change unless we're writing the same key-value pair again
+                let is_duplicate = !seen.insert((key, data));
+                if !is_duplicate {
+                    prop_assert_ne!(hash_before, hash_after, "Hash should change for new data");
                 }
             }
         }
@@ -315,174 +296,142 @@ mod tests {
 
     #[test]
     fn test_database_hash_revert() {
-        // Needs a thread for sending and a thread for receiving
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let runtime = new_test_runtime(2);
+        let mut database = new_database(runtime.handle());
 
         let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
         let original_data = [1, 2, 3];
         let mutated_data = [3, 2, 1];
 
+        // Write initial data
         database
             .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
+        let hash_original = database.hash();
 
-        let before = database.hash();
-
-        // Mutate the same key
+        // Mutate the key - hash should change
         database
             .write(key.clone(), 0, Bytes::copy_from_slice(&mutated_data))
             .expect("Writing should succeed");
+        let hash_mutated = database.hash();
+        assert_ne!(hash_original, hash_mutated, "Hash should change when data changes");
 
-        let after = database.hash();
-        assert_ne!(before, after);
-
-        // Revert the value of the same key to the original value and check the hash reverts to the
-        // same value.
+        // Revert to original data - hash should match original
         database
             .write(key.clone(), 0, Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
-        let reverted = database.hash();
-        assert_eq!(before, reverted);
+        let hash_reverted = database.hash();
+        assert_eq!(hash_original, hash_reverted,
+                   "Hash should revert when data is reverted to original value");
     }
 
     proptest! {
         #[test]
-        fn test_database_read(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100), ) {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
+        fn test_database_read(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100),
+        ) {
+            let runtime = new_test_runtime(1);
+            let mut database = new_database(runtime.handle());
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let mut read_data: [u8; 100] = [42; 100];
-
-                let read_data_before = read_data;
+                let mut buffer: [u8; 100] = [42; 100];
+                let initial_buffer = buffer;
 
                 // Write the data
-                prop_assert_eq!(
-                    database
-                        .write(key.clone(), 0, Bytes::copy_from_slice(data))
-                        .expect("Writing should succeed"),
-                    data.len()
-                );
+                let bytes_written = database
+                    .write(key.clone(), 0, Bytes::copy_from_slice(data))
+                    .expect("Writing should succeed");
+                prop_assert_eq!(bytes_written, data.len());
 
-                // The offset is bigger than the value
-                prop_assert!(database.read(&key, data.len() + 1, &mut read_data).is_err());
-                prop_assert_eq!(read_data, read_data_before);
+                // Test: reading past end should fail
+                prop_assert!(database.read(&key, data.len() + 1, &mut buffer).is_err(),
+                            "Reading past end should fail");
+                prop_assert_eq!(buffer, initial_buffer, "Buffer should be unchanged on error");
 
-                // Partial value write, where the output parameter is smaller than the data.
-                prop_assert_eq!(
-                    database
-                        .read(&key, 0, &mut read_data[1..data.len()])
-                        .expect(
-                            "Reading a value larger than the output parameter's size should succeed"
-                        ),
-                    data.len() - 1
-                );
-                prop_assert_ne!(read_data, read_data_before);
-                prop_assert_ne!(read_data, data.as_slice());
-                let read_data_before = read_data;
+                // Test: partial read when buffer is smaller than data
+                let bytes_read = database
+                    .read(&key, 0, &mut buffer[1..data.len()])
+                    .expect("Partial read should succeed");
+                prop_assert_eq!(bytes_read, data.len() - 1);
 
-                database
-                    .read(&key, data.len(), &mut read_data)
-                    .expect("A zero-sized write should succeed");
-                prop_assert_eq!(read_data, read_data_before);
+                // Test: zero-sized read at end
+                let previous_buffer = buffer;
+                database.read(&key, data.len(), &mut buffer)
+                    .expect("Zero-sized read should succeed");
+                prop_assert_eq!(buffer, previous_buffer, "Zero-sized read shouldn't modify buffer");
 
-                // Whole value write
-                database
-                    .read(&key, 0, &mut read_data)
-                    .expect("Writing the whole value should succeed");
-                prop_assert_eq!(&read_data[..data.len()], data.as_slice());
-                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+                // Test: full value read
+                database.read(&key, 0, &mut buffer)
+                    .expect("Full read should succeed");
+                prop_assert_eq!(&buffer[..data.len()], data.as_slice());
 
-                // Partial value write
-                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
-                database
-                    .read(&key, data.len() - 1, &mut read_data[1..2])
-                    .expect("A partial write should succeed");
-                prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
-                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
-                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+                // Test: partial read with offset
+                database.read(&key, data.len() - 1, &mut buffer[1..2])
+                    .expect("Partial read with offset should succeed");
+                prop_assert_eq!(&buffer[1..2], &data[data.len() - 1..]);
             }
         }
     }
 
     #[test]
     fn test_database_read_no_key() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let database = new_database(handle);
+        let runtime = new_test_runtime(1);
+        let database = new_database(runtime.handle());
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
-        let mut read_data: [u8; 100] = [42; 100];
-        let read_data_before = read_data;
+        let mut buffer: [u8; 100] = [42; 100];
+        let initial_buffer = buffer;
 
-        // The key doesn't exist
-        assert!(database.read(&key, 0, &mut read_data).is_err());
-        assert_eq!(read_data_before, read_data);
+        assert!(database.read(&key, 0, &mut buffer).is_err(),
+                "Reading nonexistent key should fail");
+        assert_eq!(buffer, initial_buffer, "Buffer should be unchanged when read fails");
     }
 
     proptest! {
         #[test]
-        fn test_database_value_length(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                      data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
+        fn test_database_value_length(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100),
+        ) {
+            let runtime = new_test_runtime(1);
+            let mut database = new_database(runtime.handle());
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data = Bytes::copy_from_slice(data);
 
-                prop_assert_eq!(
-                    database
-                        .write(key.clone(), 0, Bytes::copy_from_slice(&data))
-                        .expect("Writing should succeed"),
-                    data.len()
-                );
-                prop_assert_eq!(
-                    database
-                        .value_length(&key)
-                        .expect("Getting the value length should succeed"),
-                    data.len()
-                );
+                let bytes_written = database
+                    .write(key.clone(), 0, data.clone())
+                    .expect("Writing should succeed");
+                prop_assert_eq!(bytes_written, data.len());
+
+                let length = database
+                    .value_length(&key)
+                    .expect("Getting value length should succeed");
+                prop_assert_eq!(length, data.len(), "Value length should match written data");
             }
         }
     }
 
     proptest! {
         #[test]
-        fn test_database_write_zero_offset(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                           data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let mut database = new_database(handle);
+        fn test_database_write_zero_offset(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+        ) {
+            let runtime = new_test_runtime(1);
+            let mut database = new_database(runtime.handle());
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data = Bytes::copy_from_slice(data);
-                let expected_written = data.len();
-                let result = database
-                    .write(key, 0, data)
-                    .expect("Writing should succeed");
 
-                prop_assert_eq!(result, expected_written);
+                let bytes_written = database
+                    .write(key, 0, data.clone())
+                    .expect("Writing should succeed");
+                prop_assert_eq!(bytes_written, data.len(), "Should write all bytes");
             }
         }
     }
