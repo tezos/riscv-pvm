@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -118,10 +117,10 @@ fn validate_config(config: &BuildConfig) -> Result<()> {
 }
 
 fn run_benchmark(config: BuildConfig) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let inbox_file = repo_root.join(DEFAULT_INBOX);
-
     let sh = Shell::new()?;
+
+    let repo_root = find_repo_root(&sh)?;
+    let inbox_file = repo_root.join(DEFAULT_INBOX);
 
     println!("[INFO]: Building RISC-V sandbox");
     build_sandbox(&sh, &repo_root)?;
@@ -144,10 +143,10 @@ fn run_benchmark(config: BuildConfig) -> Result<()> {
 }
 
 fn run_profile(config: BuildConfig, sample_interval_us: u64) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let inbox_file = repo_root.join(DEFAULT_INBOX);
-
     let sh = Shell::new()?;
+
+    let repo_root = find_repo_root(&sh)?;
+    let inbox_file = repo_root.join(DEFAULT_INBOX);
 
     println!("[INFO]: Building RISC-V sandbox");
     build_sandbox(&sh, &repo_root)?;
@@ -192,20 +191,11 @@ fn run_profile(config: BuildConfig, sample_interval_us: u64) -> Result<()> {
     Ok(())
 }
 
-fn find_repo_root() -> Result<PathBuf> {
-    let current_dir = env::current_dir().context("Failed to get current directory")?;
-
-    let mut dir = current_dir.as_path();
-    loop {
-        if dir.join(".github").exists() {
-            return Ok(dir.to_path_buf());
-        }
-
-        match dir.parent() {
-            Some(parent) => dir = parent,
-            None => bail!("Could not find repository root"),
-        }
-    }
+fn find_repo_root(sh: &Shell) -> Result<PathBuf> {
+    Ok(cmd!(sh, "jj root")
+        .read()
+        .or_else(|_| cmd!(sh, "git rev-parse --show-toplevel").read())?
+        .into())
 }
 
 fn build_sandbox(sh: &Shell, repo_root: &Path) -> Result<()> {
