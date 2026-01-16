@@ -205,7 +205,6 @@ impl MerkleWorker {
     }
 
     /// See [`MerkleLayer::commit`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Used in RV-827"))]
     pub(crate) fn commit(&self) -> Result<CommitId, MerkleWorkerError> {
         let (sender, receiver) = oneshot::channel();
 

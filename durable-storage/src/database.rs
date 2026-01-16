@@ -13,6 +13,7 @@ use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use tokio::runtime::Handle;
 
+use crate::commit::CommitId;
 use crate::key::Key;
 use crate::merkle_worker::MerkleWorker;
 use crate::merkle_worker::MerkleWorkerError;
@@ -66,6 +67,13 @@ impl Database {
     /// Obtain, and possibly calculate, the root hash of the database>
     pub fn hash(&self) -> Hash {
         self.merkle.hash()
+    }
+
+    /// Commit the current database state to the repository and return its root hash.
+    pub(crate) fn commit(&self, repo: &DirectoryManager) -> Result<CommitId, DatabaseError> {
+        let commit_id = self.merkle.commit()?;
+        self.persistent.commit(repo, &commit_id)?;
+        Ok(commit_id)
     }
 
     /// Read a portion of the value associated with the provided key. The read data will be written
@@ -155,6 +163,7 @@ mod tests {
     use super::Database;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
@@ -165,6 +174,52 @@ mod tests {
             DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
 
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_commit_persists_state(
+            entries in prop::collection::vec(
+                (prop::collection::vec(any::<u8>(), 1..=KEY_MAX_SIZE),
+                 prop::collection::vec(any::<u8>(), 0..200)),
+                1..50,
+            ),
+        ) {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let tmpdir = TestableTmpdir::new();
+            let repo =
+                DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+            let mut database =
+                            Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+
+            let mut expected = std::collections::HashMap::new();
+            for (key, value) in entries {
+                let key = Key::new(&key).expect("Size less than KEY_MAX_SIZE");
+                let value = Bytes::copy_from_slice(&value);
+                database
+                    .write(key.clone(), 0, value.clone())
+                    .expect("Writing should succeed");
+                expected.insert(key, value);
+            }
+
+            let expected_hash = database.hash();
+            let commit_id = database.commit(&repo).expect("Commit should succeed");
+
+            prop_assert_eq!(&expected_hash, commit_id.as_hash());
+
+            let committed =
+                PersistenceLayer::checkout(&repo, &commit_id).expect("Checkout should succeed");
+            for (key, value) in expected {
+                let stored = committed
+                    .get(key.as_ref())
+                    .expect("Committed value should exist");
+                prop_assert_eq!(stored.as_ref(), value.as_ref());
+            }
+        }
     }
 
     proptest! {
