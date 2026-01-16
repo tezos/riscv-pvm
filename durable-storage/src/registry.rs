@@ -7,12 +7,18 @@
 //! This module provides the Registry struct, which is responsible for managing multiple
 //! databases within the durable storage system.
 
+use bincode::Decode;
+use bincode::Encode;
+use octez_riscv_data::serialisation::serialise;
 use tokio::runtime::Runtime;
 
+use crate::commit::CommitId;
 use crate::database::Database;
 use crate::database::DatabaseError;
 use crate::repo::DirectoryManager;
 use crate::repo::DirectoryManagerError;
+
+pub(super) const REGISTRY_ARITY: usize = 2;
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned by [`Registry`] operations.
@@ -29,9 +35,23 @@ pub enum RegistryError {
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
 
+    /// Error while serialising a registry commit.
+    #[error("Commit serialization error: {0}")]
+    CommitSerialization(#[from] bincode::error::EncodeError),
+
+    /// Error while reading or writing commit data.
+    #[error("Commit storage error: {0}")]
+    CommitStorage(#[from] std::io::Error),
+
     /// Error indicating an invalid database index was provided.
     #[error("Invalid database index")]
     InvalidDatabaseIndex,
+}
+
+#[derive(Debug, Encode, Decode)]
+/// Structure to store the result of serialising a registry.
+struct RegistryManifest {
+    database_hashes: Vec<CommitId>,
 }
 
 /// Registry that owns a set of databases backed by a directory manager.
@@ -153,12 +173,39 @@ impl Registry {
         self.databases[index] = Database::try_new(self.runtime.handle(), &self.repo)?;
         Ok(())
     }
+
+    /// Commit the registry state and return its commit ID.
+    ///
+    /// The registry state commit ID is computed as the Merkle root of the commit IDs
+    /// of all underlying databases, and the registry manifest is stored at the
+    /// corresponding commit path.
+    pub fn commit(&self) -> Result<CommitId, RegistryError> {
+        let mut database_hashes = Vec::with_capacity(self.databases.len());
+
+        for database in &self.databases {
+            let hash = database.commit(&self.repo)?;
+            database_hashes.push(hash);
+        }
+        let registry_commit = CommitId::compute_root_hash(&database_hashes);
+
+        let manifest = RegistryManifest { database_hashes };
+        let encoded = serialise(&manifest)?;
+
+        let commit_path = self.repo.commit_dir(&registry_commit);
+        std::fs::write(&commit_path, &encoded)?;
+
+        Ok(registry_commit)
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use octez_riscv_data::serialisation::deserialise;
 
     use super::Registry;
+    use super::RegistryManifest;
+    use crate::commit::CommitId;
     use crate::key::Key;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
@@ -406,5 +453,52 @@ mod tests {
                 .expect("Checking database should succeed"),
             "Key should not exist after clearing the database."
         );
+    }
+
+    #[test]
+    fn test_registry_commit_empty() {
+        let (_tmpdir, registry) = setup_registry();
+
+        let expected_db_hashes: Vec<super::CommitId> = Vec::new();
+        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        assert_eq!(root_commit, expected_root);
+
+        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
+        let commit: RegistryManifest =
+            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+        assert_eq!(commit.database_hashes, expected_db_hashes);
+    }
+
+    #[test]
+    fn test_registry_commit_writes_manifest() {
+        let (_tmpdir, mut registry) = setup_size_2_registry();
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        registry.databases[0]
+            .write(key_a.clone(), 0, Bytes::copy_from_slice(b"alpha"))
+            .expect("Writing to database 0 should succeed");
+        registry.databases[1]
+            .write(key_b.clone(), 0, Bytes::copy_from_slice(b"beta"))
+            .expect("Writing to database 1 should succeed");
+
+        let expected_db_hashes: Vec<super::CommitId> = registry
+            .databases
+            .iter()
+            .map(|db| db.hash().into())
+            .collect();
+        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        assert_eq!(root_commit, expected_root);
+
+        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
+        let commit: RegistryManifest =
+            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+        assert_eq!(commit.database_hashes, expected_db_hashes);
     }
 }
