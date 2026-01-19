@@ -6,6 +6,7 @@
 //!
 //! See [`Bytes`] for more details.
 
+use std::borrow::Borrow;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::ops::Range;
@@ -15,7 +16,18 @@ use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
+use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::hash::Hash;
+use crate::hash::HashFold;
+use crate::hash::Hasher;
+use crate::hash::PartialHash;
+use crate::hash::PartialHashFold;
 use crate::merkle_proof::Partial;
+use crate::merkle_tree::MerkleTree;
+use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -24,6 +36,7 @@ use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
+use crate::serialisation::serialise;
 
 /// Byte array state component
 #[perfect_derive(Debug)]
@@ -95,6 +108,53 @@ impl<M: BytesMode> Bytes<M> {
     pub fn resize(&mut self, new_len: usize) {
         M::resize(self, new_len);
     }
+
+    /// Fold [`Self`] generically.
+    fn fold_generic<Item: Foldable<Build>, Build: Fold>(
+        &self,
+        builder: Build,
+        length: usize,
+        length_node: impl Foldable<Build>,
+        get_item: impl Fn(Range<usize>) -> Item,
+    ) -> Build::Folded {
+        let generator = |idx: usize| {
+            let address = PAGE_SIZE
+                .checked_mul(idx)
+                .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
+            let address_end = address
+                .checked_add(PAGE_SIZE)
+                .expect("Address overflow")
+                .min(length);
+            let address_range = address..address_end;
+
+            get_item(address_range)
+        };
+
+        let pages = length.div_ceil(PAGE_SIZE);
+
+        let mut builder = builder.into_node_fold();
+        builder.add(&length_node);
+        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.done()
+    }
+
+    /// Folding hasher function that works for both [`Normal`] and [`Prove`] modes
+    fn fold_hash<D: Borrow<[u8]>, F: Fn(Range<usize>) -> D>(
+        &self,
+        builder: HashFold,
+        length: usize,
+        get_data: F,
+    ) -> Hash {
+        let length_node =
+            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+
+        let get_item = |range| {
+            let data = get_data(range);
+            Hash::hash_bytes(data.borrow())
+        };
+
+        self.fold_generic(builder, length, length_node, get_item)
+    }
 }
 
 impl<M: BytesMode> Default for Bytes<M> {
@@ -106,6 +166,97 @@ impl<M: BytesMode> Default for Bytes<M> {
 impl<M: CloneBytesMode> CloneState for Bytes<M> {
     fn clone_state(&self) -> Self {
         M::clone(self)
+    }
+}
+
+impl Foldable<HashFold> for Bytes<Normal> {
+    fn fold(&self, builder: HashFold) -> Hash {
+        self.fold_hash(builder, self.bytes.len(), |addr_range| {
+            &self.bytes[addr_range]
+        })
+    }
+}
+
+impl Foldable<HashFold> for Bytes<Prove<'_>> {
+    fn fold(&self, builder: HashFold) -> Hash {
+        self.fold_hash(builder, self.bytes.unrecorded_len(), |addr_range| {
+            let previous_len = self.bytes.previous.len();
+            let previous_range =
+                addr_range.start.min(previous_len)..addr_range.end.min(previous_len);
+
+            let mut data = self.bytes.previous.bytes[previous_range].to_vec();
+            data.resize(addr_range.len(), 0);
+
+            for (index, chunk) in self.bytes.writes.defined_range(addr_range) {
+                data[index..][..chunk.len()].copy_from_slice(chunk);
+            }
+
+            data
+        })
+    }
+}
+
+impl Foldable<MerkleTreeFold> for Bytes<Prove<'_>> {
+    fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
+        // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
+        // generation. This means we need to use `previous` state for the length and data.
+
+        let length = self.bytes.previous.len();
+        let length_data = serialise(length as u64).expect("Serialising length should not fail");
+        let is_length_needed = self.bytes.need_length_in_proof();
+        let length_node = MerkleTree::make_merkle_leaf(length_data, is_length_needed);
+
+        let get_item = |range: Range<usize>| {
+            let accessed = self.bytes.was_accessed(range.clone());
+            let data = self.bytes.previous.bytes[range].to_vec();
+            MerkleTree::make_merkle_leaf(data, accessed)
+        };
+
+        self.fold_generic(builder, length, length_node, get_item)
+    }
+}
+
+impl Foldable<PartialHashFold<'_>> for Bytes<Verify> {
+    fn fold(&self, builder: PartialHashFold<'_>) -> PartialHash {
+        if self.bytes.is_completely_absent() {
+            return builder.previous();
+        }
+
+        // The length must be present if the byte array is not completely absent. Otherwise we can't
+        // properly construct the partial Merkle tree and therefore obtain the final hash.
+        let Some(length) = self.bytes.length.clone().to_present() else {
+            return PartialHash::InvalidProof;
+        };
+        let length_hash =
+            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        let length_node = PartialHash::Present(length_hash);
+
+        let get_item = |range: Range<usize>| {
+            match self.bytes.data.continuous_defined_range(range.clone()) {
+                None => {
+                    if self.bytes.data.is_any_defined(range) {
+                        // This means there are undefined and defined ranges in this page.
+                        // That's not allowed as pages must be either fully present or fully
+                        // absent.
+                        return PartialHash::InvalidProof;
+                    }
+
+                    PartialHash::Previous
+                }
+
+                Some(chunks) => {
+                    let mut hasher = Hasher::default();
+
+                    for chunk in chunks {
+                        hasher.update(chunk);
+                    }
+
+                    PartialHash::Present(hasher.to_hash())
+                }
+            }
+        };
+
+        self.fold_generic(builder, length, length_node, get_item)
     }
 }
 
@@ -491,6 +642,30 @@ struct ProveImpl<'normal> {
     writes: PartialVec<u8>,
 }
 
+impl<'normal> ProveImpl<'normal> {
+    /// Get the length of the bytes without recording access.
+    fn unrecorded_len(&self) -> usize {
+        self.length
+    }
+
+    /// Check if the length needs to be included in the proof.
+    fn need_length_in_proof(&self) -> bool {
+        self.did_access_length.get()
+            || !self.reads.borrow().is_empty()
+            || !self.writes.is_all_undefined()
+    }
+
+    /// Check if any byte in the given address range was accessed (read or written).
+    fn was_accessed(&self, addr_range: Range<usize>) -> bool {
+        let query_range = RangeSet2::from(addr_range.clone());
+        if self.reads.borrow().intersects(&query_range) {
+            return true;
+        }
+
+        self.writes.is_any_defined(addr_range)
+    }
+}
+
 /// [`crate::mode::Verify`] mode implementation for the [`Bytes`] component
 #[perfect_derive(Clone)]
 struct VerifyImpl {
@@ -498,8 +673,27 @@ struct VerifyImpl {
     data: PartialVec<u8>,
 }
 
+impl VerifyImpl {
+    /// Check if the entire byte array is completely absent.
+    ///
+    /// This means length and underlying pages are all absent.
+    fn is_completely_absent(&self) -> bool {
+        if let Partial::Present(_) = self.length {
+            return false;
+        }
+
+        self.data.is_all_undefined()
+    }
+}
+
 /// Construct a range `start..start+len` then clamp it so it doesn't extend beyond `total_len`.
 fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {
     let end = start.saturating_add(len).min(total_len);
     start..end
 }
+
+/// Arity of internal nodes in the Merkle tree that holds the pages
+const NODE_ARITY: usize = 4;
+
+/// Size of a page in bytes
+const PAGE_SIZE: usize = 4096;
