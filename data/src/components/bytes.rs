@@ -697,3 +697,6 @@ const NODE_ARITY: usize = 4;
 
 /// Size of a page in bytes
 const PAGE_SIZE: usize = 4096;
+
+#[cfg(test)]
+mod tests;
