@@ -134,7 +134,7 @@ fn setup_benchmark_state<'a>(handle: &'a Handle, repo: &'a DirectoryManager) -> 
     let keys = generate_keys(&mut rng, PREPOPULATED_NODE_KEYS_COUNT);
     for key in keys {
         let value = Bytes::from(generate_random_bytes_in_range(&mut rng, 1..32));
-        database.write(key.clone(), 0, value.clone()).ok();
+        database.set(key.clone(), value.clone()).ok();
     }
 
     // Deserialise a series of operations describing an ERC-20 transaction
@@ -172,9 +172,8 @@ fn setup_benchmark_state<'a>(handle: &'a Handle, repo: &'a DirectoryManager) -> 
         match operation {
             Operation::Read { key, size } => {
                 database
-                    .write(
+                    .set(
                         key.clone(),
-                        0,
                         Bytes::from(generate_random_bytes(&mut rng, *size)),
                     )
                     .expect("The write should succeed");
@@ -260,11 +259,10 @@ fn bench_run(mut state: BenchmarkState) {
                 Err(e) => panic!("The value length calculation should succeed: {e:?}"),
             },
             Operation::Write { key, size } => {
-                match state.database.write(
-                    key,
-                    0,
-                    Bytes::copy_from_slice(&state.random_data[0..size]),
-                ) {
+                match state
+                    .database
+                    .set(key, Bytes::copy_from_slice(&state.random_data[0..size]))
+                {
                     Ok(_)
                     | Err(DatabaseError::PersistenceLayer(PersistenceLayerError::KeyNotFound)) => {}
                     Err(e) => panic!("The write should succeed: {e:?}"),
