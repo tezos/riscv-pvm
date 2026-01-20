@@ -139,9 +139,9 @@ impl MerkleWorker {
 
             while let Some(cmd) = receiver.recv().await {
                 match cmd {
-                    Command::Write { key, offset, value } => layer.write(&key, offset, value),
+                    Command::Write { key, offset, value } => layer.write(&key, offset, &value),
 
-                    Command::Set { key, value } => layer.set(&key, value),
+                    Command::Set { key, value } => layer.set(&key, &value),
 
                     Command::Delete { key } => layer.delete(&key),
 
@@ -276,12 +276,12 @@ mod tests {
         ) {
             match self {
                 Self::Write { key, offset, value } => {
-                    layer.write(&key, offset, value.clone());
+                    layer.write(&key, offset, &value);
                     worker.write(key, offset, value);
                 }
 
                 Self::Set { key, value } => {
-                    layer.set(&key, value.clone());
+                    layer.set(&key, &value);
                     worker.set(key, value);
                 }
 

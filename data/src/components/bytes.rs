@@ -115,6 +115,71 @@ impl<M: EncodeBytesMode> Encode for Bytes<M> {
     }
 }
 
+impl<T: AsRef<[u8]>, M: BytesMode> PartialEq<T> for Bytes<M> {
+    fn eq(&self, other: &T) -> bool {
+        let other = other.as_ref();
+        let len = self.len();
+
+        if len != other.len() {
+            return false;
+        }
+
+        let mut chunk_lhs = vec![0u8; 4096];
+        for start in (0..len).step_by(chunk_lhs.len()) {
+            let read = self.read(start, &mut chunk_lhs);
+
+            if chunk_lhs[..read] != other[start..][..read] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<M: BytesMode, N: BytesMode> PartialEq<Bytes<N>> for Bytes<M> {
+    fn eq(&self, other: &Bytes<N>) -> bool {
+        let len = self.len();
+
+        if len != other.len() {
+            return false;
+        }
+
+        let mut chunk_lhs = vec![0u8; 4096];
+        let mut chunk_rhs = chunk_lhs.clone();
+
+        for offset in (0..len).step_by(chunk_lhs.len()) {
+            let read = self.read(offset, &mut chunk_lhs);
+
+            if read != other.read(offset, &mut chunk_rhs) {
+                return false;
+            }
+
+            if chunk_lhs[..read] != chunk_rhs[..read] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<M: BytesMode> Eq for Bytes<M> {}
+
+impl From<bytes::Bytes> for Bytes<Normal> {
+    fn from(bytes: bytes::Bytes) -> Self {
+        let bytes = bytes::BytesMut::from(bytes);
+        Bytes { bytes }
+    }
+}
+
+impl From<&[u8]> for Bytes<Normal> {
+    fn from(slice: &[u8]) -> Self {
+        let bytes = bytes::BytesMut::from(slice);
+        Bytes { bytes }
+    }
+}
+
 /// Modal template for the [`Bytes`] component
 ///
 /// This is used to select the appropriate implementation for the mode.

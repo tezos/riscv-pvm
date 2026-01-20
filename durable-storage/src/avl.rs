@@ -4,7 +4,7 @@
 
 //! Implementation of a Merkleisable AVL tree.
 
-mod node;
+pub(crate) mod node;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
