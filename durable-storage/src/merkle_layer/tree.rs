@@ -14,15 +14,20 @@ use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
 use super::node::set;
+use super::node_resolver::MavlNodeResolver;
 use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
-pub struct Avl {
-    root: Option<Arc<MavlNode>>,
+pub struct Avl<Resolver: MavlNodeResolver> {
+    root: Option<Arc<MavlNode<Resolver>>>,
 }
 
-impl Avl {
+impl<Resolver: MavlNodeResolver> Avl<Resolver> {
+    pub fn new() -> Self {
+        Self { root: None }
+    }
+
     /// Delete the node in the tree with a given key.
     pub fn delete(&mut self, key: &Key) -> bool {
         delete(&mut self.root, key)
@@ -45,7 +50,7 @@ impl Avl {
     }
 
     /// Creates an in order iterator for the nodes in the tree
-    pub(super) fn iter(&self) -> AvlIterator {
+    pub(super) fn iter(&self) -> AvlIterator<Resolver> {
         match &self.root {
             None => AvlIterator {
                 stack: vec![],
@@ -60,12 +65,12 @@ impl Avl {
 
     /// The root node of the tree.
     #[cfg(test)]
-    pub(super) fn root(&self) -> &Option<Arc<MavlNode>> {
+    pub(super) fn root(&self) -> &Option<Arc<MavlNode<Resolver>>> {
         &self.root
     }
 
     /// A mutable reference to the root node of the tree.
-    pub(super) fn root_mut(&mut self) -> &mut Option<Arc<MavlNode>> {
+    pub(super) fn root_mut(&mut self) -> &mut Option<Arc<MavlNode<Resolver>>> {
         &mut self.root
     }
 
@@ -77,13 +82,13 @@ impl Avl {
 
 /// Used for iterating through the nodes
 /// of the [`Avl`] tree in order.
-pub(super) struct AvlIterator<'a> {
-    stack: Vec<&'a Arc<MavlNode>>,
-    current: &'a Option<Arc<MavlNode>>,
+pub(super) struct AvlIterator<'a, Resolver: MavlNodeResolver> {
+    stack: Vec<&'a Arc<MavlNode<Resolver>>>,
+    current: &'a Option<Arc<MavlNode<Resolver>>>,
 }
 
-impl<'a> Iterator for AvlIterator<'a> {
-    type Item = &'a Arc<MavlNode>;
+impl<'a, Resolver: MavlNodeResolver> Iterator for AvlIterator<'a, Resolver> {
+    type Item = &'a Arc<MavlNode<Resolver>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.current {
@@ -107,6 +112,7 @@ mod tests {
     use super::*;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::merkle_layer::node_resolver::InMemoryMavlNodeResolver;
 
     #[derive(Debug, Clone)]
     enum Operation {
@@ -146,7 +152,9 @@ mod tests {
             })
     }
 
-    fn height_and_balance_factor_sanity_check_helper(node: Arc<MavlNode>) -> (bool, usize) {
+    fn height_and_balance_factor_sanity_check_helper<Resolver: MavlNodeResolver>(
+        node: Arc<MavlNode<Resolver>>,
+    ) -> (bool, usize) {
         let (left_good, left_height) = match node.left_ref() {
             None => (true, 0),
             Some(left_node) => height_and_balance_factor_sanity_check_helper(left_node.clone()),
@@ -169,7 +177,7 @@ mod tests {
         }
     }
 
-    impl Avl {
+    impl<Resolver: MavlNodeResolver> Avl<Resolver> {
         pub fn height_and_balance_factor_sanity_check(&self) -> bool {
             match &self.root {
                 None => true,
@@ -181,7 +189,10 @@ mod tests {
         }
     }
 
-    fn compare_tree_to_reference(tree: &Avl, reference: &BTreeMap<Key, Bytes>) {
+    fn compare_tree_to_reference<Resolver: MavlNodeResolver>(
+        tree: &Avl<Resolver>,
+        reference: &BTreeMap<Key, Bytes>,
+    ) {
         let tree_iter = tree.iter();
         let mut reference_iter = reference.iter();
         for node in tree_iter {
@@ -202,7 +213,7 @@ mod tests {
     proptest! {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
-            let mut tree: Avl = Default::default();
+            let mut tree: Avl<InMemoryMavlNodeResolver> = Avl::new();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
             for operation in operations {
                 match operation {

@@ -20,6 +20,7 @@ use crate::key::Key;
 use crate::merkle_layer::CommitId;
 use crate::merkle_layer::MerkleLayer;
 use crate::merkle_layer::MerkleLayerError;
+use crate::merkle_layer::node_resolver::InMemoryMavlNodeResolver;
 use crate::persistence_layer::PersistenceLayer;
 
 /// Commands that can be sent to the Merkle worker background thread
@@ -48,7 +49,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<MerkleLayer, MerkleLayerError>>,
+        response: oneshot::Sender<Result<MerkleLayer<InMemoryMavlNodeResolver>, MerkleLayerError>>,
     },
 }
 
@@ -123,7 +124,7 @@ impl MerkleWorker {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer) -> Self {
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<InMemoryMavlNodeResolver>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         async_handle.spawn(async move {
@@ -216,6 +217,7 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
+    use crate::merkle_layer::node_resolver::InMemoryMavlNodeResolver;
     use crate::merkle_worker::MerkleWorker;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
@@ -247,7 +249,7 @@ mod tests {
             handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
-            layer: &mut MerkleLayer,
+            layer: &mut MerkleLayer<InMemoryMavlNodeResolver>,
         ) {
             match self {
                 Self::Set { key, value } => {
