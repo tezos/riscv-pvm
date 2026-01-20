@@ -4,10 +4,9 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
+use crate::avl::node::Value;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::key::Key;
@@ -92,7 +91,7 @@ impl MerkleLayer {
         not(any(test, feature = "bench")),
         expect(dead_code, reason = "Not pub in `Database`")
     )]
-    pub fn get(&self, key: &Key) -> Option<&BytesMut> {
+    pub fn get(&self, key: &Key) -> Option<&Value> {
         self.tree.get(key)
     }
 
@@ -101,7 +100,7 @@ impl MerkleLayer {
         not(any(test, feature = "bench")),
         expect(dead_code, reason = "Not pub in `Database`")
     )]
-    pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
+    pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
         self.tree.get_mut(key)
     }
 
@@ -111,12 +110,12 @@ impl MerkleLayer {
     }
 
     /// Sets the data associated with a given [Key].
-    pub fn set(&mut self, key: &Key, data: Bytes) {
+    pub fn set(&mut self, key: &Key, data: &[u8]) {
         self.tree.set(key, data)
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
+    pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
         self.tree.write(key, offset, data)
     }
 }
@@ -126,7 +125,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
-    use bytes::BufMut;
     use bytes::Bytes;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
@@ -247,7 +245,7 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         for i in 0..keys.len() {
-            ml.set(&keys[i], data[i].clone().into());
+            ml.set(&keys[i], &data[i]);
             ml.tree.check();
         }
 
@@ -256,15 +254,15 @@ mod tests {
         assert_eq!(original_hash, ml2.hash());
 
         let cow_data = "🐮<(moo!)";
-        ml2.set(&keys[0], cow_data.into());
+        ml2.set(&keys[0], cow_data.as_bytes());
         assert_ne!(original_hash, ml2.hash());
         assert_eq!(original_hash, ml.hash());
 
-        let old_node1 = Node::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]).into());
-        let new_node1 = Node::new(keys[0].clone(), cow_data.into());
+        let old_node1 = Node::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]));
+        let new_node1 = Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2 = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]).into());
-        let node3 = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]).into());
+        let node2 = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]));
+        let node3 = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
             &old_node1.data(),
@@ -313,7 +311,7 @@ mod tests {
             // Set all the keys in the tree
             for bytes in &keys1 {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, data1.clone());
+                ml.set(&key, &data1);
             }
 
             // Create a cheap copy
@@ -331,7 +329,7 @@ mod tests {
             // Set new keys in the copy
             for bytes in &keys2 {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml2.set(&key, data2.clone());
+                ml2.set(&key, &data2);
             }
 
             if keys1.is_empty() && keys2.is_empty() {
@@ -362,10 +360,10 @@ mod tests {
         let data = Bytes::from("create");
         let mut ml = new_merkle_layer();
         let empty_hash = ml.hash();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         assert_ne!(empty_hash, ml.hash());
 
-        let node = Node::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -380,20 +378,20 @@ mod tests {
         let data = Bytes::from("old");
         let data2 = Bytes::from("new");
         let mut ml = new_merkle_layer();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         let old_hash = ml.hash();
 
-        let node = Node::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
 
-        ml.set(&key, data2.clone());
+        ml.set(&key, &data2);
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = Node::new(key.clone(), data2.into());
+        let node = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -423,7 +421,7 @@ mod tests {
 
         for (key, data) in keys.iter().zip(data.iter()) {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
             assert_eq!(
@@ -454,7 +452,7 @@ mod tests {
         let data = Bytes::from("imbalanced left");
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
         }
@@ -472,7 +470,7 @@ mod tests {
         let data = Bytes::from("imbalanced right");
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
         }
@@ -489,7 +487,7 @@ mod tests {
 
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
             assert_eq!(
@@ -511,7 +509,7 @@ mod tests {
 
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
             assert_eq!(
@@ -544,7 +542,7 @@ mod tests {
 
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
             assert_eq!(
@@ -577,7 +575,7 @@ mod tests {
 
         for key in keys.iter() {
             let old_hash = ml.hash();
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
             ml.tree.check();
             assert_eq!(
@@ -597,7 +595,7 @@ mod tests {
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, data.clone());
+                ml.set(&key, &data);
             }
 
             if !keys.is_empty() {
@@ -619,7 +617,7 @@ mod tests {
         let data = Bytes::from("delete");
         let mut ml = new_merkle_layer();
         let empty_hash = ml.hash();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         let full_hash = ml.hash();
         assert_ne!(empty_hash, full_hash);
 
@@ -642,7 +640,7 @@ mod tests {
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, data.clone());
+                ml.set(&key, &data);
             }
 
             if !keys.is_empty() {
@@ -668,12 +666,12 @@ mod tests {
         let empty_hash = ml.hash();
 
         for key in keys.iter() {
-            ml.set(key, data.clone());
+            ml.set(key, &data);
             ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
-                data.as_ref()
+                &data,
             );
         }
 
@@ -831,21 +829,20 @@ mod tests {
         let data = Bytes::from("get_mut");
         let mut ml = new_merkle_layer();
         let empty_hash = ml.hash();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         let full_hash = ml.hash();
         assert_ne!(empty_hash, full_hash);
 
         let data2 = Bytes::from("mutated with larger data");
 
         let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-        data_mut.clear();
-        data_mut.put_slice(&data2);
+        data_mut.set(&data2);
 
         assert_ne!(empty_hash, ml.hash());
         assert_ne!(full_hash, ml.hash());
 
-        let before_node = Node::new(key.clone(), data.into());
-        let after_node = Node::new(key.clone(), data2.into());
+        let before_node = Node::new(key.clone(), data);
+        let after_node = Node::new(key.clone(), data2);
 
         let get_node = ml
             .get(&key)
@@ -865,7 +862,7 @@ mod tests {
         let mut ml = new_merkle_layer();
 
         let empty_hash = ml.hash();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         let before_hash = ml.hash();
         assert_ne!(empty_hash, before_hash);
 
@@ -875,14 +872,13 @@ mod tests {
         let data2 = Bytes::from("mutated");
 
         let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-        data_mut.clear();
-        data_mut.put_slice(&data2);
+        data_mut.set(&data2);
 
         assert_ne!(empty_hash, ml.hash());
         assert_ne!(before_hash, ml.hash());
         assert_ne!(ml2.hash(), ml.hash());
 
-        let before_node = Node::new(key.clone(), data.into());
+        let before_node = Node::new(key.clone(), data);
 
         let get_node = ml2
             .get(&key)
@@ -901,7 +897,7 @@ mod tests {
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, data.clone());
+                ml.set(&key, &data);
             }
 
             let data2 = Bytes::from("mutated");
@@ -911,11 +907,10 @@ mod tests {
 
                 let before_hash = ml.hash();
                 let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-                data_mut.clear();
-                data_mut.put_slice(&data2);
+                data_mut.set(&data2);
 
-                let before_node = Node::new(key.clone(), data.clone().into());
-                let after_node = Node::new(key.clone(), data2.clone().into());
+                let before_node = Node::new(key.clone(), data.clone());
+                let after_node = Node::new(key.clone(), data2.clone());
 
                 let get_node = ml
                     .get(&key)
@@ -938,9 +933,9 @@ mod tests {
         let data = Bytes::from("write_new_value");
         let mut ml = new_merkle_layer();
         let old_hash = ml.hash();
-        ml.write(&key, 0, data.clone());
+        ml.write(&key, 0, &data);
 
-        let node = Node::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -956,21 +951,21 @@ mod tests {
         let data = Bytes::from("a long value");
         let data2 = Bytes::from("good");
         let mut ml = new_merkle_layer();
-        ml.set(&key, data.clone());
+        ml.set(&key, &data);
         let old_hash = ml.hash();
 
         let data_len = data.len();
-        let node = Node::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
 
-        ml.write(&key, 2, data2.clone());
+        ml.write(&key, 2, &data2);
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = Node::new(key.clone(), Bytes::from("a good value").into());
+        let node = Node::new(key.clone(), Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -996,9 +991,9 @@ mod tests {
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, data.clone());
+                ml.set(&key, &data);
                 for offset in 0..250 {
-                    ml.write(&key, offset * 2, Bytes::from(vec![1]));
+                    ml.write(&key, offset * 2, &[1]);
                 }
             }
 
@@ -1045,7 +1040,7 @@ mod tests {
         ];
 
         for (key, data_elem) in keys.iter().zip(data.iter()) {
-            merkle_layer.set(key, data_elem.clone());
+            merkle_layer.set(key, data_elem);
         }
 
         let commit_id = merkle_layer

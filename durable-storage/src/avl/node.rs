@@ -11,17 +11,20 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use bincode::Encode;
-use bytes::Bytes;
-use bytes::BytesMut;
+use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Normal;
 
 use crate::key::Key;
+
+/// Value stored in a node
+pub type Value = Bytes<Normal>;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct Node {
     key: Key,
-    data: BytesMut,
+    data: Value,
     left: Option<Arc<Self>>,
     right: Option<Arc<Self>>,
 
@@ -37,9 +40,9 @@ pub(crate) struct Node {
 
 #[derive(Encode)]
 /// A serialisable representation of [`Node`].
-struct NodeHashRepresentation<'a> {
+struct NodeHashRepresentation<'a, Value> {
     key: &'a Key,
-    data: &'a [u8],
+    data: Value,
     // The bytes of the hash of an optional left child
     left: Option<&'a [u8; Hash::DIGEST_SIZE]>,
     // The bytes of the hash of an optional right child
@@ -55,7 +58,7 @@ impl Node {
     }
 
     /// The data stored in the node.
-    pub(crate) fn data(&self) -> &BytesMut {
+    pub(crate) fn data(&self) -> &Value {
         &self.data
     }
 
@@ -76,10 +79,10 @@ impl Node {
     }
 
     /// Create a new leaf node from the given key and data.
-    pub(crate) fn new(key: Key, data: BytesMut) -> Self {
+    pub(crate) fn new(key: Key, data: impl Into<Value>) -> Self {
         Node {
             key,
-            data,
+            data: data.into(),
             balance_factor: 0,
             ..Default::default()
         }
@@ -177,7 +180,7 @@ pub(super) fn delete(root: &mut Option<Arc<Node>>, key: &Key) -> bool {
 }
 
 /// The data stored in a node in the tree with a given key.
-pub(super) fn get<'a>(root: &'a Option<Arc<Node>>, key: &Key) -> Option<&'a BytesMut> {
+pub(super) fn get<'a>(root: &'a Option<Arc<Node>>, key: &Key) -> Option<&'a Value> {
     let mut node = root.as_deref()?;
     loop {
         match node.key().cmp(key) {
@@ -189,7 +192,7 @@ pub(super) fn get<'a>(root: &'a Option<Arc<Node>>, key: &Key) -> Option<&'a Byte
 }
 
 /// A mutable reference to the data stored in a node in the tree with a given key.
-pub(super) fn get_mut<'a>(root: &'a mut Option<Arc<Node>>, key: &Key) -> Option<&'a mut BytesMut> {
+pub(super) fn get_mut<'a>(root: &'a mut Option<Arc<Node>>, key: &Key) -> Option<&'a mut Value> {
     let node = root.as_mut()?;
     let node = Arc::make_mut(node);
     match node.key().cmp(key) {
@@ -553,55 +556,32 @@ fn replace_with_successor(node: &mut Arc<Node>) -> (Arc<Node>, bool) {
 /// Set the value of the node with a given key.
 ///
 /// Returns true if the subtree has grown in size.
-pub(super) fn set(root: &mut Option<Arc<Node>>, key: &Key, data: Bytes) -> bool {
-    upsert(root, key, 0, |_old_data: Option<BytesMut>| -> BytesMut {
-        data.into()
-    })
+pub(super) fn set(root: &mut Option<Arc<Node>>, key: &Key, data: &[u8]) -> bool {
+    upsert(root, key, 0, |old_data| old_data.set(data))
 }
 
 /// Writes the data to the node associated with a given [Key] with the given offset, overwriting
 /// existing data if the node already exists.
 ///
 /// Returns true if the subtree has grown in size.
-pub(super) fn write(root: &mut Option<Arc<Node>>, key: &Key, offset: usize, data: Bytes) -> bool {
-    upsert(
-        root,
-        key,
-        offset,
-        |old_data: Option<BytesMut>| -> BytesMut {
-            let Some(mut old_data) = old_data else {
-                // This shouldn't happen: it's prevented by the `Database` API.
-                assert_eq!(offset, 0);
-                return data.into();
-            };
-            // This shouldn't happen: it's prevented by the `Database` API.
-            assert!(offset <= old_data.len());
+pub(super) fn write(root: &mut Option<Arc<Node>>, key: &Key, offset: usize, data: &[u8]) -> bool {
+    upsert(root, key, offset, |old_data| {
+        // This shouldn't happen: it's prevented by the `Database` API.
+        assert!(offset <= old_data.len());
 
-            let Some(new_data_end) = offset.checked_add(data.len()) else {
-                // The asynchronous Merkle worker means that errors can't be returned to the
-                // `Database`.
-                panic!(
-                    "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
-                    data.len()
-                );
-            };
+        let Some(new_data_end) = offset.checked_add(data.len()) else {
+            // The asynchronous Merkle worker means that errors can't be returned to the
+            // `Database`.
+            panic!(
+                "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
+                data.len()
+            );
+        };
 
-            let overwrite_end = std::cmp::min(old_data.len(), new_data_end);
-
-            // SAFETY: Unchecked subtraction OK as result.len() >= offset && new_data_end > offset
-            let data_copy_end = overwrite_end - offset;
-
-            let data_len_before = data.len();
-
-            old_data[offset..overwrite_end].copy_from_slice(&data[0..data_copy_end]);
-            if data_len_before < new_data_end {
-                // SAFETY: Panics if the memory can't be allocated.
-                old_data.extend_from_slice(&data[data_copy_end..]);
-            }
-
-            old_data
-        },
-    )
+        let final_len = std::cmp::max(old_data.len(), new_data_end);
+        old_data.resize(final_len);
+        old_data.write(offset, data);
+    })
 }
 
 /// Remove the minimum node from this subtree and return it.
@@ -659,7 +639,7 @@ fn upsert(
     root: &mut Option<Arc<Node>>,
     key: &Key,
     offset: usize,
-    data: impl FnOnce(Option<BytesMut>) -> BytesMut,
+    data: impl FnOnce(&mut Value),
 ) -> bool {
     let Some(node) = root else {
         // We can't create a node with a non-zero offset.
@@ -667,10 +647,17 @@ fn upsert(
         // This shouldn't happen: it's prevented by the `Database` API.
         assert_eq!(offset, 0);
 
+        // TODO: RV-895: Dynamic creation of the `Bytes` (alias `Value`) state component may cause
+        // problems with proof generation
+        let mut new_data = Value::new();
+        data(&mut new_data);
+
         // The key does not exist and a new node shall be created.
-        *root = Some(Arc::new(Node::new(key.clone(), data(None))));
+        *root = Some(Arc::new(Node::new(key.clone(), new_data)));
+
         return true;
     };
+
     // SAFETY: The default recursion limit in Rust is 128
     // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
     //
@@ -692,7 +679,7 @@ fn upsert(
         // The key already exists and should be updated.
         Ordering::Equal => {
             let node = Arc::make_mut(node);
-            node.data = data(Some(std::mem::take(&mut node.data)));
+            data(&mut node.data);
             node.invalidate_hash();
             false
         }

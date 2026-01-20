@@ -7,11 +7,10 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytes::Bytes;
-use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
 use super::node::Node;
+use super::node::Value;
 use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
@@ -32,12 +31,12 @@ impl Tree {
     }
 
     /// The data stored in a node in the tree with a given key.
-    pub fn get(&self, key: &Key) -> Option<&BytesMut> {
+    pub fn get(&self, key: &Key) -> Option<&Value> {
         get(&self.root, key)
     }
 
     /// A mutable reference to the data stored in a node in the tree with a given key.
-    pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
+    pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
         get_mut(&mut self.root, key)
     }
 
@@ -73,12 +72,12 @@ impl Tree {
     }
 
     /// Set the value of a node in the tree with a given key.
-    pub fn set(&mut self, key: &Key, data: Bytes) {
+    pub fn set(&mut self, key: &Key, data: &[u8]) {
         set(&mut self.root, key, data);
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
+    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
         write(&mut self.root, key, offset, data);
     }
 }
@@ -215,12 +214,26 @@ mod tests {
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
-                        let tree_value = tree.get(&key).map(|b| b.clone().freeze());
-                        assert_eq!(tree_value.as_ref(), reference.get(&key));
+                        let tree_value = tree.get(&key);
+
+                        // The values in the Options are comparable, but the Options themselves are
+                        // not. So we need to awkwardly match on both Options to compare them.
+                        match (tree_value, reference.get(&key)) {
+                            (Some(tree_bytes), Some(reference_bytes)) => {
+                                assert_eq!(tree_bytes, reference_bytes)
+                            }
+                            (None, None) => {}
+                            (lhs, rhs) => panic!(
+                                "Mismatch between tree (is_none() = {}) and reference (is_none() = {}) for Get operation",
+                                lhs.is_none(),
+                                rhs.is_none(),
+                            ),
+                        }
+
                         continue;
-                    },
+                    }
                     Operation::Upsert(key, value) => {
-                        tree.set(&key, value.clone());
+                        tree.set(&key, &value);
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
