@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 mod node;
+pub(crate) mod node_resolver;
+pub(crate) mod node_resolver_error;
+mod node_wrapper;
 #[cfg(not(feature = "bench"))]
 mod tree;
 #[cfg(feature = "bench")]
@@ -12,6 +15,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use node_resolver::MavlNodeResolver;
 use octez_riscv_data::hash::Hash;
 use tree::Avl;
 
@@ -42,18 +46,20 @@ pub enum MerkleLayerError {
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
-pub struct MerkleLayer {
-    tree: Avl,
+pub struct MerkleLayer<Resolver: MavlNodeResolver> {
+    tree: Avl<Resolver>,
     persistence: Arc<PersistenceLayer>,
+    node_resolver: Arc<Resolver>,
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
-impl MerkleLayer {
+impl<Resolver: MavlNodeResolver> MerkleLayer<Resolver> {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
-    pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
+    pub fn new(persistence: Arc<PersistenceLayer>, node_resolver: Arc<Resolver>) -> Self {
         MerkleLayer {
-            tree: Avl::default(),
+            tree: Avl::new(),
             persistence,
+            node_resolver,
         }
     }
 
@@ -75,7 +81,7 @@ impl MerkleLayer {
 
     /// Clear all data from the [MerkleLayer].
     pub fn clear(&mut self) {
-        self.tree.root_mut().take();
+        self.tree.root_mut(&self.node_resolver).take();
     }
 
     /// Generates a commitment for the [MerkleLayer].
@@ -84,38 +90,39 @@ impl MerkleLayer {
         // iteration of the nodes the hashes are
         // calculated during the encoding of the node
         // if necessary.
-        for node in self.tree.iter() {
-            let value = octez_riscv_data::serialisation::serialise(node.to_encode())?;
+        for node in self.tree.iter(&self.node_resolver) {
+            let value =
+                octez_riscv_data::serialisation::serialise(node.to_encode(&self.node_resolver))?;
             let blob = HashedData::from_value(value.as_slice());
             self.persistence.blob_set(&blob)?;
         }
 
-        Ok(CommitId::new(self.tree.hash()))
+        Ok(CommitId::new(self.tree.hash(&self.node_resolver)))
     }
 
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) {
-        self.tree.delete(key);
+        self.tree.delete(key, self.node_resolver.as_ref());
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
     pub fn get(&self, key: &Key) -> Option<&BytesMut> {
-        self.tree.get(key)
+        self.tree.get(key, self.node_resolver.as_ref())
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
-        self.tree.get_mut(key)
+        self.tree.get_mut(key, self.node_resolver.as_ref())
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
     pub fn hash(&self) -> Hash {
-        self.tree.hash()
+        self.tree.hash(&self.node_resolver)
     }
 
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: Bytes) {
-        self.tree.set(key, data)
+        self.tree.set(key, data, self.node_resolver.as_ref())
     }
 }
 
@@ -133,18 +140,26 @@ mod tests {
     use super::MerkleLayer;
     use super::node::MavlNode;
     use super::node::hash;
+    use super::node_resolver::MavlNodeResolver;
     use super::tree::Avl;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::merkle_layer::node_resolver::InMemoryMavlNodeResolver;
     use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
-    impl Avl {
-        fn check(&self, line: u32) {
-            let inorder = self.is_inorder();
-            let is_balanced = self.is_balanced();
-            let has_correct_balance_factors = self.has_correct_balance_factors();
+    impl<Resolver: MavlNodeResolver> MerkleLayer<Resolver> {
+        fn get_node_resolver(&self) -> &Arc<Resolver> {
+            &self.node_resolver
+        }
+    }
+
+    impl<Resolver: MavlNodeResolver> Avl<Resolver> {
+        fn check(&self, line: u32, node_resolver: &Resolver) {
+            let inorder = self.is_inorder(node_resolver);
+            let is_balanced = self.is_balanced(node_resolver);
+            let has_correct_balance_factors = self.has_correct_balance_factors(node_resolver);
             if !inorder || !is_balanced || !has_correct_balance_factors {
                 eprintln!("{self:?}");
                 eprintln!("Line {line:?}");
@@ -157,35 +172,51 @@ mod tests {
             );
         }
 
-        fn has_correct_balance_factors(&self) -> bool {
-            has_correct_balance_factors(self.root())
+        fn has_correct_balance_factors(&self, node_resolver: &Resolver) -> bool {
+            has_correct_balance_factors(self.root(node_resolver), node_resolver)
         }
 
-        fn is_balanced(&self) -> bool {
-            is_balanced(self.root())
+        fn is_balanced(&self, node_resolver: &Resolver) -> bool {
+            is_balanced(self.root(node_resolver), node_resolver)
         }
 
-        fn is_inorder(&self) -> bool {
+        fn is_inorder(&self, node_resolver: &Resolver) -> bool {
             is_inorder(
-                self.root(),
+                self.root(node_resolver),
                 &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
                 &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
+                node_resolver,
             )
         }
     }
 
-    impl MavlNode {
-        pub(super) fn height(&self) -> u32 {
-            let left_height = self.left_ref().as_ref().map_or(0, |l| l.height());
-            let right_height = self.right_ref().as_ref().map_or(0, |r| r.height());
+    impl<Resolver: MavlNodeResolver> MavlNode<Resolver> {
+        pub(super) fn height(&self, node_resolver: &Resolver) -> u32 {
+            let left_height = self
+                .left_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |l| l.height(node_resolver));
+            let right_height = self
+                .right_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |r| r.height(node_resolver));
             1 + std::cmp::max(left_height, right_height)
         }
     }
 
-    pub(super) fn has_correct_balance_factors(node: &Option<Arc<MavlNode>>) -> bool {
+    pub(super) fn has_correct_balance_factors<Resolver: MavlNodeResolver>(
+        node: &Option<Arc<MavlNode<Resolver>>>,
+        node_resolver: &Resolver,
+    ) -> bool {
         if let Some(node) = node.as_ref() {
-            let left_height = node.left_ref().as_ref().map_or(0, |l| l.height());
-            let right_height = node.right_ref().as_ref().map_or(0, |r| r.height());
+            let left_height = node
+                .left_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |l| l.height(node_resolver));
+            let right_height = node
+                .right_ref(node_resolver)
+                .as_ref()
+                .map_or(0, |r| r.height(node_resolver));
             let calculated_balance_factor = right_height as i64 - left_height as i64;
             if node.balance_factor() != calculated_balance_factor {
                 eprintln!(
@@ -194,36 +225,50 @@ mod tests {
                 );
                 return false;
             }
-            return has_correct_balance_factors(node.left_ref())
-                && has_correct_balance_factors(node.right_ref());
+            return has_correct_balance_factors(node.left_ref(node_resolver), node_resolver)
+                && has_correct_balance_factors(node.right_ref(node_resolver), node_resolver);
         }
         true
     }
 
-    pub(super) fn is_balanced(node: &Option<Arc<MavlNode>>) -> bool {
+    pub(super) fn is_balanced<Resolver: MavlNodeResolver>(
+        node: &Option<Arc<MavlNode<Resolver>>>,
+        node_resolver: &Resolver,
+    ) -> bool {
         if let Some(node) = node {
             let balance_factor = node.balance_factor();
             if balance_factor.abs() > 1 {
                 eprintln!("Balance factor not in -1..=1: {balance_factor:?}");
                 return false;
             }
-            return is_balanced(node.left_ref()) && is_balanced(node.right_ref());
+            return is_balanced(node.left_ref(node_resolver), node_resolver)
+                && is_balanced(node.right_ref(node_resolver), node_resolver);
         }
         true
     }
 
-    pub(super) fn is_inorder(node: &Option<Arc<MavlNode>>, min: &Key, max: &Key) -> bool {
+    pub(super) fn is_inorder<Resolver: MavlNodeResolver>(
+        node: &Option<Arc<MavlNode<Resolver>>>,
+        min: &Key,
+        max: &Key,
+        node_resolver: &Resolver,
+    ) -> bool {
         if let Some(node) = node.as_ref() {
             if node.key() < min || node.key() > max {
                 return false;
             }
-            return is_inorder(node.left_ref(), min, node.key())
-                && is_inorder(node.right_ref(), node.key(), max);
+            return is_inorder(node.left_ref(node_resolver), min, node.key(), node_resolver)
+                && is_inorder(
+                    node.right_ref(node_resolver),
+                    node.key(),
+                    max,
+                    node_resolver,
+                );
         }
         true
     }
 
-    fn new_merkle_layer() -> MerkleLayer {
+    fn new_merkle_layer() -> MerkleLayer<InMemoryMavlNodeResolver> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
@@ -233,7 +278,9 @@ mod tests {
             .expect("Creating a persistence layer should succeed")
             .into();
 
-        MerkleLayer::new(persistence_layer)
+        let node_resolver = Arc::new(InMemoryMavlNodeResolver::default());
+
+        MerkleLayer::new(persistence_layer, node_resolver)
     }
 
     #[test]
@@ -243,11 +290,11 @@ mod tests {
 
         let data = [vec![0; 0], vec![13; 5], vec![42; 129]];
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for i in 0..keys.len() {
             ml.set(&keys[i], data[i].clone().into());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
 
         let mut ml2 = ml.clone();
@@ -259,11 +306,14 @@ mod tests {
         assert_ne!(original_hash, ml2.hash());
         assert_eq!(original_hash, ml.hash());
 
-        let old_node1 = MavlNode::new(keys[0].clone(), data[0].clone().into());
-        let new_node1 = MavlNode::new(keys[0].clone(), cow_data.into());
+        let old_node1 =
+            MavlNode::<InMemoryMavlNodeResolver>::new(keys[0].clone(), data[0].clone().into());
+        let new_node1 = MavlNode::<InMemoryMavlNodeResolver>::new(keys[0].clone(), cow_data.into());
 
-        let node2 = MavlNode::new(keys[1].clone(), data[1].clone().into());
-        let node3 = MavlNode::new(keys[2].clone(), data[2].clone().into());
+        let node2 =
+            MavlNode::<InMemoryMavlNodeResolver>::new(keys[1].clone(), data[1].clone().into());
+        let node3 =
+            MavlNode::<InMemoryMavlNodeResolver>::new(keys[2].clone(), data[2].clone().into());
 
         assert_eq!(
             &old_node1.data(),
@@ -298,8 +348,8 @@ mod tests {
                 .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
         );
 
-        ml.tree.check(line!());
-        ml2.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
+        ml2.tree.check(line!(), ml2.get_node_resolver());
     }
 
     proptest! {
@@ -307,7 +357,7 @@ mod tests {
         fn test_mavl_cow_prop(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data1 = Bytes::from("property");
             let data2 = Bytes::from("cow");
-            let mut ml = new_merkle_layer();
+            let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
             // Set all the keys in the tree
             for bytes in &keys1 {
@@ -350,8 +400,8 @@ mod tests {
                 prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully"), &data2);
             }
 
-            ml.tree.check(line!());
-            ml2.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
+            ml2.tree.check(line!(), ml2.get_node_resolver());
         }
     }
 
@@ -359,18 +409,18 @@ mod tests {
     fn test_mavl_create() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::from("create");
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
         assert_ne!(empty_hash, ml.hash());
 
-        let node = MavlNode::new(key.clone(), data.clone());
+        let node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data.clone());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
     }
 
     #[test]
@@ -378,11 +428,11 @@ mod tests {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::from("old");
         let data2 = Bytes::from("new");
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         ml.set(&key, data.clone());
         let old_hash = ml.hash();
 
-        let node = MavlNode::new(key.clone(), data.clone());
+        let node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data.clone());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -391,14 +441,17 @@ mod tests {
 
         ml.set(&key, data2.clone());
         assert_ne!(old_hash, ml.hash());
-        assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), data2.clone());
+        assert!(
+            ml.tree.is_inorder(ml.get_node_resolver()),
+            "AVL isn't in order: {ml:?}"
+        );
+        let node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data2.clone());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
     }
 
     #[test]
@@ -418,13 +471,13 @@ mod tests {
             Bytes::from("0, 0, 0"),
         ];
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for (key, data) in keys.iter().zip(data.iter()) {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -446,7 +499,7 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         let empty_hash = ml.hash();
 
         // Left imbalance
@@ -455,7 +508,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
 
         ml.clear();
@@ -473,7 +526,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
     }
 
@@ -484,13 +537,13 @@ mod tests {
 
         let data = Bytes::from("left_right");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for key in keys.iter() {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -506,13 +559,13 @@ mod tests {
 
         let data = Bytes::from("right_left");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for key in keys.iter() {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -539,13 +592,13 @@ mod tests {
 
         let data = Bytes::from("right_left");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for key in keys.iter() {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -572,13 +625,13 @@ mod tests {
 
         let data = Bytes::from("right_left");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         for key in keys.iter() {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -591,7 +644,7 @@ mod tests {
         #[test]
         fn test_mavl_create_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = Bytes::from("property");
-            let mut ml = new_merkle_layer();
+            let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
             let old_hash = ml.hash();
 
             for bytes in &keys {
@@ -608,7 +661,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data);
             }
 
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
     }
 
@@ -616,7 +669,7 @@ mod tests {
     fn test_mavl_delete() {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = Bytes::from("delete");
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
         let full_hash = ml.hash();
@@ -629,14 +682,14 @@ mod tests {
         let get_node = ml.get(&key);
 
         assert_eq!(get_node, None);
-        ml.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
     }
 
     proptest! {
         #[test]
         fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = Bytes::from("delete_prop");
-            let mut ml = new_merkle_layer();
+            let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
             let empty_hash = ml.hash();
 
             for bytes in &keys {
@@ -656,19 +709,19 @@ mod tests {
 
             prop_assert_eq!(empty_hash, ml.hash());
 
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
     }
 
     fn test_mavl_delete_keys(keys: &[Key]) {
         let data = Bytes::from("delete");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         let empty_hash = ml.hash();
 
         for key in keys.iter() {
             ml.set(key, data.clone());
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -682,7 +735,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.delete(key);
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
             ml.delete(key);
             assert_eq!(ml.get(key), None);
         }
@@ -828,7 +881,7 @@ mod tests {
     fn test_mavl_get_mut() {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = Bytes::from("get_mut");
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
         let full_hash = ml.hash();
@@ -843,8 +896,8 @@ mod tests {
         assert_ne!(empty_hash, ml.hash());
         assert_ne!(full_hash, ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.clone());
-        let after_node = MavlNode::new(key.clone(), data2.clone());
+        let before_node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data.clone());
+        let after_node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data2.clone());
 
         let get_node = ml
             .get(&key)
@@ -853,7 +906,7 @@ mod tests {
         assert_ne!(&get_node, &before_node.data());
         assert_eq!(&get_node, &after_node.data());
 
-        ml.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
     }
 
     #[test]
@@ -861,7 +914,7 @@ mod tests {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = Bytes::from("get_mut_cow");
 
-        let mut ml = new_merkle_layer();
+        let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         let empty_hash = ml.hash();
         ml.set(&key, data.clone());
@@ -881,7 +934,7 @@ mod tests {
         assert_ne!(before_hash, ml.hash());
         assert_ne!(ml2.hash(), ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.clone());
+        let before_node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data.clone());
 
         let get_node = ml2
             .get(&key)
@@ -889,14 +942,14 @@ mod tests {
 
         assert_eq!(&get_node, &before_node.data());
 
-        ml.tree.check(line!());
+        ml.tree.check(line!(), ml.get_node_resolver());
     }
 
     proptest! {
         #[test]
         fn test_mavl_get_mut_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = Bytes::from("get_mut_prop");
-            let mut ml = new_merkle_layer();
+            let mut ml: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
@@ -913,8 +966,8 @@ mod tests {
                 data_mut.clear();
                 data_mut.put_slice(&data2);
 
-                let before_node = MavlNode::new(key.clone(), data.clone());
-                let after_node = MavlNode::new(key.clone(), data2.clone());
+                let before_node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data.clone());
+                let after_node = MavlNode::<InMemoryMavlNodeResolver>::new(key.clone(), data2.clone());
 
                 let get_node = ml
                     .get(&key)
@@ -927,7 +980,7 @@ mod tests {
                 seen.insert(key);
             }
 
-            ml.tree.check(line!());
+            ml.tree.check(line!(), ml.get_node_resolver());
         }
     }
 
@@ -938,7 +991,7 @@ mod tests {
     ///   is the same as the root hash
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
-        let mut merkle_layer = new_merkle_layer();
+        let mut merkle_layer: MerkleLayer<InMemoryMavlNodeResolver> = new_merkle_layer();
 
         let keys = [
             Key::new(&[12]).unwrap(),
@@ -968,10 +1021,12 @@ mod tests {
             .commit()
             .expect("The commit operation should not fail");
 
-        for node in merkle_layer.tree.iter() {
-            let serialised = octez_riscv_data::serialisation::serialise(node.to_encode())
-                .expect("We should be able to serialise the node");
-            let node_hash = hash(node);
+        for node in merkle_layer.tree.iter(merkle_layer.get_node_resolver()) {
+            let serialised = octez_riscv_data::serialisation::serialise(
+                node.to_encode(merkle_layer.get_node_resolver()),
+            )
+            .expect("We should be able to serialise the node");
+            let node_hash = hash(node, merkle_layer.get_node_resolver());
             let blob = merkle_layer
                 .persistence
                 .blob_get(node_hash)
@@ -979,7 +1034,7 @@ mod tests {
             assert_eq!(serialised, blob.as_ref());
         }
 
-        let root_hash = merkle_layer.tree.hash();
+        let root_hash = merkle_layer.tree.hash(merkle_layer.get_node_resolver());
         assert_eq!(commit_id.0, root_hash);
     }
 }

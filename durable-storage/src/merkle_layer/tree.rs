@@ -14,85 +14,140 @@ use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
 use super::node::set;
+use super::node_resolver::MavlNodeResolver;
+use super::node_wrapper::MavlNodeWrapper;
 use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
-#[derive(Clone, Default, Debug)]
-pub struct Avl {
-    root: Option<Arc<MavlNode>>,
+#[derive(Clone, Debug)]
+pub struct Avl<Resolver: MavlNodeResolver> {
+    root: Resolver::NodeWrapper,
 }
 
-impl Avl {
+impl<Resolver: MavlNodeResolver> Avl<Resolver> {
+    pub fn new() -> Self {
+        Self {
+            root: Resolver::NodeWrapper::new(None),
+        }
+    }
+
     /// Delete the node in the tree with a given key.
-    pub fn delete(&mut self, key: &Key) -> bool {
-        delete(&mut self.root, key)
+    pub fn delete(&mut self, key: &Key, node_resolver: &Resolver) -> bool {
+        delete(
+            self.root
+                .try_borrow_mut()
+                .expect("Resolving the root should not fail"),
+            key,
+            node_resolver,
+        )
     }
 
     /// The data stored in a node in the tree with a given key.
-    pub fn get(&self, key: &Key) -> Option<&BytesMut> {
-        get(&self.root, key)
+    pub fn get(&self, key: &Key, node_resolver: &Resolver) -> Option<&BytesMut> {
+        get(
+            self.root
+                .try_borrow()
+                .expect("Resolving the root should not fail"),
+            key,
+            node_resolver,
+        )
     }
 
     /// A mutable reference to the data stored in a node in the tree with a given key.
-    pub(super) fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
-        get_mut(&mut self.root, key)
+    pub(super) fn get_mut(&mut self, key: &Key, node_resolver: &Resolver) -> Option<&mut BytesMut> {
+        get_mut(
+            self.root
+                .try_borrow_mut()
+                .expect("Resolving the root should not fail"),
+            key,
+            node_resolver,
+        )
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&self) -> Hash {
-        let encodable = self.root.as_deref().map(|node| node.to_encode());
+    pub fn hash(&self, node_resolver: &Resolver) -> Hash {
+        let encodable = self
+            .root
+            .try_borrow()
+            .expect("Resolving the root should not fail")
+            .as_ref()
+            .map(|node| node.to_encode(node_resolver));
         Hash::hash_encodable(encodable).expect("Should be hashable")
     }
 
     /// Creates an in order iterator for the nodes in the tree
-    pub(super) fn iter(&self) -> AvlIterator {
-        match &self.root {
+    pub(super) fn iter<'a>(&'a self, node_resolver: &'a Resolver) -> AvlIterator<'a, Resolver> {
+        match self
+            .root
+            .try_borrow()
+            .expect("Resolving the root should not fail")
+        {
             None => AvlIterator {
                 stack: vec![],
                 current: &None,
+                node_resolver,
             },
             Some(_) => AvlIterator {
                 stack: vec![],
-                current: &self.root,
+                current: self
+                    .root
+                    .try_borrow()
+                    .expect("Resolving the root should not fail"),
+                node_resolver,
             },
         }
     }
 
     /// The root node of the tree.
     #[cfg(test)]
-    pub(super) fn root(&self) -> &Option<Arc<MavlNode>> {
-        &self.root
+    pub(super) fn root(&self, node_resolver: &Resolver) -> &Option<Arc<MavlNode<Resolver>>> {
+        node_resolver.resolve(&self.root);
+        self.root.try_borrow().unwrap()
     }
 
     /// A mutable reference to the root node of the tree.
-    pub(super) fn root_mut(&mut self) -> &mut Option<Arc<MavlNode>> {
-        &mut self.root
+    pub(super) fn root_mut(
+        &mut self,
+        node_resolver: &Resolver,
+    ) -> &mut Option<Arc<MavlNode<Resolver>>> {
+        node_resolver.resolve(&self.root);
+        self.root
+            .try_borrow_mut()
+            .expect("Resolving the root should not fail")
     }
 
     /// Set the value of a node in the tree with a given key.
-    pub fn set(&mut self, key: &Key, data: Bytes) {
-        set(&mut self.root, key, data);
+    pub fn set(&mut self, key: &Key, data: Bytes, node_resolver: &Resolver) {
+        set(
+            self.root
+                .try_borrow_mut()
+                .expect("Resolving the root should not fail"),
+            key,
+            data,
+            node_resolver,
+        );
     }
 }
 
 /// Used for iterating through the nodes
 /// of the [`Avl`] tree in order.
-pub(super) struct AvlIterator<'a> {
-    stack: Vec<&'a Arc<MavlNode>>,
-    current: &'a Option<Arc<MavlNode>>,
+pub(super) struct AvlIterator<'a, Resolver: MavlNodeResolver> {
+    stack: Vec<&'a Arc<MavlNode<Resolver>>>,
+    current: &'a Option<Arc<MavlNode<Resolver>>>,
+    node_resolver: &'a Resolver,
 }
 
-impl<'a> Iterator for AvlIterator<'a> {
-    type Item = &'a Arc<MavlNode>;
+impl<'a, Resolver: MavlNodeResolver> Iterator for AvlIterator<'a, Resolver> {
+    type Item = &'a Arc<MavlNode<Resolver>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.current {
             self.stack.push(node);
-            self.current = node.left_ref();
+            self.current = node.left_ref(self.node_resolver);
         }
 
         let ret = self.stack.pop()?;
-        self.current = ret.right_ref();
+        self.current = ret.right_ref(self.node_resolver);
         Some(ret)
     }
 }
@@ -107,6 +162,7 @@ mod tests {
     use super::*;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::merkle_layer::node_resolver::InMemoryMavlNodeResolver;
 
     #[derive(Debug, Clone)]
     enum Operation {
@@ -146,17 +202,24 @@ mod tests {
             })
     }
 
-    fn height_and_balance_factor_sanity_check_helper(node: Arc<MavlNode>) -> (bool, usize) {
-        let (left_good, left_height) = match node.left_ref() {
+    fn height_and_balance_factor_sanity_check_helper<Resolver: MavlNodeResolver>(
+        node: Arc<MavlNode<Resolver>>,
+        node_resolver: &Resolver,
+    ) -> (bool, usize) {
+        let (left_good, left_height) = match node.left_ref(node_resolver) {
             None => (true, 0),
-            Some(left_node) => height_and_balance_factor_sanity_check_helper(left_node.clone()),
+            Some(left_node) => {
+                height_and_balance_factor_sanity_check_helper(left_node.clone(), node_resolver)
+            }
         };
         if !left_good {
             return (false, 0);
         }
-        let (right_good, right_height) = match node.right_ref() {
+        let (right_good, right_height) = match node.right_ref(node_resolver) {
             None => (true, 0),
-            Some(right_node) => height_and_balance_factor_sanity_check_helper(right_node.clone()),
+            Some(right_node) => {
+                height_and_balance_factor_sanity_check_helper(right_node.clone(), node_resolver)
+            }
         };
         if !(right_good) {
             return (false, 0);
@@ -169,20 +232,29 @@ mod tests {
         }
     }
 
-    impl Avl {
-        pub fn height_and_balance_factor_sanity_check(&self) -> bool {
-            match &self.root {
+    impl<Resolver: MavlNodeResolver> Avl<Resolver> {
+        pub fn height_and_balance_factor_sanity_check(&self, node_resolver: &Resolver) -> bool {
+            match self
+                .root
+                .try_borrow()
+                .expect("Resolving the root should not fail")
+            {
                 None => true,
                 Some(node) => {
-                    let (ret, _) = height_and_balance_factor_sanity_check_helper(node.clone());
+                    let (ret, _) =
+                        height_and_balance_factor_sanity_check_helper(node.clone(), node_resolver);
                     ret
                 }
             }
         }
     }
 
-    fn compare_tree_to_reference(tree: &Avl, reference: &BTreeMap<Key, Bytes>) {
-        let tree_iter = tree.iter();
+    fn compare_tree_to_reference<Resolver: MavlNodeResolver>(
+        tree: &Avl<Resolver>,
+        reference: &BTreeMap<Key, Bytes>,
+        node_resolver: &Resolver,
+    ) {
+        let tree_iter = tree.iter(node_resolver);
         let mut reference_iter = reference.iter();
         for node in tree_iter {
             if let Some((key, value)) = reference_iter.next() {
@@ -202,26 +274,27 @@ mod tests {
     proptest! {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
-            let mut tree: Avl = Default::default();
+            let node_resolver = Arc::new(InMemoryMavlNodeResolver::default());
+            let mut tree: Avl<InMemoryMavlNodeResolver> = Avl::new();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
-                        let tree_value = tree.get(&key).map(|b| b.clone().freeze());
+                        let tree_value = tree.get(&key, node_resolver.as_ref()).map(|b| b.clone().freeze());
                         assert_eq!(tree_value.as_ref(), reference.get(&key));
                         continue;
                     },
                     Operation::Upsert(key, value) => {
-                        tree.set(&key, value.clone());
+                        tree.set(&key, value.clone(), node_resolver.as_ref());
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
-                        tree.delete(&key);
+                        tree.delete(&key, node_resolver.as_ref());
                         reference.remove(&key);
                     }
                 }
-                compare_tree_to_reference(&tree, &reference);
-                assert!(tree.height_and_balance_factor_sanity_check());
+                compare_tree_to_reference(&tree, &reference, &node_resolver);
+                assert!(tree.height_and_balance_factor_sanity_check(node_resolver.as_ref()));
             }
         }
     }
