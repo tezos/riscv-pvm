@@ -16,8 +16,8 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::key::Key;
 use crate::merkle_layer::CommitId;
-use crate::merkle_layer::Key;
 use crate::merkle_layer::MerkleLayer;
 use crate::merkle_layer::MerkleLayerError;
 use crate::persistence_layer::PersistenceLayer;
@@ -213,8 +213,8 @@ mod tests {
     use proptest::prop_assert_eq;
     use tokio::runtime::Handle;
 
-    use crate::merkle_layer::KEY_MAX_SIZE;
-    use crate::merkle_layer::Key;
+    use crate::key::KEY_MAX_SIZE;
+    use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
     use crate::persistence_layer::PersistenceLayer;

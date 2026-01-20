@@ -3,8 +3,8 @@ use std::ops::Range;
 
 use rand::prelude::*;
 
-use crate::merkle_layer::KEY_MAX_SIZE;
-use crate::merkle_layer::Key;
+use crate::key::KEY_MAX_SIZE;
+use crate::key::Key;
 
 pub fn generate_keys(rng: &mut impl Rng, length: usize) -> Vec<Key> {
     let mut tmp: HashSet<Key> = HashSet::with_capacity(length);

@@ -13,7 +13,7 @@ use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use tokio::runtime::Handle;
 
-use crate::merkle_layer::Key;
+use crate::key::Key;
 use crate::merkle_worker::MerkleWorker;
 use crate::merkle_worker::MerkleWorkerError;
 use crate::persistence_layer::PersistenceLayer;
@@ -153,8 +153,8 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
-    use crate::merkle_layer::KEY_MAX_SIZE;
-    use crate::merkle_layer::Key;
+    use crate::key::KEY_MAX_SIZE;
+    use crate::key::Key;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
