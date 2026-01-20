@@ -2,22 +2,24 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use bincode::BorrowDecode;
 use bincode::Encode;
 use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
+use super::node_resolver::MavlNodeResolver;
 use crate::key::Key;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]
-pub(super) struct MavlNode {
+pub(crate) struct MavlNode<Resolver: MavlNodeResolver> {
     key: Key,
     data: BytesMut,
     left: Option<Arc<Self>>,
@@ -31,21 +33,22 @@ pub(super) struct MavlNode {
 
     /// The difference in heights between child branches (right - left).
     balance_factor: i64,
+    _marker: PhantomData<Resolver>,
 }
 
-#[derive(Encode)]
+#[derive(Encode, BorrowDecode)]
 /// A serialisable representation of [`MavlNode`].
-struct MavlNodeHashRepresentation<'a> {
-    key: &'a Key,
+pub(crate) struct MavlNodeHashRepresentation<'a> {
+    pub(crate) key: &'a [u8],
     data: &'a [u8],
     // The bytes of the hash of an optional left child
-    left: Option<&'a [u8; Hash::DIGEST_SIZE]>,
+    pub(crate) left: Option<&'a [u8]>,
     // The bytes of the hash of an optional right child
-    right: Option<&'a [u8; Hash::DIGEST_SIZE]>,
+    pub(crate) right: Option<&'a [u8]>,
     balance_factor: i64,
 }
 
-impl MavlNode {
+impl<Resolver: MavlNodeResolver> MavlNode<Resolver> {
     /// The difference in heights between child branches.
     #[cfg(test)]
     pub(super) fn balance_factor(&self) -> i64 {
@@ -78,8 +81,11 @@ impl MavlNode {
         MavlNode {
             key,
             data: data.into(),
+            left: None,
+            right: None,
+            hash: OnceLock::new(),
             balance_factor: 0,
-            ..Default::default()
+            _marker: PhantomData::default(),
         }
     }
 
@@ -98,20 +104,14 @@ impl MavlNode {
     /// uncached nodes.
     pub(super) fn to_encode(&self) -> impl Encode + '_ {
         MavlNodeHashRepresentation {
-            key: &self.key,
+            key: &self.key.as_slice(),
             data: &self.data,
 
             // Recursively hashes any left child and its children
-            left: self.left.as_ref().map(hash).map(|h| {
-                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
-                digest
-            }),
+            left: self.left.as_ref().map(hash).map(|value| value.as_ref()),
 
             // Recursively hashes any right child and its children
-            right: self.right.as_ref().map(hash).map(|h| {
-                let digest: &'_ [u8; Hash::DIGEST_SIZE] = h.borrow();
-                digest
-            }),
+            right: self.right.as_ref().map(hash).map(|value| value.as_ref()),
 
             balance_factor: self.balance_factor,
         }
@@ -121,12 +121,33 @@ impl MavlNode {
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
     }
+
+    pub(super) fn decode(
+        hash_representation: MavlNodeHashRepresentation,
+        commited_hash: Hash,
+        key: Key,
+        left: Option<Arc<Self>>,
+        right: Option<Arc<Self>>,
+    ) -> Self {
+        Self {
+            key,
+            data: BytesMut::from(hash_representation.data),
+            left,
+            right,
+            hash: OnceLock::from(commited_hash),
+            balance_factor: hash_representation.balance_factor,
+            _marker: PhantomData::default(),
+        }
+    }
 }
 
 /// Delete the value of the node with a given key. If the key does not exist, do nothing.
 ///
 /// Returns true if the subtree has shrank in size.
-pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
+pub(super) fn delete<Resolver: MavlNodeResolver>(
+    root: &mut Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+) -> bool {
     let Some(node) = root else {
         // The key does not exist so nothing will happen.
         return false;
@@ -175,7 +196,10 @@ pub(super) fn delete(root: &mut Option<Arc<MavlNode>>, key: &Key) -> bool {
 }
 
 /// The data stored in a node in the tree with a given key.
-pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a BytesMut> {
+pub(super) fn get<'a, Resolver: MavlNodeResolver>(
+    root: &'a Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+) -> Option<&'a BytesMut> {
     let mut node = root.as_deref()?;
     loop {
         match node.key().cmp(key) {
@@ -187,8 +211,8 @@ pub(super) fn get<'a>(root: &'a Option<Arc<MavlNode>>, key: &Key) -> Option<&'a 
 }
 
 /// A mutable reference to the data stored in a node in the tree with a given key.
-pub(super) fn get_mut<'a>(
-    root: &'a mut Option<Arc<MavlNode>>,
+pub(super) fn get_mut<'a, Resolver: MavlNodeResolver>(
+    root: &'a mut Option<Arc<MavlNode<Resolver>>>,
     key: &Key,
 ) -> Option<&'a mut BytesMut> {
     let node = root.as_mut()?;
@@ -207,7 +231,7 @@ pub(super) fn get_mut<'a>(
 ///
 /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
 /// cached.
-pub(super) fn hash(node: &Arc<MavlNode>) -> &Hash {
+pub(super) fn hash<Resolver: MavlNodeResolver>(node: &Arc<MavlNode<Resolver>>) -> &Hash {
     node.hash.get_or_init(|| {
         Hash::hash_encodable(node.to_encode()).expect("The hashing should not fail")
     })
@@ -221,7 +245,9 @@ pub(super) fn hash(node: &Arc<MavlNode>) -> &Hash {
 ///
 /// Returns the rebalanced subtree.
 #[must_use]
-fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rebalance<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> Arc<MavlNode<Resolver>> {
     match node.balance_factor {
         2 => {
             let right_balance = node.right.as_ref().map_or(0, |r| r.balance_factor);
@@ -270,7 +296,9 @@ fn rebalance(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_left<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
     let mut right = node_mut
         .right_mut()
@@ -331,7 +359,9 @@ fn rotate_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_right<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
     let mut left = node_mut
         .left_mut()
@@ -394,7 +424,9 @@ fn rotate_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_left_right<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
 
     let mut left = node_mut
@@ -457,7 +489,9 @@ fn rotate_left_right(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///
 /// Returns the rotated subtree.
 #[must_use]
-fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
+fn rotate_right_left<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> Arc<MavlNode<Resolver>> {
     let node_mut = Arc::make_mut(node);
 
     let mut right = node_mut
@@ -507,7 +541,9 @@ fn rotate_right_left(node: &mut Arc<MavlNode>) -> Arc<MavlNode> {
 ///  - The new subtree.
 ///  - True if the subtree has shrank in size.
 #[must_use]
-fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
+fn replace_with_successor<Resolver: MavlNodeResolver>(
+    node: &mut Arc<MavlNode<Resolver>>,
+) -> (Arc<MavlNode<Resolver>>, bool) {
     let node_balance_factor = node.balance_factor;
     let node_mut = Arc::make_mut(node);
     let node_bf = node_mut.balance_factor;
@@ -554,7 +590,11 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
 /// Set the value of the node with a given key.
 ///
 /// Returns true if the subtree has grown in size.
-pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> bool {
+pub(super) fn set<Resolver: MavlNodeResolver>(
+    root: &mut Option<Arc<MavlNode<Resolver>>>,
+    key: &Key,
+    data: Bytes,
+) -> bool {
     let Some(node) = root else {
         // The key does not exist and a new node shall be created.
         *root = Some(Arc::new(MavlNode::new(key.clone(), data)));
@@ -617,9 +657,13 @@ pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> b
 ///  - The minimum node's right child, if it hasn't been moved to its new position.
 ///  - True if the subtree has shrank in size.
 #[must_use]
-fn take_min(
-    node: &mut Option<Arc<MavlNode>>,
-) -> (Option<Arc<MavlNode>>, Option<Arc<MavlNode>>, bool) {
+fn take_min<Resolver: MavlNodeResolver>(
+    node: &mut Option<Arc<MavlNode<Resolver>>>,
+) -> (
+    Option<Arc<MavlNode<Resolver>>>,
+    Option<Arc<MavlNode<Resolver>>>,
+    bool,
+) {
     // Shouldn't occur if this function is used sensibly, but there is no danger to defending
     // against this.
     let Some(node_arc) = node else {

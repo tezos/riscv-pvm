@@ -39,6 +39,10 @@ impl Key {
 
         Ok(())
     }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
 }
 
 impl AsRef<[u8]> for Key {
