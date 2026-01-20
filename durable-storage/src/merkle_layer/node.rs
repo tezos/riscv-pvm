@@ -13,7 +13,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
-use super::Key;
+use crate::key::Key;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]

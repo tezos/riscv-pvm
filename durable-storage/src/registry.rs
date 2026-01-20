@@ -159,7 +159,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::Registry;
-    use crate::merkle_layer::Key;
+    use crate::key::Key;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 

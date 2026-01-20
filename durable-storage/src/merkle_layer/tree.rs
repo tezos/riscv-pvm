@@ -9,12 +9,12 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
-use super::Key;
 use super::node::MavlNode;
 use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
 use super::node::set;
+use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
@@ -105,8 +105,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::merkle_layer::KEY_MAX_SIZE;
-    use crate::merkle_layer::Key;
+    use crate::key::KEY_MAX_SIZE;
+    use crate::key::Key;
 
     #[derive(Debug, Clone)]
     enum Operation {
@@ -116,7 +116,8 @@ mod tests {
     }
 
     fn key_strategy() -> impl Strategy<Value = Key> {
-        proptest::collection::vec(any::<u8>(), 1usize..=KEY_MAX_SIZE).prop_map(Key)
+        proptest::collection::vec(any::<u8>(), 1usize..=KEY_MAX_SIZE)
+            .prop_map(|bytes| Key::new(&bytes).expect("bytes are a valid key"))
     }
 
     fn value_strategy() -> impl Strategy<Value = Bytes> {
