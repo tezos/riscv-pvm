@@ -45,5 +45,6 @@ cfg_if::cfg_if! {
     }
 }
 
+pub mod commit;
 pub mod database;
 pub mod registry;

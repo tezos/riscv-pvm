@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use crate::persistence_layer::CommitId;
+use crate::commit::CommitId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DirectoryManagerError {

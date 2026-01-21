@@ -16,8 +16,8 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::commit::CommitId;
 use crate::key::Key;
-use crate::merkle_layer::CommitId;
 use crate::merkle_layer::MerkleLayer;
 use crate::merkle_layer::MerkleLayerError;
 use crate::persistence_layer::PersistenceLayer;
