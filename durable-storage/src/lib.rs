@@ -30,20 +30,20 @@ pub mod key;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
-        pub mod database;
         pub mod merkle_layer;
         pub mod merkle_worker;
         pub mod persistence_layer;
         pub mod repo;
         pub mod random;
     } else {
-        mod database;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         mod merkle_layer;
         mod merkle_worker;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         pub(crate) mod persistence_layer;
         mod repo;
-        pub mod registry;
     }
 }
+
+pub mod database;
+pub mod registry;
