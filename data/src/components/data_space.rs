@@ -8,7 +8,6 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::ops::Range;
 
 use bincode::Decode;
@@ -28,6 +27,7 @@ use crate::foldable::NodeFold;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
+use crate::hash::Hasher;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -48,6 +48,7 @@ use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
+use crate::partial_vec::RangeEntry;
 use crate::serialisation::elem::Elem;
 use crate::serialisation::serialise;
 
@@ -181,7 +182,7 @@ impl DataSpace<Verify> {
         DataSpace {
             data_space: VerifyImpl {
                 length: Partial::Present(size),
-                pages: BTreeMap::new(),
+                data: PartialVec::undefined(size),
             },
         }
     }
@@ -194,57 +195,40 @@ impl DataSpace<Verify> {
     /// distinction that this method will implicitly zero-initialise absent or blinded pages. So if
     /// you write a single byte to an absent page, the written byte will be reflected in the page's
     /// contents, but the remainder of the page will be zero-bytes.
-    pub fn populate_pages_with_bytes(&mut self, mut addr: usize, mut bytes: &[u8]) {
+    pub fn populate_pages_with_bytes(&mut self, addr: usize, bytes: &[u8]) {
+        self.data_space.data.define(addr, bytes.to_vec());
+
         let end = addr.saturating_add(bytes.len());
 
-        let start_page = PageId::from_addr(addr).number;
-        let end_page = PageId::from_addr(end).number;
+        let start_page = addr & PAGE_MASK;
+        let mut end_page = end & PAGE_MASK;
 
-        for page_addr in start_page..=end_page {
-            // Offset into the page where we want to start writing
-            let page_offset = addr - page_addr;
+        // Unless end coincides with a page boundary, we need to bump the end page by 1 to make it
+        // the exclusive range end.
+        if end > end_page {
+            end_page = end_page.saturating_add(PAGE_SIZE);
+        }
 
-            // How many bytes we can write to this page, given the page size is limited
-            let page_space = PAGE_SIZE - page_offset;
+        let mut offset = start_page;
+        let gaps = self
+            .data_space
+            .data
+            .range(start_page..end_page)
+            .filter_map(|entry| {
+                let current_offset = offset;
+                offset += entry.width();
 
-            // Number of bytes that will be written to this page, adjusted for the number of
-            // remaining bytes in the buffer, as there may be fewer bytes left to write
-            let bytes_to_be_written = bytes.len().min(page_space);
-
-            if bytes_to_be_written == 0 {
-                continue;
-            }
-
-            // We need to awkwardly reconstruct the page ID, because we can't iterate over it
-            // directly. So instead we use the page's starting address during the iteration.
-            let page_id = PageId { number: page_addr };
-
-            // We need to ensure a page is present before we can write to it
-            let page = self
-                .data_space
-                .pages
-                .entry(page_id)
-                .or_insert_with(|| Partial::Present(Page::default()));
-
-            match page {
-                Partial::Absent | Partial::Blinded(_) => {
-                    let mut contents = [0; PAGE_SIZE];
-                    contents[page_offset..page_offset + bytes_to_be_written]
-                        .copy_from_slice(&bytes[..bytes_to_be_written]);
-
-                    *page = Partial::Present(Page {
-                        contents: Box::new(contents),
-                    });
+                match entry {
+                    RangeEntry::Undefined { length } => Some((current_offset, length)),
+                    RangeEntry::Defined { .. } => None,
                 }
+            })
+            .collect::<Vec<_>>(); // Need to collect to avoid lifetime issues
 
-                Partial::Present(page) => {
-                    page.contents[page_offset..page_offset + bytes_to_be_written]
-                        .copy_from_slice(&bytes[..bytes_to_be_written]);
-                }
-            }
-
-            addr += bytes_to_be_written;
-            bytes = &bytes[bytes_to_be_written..];
+        // Fill in the gaps with zero-bytes. After all this method promises to zero-initialise
+        // absent or blinded pages.
+        for (gap_addr, gap_zeros) in gaps {
+            self.data_space.data.define(gap_addr, vec![0u8; gap_zeros]);
         }
     }
 }
@@ -385,19 +369,30 @@ impl Foldable<PartialHashFold<'_>> for DataSpace<Verify> {
             let address = PAGE_SIZE
                 .checked_mul(idx)
                 .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
-            let page_id = PageId::from_addr(address);
 
-            let page = self
-                .data_space
-                .pages
-                .get(&page_id)
-                .unwrap_or(&Partial::Absent);
+            let range = address..address + PAGE_SIZE;
+            let page = self.data_space.data.continuous_defined_range(range.clone());
+
             match page {
-                Partial::Absent => PartialHash::Previous,
-                Partial::Blinded(hash) => PartialHash::Present(*hash),
-                Partial::Present(data) => {
-                    let hash = Hash::hash_bytes(data.contents.as_slice());
-                    PartialHash::Present(hash)
+                None => {
+                    if self.data_space.data.is_any_defined(range) {
+                        // This means there are undefined and defined ranges in this page.
+                        // That's not allowed as pages must be either fully present or fully
+                        // absent.
+                        return PartialHash::InvalidProof;
+                    }
+
+                    PartialHash::Previous
+                }
+
+                Some(chunks) => {
+                    let mut hasher = Hasher::default();
+
+                    for chunk in chunks {
+                        hasher.update(chunk);
+                    }
+
+                    PartialHash::Present(hasher.to_hash())
                 }
             }
         };
@@ -420,7 +415,7 @@ impl FromProof for DataSpace<Verify> {
         let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf::<u64>())?;
         let length = length.map_present(|len| len as usize);
 
-        let (proof, pages) = proof.next_branch_with(|proof| {
+        let (proof, data) = proof.next_branch_with(|proof| {
             // When the length node is present, we can properly parse all pages.
             // But when the length node is not present, we cannot parse any pages. This needs to be
             // validated. In other words, the node for the pages must be blinded or absent.
@@ -439,22 +434,22 @@ impl FromProof for DataSpace<Verify> {
                     ));
                 }
 
-                return proof.done(Vec::new());
+                return proof.done(PartialVec::undefined(0));
             };
 
-            let mut pages = Vec::new();
+            let mut partial_data = PartialVec::undefined(len);
+
             let mut for_leaf = |idx, proof: D| {
                 // The index is the page number, but the page ID is the starting address.
                 let address = PAGE_SIZE
                     .checked_mul(idx)
                     .expect("This should not overflow");
-                let page_id = PageId::from_addr(address);
 
-                let result = proof.into_leaf_raw()?;
+                let result = proof.into_leaf_raw::<PAGE_SIZE>()?;
                 let result = result.map(|data| {
-                    let data = data.map_present(|contents| Page { contents });
-                    if let Partial::Blinded(_) | Partial::Present(_) = data {
-                        pages.push((page_id, data));
+                    if let Partial::Present(data) = data {
+                        let data = Vec::from(data as Box<[u8]>);
+                        partial_data.define(address, data);
                     }
                 });
 
@@ -464,14 +459,11 @@ impl FromProof for DataSpace<Verify> {
             let num_leaves = len.div_ceil(PAGE_SIZE);
             let result = descend_tree(proof, NODE_ARITY, 0, num_leaves, &mut for_leaf)?;
 
-            Ok(result.map(|()| pages))
+            Ok(result.map(|()| partial_data))
         })?;
 
         proof.done(DataSpace {
-            data_space: VerifyImpl {
-                length,
-                pages: BTreeMap::from_iter(pages),
-            },
+            data_space: VerifyImpl { length, data },
         })
     }
 }
@@ -616,19 +608,10 @@ impl DataSpaceMode for Prove<'_> {
 
 impl DataSpaceMode for Verify {
     fn new(len: usize) -> DataSpace<Self> {
-        let pages = (0..len)
-            .step_by(PAGE_SIZE)
-            .map(|addr| {
-                let id = PageId::from_addr(addr);
-                let page = Page::default();
-                (id, Partial::Present(page))
-            })
-            .collect();
-
         DataSpace {
             data_space: VerifyImpl {
                 length: Partial::Present(len),
-                pages,
+                data: PartialVec::defined(vec![0u8; len]),
             },
         }
     }
@@ -646,15 +629,19 @@ impl DataSpaceMode for Verify {
     unsafe fn read<E: Elem>(this: &DataSpace<Self>, addr: usize) -> E {
         let mut data = vec![0; E::STORED_SIZE.get()];
 
-        for byte_addr in addr_range::<E>(addr) {
-            let page_id = PageId::from_addr(byte_addr);
-            let Some(Partial::Present(page)) = this.data_space.pages.get(&page_id) else {
-                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
-                unsafe { not_found() }
-            };
+        let Some(data_chunks) = this
+            .data_space
+            .data
+            .continuous_defined_range(addr_range::<E>(addr))
+        else {
+            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+            unsafe { not_found() }
+        };
 
-            let byte_offset = byte_addr & OFFSET_MASK;
-            data[byte_addr - addr] = page.contents[byte_offset];
+        let mut offset = 0;
+        for page_chunk in data_chunks {
+            data[offset..][..page_chunk.len()].copy_from_slice(page_chunk);
+            offset += page_chunk.len();
         }
 
         unsafe { E::read_unaligned(data.as_ptr()) }
@@ -669,17 +656,7 @@ impl DataSpaceMode for Verify {
             value.write_unaligned(data.as_mut_ptr());
         }
 
-        let bytewise_writes = addr_range::<E>(addr).zip(data);
-        for (byte_addr, byte) in bytewise_writes {
-            let page_id = PageId::from_addr(byte_addr);
-            let Some(Partial::Present(page)) = this.data_space.pages.get_mut(&page_id) else {
-                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
-                unsafe { not_found() }
-            };
-
-            let byte_offset = byte_addr & OFFSET_MASK;
-            page.contents[byte_offset] = byte;
-        }
+        this.data_space.data.define(addr, data);
     }
 }
 
@@ -810,8 +787,8 @@ struct VerifyImpl {
     /// Length of the data space
     length: Partial<usize>,
 
-    /// Page-level information of the data space
-    pages: BTreeMap<PageId, Partial<Page>>,
+    /// Available data in this space
+    data: PartialVec<u8>,
 }
 
 impl VerifyImpl {
@@ -823,9 +800,7 @@ impl VerifyImpl {
             return false;
         }
 
-        self.pages
-            .values()
-            .all(|page| !matches!(page, Partial::Present(_)))
+        self.data.is_all_undefined()
     }
 }
 
@@ -851,39 +826,6 @@ const OFFSET_MASK: usize = PAGE_SIZE - 1;
 
 /// Bit mask to extract the starting address of a page
 const PAGE_MASK: usize = !OFFSET_MASK;
-
-/// Identifier for a page in the data space
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-struct PageId {
-    number: usize,
-}
-
-impl PageId {
-    /// Extract the page ID from the given address.
-    fn from_addr(addr: usize) -> Self {
-        Self {
-            number: addr & PAGE_MASK,
-        }
-    }
-}
-
-/// Page in the data space
-#[derive(Clone)]
-struct Page {
-    contents: Box<[u8; PAGE_SIZE]>,
-}
-
-impl Default for Page {
-    fn default() -> Self {
-        Self {
-            contents: vec![0u8; PAGE_SIZE]
-                .into_boxed_slice()
-                .try_into()
-                .expect("Creating boxed array from PAGE_SIZE-ed vector cannot fail"),
-        }
-    }
-}
 
 /// Errors indicating a bad proof for [`DataSpace<Verify>`]
 #[derive(Debug, thiserror::Error)]

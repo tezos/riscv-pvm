@@ -16,7 +16,6 @@ use proptest::prop_assert_eq;
 use proptest::proptest;
 
 use super::PAGE_SIZE;
-use super::PageId;
 use crate::components::data_space::DataSpace;
 use crate::hash::Hash;
 use crate::merkle_tree::MerkleTree;
@@ -402,47 +401,4 @@ fn verify_with_gaps() {
         assert_not_found!(dyn_cells.read::<[u8; 6]>(PAGE_SIZE - 1));
         assert_not_found!(dyn_cells.read::<[u8; 4]>(PAGE_SIZE));
     }
-}
-
-/// Ensures that page indices are properly calculated.
-#[test]
-fn page_index() {
-    let page0 = [
-        PageId::from_addr(0),
-        PageId::from_addr(1024),
-        PageId::from_addr(2048),
-        PageId::from_addr(3072),
-    ];
-
-    let page4 = [
-        PageId::from_addr(4096),
-        PageId::from_addr(5120),
-        PageId::from_addr(6144),
-        PageId::from_addr(7168),
-    ];
-
-    let page8 = [
-        PageId::from_addr(8192),
-        PageId::from_addr(9216),
-        PageId::from_addr(10240),
-        PageId::from_addr(11264),
-    ];
-
-    page0.into_iter().fold((), |_, item| {
-        assert_eq!(item, page0[0]);
-        assert!(item < page4[0]);
-        assert!(item < page8[0]);
-    });
-
-    page4.into_iter().fold((), |_, item| {
-        assert!(item > page0[0]);
-        assert_eq!(item, page4[0]);
-        assert!(item < page8[0]);
-    });
-
-    page8.into_iter().fold((), |_, item| {
-        assert!(item > page0[0]);
-        assert!(item > page4[0]);
-        assert_eq!(item, page8[0]);
-    });
 }
