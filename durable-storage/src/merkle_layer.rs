@@ -15,20 +15,11 @@ use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 use tree::Avl;
 
+use crate::commit::CommitId;
 use crate::key::Key;
 use crate::persistence_layer::HashedData;
 use crate::persistence_layer::PersistenceLayer;
 use crate::persistence_layer::PersistenceLayerError;
-
-/// An identifier generated for a given commit.
-#[derive(Debug, PartialEq, Eq)]
-pub struct CommitId(Hash);
-
-impl CommitId {
-    fn new(hash: Hash) -> Self {
-        Self(hash)
-    }
-}
 
 /// Errors for fallible [MerkleLayer] operations.
 #[derive(Debug, thiserror::Error)]
@@ -90,7 +81,7 @@ impl MerkleLayer {
             self.persistence.blob_set(&blob)?;
         }
 
-        Ok(CommitId::new(self.tree.hash()))
+        Ok(CommitId::from(self.hash()))
     }
 
     /// Delete the data associated with a given [Key].
@@ -980,6 +971,6 @@ mod tests {
         }
 
         let root_hash = merkle_layer.tree.hash();
-        assert_eq!(commit_id.0, root_hash);
+        assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }

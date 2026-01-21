@@ -34,26 +34,9 @@ use octez_riscv_data::hash::Hash;
 use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
+use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
 use crate::repo::DirectoryManagerError;
-
-/// [`CommitId`]'s are used to generate [`PersistenceLayer`] commits & to checkout specific commits
-/// from a [`DirectoryManager`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CommitId(Hash);
-
-impl From<Hash> for CommitId {
-    fn from(hash: Hash) -> Self {
-        Self(hash)
-    }
-}
-
-impl CommitId {
-    /// Returns the hex encoded commit id.
-    pub fn hex_encode(&self) -> String {
-        hex::encode(self.0)
-    }
-}
 
 /// The name of the column family used for storing [`HashedData`].
 const BLOB_CF: &str = "blob";
