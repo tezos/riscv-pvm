@@ -26,8 +26,6 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
-pub mod key;
-
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
         pub mod merkle_layer;
@@ -46,4 +44,5 @@ cfg_if::cfg_if! {
 }
 
 pub mod database;
+pub mod key;
 pub mod registry;
