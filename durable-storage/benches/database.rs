@@ -12,7 +12,7 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use octez_riscv_durable_storage::database::Database;
 use octez_riscv_durable_storage::database::DatabaseError;
-use octez_riscv_durable_storage::merkle_layer::Key;
+use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayerError;
 use octez_riscv_durable_storage::persistence_layer::utils::TestableTmpdir;
 use octez_riscv_durable_storage::random::generate_keys;
