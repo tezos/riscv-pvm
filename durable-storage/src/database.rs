@@ -495,6 +495,13 @@ mod tests {
                 prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
                 prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
                 prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+
+                // Write limited by buffer
+                let mut small_buffer: [u8; 3] = [0, 0 ,0];
+                database
+                    .read(&key, 0, small_buffer.as_mut_slice())
+                    .expect("Writing into a smaller buffer should succeed");
+                prop_assert_eq!(&small_buffer, &data[0..3]);
             }
         }
     }
