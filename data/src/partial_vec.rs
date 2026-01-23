@@ -6,8 +6,9 @@
 //!
 //! # Structure
 //!
-//! A [`PartialVec`] is a binary tree where leaves are either defined data or undefined gaps.
-//! This allows efficient representation of sparse data without allocating memory for gaps.
+//! A [`PartialVec`] is a flat list of defined entries, where each entry has a start index and
+//! contiguous data. Gaps between entries represent undefined regions. This allows efficient
+//! representation of sparse data without allocating memory for gaps.
 //!
 //! ```text
 //! Logical view:    [a][b][c][ ? ][ ? ][ ? ][ ? ][d][e][f]
@@ -15,16 +16,12 @@
 //!                  |_______|___________________|_________|
 //!                   defined      undefined       defined
 //!
-//! Tree structure:
+//! Internal structure (sorted by start index):
 //!
-//!                        Concatenated
-//!                         (len: 10)
-//!                        /          \
-//!                Concatenated       Defined
-//!                 (len: 7)          [d,e,f]
-//!                /        \
-//!           Defined     Undefined
-//!           [a,b,c]      (len: 4)
+//!   entries: [
+//!     DefinedEntry { start: 0, data: [a, b, c] },
+//!     DefinedEntry { start: 7, data: [d, e, f] },
+//!   ]
 //! ```
 //!
 //! Unlike a `BTreeMap<usize, T>`, this structure is optimized for range queries making it
@@ -32,319 +29,238 @@
 
 use std::ops::Range;
 
+use perfect_derive::perfect_derive;
+
+/// Entry in the partial vector that represents a defined data range
+#[perfect_derive(Debug, Clone, Default)]
+struct DefinedEntry<T> {
+    /// Absolute position where this entry starts
+    start: usize,
+
+    /// Data for this entry
+    data: Vec<T>,
+}
+
+impl<T> DefinedEntry<T> {
+    /// Get the exclusive end index of this defined entry.
+    const fn end(&self) -> usize {
+        self.start + self.data.len()
+    }
+}
+
 /// Partial vector that may not be defined for certain ranges
 ///
 /// This data type can be seen as an alternative to `BTreeMap<usize, T>` which provides a more
 /// memory-efficient representation for when there are many adjacent keys and the primary query
 /// mechanism is using ranges.
 #[derive(Debug, Clone)]
-pub enum PartialVec<T> {
-    /// Undefined vector of a certain width
-    Undefined {
-        /// How many elements are undefined
-        length: usize,
-    },
-
-    /// Defined vector of a certain width
-    Defined {
-        /// Elements that define the range
-        data: Vec<T>,
-    },
-
-    /// Concatenation of two partial vectors
-    Concatenated {
-        /// Combined width of both vectors
-        ///
-        /// This is not the number of defined items.
-        node_width: usize,
-
-        /// First partial vector
-        left: Box<Self>,
-
-        /// Second partial vector
-        right: Box<Self>,
-    },
+pub struct PartialVec<T> {
+    entries: Vec<DefinedEntry<T>>,
 }
 
 impl<T> PartialVec<T> {
-    /// Create a vector of defined data.
-    pub fn defined(data: Vec<T>) -> Self {
-        Self::Defined { data }
+    /// Create an empty partial vector with no defined entries.
+    pub fn empty() -> Self {
+        Self { entries: vec![] }
     }
 
-    /// Create a vector of undefined data with the provided length.
-    pub fn undefined(length: usize) -> Self {
-        Self::Undefined { length }
-    }
-
-    /// Retrieve the width of the partial vector.
+    /// Insert a new defined entry at the specified index, if possible.
     ///
-    /// This is not the number of defined elements, but the total number of elements represented by
-    /// the partial vector - defined or undefined.
-    /// In other words, `PartialVec::undefined(10).width() == 10`.
-    fn width(&self) -> usize {
-        match self {
-            Self::Undefined { length } => *length,
-            Self::Defined { data } => data.len(),
-            Self::Concatenated { node_width, .. } => *node_width,
+    /// This function requires that the new entry does not overlap with any entries before `at`.
+    ///
+    /// If no insertion is possible, this function will have no effect.
+    fn insert_entry(&mut self, at: usize, new_entry: &mut DefinedEntry<T>) {
+        if at >= self.entries.len() {
+            let entry = std::mem::take(new_entry);
+            self.entries.push(entry);
+            return;
         }
+
+        let existing_entry = &mut self.entries[at];
+
+        // New:      ####
+        // Existing:     ####
+        // Insert new entry before existing entry.
+        if new_entry.end() <= existing_entry.start {
+            let entry = std::mem::take(new_entry);
+            self.entries.insert(at, entry);
+            return;
+        }
+
+        // New:      ####
+        // Existing:   ####
+        // Insert prefix of new before existing entry.
+        if new_entry.start < existing_entry.start {
+            let keep = new_entry
+                .data
+                .len()
+                .min(existing_entry.start - new_entry.start);
+
+            let prefix_entry = DefinedEntry {
+                start: new_entry.start,
+                data: new_entry.data.drain(..keep).collect(),
+            };
+
+            new_entry.start += keep;
+
+            self.entries.insert(at, prefix_entry);
+        }
+
+        // We compute this here to avoid borrowing issues in the below blocks.
+        let max_extent = self.max_extend(at);
+
+        // We're borrowing it again, to avoid lifetime issues in the above blocks.
+        let existing_entry = &mut self.entries[at];
+
+        // New:          ####
+        // Existing:   ####
+        // Update overlap between new and existing entry.
+        // Any overhang of the new entry will either be handled below, or by the caller in a new
+        // iteration.
+        if new_entry.start < existing_entry.end() {
+            let overlap = new_entry
+                .data
+                .len()
+                .min(existing_entry.end() - new_entry.start);
+            let gap = existing_entry
+                .data
+                .len()
+                .min(new_entry.start - existing_entry.start);
+
+            existing_entry
+                .data
+                .splice(gap..gap + overlap, new_entry.data.drain(..overlap));
+
+            new_entry.start += overlap;
+        }
+
+        // New:          ####
+        // Existing: ####
+        if new_entry.start == existing_entry.end() {
+            let extension = new_entry.end().min(max_extent) - new_entry.start;
+            existing_entry
+                .data
+                .extend(new_entry.data.drain(..extension));
+            new_entry.start += extension;
+        }
+
+        // Other cases don't apply to the entry at index `at`. The caller should handle them in the
+        // next iteration.
+    }
+
+    /// Get a hypothetical range end for the entry at index `idx`. The entry could grow up to this,
+    /// without overlapping the next entry.
+    fn max_extend(&self, idx: usize) -> usize {
+        // If `idx` is the last entry, the maximum extent is unbounded.
+        if idx + 1 >= self.entries.len() {
+            return usize::MAX;
+        }
+
+        self.entries[idx + 1].start
     }
 
     /// Define a range within the partial vector.
     ///
     /// Existing data is overwritten if it overlaps the newly defined range.
+    ///
+    /// TODO: RV-898: Improve this method to consume the `new_data` vector from the right. This can
+    /// be more performant as it avoid potentially-excessive internal copying.
     pub fn define(&mut self, offset: usize, new_data: Vec<T>) {
-        let mut work = vec![(self, offset, new_data)];
+        if new_data.is_empty() {
+            return;
+        }
 
-        while let Some((target, offset, mut new_data)) = work.pop() {
-            // If there is nothing left to insert, we might as well stop.
-            if new_data.is_empty() {
-                break;
-            }
+        let mut new_entry = DefinedEntry {
+            start: offset,
+            data: new_data,
+        };
 
-            match target {
-                Self::Concatenated {
-                    left,
-                    right,
-                    node_width,
-                } => {
-                    let new_data_end = offset + new_data.len();
+        // If you partition the list of entries by whether they end before the new entry starts,
+        // the first entry that does not satisfy this is the first one that might overlap with
+        // the new entry.
+        //
+        // Example:
+        //
+        // Entries by predicate: yyyyyyynnnnnn
+        //                              ↑
+        //                              Partition point
+        let mut start_idx = self
+            .entries
+            .partition_point(|entry| entry.end() <= new_entry.start);
 
-                    // Inserting may extend the range represented by the node.
-                    *node_width = std::cmp::max(*node_width, new_data_end);
-
-                    // When the offset is larger than what the left node stores, then we can safely
-                    // delegate all the work to the right node.
-                    // This case also handles when we want to define something beyond the current
-                    // node's width. In that scenario, we descend into the right node.
-                    if offset >= left.width() {
-                        let new_offset = offset - left.width();
-                        work.push((right, new_offset, new_data));
-                        continue;
-                    }
-
-                    // When the inserted range fits entirely within the left node, we can focus on
-                    // the left node only.
-                    if new_data_end <= left.width() {
-                        work.push((left, offset, new_data));
-                        continue;
-                    }
-
-                    // At this point we know that the inserted range overlaps with both the left and
-                    // right nodes. So we divide the insertion vector accordingly.
-                    let left_overlap_tail = left.width() - offset;
-                    let new_right_data = new_data.split_off(left_overlap_tail);
-
-                    work.push((left, offset, new_data));
-                    work.push((right, 0, new_right_data));
-                }
-
-                Self::Undefined { length } => {
-                    let new_data_end = offset + new_data.len();
-
-                    let undefined_prefix_len = offset;
-                    let undefined_suffix_len = length.saturating_sub(new_data_end);
-
-                    // This is the "center" node. We prepend and append undefined nodes as needed.
-                    // We don't need to worry about merging adjacent nodes, as this node is either
-                    // the root or the right-most node in a concatenation. The `Concatenated` case
-                    // deals with this for us.
-                    let mut new_data_node = Self::defined(new_data);
-
-                    // If the insertion does not happen at the beginning, then we keep a portion of
-                    // the undefined range. The length of the existing undefined range is not
-                    // considered, as we are only interested in filling the gap.
-                    if undefined_prefix_len > 0 {
-                        let prefix = Self::undefined(undefined_prefix_len);
-                        new_data_node = Self::Concatenated {
-                            node_width: prefix.width() + new_data_node.width(),
-                            left: Box::new(prefix),
-                            right: Box::new(new_data_node),
-                        };
-                    }
-
-                    // If the tail of the inserted range does not extend beyond the existing
-                    // undefined range, then the portion of the undefined range that covers that bit
-                    // needs to be kept.
-                    if undefined_suffix_len > 0 {
-                        let suffix = Self::undefined(undefined_suffix_len);
-                        new_data_node = Self::Concatenated {
-                            node_width: new_data_node.width() + suffix.width(),
-                            left: Box::new(new_data_node),
-                            right: Box::new(suffix),
-                        };
-                    }
-
-                    *target = new_data_node;
-                }
-
-                Self::Defined { data } => {
-                    // When inserting beyond what is currently present, there needs to be an
-                    // undefined gap between the existing range and the new range. This makes it a
-                    // slightly special case which is best handled separately.
-                    if offset > data.len() {
-                        let gap = offset - data.len();
-
-                        let new_data_node = Self::defined(new_data);
-                        let new_node = Self::Concatenated {
-                            node_width: gap + new_data_node.width(),
-                            left: Box::new(Self::undefined(gap)),
-                            right: Box::new(new_data_node),
-                        };
-
-                        // Taking the data lets us reuse the allocation. `Default for Vec` (like
-                        // `Vec::new`) does not allocate any memory, so this is rather efficient.
-                        // The alternative is a bit of unsafe code which doesn't seem worth the
-                        // trade-off right now.
-                        let data = std::mem::take(data);
-
-                        *target = Self::Concatenated {
-                            node_width: data.len() + new_node.width(),
-                            left: Box::new(Self::defined(data)),
-                            right: Box::new(new_node),
-                        };
-
-                        continue;
-                    }
-
-                    let new_data_end = offset + new_data.len();
-
-                    // When we start inserting within the defined range, but the new data extends
-                    // beyond the existing range, we can truncate and append in place.
-                    // We can do the extension because there are no adjacent entries to worry about.
-                    // The `Concatenated` case handles that.
-                    if new_data_end >= data.len() {
-                        // Truncation leaves the capacity unchanged.
-                        data.truncate(offset);
-
-                        // Using `append` to avoid the iterator intermediary.
-                        data.append(&mut new_data);
-
-                        continue;
-                    }
-
-                    // At this point we know that the newly inserted data fits entirely within the
-                    // existing defined entry.
-                    for (dst, src) in data[offset..new_data_end].iter_mut().zip(new_data) {
-                        // We replace the existing data this way to not require `T: Copy`.
-                        *dst = src;
-                    }
-                }
-            }
+        while !new_entry.data.is_empty() {
+            // Insert or merge the new entry at the current index.
+            // This will update `new_entry` accordingly for the next iteration.
+            self.insert_entry(start_idx, &mut new_entry);
+            start_idx += 1;
         }
     }
 
     /// Mark everything beyond `keep_length` as undefined.
-    pub fn truncate(&mut self, mut keep_length: usize) {
-        // The borrow checker is unfortunately a little in the way in this method. Please see the
-        // `PartialVec::Concatenated` case below for more information.
-        let mut target: *mut Self = self;
+    pub fn truncate(&mut self, keep_length: usize) {
+        // Remove entries that start at or after the "keep length" marker.
+        self.entries.retain(|entry| entry.start < keep_length);
 
-        loop {
-            // SAFETY: Dereferencing `target` is safe because we have not aliased the pointer.
-            match unsafe { &mut *target } {
-                Self::Concatenated {
-                    left,
-                    right,
-                    node_width,
-                } => {
-                    *node_width = keep_length.min(*node_width);
-
-                    // In case the left node will be fully kept, we can just move on to the right
-                    // node.
-                    if keep_length > left.width() {
-                        target = right.as_mut();
-                        keep_length -= left.width();
-
-                        continue;
-                    }
-
-                    // We only need to keep the left portion.
-                    let new_target = std::mem::take(left.as_mut());
-
-                    // SAFETY: `left` and `right` are no longer used at this point. So technically
-                    // `target` is an exclusive reference. The borrow checker is not able to detect
-                    // this though, so we must resort to unsafe code.
-                    // The old value is dropped as it is returned from the replace call.
-                    unsafe { target.replace(new_target) };
-                }
-
-                Self::Undefined { length } => {
-                    *length = keep_length.min(*length);
-                    break;
-                }
-
-                Self::Defined { data } => {
-                    data.truncate(keep_length);
-                    break;
-                }
-            }
+        // Any entry that extends beyond the "keep length" marker needs to be truncated.
+        if let Some(last) = self.entries.last_mut()
+            && last.end() > keep_length
+        {
+            last.data.truncate(keep_length - last.start);
         }
     }
 
     /// Fetch the entries of the partial vector that make up the provided range.
-    pub fn range(&self, mut range: Range<usize>) -> impl Iterator<Item = RangeEntry<T>> {
-        let mut work = vec![self];
+    pub fn range(&self, mut range: Range<usize>) -> impl Iterator<Item = RangeEntry<'_, T>> {
+        // Find the first entry that might overlap with our range.
+        let mut idx = self
+            .entries
+            .partition_point(|entry| entry.end() <= range.start);
 
         std::iter::from_fn(move || {
-            while !range.is_empty() {
-                let Some(node) = work.pop() else {
-                    // If we ran out of things to do, but the range is not empty yet, then the partial
-                    // vector is implicitly undefined for the rest of the queried range.
-                    let entry = RangeEntry::Undefined {
-                        length: range.len(),
-                    };
-
-                    // We must drain the range to prevent further iterations.
-                    range = 0..0;
-
-                    return Some(entry);
-                };
-
-                if node.width() <= range.start {
-                    // This branch happens in two cases:
-                    // - top-level undefined, defined or concatenation node before the query range
-                    // - when we split up a concatenation of two partial vectors, but the left
-                    //   vector is before the query range
-
-                    range.start -= node.width();
-                    range.end -= node.width();
-
-                    continue;
-                }
-
-                match node {
-                    Self::Concatenated { left, right, .. } => {
-                        // These nodes need to be traversed next. Otherwise we'll violate the
-                        // left-to-right traversal order which is assumed in this function.
-                        // After: left -> right -> rest...
-                        work.push(right.as_ref());
-                        work.push(left.as_ref());
-                    }
-
-                    Self::Undefined { length } => {
-                        // The overlap needs to be capped by the query range as the overlap could
-                        // otherwise be larger than the query range.
-                        let overlap = range.len().min(length - range.start);
-
-                        range.end = range.len() - overlap;
-                        range.start = 0;
-
-                        return Some(RangeEntry::Undefined { length: overlap });
-                    }
-
-                    Self::Defined { data } => {
-                        let chunk = &data[range.start..range.end.min(data.len())];
-
-                        range.end = range.len() - chunk.len();
-                        range.start = 0;
-
-                        return Some(RangeEntry::Defined { data: chunk });
-                    }
-                }
+            if range.is_empty() {
+                return None;
             }
 
-            None
+            if idx >= self.entries.len() {
+                // No more entries, but we still have range to cover.
+                // The vector is implicitly undefined beyond the last defined entry.
+                let length = range.len();
+
+                range.start += length;
+
+                return Some(RangeEntry::Undefined { length });
+            }
+
+            let entry = &self.entries[idx];
+
+            if range.start < entry.start {
+                // The query range starts before this entry. This means there is a gap of undefined
+                // data.
+                // Since we started with the first entry that might overlap, this gap is guaranteed
+                // to be undefined.
+                let gap = entry.start - range.start;
+
+                // There is an edge case where the gap is larger than the remaining range.
+                let length = range.len().min(gap);
+
+                range.start += length;
+
+                return Some(RangeEntry::Undefined { length });
+            }
+
+            // The query range starts at or after this entry's start.
+            let offset = range.start - entry.start;
+
+            // It's possible that the range goes beyond this entry. So we need to clip the length
+            // of the data entry we're about to yield to not extend beyond the entry.
+            let length = range.len().min(entry.data.len() - offset);
+
+            range.start += length;
+            idx += 1;
+
+            Some(RangeEntry::Defined {
+                data: &entry.data[offset..][..length],
+            })
         })
     }
 
@@ -398,14 +314,27 @@ impl<T> PartialVec<T> {
 
     /// Is nothing in the partial vector defined?
     pub fn is_all_undefined(&self) -> bool {
-        self.range(0..self.width())
-            .all(|chunk| matches!(chunk, RangeEntry::Undefined { .. }))
+        self.entries.iter().all(|entry| entry.data.is_empty())
     }
 }
 
 impl<T> Default for PartialVec<T> {
     fn default() -> Self {
-        Self::undefined(0)
+        Self::empty()
+    }
+}
+
+impl<T> From<Vec<T>> for PartialVec<T> {
+    fn from(data: Vec<T>) -> Self {
+        if data.is_empty() {
+            return Self::empty();
+        }
+
+        let entry = DefinedEntry { start: 0, data };
+
+        Self {
+            entries: vec![entry],
+        }
     }
 }
 

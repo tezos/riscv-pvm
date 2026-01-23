@@ -182,7 +182,7 @@ impl DataSpace<Verify> {
         DataSpace {
             data_space: VerifyImpl {
                 length: Partial::Present(size),
-                data: PartialVec::undefined(size),
+                data: PartialVec::empty(),
             },
         }
     }
@@ -434,10 +434,10 @@ impl FromProof for DataSpace<Verify> {
                     ));
                 }
 
-                return proof.done(PartialVec::undefined(0));
+                return proof.done(PartialVec::empty());
             };
 
-            let mut partial_data = PartialVec::undefined(len);
+            let mut partial_data = PartialVec::empty();
 
             let mut for_leaf = |idx, proof: D| {
                 // The index is the page number, but the page ID is the starting address.
@@ -611,7 +611,7 @@ impl DataSpaceMode for Verify {
         DataSpace {
             data_space: VerifyImpl {
                 length: Partial::Present(len),
-                data: PartialVec::defined(vec![0u8; len]),
+                data: PartialVec::from(vec![0u8; len]),
             },
         }
     }
