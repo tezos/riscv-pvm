@@ -132,13 +132,12 @@ mod tests {
     use crate::repo::DirectoryManager;
 
     impl Avl {
-        fn check(&self, line: u32) {
+        fn check(&self) {
             let inorder = self.is_inorder();
             let is_balanced = self.is_balanced();
             let has_correct_balance_factors = self.has_correct_balance_factors();
             if !inorder || !is_balanced || !has_correct_balance_factors {
                 eprintln!("{self:?}");
-                eprintln!("Line {line:?}");
             }
             assert!(inorder, "AVL tree isn't in order");
             assert!(is_balanced, "AVL tree isn't balanced");
@@ -238,7 +237,7 @@ mod tests {
 
         for i in 0..keys.len() {
             ml.set(&keys[i], data[i].clone().into());
-            ml.tree.check(line!());
+            ml.tree.check();
         }
 
         let mut ml2 = ml.clone();
@@ -289,8 +288,8 @@ mod tests {
                 .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
         );
 
-        ml.tree.check(line!());
-        ml2.tree.check(line!());
+        ml.tree.check();
+        ml2.tree.check();
     }
 
     proptest! {
@@ -341,8 +340,8 @@ mod tests {
                 prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully"), &data2);
             }
 
-            ml.tree.check(line!());
-            ml2.tree.check(line!());
+            ml.tree.check();
+            ml2.tree.check();
         }
     }
 
@@ -361,7 +360,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check(line!());
+        ml.tree.check();
     }
 
     #[test]
@@ -389,7 +388,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check(line!());
+        ml.tree.check();
     }
 
     #[test]
@@ -415,7 +414,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -446,7 +445,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
         }
 
         ml.clear();
@@ -464,7 +463,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
         }
     }
 
@@ -481,7 +480,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -503,7 +502,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -536,7 +535,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -569,7 +568,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data.clone());
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -599,7 +598,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data);
             }
 
-            ml.tree.check(line!());
+            ml.tree.check();
         }
     }
 
@@ -620,7 +619,7 @@ mod tests {
         let get_node = ml.get(&key);
 
         assert_eq!(get_node, None);
-        ml.tree.check(line!());
+        ml.tree.check();
     }
 
     proptest! {
@@ -647,7 +646,7 @@ mod tests {
 
             prop_assert_eq!(empty_hash, ml.hash());
 
-            ml.tree.check(line!());
+            ml.tree.check();
         }
     }
 
@@ -659,7 +658,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.set(key, data.clone());
-            ml.tree.check(line!());
+            ml.tree.check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -673,7 +672,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.delete(key);
-            ml.tree.check(line!());
+            ml.tree.check();
             ml.delete(key);
             assert_eq!(ml.get(key), None);
         }
@@ -844,7 +843,7 @@ mod tests {
         assert_ne!(&get_node, &before_node.data());
         assert_eq!(&get_node, &after_node.data());
 
-        ml.tree.check(line!());
+        ml.tree.check();
     }
 
     #[test]
@@ -880,7 +879,7 @@ mod tests {
 
         assert_eq!(&get_node, &before_node.data());
 
-        ml.tree.check(line!());
+        ml.tree.check();
     }
 
     proptest! {
@@ -918,7 +917,7 @@ mod tests {
                 seen.insert(key);
             }
 
-            ml.tree.check(line!());
+            ml.tree.check();
         }
     }
 
