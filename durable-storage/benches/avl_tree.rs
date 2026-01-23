@@ -8,7 +8,7 @@ use bytes::Bytes;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use octez_riscv_durable_storage::merkle_layer::Key;
+use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::merkle_layer::tree::Avl;
 use octez_riscv_durable_storage::random::generate_keys;
 use octez_riscv_durable_storage::random::generate_random_bytes_in_range;
