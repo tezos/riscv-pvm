@@ -555,59 +555,9 @@ fn replace_with_successor(node: &mut Arc<MavlNode>) -> (Arc<MavlNode>, bool) {
 ///
 /// Returns true if the subtree has grown in size.
 pub(super) fn set(root: &mut Option<Arc<MavlNode>>, key: &Key, data: Bytes) -> bool {
-    let Some(node) = root else {
-        // The key does not exist and a new node shall be created.
-        *root = Some(Arc::new(MavlNode::new(key.clone(), data.into())));
-        return true;
-    };
-    // SAFETY: The default recursion limit in Rust is 128
-    // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
-    //
-    // This function recurses once for every node it traverses, meaning that the number
-    // of recursions are equal to or less than the height of the node.
-    //
-    // To hit this limit, the lower bound on the number of nodes in a valid AVL tree is:
-    // fibonacci(height + 3) - 1
-    // see: <https://www.cs.cornell.edu/courses/cs2112/2020fa/lectures/avl/>
-    //
-    // with height = 128:
-    // fibonacci(128 + 3) - 1 > 1x10^27
-    //
-    // This would require:
-    //  - more nodes than 64-bit systems can address.
-    //  - more disk space than has ever been produced.
-    //  - inserting 2 billion nodes every second since the dawn of the universe.
-    match node.key.cmp(key) {
-        // The key already exists and should be updated.
-        Ordering::Equal => {
-            let node = Arc::make_mut(node);
-            node.data = data.into();
-            node.invalidate_hash();
-            false
-        }
-        Ordering::Greater => {
-            let node_mut = Arc::make_mut(node);
-            let grew = set(node_mut.left_mut(), key, data);
-            if grew {
-                node_mut.balance_factor -= 1;
-                *node = rebalance(node);
-                node.balance_factor != 0
-            } else {
-                false
-            }
-        }
-        Ordering::Less => {
-            let node_mut = Arc::make_mut(node);
-            let grew = set(node_mut.right_mut(), key, data);
-            if grew {
-                node_mut.balance_factor += 1;
-                *node = rebalance(node);
-                node.balance_factor != 0
-            } else {
-                false
-            }
-        }
-    }
+    upsert(root, key, 0, |_old_data: Option<BytesMut>| -> BytesMut {
+        data.into()
+    })
 }
 
 /// Writes the data to the node associated with a given [Key] with the given offset, overwriting
@@ -620,19 +570,18 @@ pub(super) fn write(
     offset: usize,
     data: Bytes,
 ) -> bool {
-    let Some(node) = root else {
-        // The key does not exist and a new node shall be created.
-        *root = Some(Arc::new(MavlNode::new(key.clone(), data.into())));
-        return true;
-    };
-
-    match node.key.cmp(key) {
-        // The key already exists and should be updated.
-        Ordering::Equal => {
-            let node = Arc::make_mut(node);
-
-            //This shouldn't happen: it's prevented by the `Database` API
-            assert!(offset <= node.data.len());
+    upsert(
+        root,
+        key,
+        offset,
+        |old_data: Option<BytesMut>| -> BytesMut {
+            let Some(mut old_data) = old_data else {
+                // This shouldn't happen: it's prevented by the `Database` API.
+                assert_eq!(offset, 0);
+                return data.into();
+            };
+            // This shouldn't happen: it's prevented by the `Database` API.
+            assert!(offset <= old_data.len());
 
             let Some(new_data_end) = offset.checked_add(data.len()) else {
                 // The asynchronous Merkle worker means that errors can't be returned to the
@@ -643,45 +592,22 @@ pub(super) fn write(
                 );
             };
 
-            let overwrite_end = std::cmp::min(node.data.len(), new_data_end);
+            let overwrite_end = std::cmp::min(old_data.len(), new_data_end);
 
             // SAFETY: Unchecked subtraction OK as result.len() >= offset && new_data_end > offset
             let data_copy_end = overwrite_end - offset;
 
             let data_len_before = data.len();
 
-            node.data[offset..overwrite_end].copy_from_slice(&data[0..data_copy_end]);
+            old_data[offset..overwrite_end].copy_from_slice(&data[0..data_copy_end]);
             if data_len_before < new_data_end {
                 // SAFETY: Panics if the memory can't be allocated.
-                node.data.extend_from_slice(&data[data_copy_end..]);
+                old_data.extend_from_slice(&data[data_copy_end..]);
             }
 
-            node.invalidate_hash();
-            false
-        }
-        Ordering::Greater => {
-            let node_mut = Arc::make_mut(node);
-            let grew = write(node_mut.left_mut(), key, offset, data);
-            if grew {
-                node_mut.balance_factor -= 1;
-                *node = rebalance(node);
-                node.balance_factor != 0
-            } else {
-                false
-            }
-        }
-        Ordering::Less => {
-            let node_mut = Arc::make_mut(node);
-            let grew = write(node_mut.right_mut(), key, offset, data);
-            if grew {
-                node_mut.balance_factor += 1;
-                *node = rebalance(node);
-                node.balance_factor != 0
-            } else {
-                false
-            }
-        }
-    }
+            old_data
+        },
+    )
 }
 
 /// Remove the minimum node from this subtree and return it.
@@ -729,5 +655,76 @@ fn take_min(
             None,
             old_node_bf.abs() == 1 && node_arc.balance_factor == 0,
         )
+    }
+}
+
+/// Set or update the value of the node with a given key and given offset.
+///
+/// `data` defines what data is upserted.
+///
+/// Returns true if the subtree has grown in size.
+fn upsert(
+    root: &mut Option<Arc<MavlNode>>,
+    key: &Key,
+    offset: usize,
+    data: impl FnOnce(Option<BytesMut>) -> BytesMut,
+) -> bool {
+    let Some(node) = root else {
+        // We can't create a node with a non-zero offset.
+        //
+        // This shouldn't happen: it's prevented by the `Database` API.
+        assert_eq!(offset, 0);
+
+        // The key does not exist and a new node shall be created.
+        *root = Some(Arc::new(MavlNode::new(key.clone(), data(None))));
+        return true;
+    };
+    // SAFETY: The default recursion limit in Rust is 128
+    // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
+    //
+    // This function recurses once for every node it traverses, meaning that the number
+    // of recursions are equal to or less than the height of the node.
+    //
+    // To hit this limit, the lower bound on the number of nodes in a valid AVL tree is:
+    // fibonacci(height + 3) - 1
+    // see: <https://www.cs.cornell.edu/courses/cs2112/2020fa/lectures/avl/>
+    //
+    // with height = 128:
+    // fibonacci(128 + 3) - 1 > 1x10^27
+    //
+    // This would require:
+    //  - more nodes than 64-bit systems can address.
+    //  - more disk space than has ever been produced.
+    //  - inserting 2 billion nodes every second since the dawn of the universe.
+    match node.key.cmp(key) {
+        // The key already exists and should be updated.
+        Ordering::Equal => {
+            let node = Arc::make_mut(node);
+            node.data = data(Some(std::mem::take(&mut node.data)));
+            node.invalidate_hash();
+            false
+        }
+        Ordering::Greater => {
+            let node_mut = Arc::make_mut(node);
+            let grew = upsert(node_mut.left_mut(), key, offset, data);
+            if grew {
+                node_mut.balance_factor -= 1;
+                *node = rebalance(node);
+                node.balance_factor != 0
+            } else {
+                false
+            }
+        }
+        Ordering::Less => {
+            let node_mut = Arc::make_mut(node);
+            let grew = upsert(node_mut.right_mut(), key, offset, data);
+            if grew {
+                node_mut.balance_factor += 1;
+                *node = rebalance(node);
+                node.balance_factor != 0
+            } else {
+                false
+            }
+        }
     }
 }
