@@ -42,6 +42,7 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::linux;
+use super::outbox::Outbox;
 use super::reveals::RevealRequest;
 use crate::default::ConstDefault;
 use crate::machine_state;
@@ -109,6 +110,7 @@ pub(crate) type PvmProve<'a, MC> = Pvm<MC, EmptyPageCache, Prove<'a>>;
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Pvm<MC: MemoryConfig, PC, M: Mode> {
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
+    pub(crate) outbox: Outbox<M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
     version: Atom<u64, M>,
@@ -128,6 +130,7 @@ where
     fn default() -> Self {
         Self {
             machine_state: machine_state::MachineState::default(),
+            outbox: Outbox::<M>::default(),
             reveal_request: RevealRequest::default(),
             system_state: linux::SupervisorState::default(),
             version: Atom::new(INITIAL_VERSION),
@@ -147,6 +150,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
         M: AtomMode + DataSpaceMode,
     {
         self.machine_state.reset();
+        self.outbox.reset();
         self.version.write(INITIAL_VERSION);
         self.tick.write(0);
         self.message_counter.write(0);
@@ -349,6 +353,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Pvm<MC, PC, Normal> {
     pub(crate) fn start_proof(&self) -> PvmProve<'_, MC> {
         Pvm {
             machine_state: self.machine_state.start_proof(),
+            outbox: self.outbox.start_proof(),
             reveal_request: self.reveal_request.start_proof(),
             system_state: self.system_state.start_proof(),
             version: self.version.start_proof(),
@@ -388,6 +393,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMo
     fn clone_state(&self) -> Self {
         Self {
             machine_state: self.machine_state.clone_state(),
+            outbox: self.outbox.clone_state(),
             reveal_request: self.reveal_request.clone_state(),
             system_state: self.system_state.clone_state(),
             version: self.version.clone_state(),
@@ -407,6 +413,7 @@ where
     M: Mode,
     F: Fold,
     machine_state::MachineState<MC, PC, M>: Foldable<F>,
+    Outbox<M>: Foldable<F>,
     RevealRequest<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
     Atom<PvmStatus, M>: Foldable<F>,
@@ -417,6 +424,7 @@ where
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
         builder.add(&self.machine_state);
+        builder.add(&self.outbox);
         builder.add(&self.reveal_request);
         builder.add(&self.system_state);
         builder.add(&self.version);
@@ -434,6 +442,7 @@ impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
         let proof = proof.into_node()?;
 
         let (proof, machine_state) = proof.next_branch()?;
+        let (proof, outbox) = proof.next_branch()?;
         let (proof, reveal_request) = proof.next_branch()?;
         let (proof, system_state) = proof.next_branch()?;
         let (proof, version) = proof.next_branch()?;
@@ -445,6 +454,7 @@ impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
 
         proof.done(Self {
             machine_state,
+            outbox,
             reveal_request,
             system_state,
             version,
@@ -465,6 +475,7 @@ where
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.machine_state.encode(encoder)?;
+        self.outbox.encode(encoder)?;
         self.reveal_request.encode(encoder)?;
         self.system_state.encode(encoder)?;
         self.version.encode(encoder)?;
@@ -486,6 +497,7 @@ where
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             machine_state: Decode::decode(decoder)?,
+            outbox: Decode::decode(decoder)?,
             reveal_request: Decode::decode(decoder)?,
             system_state: Decode::decode(decoder)?,
             version: Decode::decode(decoder)?,
