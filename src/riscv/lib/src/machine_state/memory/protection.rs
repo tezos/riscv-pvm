@@ -112,15 +112,13 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
 impl<const PAGES: usize> PagePermissions<PAGES, Normal> {
     /// Return a proof-generating version of this PagePermissions.
     pub fn start_proof(&self) -> PagePermissions<PAGES, Prove<'_>> {
-        let Ok(pages) = self
+        let pages = self
             .pages
             .iter()
             .map(Atom::start_proof)
             .collect::<Vec<_>>()
             .try_into()
-        else {
-            unreachable!("Collecting into an array of the same length should always succeed")
-        };
+            .expect("Collecting into an array of the same length should always succeed");
 
         PagePermissions { pages }
     }
