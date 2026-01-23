@@ -401,7 +401,7 @@ impl BytesMode for Verify {
         Bytes {
             bytes: VerifyImpl {
                 length: Partial::Present(0),
-                data: PartialVec::undefined(0),
+                data: PartialVec::empty(),
             },
         }
     }

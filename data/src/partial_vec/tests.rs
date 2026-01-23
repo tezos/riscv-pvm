@@ -20,8 +20,8 @@ fn data_vec() -> impl Strategy<Value = Vec<u8>> {
 proptest! {
     /// Defining a range anywhere should never fail.
     #[test]
-    fn insert_randomly(init_len: usize, init_data in vec((any::<usize>(), data_vec()), ..1024)) {
-        let mut vec = PartialVec::undefined(init_len);
+    fn insert_randomly(init_data in vec((any::<usize>(), data_vec()), ..1024)) {
+        let mut vec = PartialVec::empty();
 
         for (index, data) in init_data {
             vec.define(index, data);
@@ -32,7 +32,7 @@ proptest! {
     #[test]
     fn insert_end(init_len: usize, data in vec(data_vec(), ..1024)){
         let mut added_so_far = init_len;
-        let mut vec = PartialVec::undefined(init_len);
+        let mut vec = PartialVec::empty();
 
         for chunk in data {
             let chunk_len = chunk.len();
@@ -50,7 +50,7 @@ proptest! {
 /// Ensure defining continuous ranges can be recovered.
 #[test]
 fn get_continuous() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     vec.define(10, Vec::from_iter(0..10));
     vec.define(20, Vec::from_iter(10..20));
@@ -71,7 +71,7 @@ fn get_continuous() {
 /// Ensure defining ranges with gaps behaves correctly and is reflected in queries.
 #[test]
 fn get_with_gaps() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     // Don't define index 3
     vec.define(1, vec!["a", "b"]);
@@ -114,7 +114,7 @@ fn get_with_gaps() {
 /// Check if `is_all_defined` works in various scenarios where there are no gaps
 #[test]
 fn is_all_defined_basic() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     vec.define(10, Vec::from_iter(0u8..20));
 
@@ -141,7 +141,7 @@ fn is_all_defined_basic() {
 /// Check if `is_all_defined` works in various scenarios where there are gaps.
 #[test]
 fn is_all_defined_with_gaps() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     // Create two defined regions with a gap
     vec.define(10, Vec::from_iter(0u8..10)); // 10..20
@@ -162,7 +162,7 @@ fn is_all_defined_with_gaps() {
 /// Check if `is_all_defined` works when there are adjacent defined regions.
 #[test]
 fn is_all_defined_adjacent_regions() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     // Create adjacent defined regions (no gap)
     vec.define(10, Vec::from_iter(0u8..10)); // 10..20
@@ -180,7 +180,7 @@ fn is_all_defined_adjacent_regions() {
 /// Check that `is_any_defined` works in various scenarios without gaps.
 #[test]
 fn is_any_defined_basic() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     vec.define(10, Vec::from_iter(0u8..10)); // 10..20
 
@@ -206,7 +206,7 @@ fn is_any_defined_basic() {
 /// Check that `is_any_defined` works in various scenarios with gaps.
 #[test]
 fn is_any_defined_with_gaps() {
-    let mut vec = PartialVec::undefined(1024);
+    let mut vec = PartialVec::empty();
 
     // Create two defined regions with a gap
     vec.define(10, Vec::from_iter(0u8..10)); // 10..20
@@ -228,7 +228,7 @@ fn is_any_defined_with_gaps() {
 /// Check that truncation works correctly on a fully defined vector.
 #[test]
 fn truncate_defined_vector() {
-    let mut vec = PartialVec::defined(vec![1, 2, 3, 4, 5]);
+    let mut vec = PartialVec::from(vec![1, 2, 3, 4, 5]);
 
     vec.truncate(3);
 
@@ -245,7 +245,7 @@ fn truncate_defined_vector() {
 /// Check that truncating to zero on a defined vector works correctly.
 #[test]
 fn truncate_to_zero_defined() {
-    let mut vec = PartialVec::defined(vec![1, 2, 3, 4, 5]);
+    let mut vec = PartialVec::from(vec![1, 2, 3, 4, 5]);
 
     vec.truncate(0);
 
@@ -256,7 +256,7 @@ fn truncate_to_zero_defined() {
 /// Check that truncating an undefined vector works correctly.
 #[test]
 fn truncate_undefined_vector() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(10);
+    let mut vec: PartialVec<u8> = PartialVec::empty();
     vec.truncate(5);
 
     // After truncating, the undefined region should be 5 elements
@@ -273,8 +273,8 @@ fn truncate_undefined_vector() {
 
 /// Check that truncating a vector with undefined followed by defined data works correctly.
 #[test]
-fn truncate_concatenated_with_undefined_left() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(5);
+fn truncate_with_undefined_prefix() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
     vec.define(5, vec![1, 2, 3]);
 
     vec.truncate(3);
@@ -294,7 +294,7 @@ fn truncate_concatenated_with_undefined_left() {
 /// replacing elements without extending the range.
 #[test]
 fn define_inplace_replacement() {
-    let mut vec = PartialVec::defined(vec![1, 2, 3, 4, 5]);
+    let mut vec = PartialVec::from(vec![1, 2, 3, 4, 5]);
 
     // Replace elements at indices 1 and 2 (values 2, 3) with 10, 20
     vec.define(1, vec![10, 20]);
@@ -312,7 +312,7 @@ fn define_inplace_replacement() {
 /// Check that in-place replacement at the start of a defined range works.
 #[test]
 fn define_inplace_replacement_at_start() {
-    let mut vec = PartialVec::defined(vec![1, 2, 3, 4, 5]);
+    let mut vec = PartialVec::from(vec![1, 2, 3, 4, 5]);
 
     // Replace first two elements
     vec.define(0, vec![10, 20]);
@@ -327,13 +327,10 @@ fn define_inplace_replacement_at_start() {
     assert_eq!(values, vec![10, 20, 3, 4, 5]);
 }
 
-/// Check that defining data spanning both left and right nodes works correctly.
-///
-/// This tests the cross-boundary insertion case where the inserted range overlaps
-/// with both left and right children of a Concatenated node.
+/// Check that defining data spanning between two existing entries works.
 #[test]
-fn define_spanning_left_and_right() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(10);
+fn define_data_between_entries() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
 
     // Now create a structure with defined regions on both sides
     vec.define(0, vec![1, 2, 3]); // Left side: indices 0-2
@@ -354,51 +351,17 @@ fn define_spanning_left_and_right() {
     assert_eq!(values, vec![1, 2, 20, 30, 40, 50, 60, 7, 8, 9]);
 }
 
-/// Check that defining data across a Defined+Undefined boundary triggers the optimization.
-///
-/// This tests the special case in define() where the left child is Defined
-/// and the right child is Undefined, allowing in-place extension.
+/// Check truncation when keep_length is smaller than the extent of a single defined entry.
 #[test]
-fn define_across_defined_undefined_boundary() {
-    // Create structure: Defined[1,2,3] ++ Undefined(5)
-    // by starting with undefined and defining at offset 0
-    let mut vec: PartialVec<u8> = PartialVec::undefined(8);
-    vec.define(0, vec![1, 2, 3]);
-
-    // Now we have a Concatenated node: Defined[1,2,3] (left) ++ Undefined(5) (right)
-    // Define data starting within the defined region and extending into undefined.
-    // This should trigger the optimization path at lines 217-226.
-    vec.define(1, vec![10, 20, 30, 40]);
-
-    // Check that we can read back the defined portions
-    // The result should be [1, 10, 20, 30, 40] at indices 0-4
-    let values = vec
-        .continuous_defined_range(0..5)
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
-    assert_eq!(values, vec![1, 10, 20, 30, 40]);
-}
-
-/// Check truncation when keep_length is greater than left node width.
-///
-/// This tests the case where truncation needs to continue into the right child
-/// of a Concatenated node.
-#[test]
-fn truncate_into_right_child() {
-    // Create a Concatenated structure by starting with undefined and defining data.
-    // This creates: Undefined(3) ++ Defined[1,2,3,4,5]
-    let mut vec: PartialVec<u8> = PartialVec::undefined(3);
+fn truncate_single_entry() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
     vec.define(3, vec![1, 2, 3, 4, 5]);
 
-    // Truncate to 5 elements - this should keep the left node (3 undefined)
-    // and continue into the right node (keeping 2 defined elements)
+    // Truncate to 5 elements - this should keep the only entry (2 defined)
     vec.truncate(5);
 
     // Verify that indices 0-2 are undefined
-    assert!(!vec.is_all_defined(0..3));
+    assert!(!vec.is_any_defined(0..3));
 
     // Verify that indices 3-4 are defined
     let values = vec
@@ -417,7 +380,7 @@ fn truncate_into_right_child() {
 /// Check that `defined_range` returns only defined entries with correct offsets.
 #[test]
 fn defined_range_basic() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(20);
+    let mut vec: PartialVec<u8> = PartialVec::empty();
 
     vec.define(5, vec![1, 2, 3]); // indices 5-7
     vec.define(12, vec![4, 5, 6]); // indices 12-14
@@ -439,7 +402,7 @@ fn defined_range_basic() {
 /// Check that `defined_range` works with partial overlaps.
 #[test]
 fn defined_range_partial_overlap() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(20);
+    let mut vec: PartialVec<u8> = PartialVec::empty();
 
     vec.define(5, vec![1, 2, 3, 4, 5]); // indices 5-9
 
@@ -456,7 +419,7 @@ fn defined_range_partial_overlap() {
 /// Check that `defined_range` returns no entries when there is no defined data.
 #[test]
 fn defined_range_no_defined_data() {
-    let vec: PartialVec<u8> = PartialVec::undefined(20);
+    let vec: PartialVec<u8> = PartialVec::empty();
     let entries: Vec<_> = vec.defined_range(0..20).collect();
     assert!(entries.is_empty());
 }
@@ -464,21 +427,24 @@ fn defined_range_no_defined_data() {
 /// Check that `is_all_undefined` returns true for a fully undefined vector.
 #[test]
 fn is_undefined_empty() {
-    let vec: PartialVec<u8> = PartialVec::undefined(100);
+    let vec: PartialVec<u8> = PartialVec::empty();
     assert!(vec.is_all_undefined());
 }
 
-/// Check that `is_all_undefined` returns true for a zero-length vector.
+/// Check that `is_all_undefined` returns true after truncating all data.
 #[test]
-fn is_undefined_zero_length() {
-    let vec: PartialVec<u8> = PartialVec::undefined(0);
+fn is_undefined_after_truncate() {
+    let mut vec = PartialVec::from(vec![1u8, 2, 3, 4, 5]);
+    assert!(!vec.is_all_undefined());
+
+    vec.truncate(0);
     assert!(vec.is_all_undefined());
 }
 
 /// Check that `is_all_undefined` returns false when there is defined data.
 #[test]
 fn is_undefined_with_defined_data() {
-    let mut vec: PartialVec<u8> = PartialVec::undefined(100);
+    let mut vec: PartialVec<u8> = PartialVec::empty();
     vec.define(50, vec![1, 2, 3]);
     assert!(!vec.is_all_undefined());
 }
@@ -486,7 +452,7 @@ fn is_undefined_with_defined_data() {
 /// Check that `is_all_undefined` returns false for a fully defined vector.
 #[test]
 fn is_undefined_fully_defined() {
-    let vec = PartialVec::defined(vec![1u8, 2, 3, 4, 5]);
+    let vec = PartialVec::from(vec![1u8, 2, 3, 4, 5]);
     assert!(!vec.is_all_undefined());
 }
 
@@ -494,7 +460,7 @@ fn is_undefined_fully_defined() {
 #[test]
 fn range_entry_is_empty() {
     // Create a vector with defined and undefined regions
-    let mut vec: PartialVec<u8> = PartialVec::undefined(10);
+    let mut vec: PartialVec<u8> = PartialVec::empty();
     vec.define(3, vec![1, 2, 3]);
 
     // Get entries from the range and check is_empty on them
@@ -511,4 +477,62 @@ fn range_entry_is_empty() {
     // Test with an empty range - should produce no entries
     let empty_entries: Vec<_> = vec.range(0..0).collect();
     assert!(empty_entries.is_empty());
+}
+
+/// Check that defining a large number of small ranges does not cause stack overflow.
+#[test]
+fn stack_depth() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+
+    for i in 0..40000 {
+        vec.define(i * 2 + 1, vec![0]);
+    }
+}
+
+/// Check defining data that starts before an existing entry and overlaps it.
+///
+/// This tests the `insert_entry` code path where `new_entry.start < existing_entry.start`,
+/// which inserts a prefix of the new data before the existing entry.
+#[test]
+fn define_prefix_before_existing() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+
+    // Create a defined region at indices 5-9
+    vec.define(5, vec![5, 6, 7, 8, 9]);
+
+    // Define data starting at index 2 that overlaps the existing region
+    // This should insert [2, 3, 4] before the existing entry
+    vec.define(2, vec![2, 3, 4, 50, 60]);
+
+    // Indices 2-4 should be [2, 3, 4] (newly inserted prefix)
+    // Indices 5-9 should be [50, 60, 7, 8, 9] (partially overwritten)
+    let values = vec
+        .continuous_defined_range(2..10)
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(values, vec![2, 3, 4, 50, 60, 7, 8, 9]);
+}
+
+/// Check that defining empty data is a no-op.
+#[test]
+fn define_empty_data() {
+    let mut vec = PartialVec::from(vec![1u8, 2, 3, 4, 5]);
+
+    // Define empty data at various positions
+    vec.define(0, vec![]);
+    vec.define(2, vec![]);
+    vec.define(10, vec![]);
+
+    // Original data should be unchanged
+    let values = vec
+        .continuous_defined_range(0..5)
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(values, vec![1, 2, 3, 4, 5]);
 }
