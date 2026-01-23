@@ -37,7 +37,7 @@ test-bench-script: build
 check: cargo-format cargo-check cargo-clippy cargo-check-docs
 
 inbox-bench: cargo-build-inbox-bench
-	@ln -f target/$(NATIVE_TARGET)/release/inbox-bench $@
+	@ln -f target/$(NATIVE_TARGET)/debug/inbox-bench $@
 
 clean:
 	@cargo clean
@@ -60,7 +60,7 @@ cargo-build-kernel:
 	@cargo build --package jstz --release
 
 cargo-build-inbox-bench:
-	@cargo build $(NATIVE_OPT) --bin inbox-bench --release
+	@cargo build $(NATIVE_OPT) --bin inbox-bench
 
 cargo-test:
 	@cargo test --no-default-features $(NATIVE_OPT)
