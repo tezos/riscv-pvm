@@ -34,10 +34,22 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
     ///
     /// `len` is the length of the sequence. `arity` is the maximum number of children per node.
     /// `generator` is a function that, given an index, returns the corresponding item.
+    ///
+    /// It's worth clarifying the slightly unintuitive behaviour of this in the two special cases
+    /// of length one and length zero: for length zero, we construct a tree with a single empty
+    /// node, whereas for length one we don't need to construct _any nodes at all_---we just fold
+    /// the single element. To explain this with lisp-like notation (with `arity` = 2):
+    ///
+    /// ```ignore
+    /// [] --> ()
+    /// [A] --> A
+    /// [A, B] --> (A B)
+    /// [A, B, C] --> ((A B) (C))
+    /// ```
     pub fn new(len: usize, arity: usize, generator: &'a G) -> Self {
         // This is the tree depth needed to cover `len` items with nodes of `arity` children each.
         // We will gradually traverse down to depth 0, where the leaves are placed.
-        let depth = (len - 1).checked_ilog(arity).unwrap_or(0);
+        let depth = len.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
 
         Self {
             total_len: len,
@@ -191,5 +203,23 @@ mod tests {
                 "arity = {arity}, max_len = {max_len}\nleft = {tree:#?}\nright = {custom_tree:#?}"
             );
         });
+    }
+
+    /// Test length zero case.
+    #[test]
+    fn len_zero() {
+        let driver = IndexableSeqAsTree::new(0, 2, &|i| TestTree::Leaf(i));
+        let tree = driver.fold(TestFolder);
+
+        assert_eq!(tree, TestTree::Node(vec![]));
+    }
+
+    /// Test length one case.
+    #[test]
+    fn len_one() {
+        let driver = IndexableSeqAsTree::new(1, 2, &|i| TestTree::Leaf(i));
+        let tree = driver.fold(TestFolder);
+
+        assert_eq!(tree, TestTree::Leaf(0));
     }
 }

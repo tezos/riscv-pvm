@@ -29,11 +29,6 @@ impl CommitId {
 
     /// Compute the Merkle root hash from the list of database commit IDs.
     pub(super) fn compute_root_hash(db_hashes: &[Self]) -> Self {
-        if db_hashes.is_empty() {
-            let empty_hash: Hash = Hash::hash_bytes(&[]);
-            return CommitId::from(empty_hash);
-        }
-
         let get_hash = |idx: usize| db_hashes[idx].as_hash();
         let tree = IndexableSeqAsTree::new(db_hashes.len(), REGISTRY_ARITY, &get_hash);
         let hash = Hash::from_foldable(&tree);
