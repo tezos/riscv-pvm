@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+//! Interface for an optional root node of a Merklisable AVL tree
+
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,7 +11,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
 
-use super::node::MavlNode;
+use super::node::Node;
 use super::node::delete;
 use super::node::get;
 use super::node::get_mut;
@@ -19,11 +21,11 @@ use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
-pub struct Avl {
-    root: Option<Arc<MavlNode>>,
+pub struct Tree {
+    root: Option<Arc<Node>>,
 }
 
-impl Avl {
+impl Tree {
     /// Delete the node in the tree with a given key.
     pub fn delete(&mut self, key: &Key) -> bool {
         delete(&mut self.root, key)
@@ -35,24 +37,24 @@ impl Avl {
     }
 
     /// A mutable reference to the data stored in a node in the tree with a given key.
-    pub(super) fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
+    pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
         get_mut(&mut self.root, key)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&self) -> Hash {
+    pub(crate) fn hash(&self) -> Hash {
         let encodable = self.root.as_deref().map(|node| node.to_encode());
         Hash::hash_encodable(encodable).expect("Should be hashable")
     }
 
     /// Creates an in order iterator for the nodes in the tree
-    pub(super) fn iter(&self) -> AvlIterator {
+    pub(crate) fn iter(&self) -> TreeIterator {
         match &self.root {
-            None => AvlIterator {
+            None => TreeIterator {
                 stack: vec![],
                 current: &None,
             },
-            Some(_) => AvlIterator {
+            Some(_) => TreeIterator {
                 stack: vec![],
                 current: &self.root,
             },
@@ -61,12 +63,12 @@ impl Avl {
 
     /// The root node of the tree.
     #[cfg(test)]
-    pub(super) fn root(&self) -> &Option<Arc<MavlNode>> {
+    pub(crate) fn root(&self) -> &Option<Arc<Node>> {
         &self.root
     }
 
     /// A mutable reference to the root node of the tree.
-    pub(super) fn root_mut(&mut self) -> &mut Option<Arc<MavlNode>> {
+    pub(crate) fn root_mut(&mut self) -> &mut Option<Arc<Node>> {
         &mut self.root
     }
 
@@ -76,20 +78,20 @@ impl Avl {
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
+    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: Bytes) {
         write(&mut self.root, key, offset, data);
     }
 }
 
 /// Used for iterating through the nodes
-/// of the [`Avl`] tree in order.
-pub(super) struct AvlIterator<'a> {
-    stack: Vec<&'a Arc<MavlNode>>,
-    current: &'a Option<Arc<MavlNode>>,
+/// of the [`Tree`] tree in order.
+pub(crate) struct TreeIterator<'a> {
+    stack: Vec<&'a Arc<Node>>,
+    current: &'a Option<Arc<Node>>,
 }
 
-impl<'a> Iterator for AvlIterator<'a> {
-    type Item = &'a Arc<MavlNode>;
+impl<'a> Iterator for TreeIterator<'a> {
+    type Item = &'a Arc<Node>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.current {
@@ -152,7 +154,7 @@ mod tests {
             })
     }
 
-    fn height_and_balance_factor_sanity_check_helper(node: Arc<MavlNode>) -> (bool, usize) {
+    fn height_and_balance_factor_sanity_check_helper(node: Arc<Node>) -> (bool, usize) {
         let (left_good, left_height) = match node.left_ref() {
             None => (true, 0),
             Some(left_node) => height_and_balance_factor_sanity_check_helper(left_node.clone()),
@@ -175,8 +177,8 @@ mod tests {
         }
     }
 
-    impl Avl {
-        pub fn height_and_balance_factor_sanity_check(&self) -> bool {
+    impl Tree {
+        pub(crate) fn height_and_balance_factor_sanity_check(&self) -> bool {
             match &self.root {
                 None => true,
                 Some(node) => {
@@ -187,7 +189,7 @@ mod tests {
         }
     }
 
-    fn compare_tree_to_reference(tree: &Avl, reference: &BTreeMap<Key, Bytes>) {
+    fn compare_tree_to_reference(tree: &Tree, reference: &BTreeMap<Key, Bytes>) {
         let tree_iter = tree.iter();
         let mut reference_iter = reference.iter();
         for node in tree_iter {
@@ -208,7 +210,7 @@ mod tests {
     proptest! {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
-            let mut tree: Avl = Default::default();
+            let mut tree: Tree = Default::default();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
             for operation in operations {
                 match operation {
