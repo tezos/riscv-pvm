@@ -20,6 +20,8 @@
 //! - **Cache layer**: Layer providing an in-memory cache for the KV operations. The concern is to
 //!   optimise for performance.
 //!
+//! - **Avl**: An implementation of a Merklisable AVL tree.
+//!
 //! - **Merkle layer**: Responsible for arranging the data associated with each database in a way
 //!   such that obtaining a root hash is possible & efficient.
 //!
@@ -28,13 +30,14 @@
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
+        pub mod avl;
         pub mod merkle_layer;
         pub mod merkle_worker;
         pub mod persistence_layer;
         pub mod repo;
         pub mod random;
     } else {
-        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+        mod avl;
         mod merkle_layer;
         mod merkle_worker;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]

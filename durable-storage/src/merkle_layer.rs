@@ -2,19 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-mod node;
-#[cfg(not(feature = "bench"))]
-mod tree;
-#[cfg(feature = "bench")]
-pub mod tree;
-
 use std::sync::Arc;
 
 use bytes::Bytes;
 use bytes::BytesMut;
 use octez_riscv_data::hash::Hash;
-use tree::Avl;
 
+use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::key::Key;
 use crate::persistence_layer::HashedData;
@@ -34,7 +28,7 @@ pub enum MerkleLayerError {
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
 pub struct MerkleLayer {
-    tree: Avl,
+    tree: Tree,
     persistence: Arc<PersistenceLayer>,
 }
 
@@ -43,7 +37,7 @@ impl MerkleLayer {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
     pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
         MerkleLayer {
-            tree: Avl::default(),
+            tree: Tree::default(),
             persistence,
         }
     }
@@ -65,6 +59,10 @@ impl MerkleLayer {
     }
 
     /// Clear all data from the [MerkleLayer].
+    #[cfg_attr(
+        not(any(test, feature = "bench")),
+        expect(dead_code, reason = "Not pub in `Database`")
+    )]
     pub fn clear(&mut self) {
         self.tree.root_mut().take();
     }
@@ -90,11 +88,19 @@ impl MerkleLayer {
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
+    #[cfg_attr(
+        not(any(test, feature = "bench")),
+        expect(dead_code, reason = "Not pub in `Database`")
+    )]
     pub fn get(&self, key: &Key) -> Option<&BytesMut> {
         self.tree.get(key)
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
+    #[cfg_attr(
+        not(any(test, feature = "bench")),
+        expect(dead_code, reason = "Not pub in `Database`")
+    )]
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut BytesMut> {
         self.tree.get_mut(key)
     }
@@ -127,16 +133,16 @@ mod tests {
     use proptest::proptest;
 
     use super::MerkleLayer;
-    use super::node::MavlNode;
-    use super::node::hash;
-    use super::tree::Avl;
+    use crate::avl::Node;
+    use crate::avl::Tree;
+    use crate::avl::hash;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
-    impl Avl {
+    impl Tree {
         fn check(&self) {
             let inorder = self.is_inorder();
             let is_balanced = self.is_balanced();
@@ -169,7 +175,7 @@ mod tests {
         }
     }
 
-    impl MavlNode {
+    impl Node {
         pub(super) fn height(&self) -> u32 {
             let left_height = self.left_ref().as_ref().map_or(0, |l| l.height());
             let right_height = self.right_ref().as_ref().map_or(0, |r| r.height());
@@ -177,7 +183,7 @@ mod tests {
         }
     }
 
-    pub(super) fn has_correct_balance_factors(node: &Option<Arc<MavlNode>>) -> bool {
+    pub(super) fn has_correct_balance_factors(node: &Option<Arc<Node>>) -> bool {
         if let Some(node) = node.as_ref() {
             let left_height = node.left_ref().as_ref().map_or(0, |l| l.height());
             let right_height = node.right_ref().as_ref().map_or(0, |r| r.height());
@@ -195,7 +201,7 @@ mod tests {
         true
     }
 
-    pub(super) fn is_balanced(node: &Option<Arc<MavlNode>>) -> bool {
+    pub(super) fn is_balanced(node: &Option<Arc<Node>>) -> bool {
         if let Some(node) = node {
             let balance_factor = node.balance_factor();
             if balance_factor.abs() > 1 {
@@ -207,7 +213,7 @@ mod tests {
         true
     }
 
-    pub(super) fn is_inorder(node: &Option<Arc<MavlNode>>, min: &Key, max: &Key) -> bool {
+    pub(super) fn is_inorder(node: &Option<Arc<Node>>, min: &Key, max: &Key) -> bool {
         if let Some(node) = node.as_ref() {
             if node.key() < min || node.key() > max {
                 return false;
@@ -254,11 +260,11 @@ mod tests {
         assert_ne!(original_hash, ml2.hash());
         assert_eq!(original_hash, ml.hash());
 
-        let old_node1 = MavlNode::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]).into());
-        let new_node1 = MavlNode::new(keys[0].clone(), cow_data.into());
+        let old_node1 = Node::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]).into());
+        let new_node1 = Node::new(keys[0].clone(), cow_data.into());
 
-        let node2 = MavlNode::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]).into());
-        let node3 = MavlNode::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]).into());
+        let node2 = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]).into());
+        let node3 = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]).into());
 
         assert_eq!(
             &old_node1.data(),
@@ -359,7 +365,7 @@ mod tests {
         ml.set(&key, data.clone());
         assert_ne!(empty_hash, ml.hash());
 
-        let node = MavlNode::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -377,7 +383,7 @@ mod tests {
         ml.set(&key, data.clone());
         let old_hash = ml.hash();
 
-        let node = MavlNode::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -387,7 +393,7 @@ mod tests {
         ml.set(&key, data2.clone());
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), data2.into());
+        let node = Node::new(key.clone(), data2.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -838,8 +844,8 @@ mod tests {
         assert_ne!(empty_hash, ml.hash());
         assert_ne!(full_hash, ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.into());
-        let after_node = MavlNode::new(key.clone(), data2.into());
+        let before_node = Node::new(key.clone(), data.into());
+        let after_node = Node::new(key.clone(), data2.into());
 
         let get_node = ml
             .get(&key)
@@ -876,7 +882,7 @@ mod tests {
         assert_ne!(before_hash, ml.hash());
         assert_ne!(ml2.hash(), ml.hash());
 
-        let before_node = MavlNode::new(key.clone(), data.into());
+        let before_node = Node::new(key.clone(), data.into());
 
         let get_node = ml2
             .get(&key)
@@ -908,8 +914,8 @@ mod tests {
                 data_mut.clear();
                 data_mut.put_slice(&data2);
 
-                let before_node = MavlNode::new(key.clone(), data.clone().into());
-                let after_node = MavlNode::new(key.clone(), data2.clone().into());
+                let before_node = Node::new(key.clone(), data.clone().into());
+                let after_node = Node::new(key.clone(), data2.clone().into());
 
                 let get_node = ml
                     .get(&key)
@@ -934,7 +940,7 @@ mod tests {
         let old_hash = ml.hash();
         ml.write(&key, 0, data.clone());
 
-        let node = MavlNode::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -954,7 +960,7 @@ mod tests {
         let old_hash = ml.hash();
 
         let data_len = data.len();
-        let node = MavlNode::new(key.clone(), data.into());
+        let node = Node::new(key.clone(), data.into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
@@ -964,7 +970,7 @@ mod tests {
         ml.write(&key, 2, data2.clone());
         assert_ne!(old_hash, ml.hash());
         assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
-        let node = MavlNode::new(key.clone(), Bytes::from("a good value").into());
+        let node = Node::new(key.clone(), Bytes::from("a good value").into());
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
