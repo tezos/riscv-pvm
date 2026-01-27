@@ -114,9 +114,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arbitrary-int"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c858caffa49edfc4ecc45a4bec37abd3e88041a2903816f10f990b7b41abc281"
+checksum = "2575572fb5455467946777af62fbed3b3f96df50f6af4f1aa825182a6e881207"
 
 [[package]]
 name = "arrayref"
