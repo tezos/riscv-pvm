@@ -7,6 +7,7 @@ use std::sync::Arc;
 use octez_riscv_data::hash::Hash;
 
 use crate::avl::node::Value;
+use crate::avl::resolver::ArcResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::key::Key;
@@ -29,15 +30,18 @@ pub enum MerkleLayerError {
 pub struct MerkleLayer {
     tree: Tree,
     persistence: Arc<PersistenceLayer>,
+    resolver: ArcResolver,
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 impl MerkleLayer {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
     pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
+        let resolver = ArcResolver;
         MerkleLayer {
             tree: Tree::default(),
             persistence,
+            resolver,
         }
     }
 
@@ -67,13 +71,13 @@ impl MerkleLayer {
     }
 
     /// Generates a commitment for the [MerkleLayer].
-    pub fn commit(&self) -> Result<CommitId, MerkleLayerError> {
+    pub fn commit(&mut self) -> Result<CommitId, MerkleLayerError> {
         // Note that although we're doing in order
         // iteration of the nodes the hashes are
         // calculated during the encoding of the node
         // if necessary.
         for node in self.tree.iter() {
-            let value = octez_riscv_data::serialisation::serialise(node.to_encode())?;
+            let value = octez_riscv_data::serialisation::serialise(node.to_encode(&self.resolver))?;
             let blob = HashedData::from_value(value.as_slice());
             self.persistence.blob_set(&blob)?;
         }
@@ -83,7 +87,7 @@ impl MerkleLayer {
 
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) {
-        self.tree.delete(key);
+        self.tree.delete(key, &mut self.resolver);
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
@@ -91,8 +95,8 @@ impl MerkleLayer {
         not(any(test, feature = "bench")),
         expect(dead_code, reason = "Not pub in `Database`")
     )]
-    pub fn get(&self, key: &Key) -> Option<&Value> {
-        self.tree.get(key)
+    pub fn get(&mut self, key: &Key) -> Option<&Value> {
+        self.tree.get(key, &self.resolver)
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
@@ -101,22 +105,22 @@ impl MerkleLayer {
         expect(dead_code, reason = "Not pub in `Database`")
     )]
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
-        self.tree.get_mut(key)
+        self.tree.get_mut(key, &mut self.resolver)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&self) -> Hash {
-        self.tree.hash()
+    pub fn hash(&mut self) -> Hash {
+        self.tree.hash(&self.resolver)
     }
 
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: &[u8]) {
-        self.tree.set(key, data);
+        self.tree.set(key, data, &mut self.resolver);
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
     pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
-        self.tree.write(key, offset, data);
+        self.tree.write(key, offset, data, &mut self.resolver);
     }
 }
 
@@ -168,7 +172,7 @@ mod tests {
 
         for i in 0..keys.len() {
             ml.set(&keys[i], &data[i]);
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
 
         let mut ml2 = ml.clone();
@@ -219,8 +223,8 @@ mod tests {
                 .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
         );
 
-        ml.tree().check();
-        ml2.tree().check();
+        ml.tree().check(&ml.resolver);
+        ml2.tree().check(&ml.resolver);
     }
 
     proptest! {
@@ -271,8 +275,8 @@ mod tests {
                 prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully"), &data2);
             }
 
-            ml.tree().check();
-            ml2.tree().check();
+            ml.tree().check(&ml.resolver);
+            ml2.tree().check(&ml2.resolver);
         }
     }
 
@@ -291,7 +295,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     #[test]
@@ -312,14 +316,17 @@ mod tests {
 
         ml.set(&key, &data2);
         assert_ne!(old_hash, ml.hash());
-        assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
+        assert!(
+            ml.tree.is_inorder(&ml.resolver),
+            "AVL isn't in order: {ml:?}"
+        );
         let node = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     #[test]
@@ -345,7 +352,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -376,7 +383,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
 
         ml.clear();
@@ -394,7 +401,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
     }
 
@@ -411,7 +418,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -433,7 +440,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -466,7 +473,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -499,7 +506,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -529,7 +536,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data);
             }
 
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
     }
 
@@ -550,7 +557,7 @@ mod tests {
         let get_node = ml.get(&key);
 
         assert_eq!(get_node, None);
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     proptest! {
@@ -577,7 +584,7 @@ mod tests {
 
             prop_assert_eq!(empty_hash, ml.hash());
 
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
     }
 
@@ -589,7 +596,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.set(key, &data);
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -603,7 +610,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.delete(key);
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
             ml.delete(key);
             assert_eq!(ml.get(key), None);
         }
@@ -773,7 +780,7 @@ mod tests {
         assert_ne!(&get_node, &before_node.data());
         assert_eq!(&get_node, &after_node.data());
 
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     #[test]
@@ -788,7 +795,7 @@ mod tests {
         let before_hash = ml.hash();
         assert_ne!(empty_hash, before_hash);
 
-        let ml2 = ml.clone();
+        let mut ml2 = ml.clone();
         assert_eq!(before_hash, ml2.hash());
 
         let data2 = Bytes::from("mutated");
@@ -808,7 +815,7 @@ mod tests {
 
         assert_eq!(&get_node, &before_node.data());
 
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     proptest! {
@@ -845,7 +852,7 @@ mod tests {
                 seen.insert(key);
             }
 
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
     }
 
@@ -864,7 +871,7 @@ mod tests {
 
         assert_eq!(&get_node, &node.data());
         assert_ne!(old_hash, ml.hash());
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     #[test]
@@ -886,7 +893,10 @@ mod tests {
 
         ml.write(&key, 2, &data2);
         assert_ne!(old_hash, ml.hash());
-        assert!(ml.tree.is_inorder(), "AVL isn't in order: {ml:?}");
+        assert!(
+            ml.tree.is_inorder(&ml.resolver),
+            "AVL isn't in order: {ml:?}"
+        );
         let node = Node::new(key.clone(), Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
@@ -894,7 +904,7 @@ mod tests {
 
         assert_eq!(get_node.len(), data_len);
         assert_eq!(&get_node, &node.data());
-        ml.tree().check();
+        ml.tree().check(&ml.resolver);
     }
 
     proptest! {
@@ -928,7 +938,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &alternating);
             }
 
-            ml.tree().check();
+            ml.tree().check(&ml.resolver);
         }
     }
 
@@ -970,9 +980,10 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.tree.iter() {
-            let serialised = octez_riscv_data::serialisation::serialise(node.to_encode())
-                .expect("We should be able to serialise the node");
-            let node_hash = hash(node);
+            let serialised =
+                octez_riscv_data::serialisation::serialise(node.to_encode(&merkle_layer.resolver))
+                    .expect("We should be able to serialise the node");
+            let node_hash = hash(node, &merkle_layer.resolver);
             let blob = merkle_layer
                 .persistence
                 .blob_get(node_hash)
@@ -980,7 +991,7 @@ mod tests {
             assert_eq!(serialised, blob.as_ref());
         }
 
-        let root_hash = merkle_layer.tree.hash();
+        let root_hash = merkle_layer.tree.hash(&merkle_layer.resolver);
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }
