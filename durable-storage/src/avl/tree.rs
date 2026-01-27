@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2025 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025-2026 Trilitech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
-//! Interface for an optional root node of a Merklisable AVL tree
+//! Interface for an optional root [`Node`] of a Merklisable AVL tree
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -11,89 +12,243 @@ use octez_riscv_data::hash::Hash;
 
 use super::node::Node;
 use super::node::Value;
-use super::node::delete;
-use super::node::get;
-use super::node::get_mut;
-use super::node::set;
-use super::node::write;
+#[cfg(test)]
+use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[derive(Clone, Default, Debug)]
-pub struct Tree {
-    root: Option<Arc<Node>>,
-}
+pub struct Tree(Option<Arc<Node>>);
 
 impl Tree {
-    /// Delete the node in the tree with a given key.
+    /// Delete the [`Node`] in the [`Tree`] with a given key.
+    ///
+    /// Returns true if the [`Tree`] has shrunk in size.
     pub fn delete(&mut self, key: &Key) -> bool {
-        delete(&mut self.root, key)
-    }
+        let old_balance_factor = self.balance_factor();
+        let Some(node) = self.root_mut() else {
+            // The key does not exist so nothing will happen.
+            return false;
+        };
 
-    /// The data stored in a node in the tree with a given key.
-    pub fn get(&self, key: &Key) -> Option<&Value> {
-        get(&self.root, key)
-    }
-
-    /// A mutable reference to the data stored in a node in the tree with a given key.
-    pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
-        get_mut(&mut self.root, key)
-    }
-
-    /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub(crate) fn hash(&self) -> Hash {
-        let encodable = self.root.as_deref().map(|node| node.to_encode());
-        Hash::hash_encodable(encodable).expect("Should be hashable")
-    }
-
-    /// Creates an in order iterator for the nodes in the tree
-    pub(crate) fn iter(&self) -> TreeIterator {
-        match &self.root {
-            None => TreeIterator {
-                stack: vec![],
-                current: &None,
+        match node.key().cmp(key) {
+            Ordering::Equal => match (node.left_ref().root(), node.right_ref().root()) {
+                (None, None) => {
+                    self.take();
+                    true
+                }
+                (Some(left), None) => {
+                    *node = left.clone();
+                    true
+                }
+                (None, Some(right)) => {
+                    *node = right.clone();
+                    true
+                }
+                (Some(_), Some(_)) => {
+                    let (new_node, shrank) = Node::replace_with_successor(node);
+                    *node = new_node;
+                    shrank
+                }
             },
-            Some(_) => TreeIterator {
-                stack: vec![],
-                current: &self.root,
-            },
+            Ordering::Greater => {
+                let node_mut = Arc::make_mut(node);
+                let left_shrank = node_mut.left_mut().delete(key);
+                *node_mut.balance_factor_mut() += if left_shrank { 1 } else { 0 };
+                self.rebalance();
+                old_balance_factor.abs() == 1 && self.balance_factor() == 0
+            }
+            Ordering::Less => {
+                let node_mut = Arc::make_mut(node);
+                let right_shrank = node_mut.right_mut().delete(key);
+                *node_mut.balance_factor_mut() -= if right_shrank { 1 } else { 0 };
+                self.rebalance();
+                old_balance_factor.abs() == 1 && self.balance_factor() == 0
+            }
         }
     }
 
-    /// The root node of the tree.
-    #[cfg(test)]
-    pub(crate) fn root(&self) -> &Option<Arc<Node>> {
-        &self.root
+    #[inline]
+    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
+    pub fn get(&self, key: &Key) -> Option<&Value> {
+        let node = self.root()?;
+        Node::get(node, key)
     }
 
-    /// A mutable reference to the root node of the tree.
-    pub(crate) fn root_mut(&mut self) -> &mut Option<Arc<Node>> {
-        &mut self.root
+    #[inline]
+    /// Set the value of the [`Node`] with a given key.
+    ///
+    /// Returns true if the [`Tree`] has grown in size.
+    pub fn set(&mut self, key: &Key, data: &[u8]) -> bool {
+        self.upsert(key, 0, |old_data| old_data.set(data))
     }
 
-    /// Set the value of a node in the tree with a given key.
-    pub fn set(&mut self, key: &Key, data: &[u8]) {
-        set(&mut self.root, key, data);
+    #[inline]
+    /// A mutable reference to the data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
+    pub(crate) fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
+        let node = self.root_mut()?;
+        Node::get_mut(node, key)
     }
 
-    /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
-        write(&mut self.root, key, offset, data);
+    /// Returns the node [`struct@Hash`], potentially re-hashing uncached [`Node`]s.
+    ///
+    /// If the [`struct@Hash`] has been cached, the memo is returned. Otherwise, the
+    /// [`struct@Hash`] is calculated and cached.
+    pub(crate) fn hash(&self) -> Hash {
+        let encodable = self.0.as_deref().map(|node| node.to_encode());
+        Hash::hash_encodable(encodable).expect("Should be hashable")
+    }
+
+    /// Creates an in-order iterator for the [`Node`]s in the [`Tree`]
+    pub(crate) fn iter(&self) -> TreeIterator {
+        TreeIterator {
+            stack: vec![],
+            current: self,
+        }
+    }
+
+    /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
+    pub(crate) const fn take(&mut self) -> Option<Arc<Node>> {
+        self.0.take()
+    }
+
+    #[inline]
+    /// The difference in heights between any child branches in the [`Tree`].
+    pub(super) fn balance_factor(&self) -> i64 {
+        self.0.as_ref().map_or(0, |n| n.as_ref().balance_factor())
+    }
+
+    #[inline]
+    /// A reference to the root [`Node`].
+    pub(super) fn root(&self) -> Option<&Arc<Node>> {
+        self.0.as_ref()
+    }
+
+    #[inline]
+    /// A mutable reference to the root [`Node`].
+    pub(super) fn root_mut(&mut self) -> Option<&mut Arc<Node>> {
+        self.0.as_mut()
+    }
+
+    /// Takes the occupied [`Tree`] with the minimum [`Key`] from this [`Tree`] and replaces it
+    /// with an empty [`Tree`].
+    ///
+    /// Returns a tuple of:
+    ///  - The occupied [`Tree`] with the minimum [`Key`].
+    ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
+    ///  - True if the [`Tree`] has shrunk in size.
+    #[must_use]
+    pub(super) fn take_min(&mut self) -> (Tree, Tree, bool) {
+        let Some(node_arc) = self.root_mut() else {
+            return (None.into(), None.into(), false);
+        };
+
+        let node_mut = Arc::make_mut(node_arc);
+
+        // Base case
+        if node_mut.left_ref().root().is_none() {
+            let mut min = self.take().expect("Already checked");
+            let min_mut = Arc::make_mut(&mut min);
+
+            let right = min_mut.right_mut().take();
+
+            (Some(min).into(), right.into(), true)
+        // Recursive
+        } else {
+            Node::take_min(node_arc)
+        }
+    }
+
+    /// Set or update the value of a [`Node`] in the [`Tree`] with a given key and given offset.
+    ///
+    /// `data` defines what data is upserted.
+    ///
+    /// Returns true if the [`Tree`] has grown in size.
+    pub(crate) fn upsert(
+        &mut self,
+        key: &Key,
+        offset: usize,
+        data: impl FnOnce(&mut Value),
+    ) -> bool {
+        let node = self.root_mut();
+        let Some(node) = node else {
+            // We can't create a new `Node` with a non-zero offset.
+            //
+            // This shouldn't happen: it's prevented by the `Database` API.
+            assert_eq!(offset, 0);
+
+            // TODO: RV-895: Dynamic creation of the `Bytes` (alias `Value`) state component may cause
+            // problems with proof generation
+            let mut new_data = Value::new();
+            data(&mut new_data);
+
+            // The key does not exist and a new `Node` shall be created.
+            self.0 = Some(Arc::new(Node::new(key.clone(), new_data)));
+            return true;
+        };
+        let node_mut = Arc::make_mut(node);
+        let grew = node_mut.upsert(key, offset, data);
+        if grew {
+            self.rebalance();
+            self.balance_factor() != 0
+        } else {
+            false
+        }
+    }
+
+    /// Writes the data to the [`Node`] in this [`Tree`] associated with a given [Key] with the
+    /// given offset, overwriting existing data if the node already exists.
+    ///
+    /// Returns true if the [`Tree`] has grown in size.
+    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> bool {
+        self.upsert(key, offset, |old_data| {
+            // This shouldn't happen: it's prevented by the `Database` API.
+            assert!(offset <= old_data.len());
+
+            let Some(new_data_end) = offset.checked_add(data.len()) else {
+                // The asynchronous Merkle worker means that errors can't be returned to the
+                // `Database`.
+                panic!(
+                    "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
+                    data.len()
+                );
+            };
+
+            let final_len = std::cmp::max(old_data.len(), new_data_end);
+            old_data.resize(final_len);
+            old_data.write(offset, data);
+        })
+    }
+
+    /// Rebalance the [`Tree`] so that the difference in height between any child branches is in
+    /// the range of -1..=1.
+    ///
+    /// The [`Tree`] must already have balance factor in the range of -2..=2, else it is an invalid
+    /// AVL tree.
+    fn rebalance(&mut self) {
+        if let Some(node) = self.root_mut() {
+            Node::rebalance(node)
+        }
     }
 }
 
-/// Used for iterating through the nodes
-/// of the [`Tree`] tree in order.
+impl From<Option<Arc<Node>>> for Tree {
+    fn from(node: Option<Arc<Node>>) -> Self {
+        Tree(node)
+    }
+}
+
+/// Used for iterating through the nodes of the [`Tree`] tree in order.
 pub(crate) struct TreeIterator<'a> {
     stack: Vec<&'a Arc<Node>>,
-    current: &'a Option<Arc<Node>>,
+    current: &'a Tree,
 }
 
 impl<'a> Iterator for TreeIterator<'a> {
     type Item = &'a Arc<Node>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(node) = self.current {
+        while let Some(node) = self.current.root() {
             self.stack.push(node);
             self.current = node.left_ref();
         }
@@ -101,6 +256,54 @@ impl<'a> Iterator for TreeIterator<'a> {
         let ret = self.stack.pop()?;
         self.current = ret.right_ref();
         Some(ret)
+    }
+}
+
+#[cfg(test)]
+impl Tree {
+    /// Asserts that the [`Tree`] is a valid AVL tree
+    pub(crate) fn check(&self) {
+        let inorder = self.is_inorder();
+        let is_balanced = self.is_balanced();
+        let has_correct_balance_factors = self.has_correct_balance_factors();
+        if !inorder || !is_balanced || !has_correct_balance_factors {
+            eprintln!("{self:?}");
+        }
+        assert!(inorder, "AVL tree isn't in order");
+        assert!(is_balanced, "AVL tree isn't balanced");
+        assert!(
+            has_correct_balance_factors,
+            "AVL tree balance factors are incorrect"
+        );
+    }
+
+    /// Returns true if the [`Tree`] is in-order.
+    pub(crate) fn is_inorder(&self) -> bool {
+        self.is_inorder_inner(
+            &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
+            &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
+        )
+    }
+
+    /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
+    pub(super) fn has_correct_balance_factors(&self) -> bool {
+        self.root()
+            .is_none_or(|node| node.has_correct_balance_factors())
+    }
+
+    /// Returns the height of the [`Tree`].
+    pub(super) fn height(&self) -> u32 {
+        self.root().map_or(0, |node| node.height())
+    }
+
+    /// Returns true if the [`Tree`] is balanced.
+    pub(super) fn is_balanced(&self) -> bool {
+        self.root().is_none_or(|node| node.is_balanced())
+    }
+
+    /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
+    pub(super) fn is_inorder_inner(&self, min: &Key, max: &Key) -> bool {
+        self.root().is_none_or(|node| node.is_inorder(min, max))
     }
 }
 
@@ -151,41 +354,6 @@ mod tests {
                     length,
                 )
             })
-    }
-
-    fn height_and_balance_factor_sanity_check_helper(node: Arc<Node>) -> (bool, usize) {
-        let (left_good, left_height) = match node.left_ref() {
-            None => (true, 0),
-            Some(left_node) => height_and_balance_factor_sanity_check_helper(left_node.clone()),
-        };
-        if !left_good {
-            return (false, 0);
-        }
-        let (right_good, right_height) = match node.right_ref() {
-            None => (true, 0),
-            Some(right_node) => height_and_balance_factor_sanity_check_helper(right_node.clone()),
-        };
-        if !(right_good) {
-            return (false, 0);
-        }
-        let balance_factor = (right_height as i64) - (left_height as i64);
-        if balance_factor.abs() > 1 || node.balance_factor() != balance_factor {
-            (false, 0)
-        } else {
-            (true, std::cmp::max(left_height, right_height) + 1)
-        }
-    }
-
-    impl Tree {
-        pub(crate) fn height_and_balance_factor_sanity_check(&self) -> bool {
-            match &self.root {
-                None => true,
-                Some(node) => {
-                    let (ret, _) = height_and_balance_factor_sanity_check_helper(node.clone());
-                    ret
-                }
-            }
-        }
     }
 
     fn compare_tree_to_reference(tree: &Tree, reference: &BTreeMap<Key, Bytes>) {
@@ -242,7 +410,7 @@ mod tests {
                     }
                 }
                 compare_tree_to_reference(&tree, &reference);
-                assert!(tree.height_and_balance_factor_sanity_check());
+                tree.check();
             }
         }
     }

@@ -63,7 +63,7 @@ impl MerkleLayer {
         expect(dead_code, reason = "Not pub in `Database`")
     )]
     pub fn clear(&mut self) {
-        self.tree.root_mut().take();
+        self.tree.take();
     }
 
     /// Generates a commitment for the [MerkleLayer].
@@ -111,19 +111,18 @@ impl MerkleLayer {
 
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: &[u8]) {
-        self.tree.set(key, data)
+        self.tree.set(key, data);
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
     pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
-        self.tree.write(key, offset, data)
+        self.tree.write(key, offset, data);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::sync::Arc;
 
     use bytes::Bytes;
     use proptest::prelude::*;
@@ -134,92 +133,15 @@ mod tests {
     use crate::avl::Node;
     use crate::avl::Tree;
     use crate::avl::hash;
-    use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
-    impl Tree {
-        fn check(&self) {
-            let inorder = self.is_inorder();
-            let is_balanced = self.is_balanced();
-            let has_correct_balance_factors = self.has_correct_balance_factors();
-            if !inorder || !is_balanced || !has_correct_balance_factors {
-                eprintln!("{self:?}");
-            }
-            assert!(inorder, "AVL tree isn't in order");
-            assert!(is_balanced, "AVL tree isn't balanced");
-            assert!(
-                has_correct_balance_factors,
-                "AVL tree balance factors are incorrect"
-            );
+    impl MerkleLayer {
+        fn tree(&self) -> &Tree {
+            &self.tree
         }
-
-        fn has_correct_balance_factors(&self) -> bool {
-            has_correct_balance_factors(self.root())
-        }
-
-        fn is_balanced(&self) -> bool {
-            is_balanced(self.root())
-        }
-
-        fn is_inorder(&self) -> bool {
-            is_inorder(
-                self.root(),
-                &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
-                &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
-            )
-        }
-    }
-
-    impl Node {
-        pub(super) fn height(&self) -> u32 {
-            let left_height = self.left_ref().as_ref().map_or(0, |l| l.height());
-            let right_height = self.right_ref().as_ref().map_or(0, |r| r.height());
-            1 + std::cmp::max(left_height, right_height)
-        }
-    }
-
-    pub(super) fn has_correct_balance_factors(node: &Option<Arc<Node>>) -> bool {
-        if let Some(node) = node.as_ref() {
-            let left_height = node.left_ref().as_ref().map_or(0, |l| l.height());
-            let right_height = node.right_ref().as_ref().map_or(0, |r| r.height());
-            let calculated_balance_factor = right_height as i64 - left_height as i64;
-            if node.balance_factor() != calculated_balance_factor {
-                eprintln!(
-                    "Node has balance_factor {:?}, should be {calculated_balance_factor:?}\nnode: {node:?}",
-                    node.balance_factor()
-                );
-                return false;
-            }
-            return has_correct_balance_factors(node.left_ref())
-                && has_correct_balance_factors(node.right_ref());
-        }
-        true
-    }
-
-    pub(super) fn is_balanced(node: &Option<Arc<Node>>) -> bool {
-        if let Some(node) = node {
-            let balance_factor = node.balance_factor();
-            if balance_factor.abs() > 1 {
-                eprintln!("Balance factor not in -1..=1: {balance_factor:?}");
-                return false;
-            }
-            return is_balanced(node.left_ref()) && is_balanced(node.right_ref());
-        }
-        true
-    }
-
-    pub(super) fn is_inorder(node: &Option<Arc<Node>>, min: &Key, max: &Key) -> bool {
-        if let Some(node) = node.as_ref() {
-            if node.key() < min || node.key() > max {
-                return false;
-            }
-            return is_inorder(node.left_ref(), min, node.key())
-                && is_inorder(node.right_ref(), node.key(), max);
-        }
-        true
     }
 
     fn new_merkle_layer() -> MerkleLayer {
@@ -246,7 +168,7 @@ mod tests {
 
         for i in 0..keys.len() {
             ml.set(&keys[i], &data[i]);
-            ml.tree.check();
+            ml.tree().check();
         }
 
         let mut ml2 = ml.clone();
@@ -297,8 +219,8 @@ mod tests {
                 .expect("The node should be retrieved successfully. Merkle layer: {ml2:?}")
         );
 
-        ml.tree.check();
-        ml2.tree.check();
+        ml.tree().check();
+        ml2.tree().check();
     }
 
     proptest! {
@@ -349,8 +271,8 @@ mod tests {
                 prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully"), &data2);
             }
 
-            ml.tree.check();
-            ml2.tree.check();
+            ml.tree().check();
+            ml2.tree().check();
         }
     }
 
@@ -369,7 +291,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check();
+        ml.tree().check();
     }
 
     #[test]
@@ -397,7 +319,7 @@ mod tests {
             .expect("The node should be retrieved successfully");
 
         assert_eq!(&get_node, &node.data());
-        ml.tree.check();
+        ml.tree().check();
     }
 
     #[test]
@@ -423,7 +345,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -454,7 +376,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
         }
 
         ml.clear();
@@ -472,7 +394,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
         }
     }
 
@@ -489,7 +411,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -511,7 +433,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -544,7 +466,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -577,7 +499,7 @@ mod tests {
             let old_hash = ml.hash();
             ml.set(key, &data);
             assert_ne!(old_hash, ml.hash());
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -607,7 +529,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &data);
             }
 
-            ml.tree.check();
+            ml.tree().check();
         }
     }
 
@@ -628,7 +550,7 @@ mod tests {
         let get_node = ml.get(&key);
 
         assert_eq!(get_node, None);
-        ml.tree.check();
+        ml.tree().check();
     }
 
     proptest! {
@@ -655,7 +577,7 @@ mod tests {
 
             prop_assert_eq!(empty_hash, ml.hash());
 
-            ml.tree.check();
+            ml.tree().check();
         }
     }
 
@@ -667,7 +589,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.set(key, &data);
-            ml.tree.check();
+            ml.tree().check();
             assert_eq!(
                 ml.get(key)
                     .expect("The node should be retrieved successfully"),
@@ -681,7 +603,7 @@ mod tests {
 
         for key in keys.iter() {
             ml.delete(key);
-            ml.tree.check();
+            ml.tree().check();
             ml.delete(key);
             assert_eq!(ml.get(key), None);
         }
@@ -829,7 +751,7 @@ mod tests {
         let data = Bytes::from("get_mut");
         let mut ml = new_merkle_layer();
         let empty_hash = ml.hash();
-        ml.set(&key, &data);
+        ml.set(&key, &data.clone());
         let full_hash = ml.hash();
         assert_ne!(empty_hash, full_hash);
 
@@ -851,7 +773,7 @@ mod tests {
         assert_ne!(&get_node, &before_node.data());
         assert_eq!(&get_node, &after_node.data());
 
-        ml.tree.check();
+        ml.tree().check();
     }
 
     #[test]
@@ -886,7 +808,7 @@ mod tests {
 
         assert_eq!(&get_node, &before_node.data());
 
-        ml.tree.check();
+        ml.tree().check();
     }
 
     proptest! {
@@ -923,7 +845,7 @@ mod tests {
                 seen.insert(key);
             }
 
-            ml.tree.check();
+            ml.tree().check();
         }
     }
 
@@ -942,7 +864,7 @@ mod tests {
 
         assert_eq!(&get_node, &node.data());
         assert_ne!(old_hash, ml.hash());
-        ml.tree.check();
+        ml.tree().check();
     }
 
     #[test]
@@ -972,7 +894,7 @@ mod tests {
 
         assert_eq!(get_node.len(), data_len);
         assert_eq!(&get_node, &node.data());
-        ml.tree.check();
+        ml.tree().check();
     }
 
     proptest! {
@@ -1006,7 +928,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully"), &alternating);
             }
 
-            ml.tree.check();
+            ml.tree().check();
         }
     }
 
