@@ -39,11 +39,25 @@ pub use proof_layout::*;
 mod tests {
     use std::num::NonZeroUsize;
 
+    use octez_riscv_data::components::atom::Atom;
+    use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::data_space::DataSpace;
+    use octez_riscv_data::foldable::Fold;
+    use octez_riscv_data::foldable::Foldable;
+    use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::HashFold;
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::hash::PartialHashFold;
+    use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_tree::MerkleTree;
+    use octez_riscv_data::merkle_tree::MerkleTreeFold;
+    use octez_riscv_data::mode::Mode;
+    use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Prove;
+    use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use octez_riscv_data::serialisation::elem::Elem;
     use rand::RngCore;
 
@@ -125,5 +139,94 @@ mod tests {
             .to_hash()
             .unwrap();
         assert_eq!(hash_normal, hash_verify);
+    }
+
+    #[ignore = "RV-895: Enable once dynamic state component creation is supported in Prove/Verify modes"]
+    #[test]
+    fn dyn_atom_creation_rv_895() {
+        struct Foo<M: Mode> {
+            bar: Atom<u64, M>,
+        }
+
+        fn operation<M: AtomMode>(foo: &mut Foo<M>) {
+            // This would work:
+            // foo.bar.write(foo.bar.read() * 2);
+
+            // This does not:
+            foo.bar = Atom::new(foo.bar.read() * 2);
+        }
+
+        impl Foo<Normal> {
+            fn start_proof(&self) -> Foo<Prove<'_>> {
+                Foo {
+                    bar: self.bar.start_proof(),
+                }
+            }
+        }
+
+        impl Foldable<HashFold> for Foo<Prove<'_>> {
+            fn fold(&self, builder: HashFold) -> Hash {
+                let mut node = builder.into_node_fold();
+                node.add(&self.bar);
+                node.done()
+            }
+        }
+
+        impl Foldable<MerkleTreeFold> for Foo<Prove<'_>> {
+            fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
+                let mut node = builder.into_node_fold();
+                node.add(&self.bar);
+                node.done()
+            }
+        }
+
+        impl Foldable<PartialHashFold<'_>> for Foo<Verify> {
+            fn fold(&self, builder: PartialHashFold) -> PartialHash {
+                let mut node = builder.into_node_fold();
+                node.add(&self.bar);
+                node.done()
+            }
+        }
+
+        impl FromProof for Foo<Verify> {
+            fn from_proof<Proof: octez_riscv_data::merkle_proof::Deserialiser>(
+                proof: Proof,
+            ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self> {
+                let node = proof.into_node()?;
+
+                let (node, bar) = node.next_branch()?;
+
+                let this = Foo { bar };
+                node.done(this)
+            }
+        }
+
+        let foo_normal = Foo {
+            bar: Atom::new(1337),
+        };
+
+        let mut foo_prove = foo_normal.start_proof();
+
+        operation(&mut foo_prove);
+
+        let merkle_tree = MerkleTree::from_foldable(&foo_prove);
+        let expected_hash = Hash::from_foldable(&foo_prove);
+
+        let merkle_proof = merkle_tree_to_compressed_merkle_tree(merkle_tree).to_proof();
+        let proof_deser = ProofTreeDeserialiser::from(ProofTree::Present(&merkle_proof));
+
+        let mut foo_verify = Foo::<Verify>::from_proof(proof_deser)
+            .unwrap()
+            .into_result();
+
+        let final_hash = catch_not_found(move || {
+            operation(&mut foo_verify);
+            PartialHash::from_foldable(Some(&merkle_proof), &foo_verify)
+                .to_hash()
+                .unwrap()
+        })
+        .unwrap();
+
+        assert_eq!(expected_hash, final_hash);
     }
 }
