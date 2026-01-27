@@ -12,6 +12,7 @@ use octez_riscv_data::hash::Hash;
 
 use super::node::Node;
 use super::node::Value;
+use crate::avl::resolver::Resolver;
 #[cfg(test)]
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
@@ -24,15 +25,19 @@ impl Tree {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
-    pub fn delete(&mut self, key: &Key) -> bool {
-        let old_balance_factor = self.balance_factor();
+    pub fn delete(&mut self, key: &Key, resolver: &mut impl Resolver<Arc<Node>, Node>) -> bool {
+        let old_balance_factor = self.balance_factor(resolver);
         let Some(node) = self.root_mut() else {
             // The key does not exist so nothing will happen.
             return false;
         };
 
-        match node.key().cmp(key) {
-            Ordering::Equal => match (node.left_ref().root(), node.right_ref().root()) {
+        let resolved_node = resolver.resolve(node);
+        match resolved_node.key().cmp(key) {
+            Ordering::Equal => match (
+                resolved_node.left_ref().root(),
+                resolved_node.right_ref().root(),
+            ) {
                 (None, None) => {
                     self.take();
                     true
@@ -46,56 +51,65 @@ impl Tree {
                     true
                 }
                 (Some(_), Some(_)) => {
-                    let (new_node, shrank) = Node::replace_with_successor(node);
+                    let (new_node, shrank) = Node::replace_with_successor(node, resolver);
                     *node = new_node;
                     shrank
                 }
             },
             Ordering::Greater => {
-                let node_mut = Arc::make_mut(node);
-                let left_shrank = node_mut.left_mut().delete(key);
+                let node_mut = resolver.resolve_mut(node);
+                let left_shrank = node_mut.left_mut().delete(key, resolver);
                 *node_mut.balance_factor_mut() += if left_shrank { 1 } else { 0 };
-                self.rebalance();
-                old_balance_factor.abs() == 1 && self.balance_factor() == 0
+                self.rebalance(resolver);
+                old_balance_factor.abs() == 1 && self.balance_factor(resolver) == 0
             }
             Ordering::Less => {
-                let node_mut = Arc::make_mut(node);
-                let right_shrank = node_mut.right_mut().delete(key);
+                let node_mut = resolver.resolve_mut(node);
+                let right_shrank = node_mut.right_mut().delete(key, resolver);
                 *node_mut.balance_factor_mut() -= if right_shrank { 1 } else { 0 };
-                self.rebalance();
-                old_balance_factor.abs() == 1 && self.balance_factor() == 0
+                self.rebalance(resolver);
+                old_balance_factor.abs() == 1 && self.balance_factor(resolver) == 0
             }
         }
     }
 
     #[inline]
     /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub fn get(&self, key: &Key) -> Option<&Value> {
+    pub fn get(&self, key: &Key, resolver: &impl Resolver<Arc<Node>, Node>) -> Option<&Value> {
         let node = self.root()?;
-        Node::get(node, key)
+        Node::get(node, key, resolver)
     }
 
     #[inline]
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub fn set(&mut self, key: &Key, data: &[u8]) -> bool {
-        self.upsert(key, 0, |old_data| old_data.set(data))
+    pub fn set(
+        &mut self,
+        key: &Key,
+        data: &[u8],
+        resolver: &mut impl Resolver<Arc<Node>, Node>,
+    ) -> bool {
+        self.upsert(key, 0, |old_data| old_data.set(data), resolver)
     }
 
     #[inline]
     /// A mutable reference to the data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub(crate) fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
+    pub(crate) fn get_mut(
+        &mut self,
+        key: &Key,
+        resolver: &mut impl Resolver<Arc<Node>, Node>,
+    ) -> Option<&mut Value> {
         let node = self.root_mut()?;
-        Node::get_mut(node, key)
+        Node::get_mut(node, key, resolver)
     }
 
     /// Returns the node [`struct@Hash`], potentially re-hashing uncached [`Node`]s.
     ///
     /// If the [`struct@Hash`] has been cached, the memo is returned. Otherwise, the
     /// [`struct@Hash`] is calculated and cached.
-    pub(crate) fn hash(&self) -> Hash {
-        let encodable = self.0.as_deref().map(|node| node.to_encode());
+    pub(crate) fn hash(&self, resolver: &impl Resolver<Arc<Node>, Node>) -> Hash {
+        let encodable = self.0.as_deref().map(|node| node.to_encode(resolver));
         Hash::hash_encodable(encodable).expect("Should be hashable")
     }
 
@@ -114,8 +128,10 @@ impl Tree {
 
     #[inline]
     /// The difference in heights between any child branches in the [`Tree`].
-    pub(super) fn balance_factor(&self) -> i64 {
-        self.0.as_ref().map_or(0, |n| n.as_ref().balance_factor())
+    pub(super) fn balance_factor(&self, resolver: &impl Resolver<Arc<Node>, Node>) -> i64 {
+        self.0
+            .as_ref()
+            .map_or(0, |n| resolver.resolve(n).balance_factor())
     }
 
     #[inline]
@@ -138,24 +154,26 @@ impl Tree {
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if the [`Tree`] has shrunk in size.
     #[must_use]
-    pub(super) fn take_min(&mut self) -> (Tree, Tree, bool) {
+    pub(super) fn take_min(
+        &mut self,
+        resolver: &mut impl Resolver<Arc<Node>, Node>,
+    ) -> (Tree, Tree, bool) {
         let Some(node_arc) = self.root_mut() else {
             return (None.into(), None.into(), false);
         };
 
-        let node_mut = Arc::make_mut(node_arc);
+        let node_mut = resolver.resolve_mut(node_arc);
 
         // Base case
         if node_mut.left_ref().root().is_none() {
             let mut min = self.take().expect("Already checked");
-            let min_mut = Arc::make_mut(&mut min);
-
+            let min_mut = resolver.resolve_mut(&mut min);
             let right = min_mut.right_mut().take();
 
             (Some(min).into(), right.into(), true)
         // Recursive
         } else {
-            Node::take_min(node_arc)
+            Node::take_min(node_arc, resolver)
         }
     }
 
@@ -169,6 +187,7 @@ impl Tree {
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Value),
+        resolver: &mut impl Resolver<Arc<Node>, Node>,
     ) -> bool {
         let node = self.root_mut();
         let Some(node) = node else {
@@ -186,11 +205,12 @@ impl Tree {
             self.0 = Some(Arc::new(Node::new(key.clone(), new_data)));
             return true;
         };
-        let node_mut = Arc::make_mut(node);
-        let grew = node_mut.upsert(key, offset, data);
+        let grew = resolver
+            .resolve_mut(node)
+            .upsert(key, offset, data, resolver);
         if grew {
-            self.rebalance();
-            self.balance_factor() != 0
+            self.rebalance(resolver);
+            self.balance_factor(resolver) != 0
         } else {
             false
         }
@@ -200,24 +220,35 @@ impl Tree {
     /// given offset, overwriting existing data if the node already exists.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> bool {
-        self.upsert(key, offset, |old_data| {
-            // This shouldn't happen: it's prevented by the `Database` API.
-            assert!(offset <= old_data.len());
+    pub(crate) fn write(
+        &mut self,
+        key: &Key,
+        offset: usize,
+        data: &[u8],
+        resolver: &mut impl Resolver<Arc<Node>, Node>,
+    ) -> bool {
+        self.upsert(
+            key,
+            offset,
+            |old_data| {
+                // This shouldn't happen: it's prevented by the `Database` API.
+                assert!(offset <= old_data.len());
 
-            let Some(new_data_end) = offset.checked_add(data.len()) else {
-                // The asynchronous Merkle worker means that errors can't be returned to the
-                // `Database`.
-                panic!(
-                    "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
-                    data.len()
-                );
-            };
+                let Some(new_data_end) = offset.checked_add(data.len()) else {
+                    // The asynchronous Merkle worker means that errors can't be returned to the
+                    // `Database`.
+                    panic!(
+                        "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
+                        data.len()
+                    );
+                };
 
-            let final_len = std::cmp::max(old_data.len(), new_data_end);
-            old_data.resize(final_len);
-            old_data.write(offset, data);
-        })
+                let final_len = std::cmp::max(old_data.len(), new_data_end);
+                old_data.resize(final_len);
+                old_data.write(offset, data);
+            },
+            resolver,
+        )
     }
 
     /// Rebalance the [`Tree`] so that the difference in height between any child branches is in
@@ -225,9 +256,9 @@ impl Tree {
     ///
     /// The [`Tree`] must already have balance factor in the range of -2..=2, else it is an invalid
     /// AVL tree.
-    fn rebalance(&mut self) {
+    fn rebalance(&mut self, resolver: &mut impl Resolver<Arc<Node>, Node>) {
         if let Some(node) = self.root_mut() {
-            Node::rebalance(node)
+            Node::rebalance(node, resolver)
         }
     }
 }
@@ -262,10 +293,10 @@ impl<'a> Iterator for TreeIterator<'a> {
 #[cfg(test)]
 impl Tree {
     /// Asserts that the [`Tree`] is a valid AVL tree
-    pub(crate) fn check(&self) {
-        let inorder = self.is_inorder();
-        let is_balanced = self.is_balanced();
-        let has_correct_balance_factors = self.has_correct_balance_factors();
+    pub(crate) fn check(&self, resolver: &impl Resolver<Arc<Node>, Node>) {
+        let inorder = self.is_inorder(resolver);
+        let is_balanced = self.is_balanced(resolver);
+        let has_correct_balance_factors = self.has_correct_balance_factors(resolver);
         if !inorder || !is_balanced || !has_correct_balance_factors {
             eprintln!("{self:?}");
         }
@@ -278,32 +309,42 @@ impl Tree {
     }
 
     /// Returns true if the [`Tree`] is in-order.
-    pub(crate) fn is_inorder(&self) -> bool {
+    pub(crate) fn is_inorder(&self, resolver: &impl Resolver<Arc<Node>, Node>) -> bool {
         self.is_inorder_inner(
             &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
             &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
+            resolver,
         )
     }
 
     /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
-    pub(super) fn has_correct_balance_factors(&self) -> bool {
+    pub(super) fn has_correct_balance_factors(
+        &self,
+        resolver: &impl Resolver<Arc<Node>, Node>,
+    ) -> bool {
         self.root()
-            .is_none_or(|node| node.has_correct_balance_factors())
+            .is_none_or(|node| resolver.resolve(node).has_correct_balance_factors(resolver))
     }
 
     /// Returns the height of the [`Tree`].
-    pub(super) fn height(&self) -> u32 {
-        self.root().map_or(0, |node| node.height())
+    pub(super) fn height(&self, resolver: &impl Resolver<Arc<Node>, Node>) -> u32 {
+        self.root().map_or(0, |node| node.height(resolver))
     }
 
     /// Returns true if the [`Tree`] is balanced.
-    pub(super) fn is_balanced(&self) -> bool {
-        self.root().is_none_or(|node| node.is_balanced())
+    pub(super) fn is_balanced(&self, resolver: &impl Resolver<Arc<Node>, Node>) -> bool {
+        self.root().is_none_or(|node| node.is_balanced(resolver))
     }
 
     /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
-    pub(super) fn is_inorder_inner(&self, min: &Key, max: &Key) -> bool {
-        self.root().is_none_or(|node| node.is_inorder(min, max))
+    pub(super) fn is_inorder_inner(
+        &self,
+        min: &Key,
+        max: &Key,
+        resolver: &impl Resolver<Arc<Node>, Node>,
+    ) -> bool {
+        self.root()
+            .is_none_or(|node| node.is_inorder(min, max, resolver))
     }
 }
 
@@ -317,6 +358,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::avl::resolver::ArcResolver;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
 
@@ -383,10 +425,11 @@ mod tests {
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
             let mut tree: Tree = Default::default();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
+            let mut resolver = ArcResolver;
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
-                        let tree_value = tree.get(&key);
+                        let tree_value = tree.get(&key, &resolver);
 
                         // The values in the Options are comparable, but the Options themselves are
                         // not. So we need to awkwardly match on both Options to compare them.
@@ -405,16 +448,16 @@ mod tests {
                         continue;
                     }
                     Operation::Upsert(key, value) => {
-                        tree.set(&key, &value);
+                        tree.set(&key, &value, &mut resolver);
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
-                        tree.delete(&key);
+                        tree.delete(&key, &mut resolver);
                         reference.remove(&key);
                     }
                 }
                 compare_tree_to_reference(&tree, &reference);
-                tree.check();
+                tree.check(&resolver);
             }
         }
     }
@@ -422,6 +465,7 @@ mod tests {
     #[test]
     fn test_hash_consistency() {
         let mut tree: Tree = Default::default();
+        let mut resolver = ArcResolver;
 
         let data = ["42", "6 * 9", "1337", "31337"];
 
@@ -437,13 +481,13 @@ mod tests {
             .iter()
             .zip(data)
             .map(|(key, data)| -> Hash {
-                let digest = tree.hash();
-                tree.set(key, data.as_bytes());
+                let digest = tree.hash(&resolver);
+                tree.set(key, data.as_bytes(), &mut resolver);
                 digest
             })
             .collect();
 
-            digests.push(tree.hash());
+            digests.push(tree.hash(&resolver));
 
             digests
         };
