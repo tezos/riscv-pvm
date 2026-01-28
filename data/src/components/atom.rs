@@ -303,7 +303,7 @@ impl<'normal> AtomMode for Prove<'normal> {
     fn new<T: 'static>(value: T) -> Atom<T, Self> {
         Atom {
             atom: ProveImpl {
-                previous: Source::from(value),
+                previous: Source::owned(value),
                 current: None,
                 read: Cell::new(false),
             },
