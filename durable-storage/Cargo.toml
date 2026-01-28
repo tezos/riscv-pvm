@@ -11,6 +11,7 @@ workspace = true
 bincode.workspace = true
 bytes.workspace = true
 cfg-if.workspace = true
+goldenfile.workspace = true
 log.workspace = true
 hex.workspace = true
 octez-riscv-data.workspace = true

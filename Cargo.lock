@@ -2442,6 +2442,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "criterion",
+ "goldenfile",
  "hex",
  "log",
  "octez-riscv-data",

@@ -310,13 +310,17 @@ impl Tree {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::io::prelude::*;
 
     use bytes::Bytes;
+    use goldenfile::Mint;
     use proptest::prelude::*;
 
     use super::*;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+
+    const GOLDEN_DIR: &str = "tests/expected";
 
     #[derive(Debug, Clone)]
     enum Operation {
@@ -413,5 +417,42 @@ mod tests {
                 tree.check();
             }
         }
+    }
+
+    #[test]
+    fn test_hash_consistency() {
+        let mut tree: Tree = Default::default();
+
+        let data = ["42", "6 * 9", "1337", "31337"];
+
+        // Create a collection of digests from a series of tree mutations
+        let digests = {
+            let mut digests: Vec<Hash> = [
+                Key::new(&[42]),
+                Key::new(&[6, 9]),
+                Key::new(&[13, 37]),
+                Key::new(&[31, 33, 7]),
+            ]
+            .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"))
+            .iter()
+            .zip(data)
+            .map(|(key, data)| -> Hash {
+                let digest = tree.hash();
+                tree.set(key, data.as_bytes());
+                digest
+            })
+            .collect();
+
+            digests.push(tree.hash());
+
+            digests
+        };
+
+        let serialised = octez_riscv_data::serialisation::serialise(digests).unwrap();
+
+        let mut mint = Mint::new(GOLDEN_DIR);
+        let mut golden = mint.new_goldenfile("digests.out").unwrap();
+
+        golden.write_all(&serialised).unwrap();
     }
 }
