@@ -6,10 +6,6 @@
 //!
 //! See [`DataSpace`] for more details.
 
-use std::cell::Cell;
-use std::cell::RefCell;
-use std::ops::Range;
-
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -18,8 +14,8 @@ use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
-use range_collections::RangeSet2;
 
+use super::bytes::Bytes;
 use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
@@ -27,28 +23,17 @@ use crate::foldable::NodeFold;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
-use crate::hash::Hasher;
-use crate::hash::PartialHash;
-use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::FromProof;
-use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
 use crate::merkle_proof::SuspendedResult;
-use crate::merkle_proof::sequence_as_tree_from_proof;
-use crate::merkle_tree::MerkleTree;
-use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Prove;
 use crate::mode::Verify;
-use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
-use crate::partial_vec::PartialVec;
-use crate::partial_vec::RangeEntry;
 use crate::serialisation::elem::Elem;
-use crate::serialisation::serialise;
 
 /// Byte array-like state component which allows reading and writing values of various types
 #[repr(transparent)]
@@ -157,12 +142,7 @@ impl DataSpace<Normal> {
     /// Start proof generation for this data space.
     pub fn start_proof(&self) -> DataSpace<Prove<'_>> {
         DataSpace {
-            data_space: ProveImpl {
-                source: Source::from(self),
-                did_access_length: Cell::new(false),
-                reads: Default::default(),
-                writes: Default::default(),
-            },
+            data_space: Bytes::from_raw_source(&self.data_space),
         }
     }
 
@@ -177,12 +157,8 @@ impl DataSpace<Normal> {
 impl DataSpace<Verify> {
     /// Construct a [`DataSpace`] which is absent apart from its length.
     pub fn absent(size: usize) -> Self {
-        DataSpace {
-            data_space: VerifyImpl {
-                length: Partial::Present(size),
-                data: PartialVec::empty(),
-            },
-        }
+        let data_space = Bytes::absent(size);
+        DataSpace { data_space }
     }
 
     /// Write bytes to the data space, creating new present pages if needed.
@@ -194,8 +170,6 @@ impl DataSpace<Verify> {
     /// you write a single byte to an absent page, the written byte will be reflected in the page's
     /// contents, but the remainder of the page will be zero-bytes.
     pub fn populate_pages_with_bytes(&mut self, addr: usize, bytes: &[u8]) {
-        self.data_space.data.define(addr, bytes.to_vec());
-
         let end = addr.saturating_add(bytes.len());
 
         let start_page = addr & PAGE_MASK;
@@ -207,27 +181,8 @@ impl DataSpace<Verify> {
             end_page = end_page.saturating_add(PAGE_SIZE);
         }
 
-        let mut offset = start_page;
-        let gaps = self
-            .data_space
-            .data
-            .range(start_page..end_page)
-            .filter_map(|entry| {
-                let current_offset = offset;
-                offset += entry.width();
-
-                match entry {
-                    RangeEntry::Undefined { length } => Some((current_offset, length)),
-                    RangeEntry::Defined { .. } => None,
-                }
-            })
-            .collect::<Vec<_>>(); // Need to collect to avoid lifetime issues
-
-        // Fill in the gaps with zero-bytes. After all this method promises to zero-initialise
-        // absent or blinded pages.
-        for (gap_addr, gap_zeros) in gaps {
-            self.data_space.data.define(gap_addr, vec![0u8; gap_zeros]);
-        }
+        self.data_space.zero_init_range(start_page..end_page);
+        self.data_space.write(addr, bytes);
     }
 }
 
@@ -286,160 +241,29 @@ impl Foldable<HashFold> for DataSpace<Normal> {
     }
 }
 
-impl Foldable<HashFold> for DataSpace<Prove<'_>> {
-    fn fold(&self, builder: HashFold) -> Hash {
-        let length = self.data_space.source.data_space.len();
-        let length_node =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
-
-        let generator = |idx: usize| {
-            let address = PAGE_SIZE
-                .checked_mul(idx)
-                .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
-            let address_end = address.checked_add(PAGE_SIZE).expect("Address overflow");
-            let address_range = address..address_end;
-
-            let mut data = self.data_space.source.data_space[address_range.clone()].to_vec();
-            for (index, bytes) in self.data_space.writes.defined_range(address_range.clone()) {
-                let data_from = &mut data[index..];
-                let len = bytes.len().min(data_from.len());
-                data_from[..len].copy_from_slice(&bytes[..len]);
-            }
-
-            Hash::hash_bytes(&data)
-        };
-
-        let pages = length.div_ceil(PAGE_SIZE);
-
-        let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
-        builder.done()
+impl<'a, F: Fold> Foldable<F> for DataSpace<Prove<'a>>
+where
+    Bytes<Prove<'a>>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        self.data_space.fold(builder)
     }
 }
 
-impl Foldable<MerkleTreeFold> for DataSpace<Prove<'_>> {
-    fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
-        let length = self.data_space.unrecorded_len();
-        let length_data = serialise(length as u64).expect("Serialising length should not fail");
-        let length_needed = self.data_space.need_length_in_proof();
-        let length_node = MerkleTree::make_merkle_leaf(length_data, length_needed);
-
-        let page_tree_generator = |idx| {
-            let address = PAGE_SIZE
-                .checked_mul(idx)
-                .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
-            let address_end = address.checked_add(PAGE_SIZE).expect("Address overflow");
-            let address_range = address..address_end;
-
-            let accessed = self.data_space.was_accessed(address_range.clone());
-            let data = self.data_space.source.data_space[address_range].to_vec();
-            MerkleTree::make_merkle_leaf(data, accessed)
-        };
-
-        let pages = length.div_ceil(PAGE_SIZE);
-
-        let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(
-            pages,
-            NODE_ARITY,
-            &page_tree_generator,
-        ));
-        builder.done()
-    }
-}
-
-impl Foldable<PartialHashFold<'_>> for DataSpace<Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
-        if self.data_space.is_completely_absent() {
-            return builder.previous();
-        }
-
-        // The length must be present if the space is not completely absent. Otherwise we can't
-        // properly construct the partial Merkle tree and therefore obtain the final hash.
-        let Some(len) = self.data_space.length.clone().to_present() else {
-            return PartialHash::InvalidProof;
-        };
-        let length_hash = Hash::hash_encodable(len as u64).expect("Hashing length should not fail");
-
-        let page_hash_generator = |idx| {
-            let address = PAGE_SIZE
-                .checked_mul(idx)
-                .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
-
-            let range = address..address + PAGE_SIZE;
-            let page = self.data_space.data.continuous_defined_range(range.clone());
-
-            match page {
-                None => {
-                    if self.data_space.data.is_any_defined(range) {
-                        // This means there are undefined and defined ranges in this page.
-                        // That's not allowed as pages must be either fully present or fully
-                        // absent.
-                        return PartialHash::InvalidProof;
-                    }
-
-                    PartialHash::Previous
-                }
-
-                Some(chunks) => {
-                    let mut hasher = Hasher::default();
-
-                    for chunk in chunks {
-                        hasher.update(chunk);
-                    }
-
-                    PartialHash::Present(hasher.to_hash())
-                }
-            }
-        };
-
-        let mut builder = builder.into_node_fold();
-        builder.add(&PartialHash::Present(length_hash));
-        builder.add(&IndexableSeqAsTree::new(
-            len.div_ceil(PAGE_SIZE),
-            NODE_ARITY,
-            &page_hash_generator,
-        ));
-        builder.done()
+impl<F: Fold> Foldable<F> for DataSpace<Verify>
+where
+    Bytes<Verify>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        self.data_space.fold(builder)
     }
 }
 
 impl FromProof for DataSpace<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        sequence_as_tree_from_proof::<u64, Self, _>(
-            proof,
-            NODE_ARITY,
-            |length_in_bytes| {
-                let length_in_bytes = length_in_bytes.map_present(|len| len as usize);
-                let state = DataSpace {
-                    data_space: VerifyImpl {
-                        length: length_in_bytes.clone(),
-                        data: PartialVec::empty(),
-                    },
-                };
-
-                let length_in_pages = length_in_bytes.map_present(|len| len.div_ceil(PAGE_SIZE));
-                (state, length_in_pages)
-            },
-            |state, idx, proof| {
-                // The index is the page number, but we need the starting address of that page.
-                let address = PAGE_SIZE
-                    .checked_mul(idx)
-                    .expect("This should not overflow");
-
-                let result = proof.into_leaf_raw::<PAGE_SIZE>()?;
-                let result = result.map(|data| {
-                    if let Partial::Present(data) = data {
-                        let data = Vec::from(data as Box<[u8]>);
-                        state.data_space.data.define(address, data);
-                    }
-                });
-
-                Ok(result)
-            },
-        )
+        let bytes = Bytes::<Verify>::from_proof(proof)?;
+        let bytes = bytes.map(|bytes| DataSpace { data_space: bytes });
+        Ok(bytes)
     }
 }
 
@@ -473,9 +297,9 @@ enum DataSpaceTemplate {}
 impl Modal for DataSpaceTemplate {
     type Normal = memmap2::MmapMut;
 
-    type Prove<'normal> = ProveImpl<'normal>;
+    type Prove<'normal> = Bytes<Prove<'normal>>;
 
-    type Verify = VerifyImpl;
+    type Verify = Bytes<Verify>;
 }
 
 /// Mode types that implement this trait support common operations on [`DataSpace`] components
@@ -534,36 +358,19 @@ impl DataSpaceMode for Normal {
 impl DataSpaceMode for Prove<'_> {
     fn new(len: usize) -> DataSpace<Self> {
         DataSpace {
-            data_space: ProveImpl {
-                source: Source::from(DataSpace::new(len)),
-                did_access_length: Cell::new(false),
-                reads: Default::default(),
-                writes: Default::default(),
-            },
+            data_space: Bytes::new(len),
         }
     }
 
     fn len(this: &DataSpace<Self>) -> usize {
-        this.data_space.did_access_length.set(true);
-        this.data_space.unrecorded_len()
+        this.data_space.len()
     }
 
     unsafe fn read<E: Elem>(this: &DataSpace<Self>, addr: usize) -> E {
-        let addr_range = addr_range::<E>(addr);
+        let mut data = vec![0; E::STORED_SIZE.get()];
 
-        let read_range = RangeSet2::from(addr_range.clone());
-        this.data_space.reads.borrow_mut().union_with(&read_range);
-
-        let mut data = this.data_space.source.data_space[addr_range.clone()].to_vec();
-
-        // We need to overlay previously written bytes on to the source data. Without this step,
-        // writes would not be reflected in subsequent reads.
-        let prev_bytewise_writes = this.data_space.writes.defined_range(addr_range.clone());
-        for (index, bytes) in prev_bytewise_writes {
-            let data_from = &mut data[index..];
-            let len = bytes.len().min(data_from.len());
-            data_from[..len].copy_from_slice(&bytes[..len]);
-        }
+        let read_bytes = this.data_space.read(addr, &mut data);
+        assert_eq!(read_bytes, data.len());
 
         unsafe { E::read_unaligned(data.as_ptr()) }
     }
@@ -577,46 +384,29 @@ impl DataSpaceMode for Prove<'_> {
             value.write_unaligned(data.as_mut_ptr());
         }
 
-        this.data_space.writes.define(addr, data);
+        let written = this.data_space.write(addr, &data);
+        assert_eq!(written, data.len());
     }
 }
 
 impl DataSpaceMode for Verify {
     fn new(len: usize) -> DataSpace<Self> {
         DataSpace {
-            data_space: VerifyImpl {
-                length: Partial::Present(len),
-                data: PartialVec::from(vec![0u8; len]),
-            },
+            data_space: Bytes::new(len),
         }
     }
 
     fn len(this: &DataSpace<Self>) -> usize {
-        match this.data_space.length {
-            Partial::Present(len) => len,
-            Partial::Absent | Partial::Blinded(_) => {
-                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
-                unsafe { not_found() }
-            }
-        }
+        this.data_space.len()
     }
 
     unsafe fn read<E: Elem>(this: &DataSpace<Self>, addr: usize) -> E {
         let mut data = vec![0; E::STORED_SIZE.get()];
+        let read_bytes = this.data_space.read(addr, &mut data);
 
-        let Some(data_chunks) = this
-            .data_space
-            .data
-            .continuous_defined_range(addr_range::<E>(addr))
-        else {
-            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+        if read_bytes < data.len() {
+            // SAFETY: We're in Verify mode, so calling `not_found` is safe.
             unsafe { not_found() }
-        };
-
-        let mut offset = 0;
-        for page_chunk in data_chunks {
-            data[offset..][..page_chunk.len()].copy_from_slice(page_chunk);
-            offset += page_chunk.len();
         }
 
         unsafe { E::read_unaligned(data.as_ptr()) }
@@ -631,7 +421,7 @@ impl DataSpaceMode for Verify {
             value.write_unaligned(data.as_mut_ptr());
         }
 
-        this.data_space.data.define(addr, data);
+        this.data_space.write(addr, &data);
     }
 }
 
@@ -685,116 +475,15 @@ impl EncodeDataSpaceMode for Normal {
 
 impl EncodeDataSpaceMode for Prove<'_> {
     fn encode<E: Encoder>(this: &DataSpace<Self>, encoder: &mut E) -> Result<(), EncodeError> {
-        if this.data_space.writes.is_all_undefined() {
-            // If no writes were recorded, we can serialise the underlying data space as is.
-            return Normal::encode(&this.data_space.source, encoder);
-        }
-
-        // This variable keeps the index of the next item from the region that should be written.
-        let mut write_index = 0;
-
-        let full_range = 0..this.data_space.unrecorded_len();
-        for (addr, data) in this.data_space.writes.defined_range(full_range) {
-            // There are items before the current index that have not been written yet.
-            if write_index < addr {
-                let data = &this.data_space.source.data_space[write_index..addr];
-                encoder.writer().write(data)?;
-            }
-
-            encoder.writer().write(data)?;
-
-            // Make sure we expect to write the next item after the current range entry in the
-            // `PartialVec`.
-            write_index = addr.saturating_add(data.len());
-        }
-
-        // Write the remaining items from the region that were not written yet.
-        let data = &this.data_space.source.data_space[write_index..];
-        encoder.writer().write(data)?;
-
-        Ok(())
+        this.data_space.encode(encoder)
     }
-}
-
-/// [`Prove`] mode implementation for the [`DataSpace`] component
-#[derive(Clone)]
-struct ProveImpl<'normal> {
-    /// State at the start of proof generation
-    source: Source<'normal, DataSpace<Normal>>,
-
-    /// Was the length of the data space accessed?
-    did_access_length: Cell<bool>,
-
-    /// Addresses that were read
-    reads: RefCell<RangeSet2<usize>>,
-
-    /// Addresses that were written, mapped to their latest byte value
-    writes: PartialVec<u8>,
-}
-
-impl<'normal> ProveImpl<'normal> {
-    /// Get the length of the data space without recording access.
-    fn unrecorded_len(&self) -> usize {
-        self.source.len()
-    }
-
-    /// Check if the length needs to be included in the proof.
-    fn need_length_in_proof(&self) -> bool {
-        self.did_access_length.get()
-            || !self.reads.borrow().is_empty()
-            || !self.writes.is_all_undefined()
-    }
-
-    /// Check if any byte in the given address range was accessed (read or written).
-    fn was_accessed(&self, addr_range: Range<usize>) -> bool {
-        let query_range = RangeSet2::from(addr_range.clone());
-        if self.reads.borrow().intersects(&query_range) {
-            return true;
-        }
-
-        self.writes.is_any_defined(addr_range)
-    }
-}
-
-/// [`Verify`] mode implementation for the [`DataSpace`] component
-#[derive(Clone)]
-struct VerifyImpl {
-    /// Length of the data space
-    length: Partial<usize>,
-
-    /// Available data in this space
-    data: PartialVec<u8>,
-}
-
-impl VerifyImpl {
-    /// Check if the entire data space is completely absent.
-    ///
-    /// This means length and underlying pages are all absent.
-    fn is_completely_absent(&self) -> bool {
-        if let Partial::Present(_) = self.length {
-            return false;
-        }
-
-        self.data.is_all_undefined()
-    }
-}
-
-/// Generate an address range for a value of type `E` at the given address.
-fn addr_range<E: Elem>(addr: usize) -> Range<usize> {
-    // We don't specify the type of addition (e.g. wrapping or saturating) to let the compiler
-    // pick the fastest option. This will commonly be wrapping addition on modern hardware. We
-    // assert this is safe because the safety requirement for this function includes that the
-    // read is within bounds of the address space. In other words, we assume the addition won't
-    // overflow and hence the type of addition ought not matter.
-    let addr_end = addr + E::STORED_SIZE.get();
-    addr..addr_end
 }
 
 /// Arity of internal nodes in the Merkle tree that holds the pages
-const NODE_ARITY: usize = 4;
+const NODE_ARITY: usize = super::bytes::NODE_ARITY;
 
 /// Size of a page in bytes
-const PAGE_SIZE: usize = 4096;
+const PAGE_SIZE: usize = super::bytes::PAGE_SIZE;
 
 /// Bit mask to extract the offset within a page
 const OFFSET_MASK: usize = PAGE_SIZE - 1;

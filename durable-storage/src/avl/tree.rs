@@ -179,7 +179,7 @@ impl Tree {
 
             // TODO: RV-895: Dynamic creation of the `Bytes` (alias `Value`) state component may cause
             // problems with proof generation
-            let mut new_data = Value::new();
+            let mut new_data = Value::default();
             data(&mut new_data);
 
             // The key does not exist and a new `Node` shall be created.

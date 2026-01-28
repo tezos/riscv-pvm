@@ -295,11 +295,11 @@ mod tests {
         }
 
         proptest!(|(ops in vec(op_strat, 1..20))| {
-            let mut bytes_normal = Bytes::<Normal>::new();
+            let mut bytes_normal = Bytes::<Normal>::default();
             let results_normal = run_ops(&mut bytes_normal, &ops);
             let hash_normal = Hash::from_foldable(&bytes_normal);
 
-            let mut bytes_prove = Bytes::<Prove>::new();
+            let mut bytes_prove = Bytes::<Prove>::default();
             let results_prove = run_ops(&mut bytes_prove, &ops);
             prop_assert_eq!(&results_normal, &results_prove);
 
@@ -309,7 +309,7 @@ mod tests {
             let merkle_tree = MerkleTree::from_foldable(&bytes_prove);
             let merkle_proof = merkle_tree_to_compressed_merkle_tree(merkle_tree).to_proof();
 
-            let mut bytes_verify = Bytes::<Verify>::new();
+            let mut bytes_verify = Bytes::<Verify>::default();
             let results_verify = run_ops(&mut bytes_verify, &ops);
             prop_assert_eq!(results_normal, results_verify);
 

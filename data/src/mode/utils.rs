@@ -4,8 +4,11 @@
 
 //! Utilities for modal components
 
+use std::borrow::Borrow;
 use std::ops::Deref;
 use std::panic::resume_unwind;
+
+use perfect_derive::perfect_derive;
 
 use crate::components::atom::AtomMode;
 use crate::components::atom::CloneAtomMode;
@@ -51,30 +54,36 @@ use crate::components::data_space::DataSpaceMode;
 ///
 /// [`Normal`]: crate::mode::Normal
 /// [`Prove`]: crate::mode::Prove
-#[derive(Debug, Clone, derive_more::From)]
-pub enum Source<'a, T> {
-    Borrowed(#[from] &'a T),
-    Owned(#[from] Box<T>),
+#[perfect_derive(Debug, Clone)]
+pub enum Source<'a, T, R: ?Sized = T> {
+    Borrowed(&'a R),
+    Owned(Box<T>),
 }
 
-impl<T> Deref for Source<'_, T> {
-    type Target = T;
+impl<'a, T, R: ?Sized> Source<'a, T, R> {
+    /// Construct a [`Source`] that is considered owned.
+    pub fn owned(value: T) -> Self {
+        Source::Owned(Box::new(value))
+    }
+
+    /// Construct a [`Source`] that is borrowed from somewhere else.
+    pub fn borrowed(value: &'a R) -> Self {
+        Source::Borrowed(value)
+    }
+}
+
+impl<T: Borrow<R>, R: ?Sized> Deref for Source<'_, T, R> {
+    type Target = R;
 
     fn deref(&self) -> &Self::Target {
         match self {
             Source::Borrowed(value) => value,
-            Source::Owned(value) => value.as_ref(),
+            Source::Owned(value) => value.as_ref().borrow(),
         }
     }
 }
 
-impl<T> From<T> for Source<'_, T> {
-    fn from(value: T) -> Self {
-        Source::from(Box::new(value))
-    }
-}
-
-impl<T: Default> Default for Source<'_, T> {
+impl<T: Default, R: ?Sized> Default for Source<'_, T, R> {
     fn default() -> Self {
         Source::Owned(Default::default())
     }

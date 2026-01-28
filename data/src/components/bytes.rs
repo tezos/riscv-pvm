@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::ops::Range;
 
 use bincode::Encode;
+use bincode::enc::write::Writer;
 use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
@@ -25,7 +26,11 @@ use crate::hash::HashFold;
 use crate::hash::Hasher;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
+use crate::merkle_proof::Deserialiser;
+use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
+use crate::merkle_proof::Suspended;
+use crate::merkle_proof::sequence_as_tree_from_proof;
 use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
@@ -36,6 +41,7 @@ use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
+use crate::partial_vec::RangeEntry;
 use crate::serialisation::serialise;
 
 /// Byte array state component
@@ -45,9 +51,9 @@ pub struct Bytes<M: Mode> {
 }
 
 impl<M: BytesMode> Bytes<M> {
-    /// Create an empty byte array.
-    pub fn new() -> Self {
-        M::new()
+    /// Create a zero-initialised byte array of the given length.
+    pub fn new(len: usize) -> Self {
+        M::new(len)
     }
 
     /// Read from the byte array.
@@ -157,9 +163,73 @@ impl<M: BytesMode> Bytes<M> {
     }
 }
 
+impl Bytes<Normal> {
+    /// Start proof generation for this byte array.
+    pub fn start_proof(&self) -> Bytes<Prove<'_>> {
+        Bytes::from_raw_source(&self.bytes)
+    }
+}
+
+impl<'a> Bytes<Prove<'a>> {
+    /// Construct the state component in [`Prove`] mode given the source data representing the state
+    /// at the beginning of the proof recording.
+    pub fn from_raw_source(source: &'a [u8]) -> Self {
+        Bytes {
+            bytes: ProveImpl {
+                previous: Source::borrowed(source),
+                length: source.len(),
+                did_access_length: Cell::new(false),
+                reads: RefCell::new(RangeSet2::empty()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+}
+
+impl Bytes<Verify> {
+    /// Construct a [`Bytes<Verify>`] which is absent apart from its length.
+    pub(crate) fn absent(len: usize) -> Self {
+        Bytes {
+            bytes: VerifyImpl {
+                length: Partial::Present(len),
+                data: PartialVec::empty(),
+            },
+        }
+    }
+
+    /// Zero-initialise all undefined bytes in the given range.
+    pub(crate) fn zero_init_range(&mut self, range: Range<usize>) {
+        let mut offset = range.start;
+        let gaps = self
+            .bytes
+            .data
+            .range(range)
+            .filter_map(|entry| {
+                let current_offset = offset;
+                offset += entry.width();
+
+                match entry {
+                    RangeEntry::Undefined { length } => Some((current_offset, length)),
+                    RangeEntry::Defined { .. } => None,
+                }
+            })
+            .collect::<Vec<_>>(); // Need to collect to avoid lifetime issues
+
+        for (gap_addr, gap_zeros) in gaps {
+            self.bytes.data.define(gap_addr, vec![0u8; gap_zeros]);
+        }
+    }
+}
+
+impl Borrow<[u8]> for Bytes<Normal> {
+    fn borrow(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl<M: BytesMode> Default for Bytes<M> {
     fn default() -> Self {
-        M::new()
+        M::new(0)
     }
 }
 
@@ -184,7 +254,7 @@ impl Foldable<HashFold> for Bytes<Prove<'_>> {
             let previous_range =
                 addr_range.start.min(previous_len)..addr_range.end.min(previous_len);
 
-            let mut data = self.bytes.previous.bytes[previous_range].to_vec();
+            let mut data = self.bytes.previous[previous_range].to_vec();
             data.resize(addr_range.len(), 0);
 
             for (index, chunk) in self.bytes.writes.defined_range(addr_range) {
@@ -208,7 +278,7 @@ impl Foldable<MerkleTreeFold> for Bytes<Prove<'_>> {
 
         let get_item = |range: Range<usize>| {
             let accessed = self.bytes.was_accessed(range.clone());
-            let data = self.bytes.previous.bytes[range].to_vec();
+            let data = self.bytes.previous[range].to_vec();
             MerkleTree::make_merkle_leaf(data, accessed)
         };
 
@@ -257,6 +327,45 @@ impl Foldable<PartialHashFold<'_>> for Bytes<Verify> {
         };
 
         self.fold_generic(builder, length, length_node, get_item)
+    }
+}
+
+impl FromProof for Bytes<Verify> {
+    fn from_proof<Proof: Deserialiser>(
+        proof: Proof,
+    ) -> Result<<Proof as Deserialiser>::Suspended<Self>, <Proof as Deserialiser>::Error> {
+        sequence_as_tree_from_proof::<u64, Self, _>(
+            proof,
+            NODE_ARITY,
+            |length| {
+                let length_in_bytes = length.map_present(|len| len as usize);
+                let state = Bytes {
+                    bytes: VerifyImpl {
+                        length: length_in_bytes.clone(),
+                        data: PartialVec::empty(),
+                    },
+                };
+
+                let length_in_pages = length_in_bytes.map_present(|len| len.div_ceil(PAGE_SIZE));
+                (state, length_in_pages)
+            },
+            |state, idx, proof| {
+                // The index is the page number, but we need the starting address of that page.
+                let address = PAGE_SIZE
+                    .checked_mul(idx)
+                    .expect("This should not overflow");
+
+                let result = proof.into_leaf_raw::<PAGE_SIZE>()?;
+                let result = result.map(|data| {
+                    if let Partial::Present(data) = data {
+                        let data = Vec::from(data as Box<[u8]>);
+                        state.bytes.data.define(address, data);
+                    }
+                });
+
+                Ok(result)
+            },
+        )
     }
 }
 
@@ -358,7 +467,7 @@ impl Modal for BytesTemplate {
 /// See [`Bytes`] for a more convenient interface.
 pub trait BytesMode: Mode {
     /// See [`Bytes::new`].
-    fn new() -> Bytes<Self>;
+    fn new(len: usize) -> Bytes<Self>;
 
     /// See [`Bytes::read`].
     fn read(this: &Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize;
@@ -374,9 +483,9 @@ pub trait BytesMode: Mode {
 }
 
 impl BytesMode for Normal {
-    fn new() -> Bytes<Self> {
+    fn new(len: usize) -> Bytes<Self> {
         Bytes {
-            bytes: bytes::BytesMut::new(),
+            bytes: bytes::BytesMut::zeroed(len),
         }
     }
 
@@ -468,12 +577,48 @@ impl EncodeBytesMode for Normal {
     }
 }
 
+impl EncodeBytesMode for Prove<'_> {
+    fn encode<E: bincode::enc::Encoder>(
+        this: &Bytes<Self>,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        if this.bytes.writes.is_all_undefined() {
+            // If no writes were recorded, we can serialise the underlying byte array as is.
+            return this.bytes.previous.encode(encoder);
+        }
+
+        // This variable keeps the index of the next item from the region that should be written.
+        let mut write_index = 0;
+
+        let full_range = 0..this.bytes.unrecorded_len();
+        for (addr, data) in this.bytes.writes.defined_range(full_range) {
+            // There are items before the current index that have not been written yet.
+            if write_index < addr {
+                let data = &this.bytes.previous[write_index..addr];
+                encoder.writer().write(data)?;
+            }
+
+            encoder.writer().write(data)?;
+
+            // Make sure we expect to write the next item after the current range entry in the
+            // `PartialVec`.
+            write_index = addr.saturating_add(data.len());
+        }
+
+        // Write the remaining items from the region that were not written yet.
+        let data = &this.bytes.previous[write_index..];
+        encoder.writer().write(data)?;
+
+        Ok(())
+    }
+}
+
 impl BytesMode for Prove<'_> {
-    fn new() -> Bytes<Self> {
+    fn new(len: usize) -> Bytes<Self> {
         Bytes {
             bytes: ProveImpl {
-                previous: Source::default(),
-                length: 0,
+                previous: Source::owned(Bytes::new(len)),
+                length: len,
                 did_access_length: Cell::new(false),
                 reads: RefCell::new(RangeSet2::empty()),
                 writes: PartialVec::default(),
@@ -499,11 +644,20 @@ impl BytesMode for Prove<'_> {
             .union_with(&RangeSet2::from(range.clone()));
 
         let buffer = &mut buffer[..len];
-        let from_previous = this.bytes.previous.read(range.start, buffer);
+
+        // We need to figure out which bytes are available in the previous block.
+        let previous_len = this.bytes.previous.len();
+        let from_previous_start = range.start.min(previous_len);
+        let from_previous_end = range.end.min(previous_len);
+        let from_previous_len = from_previous_end - from_previous_start;
+
+        // The bytes available in the previous block will be a non-strict prefix of the range.
+        buffer[..from_previous_len]
+            .copy_from_slice(&this.bytes.previous[from_previous_start..from_previous_end]);
 
         // Bytes beyond the previous length are implicitly zero, if they are not present in the
         // `writes` vector.
-        buffer[from_previous..].fill(0);
+        buffer[from_previous_len..].fill(0);
 
         for (offset, bytes) in this.bytes.writes.defined_range(range.clone()) {
             buffer[offset..][..bytes.len()].copy_from_slice(bytes);
@@ -548,11 +702,11 @@ impl BytesMode for Prove<'_> {
 }
 
 impl BytesMode for Verify {
-    fn new() -> Bytes<Self> {
+    fn new(len: usize) -> Bytes<Self> {
         Bytes {
             bytes: VerifyImpl {
-                length: Partial::Present(0),
-                data: PartialVec::empty(),
+                length: Partial::Present(len),
+                data: PartialVec::from(vec![0u8; len]),
             },
         }
     }
@@ -635,7 +789,7 @@ impl BytesMode for Verify {
 /// [`crate::mode::Prove`] mode implementation for the [`Bytes`] component
 #[perfect_derive(Clone)]
 struct ProveImpl<'normal> {
-    previous: Source<'normal, Bytes<Normal>>,
+    previous: Source<'normal, Bytes<Normal>, [u8]>,
     length: usize,
     did_access_length: Cell<bool>,
     reads: RefCell<RangeSet2<usize>>,
@@ -693,10 +847,10 @@ fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {
 }
 
 /// Arity of internal nodes in the Merkle tree that holds the pages
-const NODE_ARITY: usize = 4;
+pub(crate) const NODE_ARITY: usize = 4;
 
 /// Size of a page in bytes
-const PAGE_SIZE: usize = 4096;
+pub(crate) const PAGE_SIZE: usize = 4096;
 
 #[cfg(test)]
 mod tests;

@@ -14,7 +14,7 @@ use crate::mode_test;
 
 // Bytes should be empty after creation
 mode_test!(new_is_empty, F, {
-    let bytes = Bytes::<F>::new();
+    let bytes = Bytes::<F>::default();
     assert_eq!(bytes.len(), 0);
     assert!(bytes.is_empty());
 });
@@ -22,7 +22,7 @@ mode_test!(new_is_empty, F, {
 // Reading from empty bytes always returns 0, regardless of offset or buffer size
 mode_test!(read_from_empty_bytes_returns_zero, F, {
     proptest!(|(offset: usize, buffer_size in 0usize..50)| {
-        let bytes = Bytes::<F>::new();
+        let bytes = Bytes::<F>::default();
         let mut buffer = vec![0u8; buffer_size];
         prop_assert_eq!(bytes.read(offset, &mut buffer), 0);
     });
@@ -34,7 +34,7 @@ mode_test!(read_past_end_returns_zero, F, {
         // Out of bounds offset
         let offset = size.saturating_add(extra);
 
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         let mut buffer = vec![0u8; buffer_size];
@@ -45,7 +45,7 @@ mode_test!(read_past_end_returns_zero, F, {
 // Read doesn't return more bytes than are available
 mode_test!(read_returns_correct_byte_count, F, {
     proptest!(|(size in 0usize..100, offset: usize, buffer_size in 0usize..50)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         let mut buffer = vec![0u8; buffer_size];
@@ -58,7 +58,7 @@ mode_test!(read_returns_correct_byte_count, F, {
 // Writing to empty bytes always returns 0, regardless of offset or data
 mode_test!(write_to_empty_bytes_returns_zero, F, {
     proptest!(|(offset: usize, data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         prop_assert_eq!(bytes.write(offset, &data), 0);
         prop_assert!(bytes.is_empty());
         prop_assert_eq!(bytes.read(0, &mut vec![0u8; data.len()]), 0);
@@ -69,7 +69,7 @@ mode_test!(write_to_empty_bytes_returns_zero, F, {
 mode_test!(write_past_end_returns_zero, F, {
     proptest!(|(size in 0usize..100, extra: usize, data: Vec<u8>)| {
         let offset = size.saturating_add(extra);
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
 
         bytes.resize(size);
 
@@ -85,7 +85,7 @@ mode_test!(write_past_end_returns_zero, F, {
 // Write doesn't update more than there are bytes to be updated
 mode_test!(write_returns_correct_byte_count, F, {
     proptest!(|(size in 0usize..100, offset in 0usize..200, data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         let written = bytes.write(offset, &data);
@@ -97,7 +97,7 @@ mode_test!(write_returns_correct_byte_count, F, {
 // Write followed by read at same offset returns the written data
 mode_test!(write_read_roundtrip, F, {
     proptest!(|(size in 0usize..100, start in 0usize..100, data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         let written = bytes.write(start, &data);
@@ -120,7 +120,7 @@ mode_test!(overlapping_writes_last_write_wins, F, {
     let writes_strat = vec((0usize..100, vec(0u8..=255, 0..10)), 0..20);
 
     proptest!(|(size in 1usize..50, writes in writes_strat)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         // Track expected state by applying same writes to a reference buffer
@@ -147,7 +147,7 @@ mode_test!(overlapping_writes_last_write_wins, F, {
 // Resize always results in len() == new_size
 mode_test!(resize_sets_correct_length, F, {
     proptest!(|(initial_size in 0usize..100, new_size in 0usize..100)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(initial_size);
         prop_assert_eq!(bytes.len(), initial_size);
         prop_assert_eq!(bytes.is_empty(), initial_size == 0);
@@ -161,7 +161,7 @@ mode_test!(resize_sets_correct_length, F, {
 // Resize up fills new space with zeros
 mode_test!(resize_up_fills_with_zeros, F, {
     proptest!(|(initial_size in 0usize..50, grow_by in 1usize..50)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(initial_size);
 
         // Initial resize should yield zeros
@@ -183,7 +183,7 @@ mode_test!(resize_up_fills_with_zeros, F, {
 // Resize down preserves prefix data
 mode_test!(resize_down_preserves_prefix, F, {
     proptest!(|(initial_size in 10usize..50, shrink_to in 0usize..10, data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(initial_size);
 
         let written = bytes.write(0, &data);
@@ -206,7 +206,7 @@ mode_test!(resize_up_preserves_written_data, F, {
         data: Vec<u8>,
         grow_by in 1usize..20
     )| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(initial_size);
 
         let written = bytes.write(0, &data);
@@ -232,7 +232,7 @@ mode_test!(resize_down_then_up_clears_truncated_region, F, {
     )| {
         let grow_to = shrink_to + grow_extra;
 
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(initial_size);
         bytes.write(0, &data);
 
@@ -261,7 +261,7 @@ mode_test!(resize_down_then_up_clears_truncated_region, F, {
 // Resize to same size is idempotent (no-op)
 mode_test!(resize_to_same_size_is_idempotent, F, {
     proptest!(|(size in 0usize..50, data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
         bytes.write(0, &data);
 
@@ -281,7 +281,7 @@ mode_test!(resize_to_same_size_is_idempotent, F, {
 // Zero-length operations are always safe and return 0
 mode_test!(zero_length_operations, F, {
     proptest!(|(size in 0usize..50, offset: usize)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
 
         // Empty writes and reads should succeed regardless of offset validity
@@ -296,7 +296,7 @@ mode_test!(zero_length_operations, F, {
 // Resize to zero clears all data
 mode_test!(resize_to_zero_clears_data, F, {
     proptest!(|(size in 0usize..50, data in vec(0u8..=255, 1..20))| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.resize(size);
         let written_len = bytes.write(0, &data);
 
@@ -325,7 +325,7 @@ mode_test!(resize_to_zero_clears_data, F, {
 // Set overwrites entire contents with new data
 mode_test!(set_overwrites_contents, F, {
     proptest!(|(initial_data: Vec<u8>, new_data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
 
         // Set initial data
         bytes.set(&initial_data);
@@ -350,7 +350,7 @@ mode_test!(set_overwrites_contents, F, {
 // Append adds data to the end of the byte array
 mode_test!(append_adds_to_end, F, {
     proptest!(|(initial_data: Vec<u8>, append_data: Vec<u8>)| {
-        let mut bytes = Bytes::<F>::new();
+        let mut bytes = Bytes::<F>::default();
         bytes.set(&initial_data);
 
         let appended = bytes.append(&append_data);
