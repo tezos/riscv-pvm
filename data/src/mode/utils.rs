@@ -16,6 +16,8 @@ use crate::components::bytes::BytesMode;
 use crate::components::bytes::CloneBytesMode;
 use crate::components::data_space::CloneDataSpaceMode;
 use crate::components::data_space::DataSpaceMode;
+use crate::components::vector::CloneVectorMode;
+use crate::components::vector::VectorMode;
 
 /// Source for a state component, either borrowed or owned
 ///
@@ -161,7 +163,9 @@ trait_set::trait_set! {
         + DataSpaceMode
         + CloneDataSpaceMode
         + BytesMode
-        + CloneBytesMode;
+        + CloneBytesMode
+        + VectorMode
+        + CloneVectorMode;
 }
 
 /// Generate a test against all modes.
