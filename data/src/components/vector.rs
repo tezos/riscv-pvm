@@ -6,6 +6,8 @@
 //!
 //! See [`Vector`] for more details.
 
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::ops::Index;
@@ -13,6 +15,7 @@ use std::ops::IndexMut;
 
 use bincode::Encode;
 use perfect_derive::perfect_derive;
+use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
 use crate::foldable::Fold;
@@ -21,9 +24,15 @@ use crate::foldable::NodeFold;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
+use crate::merkle_proof::proof_tree::ForceMinimumPresence;
+use crate::merkle_proof::proof_tree::MerkleProofFold;
+use crate::merkle_proof::proof_tree::MinimumPresence;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Provable;
+use crate::mode::Prove;
+use crate::serialisation::serialise;
 
 /// Vector state component
 ///
@@ -98,6 +107,78 @@ impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Normal> {
     }
 }
 
+impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Prove<'_>> {
+    fn fold(&self, builder: HashFold) -> Hash {
+        let mut node = builder.into_node_fold();
+
+        let length = self.vector.unrecorded_len();
+        let length_node =
+            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        node.add(&length_node);
+
+        let get_item = |idx: usize| self.vector.unrecorded_index(idx);
+        let seq_as_tree = IndexableSeqAsTree::new(length, NODE_ARITY, &get_item);
+        node.add(&seq_as_tree);
+
+        node.done()
+    }
+}
+
+impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Vector<T, Prove<'_>> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
+        // generation. This means we need to use `previous` state for the length and data.
+
+        let mut node = builder.into_node_fold();
+
+        let length = self.vector.previous.len();
+        let length_data = serialise(length as u64).expect("Serialising length should not fail");
+        let is_length_needed = self.vector.need_length_in_proof();
+        let length_constraint = if is_length_needed {
+            MinimumPresence::Present
+        } else {
+            MinimumPresence::MayOmit
+        };
+        let length_node = MerkleProofFold::new_leaf(length_constraint, length_data);
+        node.add(&length_node);
+
+        let get_item = |idx: usize| ForceMinimumPresence {
+            min_constraint: if self.vector.has_accessed(idx) {
+                MinimumPresence::MayBlind
+            } else {
+                MinimumPresence::MayOmit
+            },
+            inner: &self.vector.previous[idx],
+        };
+        let seq_as_tree = IndexableSeqAsTree::new(length, NODE_ARITY, &get_item);
+        node.add(&seq_as_tree);
+
+        node.done()
+    }
+}
+
+impl<'normal, T: Provable<'normal>> Provable<'normal> for Vector<T, Normal> {
+    type Prover = Vector<T::Prover, Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        let previous = self
+            .vector
+            .iter()
+            .map(Provable::start_proof)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Vector {
+            vector: ProveImpl {
+                active_previous: previous.len(),
+                previous,
+                accessed_indices: Default::default(),
+                appended: Vec::new(),
+                read_length: Cell::new(false),
+            },
+        }
+    }
+}
+
 impl<T: Clone, M: CloneVectorMode> Clone for Vector<T, M> {
     fn clone(&self) -> Self {
         M::clone(self)
@@ -121,7 +202,7 @@ struct VectorTemplate<T: ?Sized>(PhantomData<T>, Infallible);
 impl<T> Modal for VectorTemplate<T> {
     type Normal = Vec<T>;
 
-    type Prove<'normal> = ProveImpl;
+    type Prove<'normal> = ProveImpl<T>;
 
     type Verify = VerifyImpl;
 }
@@ -168,6 +249,72 @@ impl VectorMode for Normal {
     }
 }
 
+impl VectorMode for Prove<'_> {
+    fn new<T>(values: Vec<T>) -> Vector<T, Self> {
+        Vector {
+            vector: ProveImpl {
+                active_previous: values.len(),
+                previous: values.into_boxed_slice(),
+                accessed_indices: Default::default(),
+                appended: Vec::new(),
+                read_length: Cell::new(false),
+            },
+        }
+    }
+
+    fn index<T>(this: &Vector<T, Self>, idx: usize) -> &T {
+        this.vector.record_access(idx);
+
+        if idx < this.vector.active_previous {
+            &this.vector.previous[idx]
+        } else {
+            &this.vector.appended[idx - this.vector.active_previous]
+        }
+    }
+
+    fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
+        this.vector.record_access(idx);
+
+        if idx < this.vector.active_previous {
+            &mut this.vector.previous[idx]
+        } else {
+            &mut this.vector.appended[idx - this.vector.active_previous]
+        }
+    }
+
+    fn len<T>(this: &Vector<T, Self>) -> usize {
+        this.vector.read_length.set(true);
+        this.vector.unrecorded_len()
+    }
+
+    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, mut value: impl FnMut() -> T) {
+        let current_len = this.len();
+
+        this.vector.record_resize_boundary(new_len);
+
+        // Increasing the size simply requires us to add items to the end, i.e. add them to `extra`.
+        if new_len > current_len {
+            let growth = new_len - current_len;
+            this.vector.appended.reserve(growth);
+            this.vector.appended.extend((0..growth).map(|_| value()));
+            return;
+        }
+
+        // When not shrinking below the number of active previous items, we can truncate `extra`.
+        if new_len >= this.vector.active_previous {
+            this.vector
+                .appended
+                .truncate(new_len - this.vector.active_previous);
+            return;
+        }
+
+        // When shrinking below the number of active previous items, we need to clear `extra` as
+        // those are now invalid, and shrink `active_previous` to reflect the new size.
+        this.vector.active_previous = new_len;
+        this.vector.appended.clear();
+    }
+}
+
 /// Mode types that implement this trait support cloning of the [`Vector`] component.
 pub trait CloneVectorMode: Mode {
     /// Clones the given [`Vector`] component.
@@ -178,6 +325,14 @@ pub trait CloneVectorMode: Mode {
 }
 
 impl CloneVectorMode for Normal {
+    fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
+        Vector {
+            vector: this.vector.clone(),
+        }
+    }
+}
+
+impl CloneVectorMode for Prove<'_> {
     fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
         Vector {
             vector: this.vector.clone(),
@@ -203,8 +358,94 @@ impl EncodeVectorMode for Normal {
     }
 }
 
+impl EncodeVectorMode for Prove<'_> {
+    fn encode<T: Encode, E: bincode::enc::Encoder>(
+        vector: &Vector<T, Self>,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        let len = vector.vector.unrecorded_len();
+        len.encode(encoder)?;
+
+        for idx in 0..len {
+            vector.vector.unrecorded_index(idx).encode(encoder)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// [`crate::mode::Prove`] mode implementation for the [`Vector`] component
-struct ProveImpl {}
+#[perfect_derive(Clone)]
+struct ProveImpl<T> {
+    /// Items at the time of starting the proof generation
+    ///
+    /// This collection must not be resized, because it is important to use as-is in the Merkle tree
+    /// generation.
+    previous: Box<[T]>,
+
+    /// Number of active items from the `previous` field
+    active_previous: usize,
+
+    /// Indices that were accessed during the proof generation
+    accessed_indices: RefCell<RangeSet2<usize>>,
+
+    /// New items that were added after the proof generation started, or after a resize
+    ///
+    /// The first extra item is located at index `active_previous`.
+    appended: Vec<T>,
+
+    /// Was the length requested?
+    ///
+    /// This field is used to determine whether the node in the Merkle tree that holds the length
+    /// needs to be present or not. This cell may contain `false` but the length node might still be
+    /// present in the Merkle tree - there are other means to influence the length node presence.
+    read_length: Cell<bool>,
+}
+
+impl<T> ProveImpl<T> {
+    /// Returns a reference to the item at index `idx` without recording it as accessed.
+    fn unrecorded_index(&self, idx: usize) -> &T {
+        if idx < self.active_previous {
+            &self.previous[idx]
+        } else {
+            &self.appended[idx - self.active_previous]
+        }
+    }
+
+    /// Returns the length of the vector without recording any indices as accessed.
+    fn unrecorded_len(&self) -> usize {
+        self.appended.len().saturating_add(self.active_previous)
+    }
+
+    /// Records that the item at index `idx` has been accessed.
+    fn record_access(&self, idx: usize) {
+        let range = idx..idx.checked_add(1).expect("Index must not be max");
+        let range = RangeSet2::from(range);
+        self.accessed_indices.borrow_mut().union_with(&range);
+    }
+
+    /// Records that the vector has been resized to `new_len`, updating the accessed indices.
+    fn record_resize_boundary(&self, new_len: usize) {
+        let prev_len = self.unrecorded_len();
+        let boundary_pos = new_len.min(prev_len);
+
+        if boundary_pos == 0 || prev_len == new_len {
+            return;
+        }
+
+        self.record_access(boundary_pos - 1)
+    }
+
+    /// Returns `true` if the item at index `idx` has been accessed.
+    fn has_accessed(&self, idx: usize) -> bool {
+        self.accessed_indices.borrow().contains(&idx)
+    }
+
+    /// Returns `true` if the length of the vector needs to be included in the proof.
+    fn need_length_in_proof(&self) -> bool {
+        self.read_length.get() || !self.accessed_indices.borrow().is_empty()
+    }
+}
 
 /// [`crate::mode::Verify`] mode implementation for the [`Vector`] component
 struct VerifyImpl {}
