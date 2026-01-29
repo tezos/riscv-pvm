@@ -8,11 +8,17 @@ NUM_ITERS=20
 # Git ref to checkout
 ref=""
 
+# Whether to submit metrics to datadog
+submit_dd_args=()
+
 # Parse command line arguments
-while getopts "r:" OPTION; do
+while getopts "r:s" OPTION; do
   case "$OPTION" in
   r)
     ref="$OPTARG"
+    ;;
+  s)
+    submit_dd_args+=("--submit-dd-metric")
     ;;
   *)
     echo "Invalid parameter"
@@ -60,7 +66,7 @@ for i in $(seq 1 $NUM_ITERS); do
 done
 
 # Collect results and display them
-nix develop --command cargo run --quiet --manifest-path kernels/jstz/Cargo.toml --bin inbox-bench -- results --collapsible-results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}"
+nix develop --command cargo run --quiet --manifest-path kernels/jstz/Cargo.toml --bin inbox-bench -- results --collapsible-results --inbox-file "$inbox_file" --expected-transfers "$NUM_TXS" "${result_args[@]}" "${submit_dd_args[@]}"
 
 # Clean up
 rm -rf "$inbox_file" "$dir" "$result_dir"
