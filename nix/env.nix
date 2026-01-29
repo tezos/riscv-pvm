@@ -5,7 +5,6 @@
   taplo,
   cargo-audit,
   cargo-nextest,
-  ocaml-ng,
   cacert,
   curl,
   libclang,
@@ -30,9 +29,6 @@ mkShell {
     taplo
     cargo-audit
     cargo-nextest
-
-    # Make sure there is an OCaml compiler available
-    ocaml-ng.ocamlPackages_5_2.ocaml
 
     # These are needed for downloads and stuff
     cacert
