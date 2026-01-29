@@ -250,6 +250,27 @@ impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
     }
 }
 
+/// Elevate the minimum presence requirement of a Merkle proof tree `Foldable`
+///
+/// When `T` gets folded using a `MerkleProofFold`, the result is a proof tree with a presence
+/// constraint attached to it. This struct allows you to impose a minimum on the presence
+/// constraint.
+pub struct ForceMinimumPresence<T> {
+    /// Minimum presence requirement for the proof tree resulting from folding `T`
+    pub min_constraint: MinimumPresence,
+
+    /// Subject that gets folded into a proof tree with the given minimum presence requirement
+    pub inner: T,
+}
+
+impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPresence<T> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        let mut proof = self.inner.fold(builder);
+        proof.constraint = self.min_constraint.max(proof.constraint);
+        proof
+    }
+}
+
 /// [`Fold`] for creating a [`MerkleProof`] tree from a foldable structure
 pub struct MerkleProofFold {
     _private: (),
