@@ -4,6 +4,8 @@
 
 //! Tests for [`PartialVec`]
 
+use std::collections::BTreeMap;
+
 use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prelude::Strategy;
@@ -43,6 +45,86 @@ proptest! {
             assert_eq!(values, chunk);
 
             added_so_far += chunk_len;
+        }
+    }
+
+    /// `get` returns the correct value for any index in defined ranges.
+    #[test]
+    fn get_returns_defined_data(
+        entries in vec((..100usize, data_vec()), ..16),
+        query_indices in vec(..200usize, ..32)
+    ) {
+        let mut vec = PartialVec::empty();
+        let mut reference = BTreeMap::new();
+
+        // Build the PartialVec and a reference map (later writes overwrite earlier ones)
+        for (offset, data) in entries {
+            for (i, &val) in data.iter().enumerate() {
+                reference.insert(offset.saturating_add(i), val);
+            }
+
+            vec.define(offset, data);
+        }
+
+        // Getting should match the reference for all queried indices
+        for query_idx in query_indices {
+            assert_eq!(vec.get(query_idx), reference.get(&query_idx));
+            assert_eq!(vec.get_mut(query_idx), reference.get_mut(&query_idx));
+        }
+    }
+
+    /// `get_mut` allows modifying values and subsequent `get` reflects the change.
+    #[test]
+    fn get_mut_modifies_data(
+        offset in 0usize..1000,
+        data in vec(any::<u8>(), 1..64),
+        local_idx in any::<proptest::sample::Index>(),
+        new_value in any::<u8>()
+    ) {
+        let mut vec = PartialVec::empty();
+        vec.define(offset, data.clone());
+
+        let local_idx = local_idx.index(data.len());
+        let idx = offset + local_idx;
+
+        // Modify via get_mut
+        if let Some(elem) = vec.get_mut(idx) {
+            *elem = new_value;
+        }
+
+        // Verify the modification
+        assert_eq!(vec.get(idx), Some(&new_value));
+    }
+
+    /// `get` and `get_mut` return `None` for undefined indices.
+    #[test]
+    fn get_returns_none_for_undefined_indices(
+        entries in vec((0usize..200, vec(any::<u8>(), 0..64)), 0..32),
+        query_indices in vec(0usize..300, 1..64)
+    ) {
+        let mut vec = PartialVec::empty();
+        let mut reference = BTreeMap::new();
+
+        // Build the PartialVec and a reference map (later writes overwrite earlier ones)
+        for (offset, data) in entries {
+            for (i, &val) in data.iter().enumerate() {
+                reference.insert(offset + i, val);
+            }
+
+            vec.define(offset, data);
+        }
+
+        let undefined_indices = query_indices
+            .into_iter()
+            .filter(|idx| !reference.contains_key(idx))
+            .collect::<Vec<_>>();
+
+        // Ensure the test run exercises the undefined-index path.
+        proptest::prop_assume!(!undefined_indices.is_empty());
+
+        for idx in undefined_indices {
+            assert_eq!(vec.get(idx), None);
+            assert_eq!(vec.get_mut(idx), None);
         }
     }
 }

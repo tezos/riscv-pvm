@@ -159,6 +159,39 @@ impl<T> PartialVec<T> {
         self.entries[idx + 1].start
     }
 
+    /// Locate the entry index that contains the provided vector index.
+    fn find_entry_idx(&self, idx: usize) -> Option<usize> {
+        self.entries
+            .binary_search_by(|entry| {
+                if entry.end() <= idx {
+                    std::cmp::Ordering::Less
+                } else if entry.start > idx {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .ok()
+    }
+
+    /// Retrieve a reference to the element at the given index, if defined.
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        let entry_idx = self.find_entry_idx(idx)?;
+        let entry = &self.entries[entry_idx];
+        // Entry was found - therefore `entry.start <= idx`
+        let local_idx = idx - entry.start;
+        entry.data.get(local_idx)
+    }
+
+    /// Retrieve a mutable reference to the element at the given index, if defined.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        let entry_idx = self.find_entry_idx(idx)?;
+        let entry = &mut self.entries[entry_idx];
+        // Entry was found - therefore `entry.start <= idx`
+        let local_idx = idx - entry.start;
+        entry.data.get_mut(local_idx)
+    }
+
     /// Define a range within the partial vector.
     ///
     /// Existing data is overwritten if it overlaps the newly defined range.
