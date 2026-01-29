@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -38,6 +39,15 @@ impl<T: CloneState, const N: usize> CloneState for Box<[T; N]> {
         };
 
         this
+    }
+}
+
+impl<T: CloneState> CloneState for Box<[T]> {
+    fn clone_state(&self) -> Self {
+        self.as_ref()
+            .iter()
+            .map(CloneState::clone_state)
+            .collect::<Box<[_]>>()
     }
 }
 
