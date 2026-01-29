@@ -31,13 +31,11 @@ use crate::hash::Hasher;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
-use crate::merkle_proof::DeserialiserError;
-use crate::merkle_proof::DeserialiserNode;
 use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
 use crate::merkle_proof::SuspendedResult;
-use crate::merkle_proof::descend_tree;
+use crate::merkle_proof::sequence_as_tree_from_proof;
 use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
@@ -410,37 +408,23 @@ impl Foldable<PartialHashFold<'_>> for DataSpace<Verify> {
 
 impl FromProof for DataSpace<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let proof = proof.into_node()?;
+        sequence_as_tree_from_proof::<u64, Self, _>(
+            proof,
+            NODE_ARITY,
+            |length_in_bytes| {
+                let length_in_bytes = length_in_bytes.map_present(|len| len as usize);
+                let state = DataSpace {
+                    data_space: VerifyImpl {
+                        length: length_in_bytes.clone(),
+                        data: PartialVec::empty(),
+                    },
+                };
 
-        let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf::<u64>())?;
-        let length = length.map_present(|len| len as usize);
-
-        let (proof, data) = proof.next_branch_with(|proof| {
-            // When the length node is present, we can properly parse all pages.
-            // But when the length node is not present, we cannot parse any pages. This needs to be
-            // validated. In other words, the node for the pages must be blinded or absent.
-            let Partial::Present(len) = length else {
-                // XXX: We can't pick whether this is a node or leaf given we don't know the
-                // length. However, absent or blinded leaves are encoded the same way as nodes.
-                // In the case where the node is present (which is an error in here), we would
-                // trigger an unexpected leaf error instead of the more appropriate error below.
-                let proof = proof.into_node()?;
-
-                // When the node for the pages is present, that's a problem. There may be pages and
-                // we don't know how to extract them because we don't know how many there are.
-                if let Partial::Present(_) = proof.presence() {
-                    return Err(DeserialiserError::custom(
-                        BadProofError::LengthAbsentButPagesPresent,
-                    ));
-                }
-
-                return proof.done(PartialVec::empty());
-            };
-
-            let mut partial_data = PartialVec::empty();
-
-            let mut for_leaf = |idx, proof: D| {
-                // The index is the page number, but the page ID is the starting address.
+                let length_in_pages = length_in_bytes.map_present(|len| len.div_ceil(PAGE_SIZE));
+                (state, length_in_pages)
+            },
+            |state, idx, proof| {
+                // The index is the page number, but we need the starting address of that page.
                 let address = PAGE_SIZE
                     .checked_mul(idx)
                     .expect("This should not overflow");
@@ -449,22 +433,13 @@ impl FromProof for DataSpace<Verify> {
                 let result = result.map(|data| {
                     if let Partial::Present(data) = data {
                         let data = Vec::from(data as Box<[u8]>);
-                        partial_data.define(address, data);
+                        state.data_space.data.define(address, data);
                     }
                 });
 
                 Ok(result)
-            };
-
-            let num_leaves = len.div_ceil(PAGE_SIZE);
-            let result = descend_tree(proof, NODE_ARITY, 0, num_leaves, &mut for_leaf)?;
-
-            Ok(result.map(|()| partial_data))
-        })?;
-
-        proof.done(DataSpace {
-            data_space: VerifyImpl { length, data },
-        })
+            },
+        )
     }
 }
 
@@ -826,13 +801,6 @@ const OFFSET_MASK: usize = PAGE_SIZE - 1;
 
 /// Bit mask to extract the starting address of a page
 const PAGE_MASK: usize = !OFFSET_MASK;
-
-/// Errors indicating a bad proof for [`DataSpace<Verify>`]
-#[derive(Debug, thiserror::Error)]
-enum BadProofError {
-    #[error("Length node is absent but some page nodes are present")]
-    LengthAbsentButPagesPresent,
-}
 
 #[cfg(test)]
 mod tests;
