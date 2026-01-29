@@ -14,8 +14,11 @@ use std::error;
 use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::foldable::Foldable;
 use crate::foldable::seq_tree::Many;
 use crate::hash::Hash;
+use crate::hash::PartialHash;
+use crate::hash::PartialHashFold;
 
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
 /// where the leaf is assumed to have type `T`.
@@ -58,6 +61,16 @@ impl<T> Partial<T> {
         match self {
             Partial::Present(data) => Some(data),
             Partial::Absent | Partial::Blinded(_) => None,
+        }
+    }
+}
+
+impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Partial<T> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        match self {
+            Partial::Absent => builder.previous(),
+            Partial::Blinded(hash) => builder.present(*hash),
+            Partial::Present(data) => data.fold(builder),
         }
     }
 }

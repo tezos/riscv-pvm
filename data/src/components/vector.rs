@@ -21,17 +21,29 @@ use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
+use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
+use crate::hash::PartialHash;
+use crate::hash::PartialHashFold;
+use crate::merkle_proof::Deserialiser;
+use crate::merkle_proof::FromProof;
+use crate::merkle_proof::Partial;
+use crate::merkle_proof::Suspended;
+use crate::merkle_proof::SuspendedResult;
 use crate::merkle_proof::proof_tree::ForceMinimumPresence;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
 use crate::merkle_proof::proof_tree::MinimumPresence;
+use crate::merkle_proof::sequence_as_tree_from_proof;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
+use crate::mode::Verify;
+use crate::mode::utils::not_found;
+use crate::partial_vec::PartialVec;
 use crate::serialisation::serialise;
 
 /// Vector state component
@@ -157,6 +169,55 @@ impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Vector<T, Prove
     }
 }
 
+impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        if self.vector.is_completely_absent() {
+            return builder.previous();
+        }
+
+        let Some(original_length) = self.vector.original_length.clone().to_present() else {
+            return PartialHash::InvalidProof;
+        };
+
+        let Some(length) = self.vector.length.clone().to_present() else {
+            return PartialHash::InvalidProof;
+        };
+
+        let mut node = builder.into_node_fold();
+
+        let length_hash = Hash::hash_encodable(length as u64).expect("Hashing should not fail");
+        let length_node = PartialHash::Present(length_hash);
+        node.add(&length_node);
+
+        let get_item = |index| {
+            self.vector
+                .items
+                .get(index)
+                .map(Partial::Present)
+                .unwrap_or(Partial::Absent)
+        };
+
+        node.add(&DepthAdjustedSeqAsTree {
+            inner: IndexableSeqAsTree::new(length, NODE_ARITY, &get_item),
+            // `IndexableSeqAsTree` has a special-case layout where a single-element sequence is a
+            // bare leaf and all other lengths are wrapped in at least one node. We encode that in
+            // the adjusted depth by adding one level for all non-singleton lengths.
+            original_depth: original_length
+                .saturating_sub(1)
+                .checked_ilog(NODE_ARITY)
+                .unwrap_or(0)
+                .saturating_add(u32::from(original_length != 1)),
+            current_depth: length
+                .saturating_sub(1)
+                .checked_ilog(NODE_ARITY)
+                .unwrap_or(0)
+                .saturating_add(u32::from(length != 1)),
+        });
+
+        node.done()
+    }
+}
+
 impl<'normal, T: Provable<'normal>> Provable<'normal> for Vector<T, Normal> {
     type Prover = Vector<T::Prover, Prove<'normal>>;
 
@@ -176,6 +237,32 @@ impl<'normal, T: Provable<'normal>> Provable<'normal> for Vector<T, Normal> {
                 read_length: Cell::new(false),
             },
         }
+    }
+}
+
+impl<T: FromProof> FromProof for Vector<T, Verify> {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let with_length = |length: Partial<u64>| {
+            let length = length.map_present(|len: u64| len as usize);
+            let state = Vector {
+                vector: VerifyImpl {
+                    original_length: length.clone(),
+                    length: length.clone(),
+                    items: PartialVec::empty(),
+                },
+            };
+            (state, length)
+        };
+
+        let with_item = |state: &mut Vector<T, Verify>, idx, proof| {
+            let result: Proof::Suspended<T> = T::from_proof(proof)?;
+            let result = result.map(|item: T| {
+                state.vector.items.define(idx, vec![item]);
+            });
+            Ok(result)
+        };
+
+        sequence_as_tree_from_proof(proof, NODE_ARITY, with_length, with_item)
     }
 }
 
@@ -204,7 +291,7 @@ impl<T> Modal for VectorTemplate<T> {
 
     type Prove<'normal> = ProveImpl<T>;
 
-    type Verify = VerifyImpl;
+    type Verify = VerifyImpl<T>;
 }
 
 /// Mode types that implement this trait support common operations on the [`Vector`] component.
@@ -315,6 +402,67 @@ impl VectorMode for Prove<'_> {
     }
 }
 
+impl VectorMode for Verify {
+    fn new<T>(values: Vec<T>) -> Vector<T, Self> {
+        Vector {
+            vector: VerifyImpl {
+                original_length: Partial::Present(values.len()),
+                length: Partial::Present(values.len()),
+                items: PartialVec::from(values),
+            },
+        }
+    }
+
+    fn index<T>(this: &Vector<T, Self>, idx: usize) -> &T {
+        match this.vector.items.get(idx) {
+            Some(item) => item,
+            None => {
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
+            }
+        }
+    }
+
+    fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
+        match this.vector.items.get_mut(idx) {
+            Some(item) => item,
+            None => {
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
+            }
+        }
+    }
+
+    fn len<T>(this: &Vector<T, Self>) -> usize {
+        match this.vector.length {
+            Partial::Present(len) => len,
+            Partial::Absent | Partial::Blinded(_) => {
+                // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+                unsafe { not_found() }
+            }
+        }
+    }
+
+    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, mut value: impl FnMut() -> T) {
+        let current_len = this.len();
+
+        // If there is anything to grow, we need to ensure the items are defined for the range that
+        // we're growing.
+        if new_len > current_len {
+            let growth = new_len - current_len;
+            let values = Vec::from_iter((0..growth).map(|_| value()));
+            this.vector.items.define(current_len, values);
+        }
+
+        // When shrinking, the excessive items need to be truncated.
+        if new_len < current_len {
+            this.vector.items.truncate(new_len);
+        }
+
+        this.vector.length = Partial::Present(new_len);
+    }
+}
+
 /// Mode types that implement this trait support cloning of the [`Vector`] component.
 pub trait CloneVectorMode: Mode {
     /// Clones the given [`Vector`] component.
@@ -333,6 +481,14 @@ impl CloneVectorMode for Normal {
 }
 
 impl CloneVectorMode for Prove<'_> {
+    fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
+        Vector {
+            vector: this.vector.clone(),
+        }
+    }
+}
+
+impl CloneVectorMode for Verify {
     fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
         Vector {
             vector: this.vector.clone(),
@@ -448,7 +604,27 @@ impl<T> ProveImpl<T> {
 }
 
 /// [`crate::mode::Verify`] mode implementation for the [`Vector`] component
-struct VerifyImpl {}
+#[perfect_derive(Clone)]
+struct VerifyImpl<T> {
+    /// Original length of the vector
+    original_length: Partial<usize>,
+
+    /// Current length of the vector
+    length: Partial<usize>,
+
+    /// Items in the vector
+    items: PartialVec<T>,
+}
+
+impl<T> VerifyImpl<T> {
+    fn is_completely_absent(&self) -> bool {
+        if let Partial::Present(_) = self.length {
+            return false;
+        }
+
+        self.items.is_all_undefined()
+    }
+}
 
 /// Arity of internal nodes in the Merkle tree
 const NODE_ARITY: usize = 4;
