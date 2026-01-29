@@ -239,6 +239,87 @@ where
     ctx.done(())
 }
 
+/// Parse proof as a sequence with length represented as a Merkle tree.
+///
+/// # Merkle Tree Shape
+///
+/// The Merkle tree is split into length and contents at the root.
+///
+/// ```text
+///    root
+///    /  \
+/// len    contents
+/// ```
+///
+/// The length node is a leaf containing the length of the sequence. It must be present when any
+/// node or leaf in the contents subtree is present.
+///
+/// The contents subtree contains the leaves which represent elements from the sequence.
+///
+/// With `arity = 2`:
+///
+/// ```text
+///       N0
+///      /  \
+///    N1    N2
+///   / \    / \
+/// L0  L1  L2  L3
+/// ```
+///
+/// L0, L1, etc are the leaves containing the sequenced items.
+pub fn sequence_as_tree_from_proof<Length, State, Proof>(
+    proof: Proof,
+    arity: usize,
+    with_length: impl FnOnce(Partial<Length>) -> (State, Partial<usize>),
+    mut with_item: impl FnMut(&mut State, usize, Proof) -> SuspendedResult<Proof, ()>,
+) -> SuspendedResult<Proof, State>
+where
+    Length: Decode<()>,
+    Proof: Deserialiser,
+{
+    let proof = proof.into_node()?;
+
+    let (proof, length) = proof.next_branch_with(|proof| proof.into_leaf())?;
+    let (mut state, length) = with_length(length);
+
+    let (proof, state) = proof.next_branch_with(|proof| {
+        // When the length node is present, we can properly parse all leaves.
+        // But when the length node is not present, we cannot parse any leaves. This needs to be
+        // validated. In other words, the node for the sequence items must be blinded or absent.
+        let Partial::Present(len) = length else {
+            // XXX: We can't pick whether this is a node or leaf given we don't know the
+            // length. However, absent or blinded leaves are encoded the same way as nodes.
+            // In the case where the node is present (which is an error in here), we would
+            // trigger an unexpected leaf error instead of the more appropriate error below.
+            let proof = proof.into_node()?;
+
+            // When the node for the items is present, that's a problem. There may be items and
+            // we don't know how to extract them because we don't know how many there are.
+            if let Partial::Present(_) = proof.presence() {
+                return Err(DeserialiserError::custom(
+                    SeqTreeProofError::LengthAbsentButItemsPresent,
+                ));
+            }
+
+            return proof.done(state);
+        };
+
+        let mut for_leaf = |idx, proof: Proof| with_item(&mut state, idx, proof);
+
+        let result = descend_tree(proof, arity, 0, len, &mut for_leaf)?;
+        Ok(result.map(|()| state))
+    })?;
+
+    proof.done(state)
+}
+
+/// Errors indicating a bad proof for a sequence-as-tree
+#[derive(Debug, thiserror::Error)]
+enum SeqTreeProofError {
+    #[error("Length node is absent but some item nodes are present")]
+    LengthAbsentButItemsPresent,
+}
+
 /// Compute the lengths covered by each child of a node.
 fn node_child_length(arity: usize, length: usize) -> impl Iterator<Item = usize> {
     let child_max_length = length.div_ceil(arity);
