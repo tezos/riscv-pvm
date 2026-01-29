@@ -1,3 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Trilitech <contact@trili.tech>
+//
+// SPDX-License-Identifier: MIT
+
+#![cfg(feature = "bench")]
+
 use std::collections::HashSet;
 use std::ops::Range;
 
