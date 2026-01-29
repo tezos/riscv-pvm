@@ -291,7 +291,7 @@ pub(crate) enum AtomOp {
 
 impl AtomOp {
     /// Strategy for generating operations to be issued against the Atom state component
-    pub(crate) fn any() -> impl Strategy<Value = Self> {
+    pub(crate) fn any() -> impl Strategy<Value = Self> + Clone {
         Just(Self::Read)
     }
 
@@ -326,7 +326,7 @@ impl<T: Copy + 'static> AtomMutOp<T> {
 
 impl<T: Copy + Arbitrary + 'static> AtomMutOp<T> {
     /// Strategy for generating operations to be issued against the Atom state component
-    pub(crate) fn any() -> impl Strategy<Value = Self> {
+    pub(crate) fn any() -> impl Strategy<Value = Self> + Clone {
         prop_oneof![
             any::<T>().prop_map(|value| Self::Write { value }),
             AtomOp::any().prop_map(|op| Self::Immutable { op }),

@@ -628,3 +628,6 @@ impl<T> VerifyImpl<T> {
 
 /// Arity of internal nodes in the Merkle tree
 const NODE_ARITY: usize = 4;
+
+#[cfg(test)]
+mod tests;

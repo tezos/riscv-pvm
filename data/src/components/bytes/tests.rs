@@ -417,7 +417,7 @@ pub(crate) enum BytesOp {
 
 impl BytesOp {
     /// Strategy for generating operations to be issued against the Bytes state component
-    pub(crate) fn any() -> impl Strategy<Value = Self> {
+    pub(crate) fn any() -> impl Strategy<Value = Self> + Clone {
         prop_oneof![
             (0usize..8192, 0usize..50).prop_map(|(offset, size)| Self::Read { offset, size }),
             Just(Self::Len),
@@ -448,7 +448,7 @@ pub(crate) enum BytesMutOp {
 
 impl BytesMutOp {
     /// Strategy for generating operations to be issued against the Bytes state component
-    pub(crate) fn any() -> impl Strategy<Value = Self> {
+    pub(crate) fn any() -> impl Strategy<Value = Self> + Clone {
         prop_oneof![
             (0usize..8192, vec(any::<u8>(), 0..50))
                 .prop_map(|(offset, data)| Self::Write { offset, data }),

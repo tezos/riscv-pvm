@@ -462,4 +462,4 @@ impl CloneAtomMode for Verify {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
