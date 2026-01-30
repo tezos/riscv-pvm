@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
+//
+// SPDX-License-Identifier: MIT
+
 mod sbi_crypto;
 
 #[cfg(target_os = "linux")]
@@ -5,12 +10,16 @@ mod linux_only;
 
 use tezos_crypto_rs::blake2b::digest_256;
 use tezos_smart_rollup::entrypoint;
+use tezos_smart_rollup::host::HostError::FullOutbox;
+use tezos_smart_rollup::host::HostError::InputOutputTooLarge;
+use tezos_smart_rollup::host::RuntimeError;
 use tezos_smart_rollup::inbox::InboxMessage;
 use tezos_smart_rollup::inbox::InternalInboxMessage;
 use tezos_smart_rollup::michelson::MichelsonUnit;
 use tezos_smart_rollup::prelude::*;
 use tezos_smart_rollup::storage::path::OwnedPath;
 use tezos_smart_rollup::types::SmartRollupAddress;
+use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 use tezos_smart_rollup_constants::core::PREIMAGE_HASH_SIZE;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
@@ -108,9 +117,19 @@ pub fn entry(host: &mut impl Runtime) {
 
     debug_msg!(host, "Reveals Done\n");
 
+    let outbox_message = vec![0x1; MAX_OUTPUT_SIZE];
+    let mut outbox_level_full = false;
+
+    // The outbox wont't accept messages before the first inbox message is received
+    assert_eq!(
+        host.write_output(outbox_message.as_slice()),
+        Err(RuntimeError::HostErr(FullOutbox))
+    );
+
     while let Some(msg) = host.read_input().expect("Want message") {
         let (_, msg) = InboxMessage::<MichelsonUnit>::parse(msg.as_ref())
             .expect("Failed to parse inbox message");
+
         match msg {
             // When running a rollup node with this kernel through Tezt tests
             // `InfoPerlevel` messages are not identical for each run. This can
@@ -119,7 +138,33 @@ pub fn entry(host: &mut impl Runtime) {
             InboxMessage::Internal(InternalInboxMessage::InfoPerLevel(_)) => {
                 debug_msg!(host, "Internal(InfoPerLevel)\n")
             }
+            InboxMessage::Internal(InternalInboxMessage::StartOfLevel) => {
+                debug_msg!(host, "{:#?}\n", msg);
+                outbox_level_full = false;
+            }
             msg => debug_msg!(host, "{:#?}\n", msg),
+        }
+
+        if !outbox_level_full {
+            // The outbox won't accept a message if it is too large
+            assert_eq!(
+                host.write_output(vec![0x1; MAX_OUTPUT_SIZE + 1].as_slice()),
+                Err(RuntimeError::HostErr(InputOutputTooLarge))
+            );
+
+            // The outbox can accept 100 messages per level
+            for _ in 0..100 {
+                host.write_output(outbox_message.as_slice()).unwrap();
+            }
+            outbox_level_full = true;
+        }
+
+        // The outbox won't accept any more messages once the level is full
+        for _ in 0..5 {
+            assert_eq!(
+                host.write_output(outbox_message.as_slice()),
+                Err(RuntimeError::HostErr(FullOutbox))
+            );
         }
     }
 }
