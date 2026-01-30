@@ -1079,9 +1079,12 @@ mod tests {
 
                     handle_system_call(
                         machine,
+                        &mut state.outbox,
                         &mut state.system_state,
                         &mut state.status,
                         &mut state.reveal_request,
+                        &state.level,
+                        &state.level_is_set,
                         StdoutDebugHooks,
                     )
                 });

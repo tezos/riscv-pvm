@@ -214,9 +214,12 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
             .step_max_handle(step_bounds, |machine_state| {
                 handle_system_call(
                     machine_state,
+                    &mut self.outbox,
                     &mut self.system_state,
                     &mut self.status,
                     &mut self.reveal_request,
+                    &self.level,
+                    &self.level_is_set,
                     &mut hooks,
                 )
             })
@@ -528,11 +531,18 @@ pub enum InputRequest {
 }
 
 /// Handle a system call in the PVM.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Addressed by RV-909: Restructure Pvm type"
+)]
 pub(crate) fn handle_system_call<MC, PC, M>(
     machine: &mut machine_state::MachineState<MC, PC, M>,
+    outbox: &mut Outbox<M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
+    level: &Atom<u32, M>,
+    level_is_set: &Atom<bool, M>,
     hooks: impl PvmHooks,
 ) -> ControlFlow<()>
 where
@@ -541,7 +551,7 @@ where
     M: AtomMode + DataSpaceMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request);
+        tezos::handle_tezos(core, outbox, status, reveal_request, level, level_is_set);
 
         if status.read() == PvmStatus::Evaluating {
             ControlFlow::Continue(())
@@ -587,9 +597,12 @@ mod tests {
         {
             handle_system_call(
                 &mut self.machine_state,
+                &mut self.outbox,
                 &mut self.system_state,
                 &mut self.status,
                 &mut self.reveal_request,
+                &self.level,
+                &self.level_is_set,
                 hooks,
             )
             .is_continue()
