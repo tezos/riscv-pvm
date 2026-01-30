@@ -46,6 +46,7 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
+use tezos_smart_rollup_constants::riscv::SbiError;
 use thiserror::Error;
 
 /// Small outbox size for testing
@@ -73,6 +74,15 @@ pub(crate) enum OutboxError {
     OutboxMessageTooLarge { size: usize },
 }
 
+impl From<OutboxError> for SbiError {
+    fn from(value: OutboxError) -> Self {
+        match value {
+            OutboxError::OutboxFull => Self::FullOutbox,
+            OutboxError::OutboxMessageTooLarge { .. } => Self::OutputTooLarge,
+        }
+    }
+}
+
 /// Outbox state
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Outbox<M: Mode> {
@@ -94,7 +104,6 @@ impl<M: AtomMode> Outbox<M> {
     ///
     /// Panics if `current_level` is lt the last recorded level in the modded outbox
     /// level slot
-    #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
     pub(crate) fn write_message(
         &mut self,
         message: OutboxMessage,
@@ -322,7 +331,6 @@ impl OutboxMessage {
     /// Constructs a zeroed, boxed outbox message buffer of size `size`
     ///
     /// Fails if `size` exceeds [`MAX_OUTPUT_SIZE`]
-    #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
     pub(crate) fn new(size: usize) -> Result<Self, OutboxError> {
         if size > MAX_OUTPUT_SIZE {
             return Err(OutboxError::OutboxMessageTooLarge { size });

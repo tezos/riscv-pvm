@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2024-2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -26,6 +27,7 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_INBOX_NEXT;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_KECCAK256_HASH;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_SECP256K1_VERIFY;
+use tezos_smart_rollup_constants::riscv::SBI_TEZOS_WRITE_OUTPUT;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 /// Maximum size of pvm memory access by a host function in bytes
@@ -36,6 +38,8 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 
 use super::PvmStatus;
+use super::outbox::Outbox;
+use super::outbox::OutboxMessage;
 use super::reveals::RevealRequest;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
@@ -178,6 +182,36 @@ where
 {
     // Prepare the EE state for an input tick.
     status.write(PvmStatus::WaitingForInput);
+}
+
+/// Handle a [SBI_TEZOS_WRITE_OUTPUT] call.
+#[inline]
+fn handle_tezos_write_output<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+    outbox: &mut Outbox<M>,
+    level: &Atom<u32, M>,
+    level_is_set: &Atom<bool, M>,
+) where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode,
+{
+    sbi_wrap(machine, |machine| {
+        // The outbox can't accept messages before the first inbox message is received
+        if !level_is_set.read() {
+            return Err(SbiError::FullOutbox);
+        }
+
+        let buffer_size = machine.hart.xregisters.read(a1) as usize;
+        let mut msg = OutboxMessage::new(buffer_size)?;
+
+        // Only read the message if it is not larger than `MAX_OUTPUT_SIZE`
+        let buffer_addr = machine.hart.xregisters.read(a0);
+        machine.main_memory.read_all(buffer_addr, &mut msg)?;
+
+        outbox.write_message(msg, level.read())?;
+
+        Ok(0)
+    })
 }
 
 /// Produce a Ed25519 signature.
@@ -352,8 +386,11 @@ where
 /// Handle a Tezos SBI call.
 pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
+    outbox: &mut Outbox<M>,
     status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
+    level: &Atom<u32, M>,
+    level_is_set: &Atom<bool, M>,
 ) where
     MC: MemoryConfig,
     M: AtomMode + DataSpaceMode,
@@ -365,6 +402,7 @@ pub(super) fn handle_tezos<MC, M>(
     let sbi_function = machine.hart.xregisters.read(a6);
     match sbi_function {
         SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
+        SBI_TEZOS_WRITE_OUTPUT => handle_tezos_write_output(machine, outbox, level, level_is_set),
         SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
         SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
