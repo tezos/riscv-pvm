@@ -7,6 +7,8 @@ use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
+use crate::merkle_proof::proof_tree::MerkleProof;
+use crate::merkle_proof::proof_tree::MerkleProofLeaf;
 use crate::tree::Node;
 use crate::tree::Tree;
 
@@ -117,6 +119,17 @@ impl MerkleTree {
     pub fn from_foldable(foldable: &impl Foldable<MerkleTreeFold>) -> MerkleTree {
         foldable.fold(MerkleTreeFold)
     }
+
+    /// Compress a [`MerkleTree`] into a [`MerkleProof`].
+    ///
+    /// If a leaf was not accessed, it will be compressed as a blinded leaf.
+    /// If all children of a node are blinded, compress it as a blinded node.
+    pub fn compress(self) -> MerkleProof {
+        match self {
+            Tree::Node(node) => compress_merkle_node(node.data.hash, node.children),
+            Tree::Leaf(leaf) => compress_merkle_leaf(leaf),
+        }
+    }
 }
 
 impl Foldable<MerkleTreeFold> for MerkleTree {
@@ -160,3 +173,33 @@ impl NodeFold for MerkleNodeFold {
         MerkleTree::make_merkle_node(self.children)
     }
 }
+
+/// Compress a Merkle tree leaf.
+fn compress_merkle_leaf(leaf: MerkleTreeLeafData) -> MerkleProof {
+    if !leaf.access_info {
+        return Tree::Leaf(MerkleProofLeaf::Blind(leaf.hash));
+    }
+
+    Tree::Leaf(MerkleProofLeaf::Read(leaf.data))
+}
+
+/// Compress a Merkle tree node.
+fn compress_merkle_node(hash: Hash, children: Vec<MerkleTree>) -> MerkleProof {
+    let children = children
+        .into_iter()
+        .map(MerkleTree::compress)
+        .collect::<Vec<_>>();
+
+    let not_accessed = children
+        .iter()
+        .all(|child| matches!(child, Tree::Leaf(MerkleProofLeaf::Blind(_))));
+
+    if not_accessed {
+        return Tree::Leaf(MerkleProofLeaf::Blind(hash));
+    }
+
+    Tree::node_without_data(children)
+}
+
+#[cfg(test)]
+mod tests;
