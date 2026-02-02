@@ -32,12 +32,12 @@ impl bincode::Encode for MerkleProof {
 
         while let Some(node) = nodes.pop() {
             match node {
-                Self::Node(trees) => {
+                Self::Node(node) => {
                     Tag::Node.encode(encoder)?;
 
                     // We add the children in reverse order so that when we pop them from the
                     // `nodes` stack, they are in the original order.
-                    nodes.extend(trees.iter().rev());
+                    nodes.extend(node.children.iter().rev());
                 }
 
                 Self::Leaf(MerkleProofLeaf::Read(data)) => {
@@ -159,10 +159,10 @@ impl MerkleProof {
                         Hash::hash_bytes(data.as_slice()),
                     ));
                 }
-                Tree::Node(children) => {
+                Tree::Node(node) => {
                     hash_states.push(HashState::new_node(parent_index));
                     let new_parent_index = hash_states.len() - 1;
-                    for child in children.iter() {
+                    for child in node.children.iter() {
                         nodes.push((child, new_parent_index));
                     }
                 }
@@ -202,7 +202,7 @@ mod tests {
         let merkle_proofs = [
             MerkleProof::leaf_read([1, 2, 3].to_vec()),
             MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
-            Tree::Node(
+            Tree::node_without_data(
                 [
                     MerkleProof::leaf_read([1, 2, 3].to_vec()),
                     MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn we_can_take_the_merkle_proof_of_the_root_hash() {
-        let node = Tree::Node(
+        let node = Tree::node_without_data(
             [
                 MerkleProof::leaf_read([1, 2, 3].to_vec()),
                 MerkleProof::leaf_blind(Hash::hash_bytes(&[1, 3, 4])),
@@ -230,9 +230,9 @@ mod tests {
 
     #[test]
     fn child_node_hashes_are_pushed_back_in_normal_order() {
-        let merkle_proof = Tree::Node(
+        let merkle_proof = Tree::node_without_data(
             [
-                Tree::Node(
+                Tree::node_without_data(
                     [
                         MerkleProof::leaf_read([1, 2, 3].to_vec()),
                         MerkleProof::leaf_blind(Hash::hash_bytes(&[4, 5, 6])),

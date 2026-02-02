@@ -251,7 +251,7 @@ mod proof_helpers {
     }
 
     pub(crate) fn empty(hash: Hash) -> Proof {
-        Proof::new(Tree::Node(Vec::new()), hash)
+        Proof::new(Tree::node_without_data(Vec::new()), hash)
     }
 
     pub(crate) fn with_final_hash(proof: &Proof, hash: Hash) -> Proof {

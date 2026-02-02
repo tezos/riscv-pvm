@@ -243,10 +243,10 @@ mod tests {
         let n3 = MerkleProof::Leaf(MerkleProofLeaf::Blind(h2));
         let n4 = MerkleProof::Leaf(MerkleProofLeaf::Read(vec![123, 234, 42, 1, 2, 3]));
 
-        let root = MerkleProof::Node(vec![n1.clone()]);
+        let root = MerkleProof::node_without_data(vec![n1.clone()]);
         check_serialisation(root, &[TAG_NODE, TAG_READ, 12, 15, 30, 40]);
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone()]);
+        let root = MerkleProof::node_without_data(vec![n1.clone(), n2.clone()]);
         check_serialisation(
             root,
             &[
@@ -259,7 +259,7 @@ mod tests {
             .concat(),
         );
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone(), n3.clone()]);
+        let root = MerkleProof::node_without_data(vec![n1.clone(), n2.clone(), n3.clone()]);
         check_serialisation(
             root,
             &[
@@ -274,7 +274,8 @@ mod tests {
             .concat(),
         );
 
-        let root = MerkleProof::Node(vec![n1.clone(), n2.clone(), n4.clone(), n3.clone()]);
+        let root =
+            MerkleProof::node_without_data(vec![n1.clone(), n2.clone(), n4.clone(), n3.clone()]);
         check_serialisation(
             root,
             &[
@@ -311,7 +312,7 @@ mod tests {
                 .map(SerialisationBound::from_merkle_leaf)
                 .collect();
 
-            let root = MerkleProof::Node(children);
+            let root = MerkleProof::node_without_data(children);
             let bound = SerialisationBound::node_combine(bounds);
 
             check_bounds(root, &bound);
@@ -354,7 +355,7 @@ mod tests {
                     nothing_taken = new_bounds.is_empty();
 
                     if !nothing_taken {
-                        let node = MerkleProof::Node(new_children);
+                        let node = MerkleProof::node_without_data(new_children);
                         let bound = SerialisationBound::node_combine(new_bounds);
 
                         new_nodes.push((node, bound));

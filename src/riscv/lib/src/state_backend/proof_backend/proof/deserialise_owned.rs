@@ -91,8 +91,8 @@ impl ProofTreeDeserialiser<'_> {
             ProofPart::Present(Tree::Leaf(MerkleProofLeaf::Read(_))) => {
                 Err(ProofError::UnexpectedLeaf)
             }
-            ProofPart::Present(Tree::Node(trees)) => Ok(Partial::Present(
-                trees
+            ProofPart::Present(Tree::Node(node)) => Ok(Partial::Present(
+                node.children
                     .iter()
                     .map(ProofPart::Present)
                     .map(ProofTreeDeserialiser)
