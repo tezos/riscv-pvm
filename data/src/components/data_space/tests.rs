@@ -262,9 +262,9 @@ fn generate_proof() {
 
         let pages_tree = match merkle_tree {
             MerkleTree::Leaf(_) => panic!("Did not expect leaf"),
-            MerkleTree::Node(_, mut children) => {
+            MerkleTree::Node(mut node) => {
                 // The node for the pages is the second child.
-                children.remove(1)
+                node.children.remove(1)
             },
         };
         queue.push_back(pages_tree);
@@ -272,7 +272,7 @@ fn generate_proof() {
         let mut leaf: usize = 0;
         while let Some(node) = queue.pop_front() {
             match node {
-                MerkleTree::Node(_, children) => queue.extend(children),
+                MerkleTree::Node(node) => queue.extend(node.children),
                 MerkleTree::Leaf(MerkleTreeLeafData {
                     access_info,
                     ..

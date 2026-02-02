@@ -7,6 +7,8 @@ use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
+use crate::tree::Node;
+use crate::tree::Tree;
 
 /// Struct which holds data for the leafs of a [`MerkleTree`].
 #[derive(Debug, Clone)]
@@ -21,16 +23,19 @@ pub struct MerkleTreeLeafData {
     pub data: Vec<u8>,
 }
 
+/// Merkle node data
+#[derive(Debug, Clone)]
+pub struct MerkleNodeData {
+    /// Hash of the Merkle node
+    pub hash: Hash,
+}
+
 /// A variable-width Merkle tree with access metadata for leaves.
 ///
 /// Values of this type are produced by the proof-generating backend to capture
 /// a snapshot of the machine state along with access information for leaves
 /// which hold data that was used in a particular evaluation step.
-#[derive(Debug, Clone)]
-pub enum MerkleTree {
-    Leaf(MerkleTreeLeafData),
-    Node(Hash, Vec<Self>),
-}
+pub type MerkleTree = Tree<MerkleTreeLeafData, MerkleNodeData>;
 
 impl MerkleTree {
     /// Returns the precalculated root hash of the node.
@@ -50,8 +55,8 @@ impl MerkleTree {
     /// ```
     pub fn root_hash(&self) -> Hash {
         match self {
-            Self::Node(hash, _) => *hash,
-            Self::Leaf(MerkleTreeLeafData { hash, .. }) => *hash,
+            Self::Node(node) => node.data.hash,
+            Self::Leaf(leaf) => leaf.hash,
         }
     }
 
@@ -70,7 +75,10 @@ impl MerkleTree {
     pub fn make_merkle_node(children: Vec<Self>) -> Self {
         let children_hashes = children.iter().map(|t| t.root_hash());
         let node_hash = Hash::combine_hashes(children_hashes);
-        MerkleTree::Node(node_hash, children)
+        MerkleTree::Node(Node {
+            data: MerkleNodeData { hash: node_hash },
+            children,
+        })
     }
 
     /// Recomputes the hashes for the whole tree
@@ -85,8 +93,9 @@ impl MerkleTree {
                 Self::Leaf(MerkleTreeLeafData { hash, data, .. }) => {
                     &Hash::hash_bytes(data) == hash
                 }
-                Self::Node(hash, children) => {
-                    let children_hashes: Vec<Hash> = children
+                Self::Node(node) => {
+                    let children_hashes: Vec<Hash> = node
+                        .children
                         .iter()
                         .map(|child| {
                             deque.push_back(child);
@@ -94,7 +103,7 @@ impl MerkleTree {
                         })
                         .collect();
 
-                    &Hash::combine_hashes(children_hashes) == hash
+                    Hash::combine_hashes(children_hashes) == node.data.hash
                 }
             };
             if !is_valid_hash {
