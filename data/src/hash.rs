@@ -289,9 +289,9 @@ impl<'tree> Fold for PartialHashFold<'tree> {
         };
 
         match tree {
-            Tree::Node(children) => PartialHashNodeFold {
+            Tree::Node(node) => PartialHashNodeFold {
                 node_hash: None,
-                children: VecDeque::from_iter(children),
+                children: VecDeque::from_iter(&node.children),
                 child_hashes: VecDeque::new(),
             },
 

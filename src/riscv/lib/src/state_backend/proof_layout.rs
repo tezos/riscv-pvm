@@ -125,7 +125,7 @@ impl OwnedProofPart {
             }
         }
 
-        OwnedProofPart::Present(MerkleProof::Node(partial_children))
+        OwnedProofPart::Present(MerkleProof::node_without_data(partial_children))
     }
 
     /// Obtain the [`ProofTree`] reference corresponding to this owned proof part.
