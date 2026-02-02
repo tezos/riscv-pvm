@@ -54,7 +54,8 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
     let mut tree = Tree::default();
     for key in &keys[..keys.len() / 2] {
         let random_data = generate_random_bytes_in_range(&mut rng, 1..20);
-        tree.set(key, &random_data, &mut resolver);
+        tree.set(key, &random_data, &mut resolver)
+            .expect("Hit error on setting a value in setup.");
     }
 
     c.bench_function("Bench AVL tree with operations", |b| {
@@ -64,10 +65,12 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
                 for operation in operations {
                     match operation {
                         Operation::Upsert(key, value) => {
-                            tree.set(&key, &value, &mut resolver);
+                            tree.set(&key, &value, &mut resolver)
+                                .expect("Hit error on setting a value in bench.");
                         }
                         Operation::Delete(key) => {
-                            tree.delete(&key, &mut resolver);
+                            tree.delete(&key, &mut resolver)
+                                .expect("Hit error on deleting a value in bench.");
                         }
                     }
                 }

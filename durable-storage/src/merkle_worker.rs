@@ -128,14 +128,26 @@ impl MerkleWorker {
 
             while let Some(cmd) = receiver.recv().await {
                 match cmd {
-                    Command::Write { key, offset, value } => layer.write(&key, offset, &value),
+                    Command::Write { key, offset, value } => {
+                        layer
+                            .write(&key, offset, &value)
+                            .expect("Writing to the Merkle layer should succeed.");
+                    }
 
-                    Command::Set { key, value } => layer.set(&key, &value),
+                    Command::Set { key, value } => {
+                        layer
+                            .set(&key, &value)
+                            .expect("Set on the Merkle layer should succeed.");
+                    }
 
-                    Command::Delete { key } => layer.delete(&key),
+                    Command::Delete { key } => {
+                        layer
+                            .delete(&key)
+                            .expect("Delete on the Merkle layer should succeed.");
+                    }
 
                     Command::Hash { response } => {
-                        let hash = layer.hash();
+                        let hash = layer.hash().expect("Resolving the tree should succeed.");
                         let _ = response.send(hash);
                     }
 
@@ -269,23 +281,27 @@ mod tests {
         ) {
             match self {
                 Self::Write { key, offset, value } => {
-                    layer.write(&key, offset, &value);
+                    layer
+                        .write(&key, offset, &value)
+                        .expect("Write should succeed.");
                     worker.write(key, offset, value).unwrap();
                 }
 
                 Self::Set { key, value } => {
-                    layer.set(&key, &value);
+                    layer.set(&key, &value).expect("Set should succeed.");
                     worker.set(key, value).unwrap();
                 }
 
                 Self::Delete { key } => {
-                    layer.delete(&key);
+                    layer.delete(&key).expect("Delete should succeed.");
                     worker.delete(key).unwrap();
                 }
 
                 Self::Hash => {
                     let hash1 = worker.hash().unwrap();
-                    let hash2 = layer.hash();
+                    let hash2 = layer
+                        .hash()
+                        .expect("Resolving the tree for the hash should succeed.");
                     assert_eq!(hash1, hash2);
                 }
 
@@ -370,7 +386,7 @@ mod tests {
                 command.run(handle, &dir_manager, &mut merkle_worker, &mut merkle_layer);
             }
 
-            let layer_hash = merkle_layer.hash();
+            let layer_hash = merkle_layer.hash().expect("Resolving the tree should succeed.");
             let worker_hash = merkle_worker.hash().unwrap();
             prop_assert_eq!(layer_hash, worker_hash);
         });
