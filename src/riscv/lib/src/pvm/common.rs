@@ -55,8 +55,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend::ProofTree;
-use crate::state_backend::proof_backend::merkle::CompressedMerkleTree;
-use crate::state_backend::proof_backend::merkle::merkle_tree_to_compressed_merkle_tree;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
 
@@ -376,9 +374,7 @@ where
         let _ = self.input_request();
 
         let merkle_tree = MerkleTree::from_foldable(self);
-        let compressed_merkle_tree: CompressedMerkleTree =
-            merkle_tree_to_compressed_merkle_tree(merkle_tree);
-        let merkle_proof: MerkleProof = compressed_merkle_tree.to_proof();
+        let merkle_proof: MerkleProof = merkle_tree.compress();
 
         let final_hash = Hash::from_foldable(self);
         let proof = Proof::new(merkle_proof, final_hash);
