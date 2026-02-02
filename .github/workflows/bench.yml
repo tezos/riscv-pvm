@@ -44,7 +44,7 @@ jobs:
         run: |
           scp scripts/ci-bench.sh ${{ secrets.BENCH_HOST }}:bench-${{ github.run_id }}.sh
 
-          if [[ "${{ github.ref }}" == "main" && "${{ github.run_attempt }}" == "1" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.run_attempt }}" == "1" ]]; then
             ssh ${{ secrets.BENCH_HOST }} env DD_API_KEY=${{ secrets.BENCH_DD_API_KEY }} DD_SITE=${{ secrets.BENCH_DD_SITE }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" -s >> $GITHUB_STEP_SUMMARY
           else
             ssh ${{ secrets.BENCH_HOST }} ./bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
