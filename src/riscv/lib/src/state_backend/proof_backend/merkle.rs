@@ -38,10 +38,13 @@ pub(crate) fn merkle_tree_to_compressed_merkle_tree(
             MerkleTree::Leaf(leaf_data) => {
                 compressed_nodes.push((CompressedMerkleTree::leaf(leaf_data), parent_index));
             }
-            MerkleTree::Node(hash, children) => {
-                compressed_nodes.push((CompressedMerkleTree::Node(hash, vec![]), parent_index));
+            MerkleTree::Node(node) => {
+                compressed_nodes.push((
+                    CompressedMerkleTree::Node(node.data.hash, vec![]),
+                    parent_index,
+                ));
                 let new_parent_index = compressed_nodes.len() - 1;
-                for child in children {
+                for child in node.children {
                     nodes.push((child, new_parent_index));
                 }
             }
