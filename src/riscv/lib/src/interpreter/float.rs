@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2024-2026 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 

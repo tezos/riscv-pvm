@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025-2026 TriliTech <contact@trili.tech>
 // SPDX-License-Identifier: MIT
 
 //! Merkle tree data structure and utilities

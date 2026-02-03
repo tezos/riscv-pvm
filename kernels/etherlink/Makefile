@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2023 TriliTech <contact@trili.tech>
+# SPDX-FileCopyrightText: 2023-2026 TriliTech <contact@trili.tech>
 # SPDX-FileCopyrightText: 2025-2026 Nomadic Labs <contact@nomadic-labs.com>
 #
 # SPDX-License-Identifier: MIT

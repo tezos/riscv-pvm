@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025-2026 TriliTech <contact@trili.tech>
 
 //! Dispatching of entrypoints under JIT is done via hot-swappable
 //! function pointers.

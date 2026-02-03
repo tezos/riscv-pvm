@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2023-2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 

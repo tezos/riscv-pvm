@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025-2026 TriliTech <contact@trili.tech>
 // SPDX-License-Identifier: MIT
 
 /// Generic tree structure used to model the [`crate::merkle_proof::proof_tree::MerkleProof`],
