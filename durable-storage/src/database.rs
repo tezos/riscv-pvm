@@ -463,8 +463,9 @@ mod tests {
                         ),
                     data.len() - 1
                 );
-                prop_assert_ne!(read_data, read_data_before);
-                prop_assert_ne!(read_data, data.as_slice());
+                prop_assert_eq!(read_data[0], read_data_before[0]);
+                prop_assert_eq!(&read_data[1..data.len()], &data[..data.len() - 1]);
+                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
                 let read_data_before = read_data;
 
                 database
