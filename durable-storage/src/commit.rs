@@ -31,7 +31,14 @@ impl CommitId {
     pub(super) fn compute_root_hash(db_hashes: &[Self]) -> Self {
         let get_hash = |idx: usize| db_hashes[idx].as_hash();
         let tree = IndexableSeqAsTree::new(db_hashes.len(), REGISTRY_ARITY, &get_hash);
-        let hash = Hash::from_foldable(&tree);
+
+        // Create the final commit ID by combining the root hash with the "registry_commit" tag.
+        // This avoids a collision between the registry and the database commits when there is only a single
+        // database in the registry.
+        let root = Hash::from_foldable(&tree);
+        let tag = Hash::hash_bytes(b"registry_commit");
+        let hash = Hash::combine_hashes([tag, root]);
+
         CommitId::from(hash)
     }
 }

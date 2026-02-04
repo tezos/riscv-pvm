@@ -473,6 +473,56 @@ mod tests {
     }
 
     #[test]
+    fn test_registry_commit_size_1() {
+        let (_tmpdir, mut registry) = setup_registry();
+        registry
+            .resize(1)
+            .expect("Growing the registry should succeed.");
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry.databases[0]
+            .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
+            .expect("Writing to database should succeed");
+
+        let expected_db_hashes: Vec<super::CommitId> = registry
+            .databases
+            .iter()
+            .map(|db| db.hash().into())
+            .collect();
+        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        assert_eq!(root_commit, expected_root);
+
+        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
+        let commit: RegistryManifest =
+            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+        assert_eq!(commit.database_hashes, expected_db_hashes);
+    }
+
+    #[test]
+    fn test_committing_identical_registry_succeeds() {
+        let (_tmpdir, mut registry) = setup_registry();
+        registry
+            .resize(1)
+            .expect("Growing the registry should succeed.");
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry.databases[0]
+            .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
+            .expect("Writing to database should succeed");
+
+        let first_commit = registry.commit().expect("First commit should succeed");
+        let second_commit = registry.commit().expect("Second commit should succeed");
+
+        assert_eq!(
+            first_commit, second_commit,
+            "Committing identical registry states should yield the same commit ID."
+        );
+    }
+
+    #[test]
     fn test_registry_commit_writes_manifest() {
         let (_tmpdir, mut registry) = setup_size_2_registry();
 
