@@ -7,10 +7,7 @@
 
 use bincode::Decode;
 use bincode::Encode;
-use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::hash::Hash;
-
-use crate::registry::REGISTRY_ARITY;
 
 /// [`CommitId`]'s are used to generate commits & to checkout specific commits
 /// from a `DirectoryManager`.
@@ -25,14 +22,6 @@ impl CommitId {
     /// Returns the hex encoded commit id.
     pub fn hex_encode(&self) -> String {
         hex::encode(self.0)
-    }
-
-    /// Compute the Merkle root hash from the list of database commit IDs.
-    pub(super) fn compute_root_hash(db_hashes: &[Self]) -> Self {
-        let get_hash = |idx: usize| db_hashes[idx].as_hash();
-        let tree = IndexableSeqAsTree::new(db_hashes.len(), REGISTRY_ARITY, &get_hash);
-        let hash = Hash::from_foldable(&tree);
-        CommitId::from(hash)
     }
 }
 

@@ -13,6 +13,10 @@ use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -69,8 +73,8 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
     /// Commit the registry state and return its commit ID.
     ///
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
-    /// of all underlying databases, and the registry manifest is stored at the
-    /// corresponding commit path.
+    /// of all underlying databases through the [`Foldable<HashFold>`] implementation,
+    /// and the registry manifest is stored at the corresponding commit path.
     pub fn commit(&self) -> Result<CommitId, OperationalError> {
         let mut database_hashes = Vec::with_capacity(self.inner.databases.len());
 
@@ -78,7 +82,8 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
             let hash = database.commit(&self.inner.repo)?;
             database_hashes.push(hash);
         }
-        let registry_commit = CommitId::compute_root_hash(&database_hashes);
+
+        let registry_commit = CommitId::from(Hash::from_foldable(&self));
 
         let manifest = RegistryManifest { database_hashes };
         let encoded =
@@ -147,6 +152,23 @@ where
     /// This can fail for mode-specific reasons.
     pub fn try_clone(&self) -> Result<Self, OperationalError> {
         M::try_clone(self)
+    }
+}
+
+// RV-926 TODO: Ensure that implementing other modes for Registry does not require specific implementations
+// for each Fold trait.
+
+impl<KV: BackgroundKeyValueStore> Foldable<HashFold> for Registry<KV, Normal> {
+    fn fold(&self, builder: HashFold) -> Hash {
+        let get_hash = |idx: usize| {
+            self.database(idx)
+                .expect("Getting a database at a valid index should succeed.")
+                .hash()
+                .expect("Hashing the database should succeed.")
+        };
+
+        let tree = IndexableSeqAsTree::new(self.len(), REGISTRY_ARITY, &get_hash);
+        tree.fold(builder)
     }
 }
 
@@ -647,6 +669,7 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_empty() {
+        use octez_riscv_data::hash::Hash;
         use octez_riscv_data::serialisation;
 
         use crate::commit::CommitId;
@@ -656,7 +679,7 @@ mod tests {
         let registry = setup_registry(repo);
 
         let expected_db_hashes: Vec<CommitId> = Vec::new();
-        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+        let expected_root = CommitId::from(Hash::hash_bytes(&[]));
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
@@ -673,7 +696,6 @@ mod tests {
     fn test_registry_commit_size_1() {
         use octez_riscv_data::serialisation;
 
-        use crate::commit::CommitId;
         use crate::registry::RegistryManifest;
 
         let (_keepalive, repo) = setup_repo();
@@ -693,7 +715,7 @@ mod tests {
             .iter()
             .map(|db| db.hash().unwrap().into())
             .collect();
-        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+        let expected_root = expected_db_hashes[0];
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
@@ -731,6 +753,7 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_writes_manifest() {
+        use octez_riscv_data::hash::Hash;
         use octez_riscv_data::serialisation;
 
         use crate::commit::CommitId;
@@ -754,7 +777,9 @@ mod tests {
             .iter()
             .map(|db| db.hash().unwrap().into())
             .collect();
-        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+        let expected_root = CommitId::from(Hash::combine_hashes(
+            expected_db_hashes.iter().map(CommitId::as_hash),
+        ));
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
