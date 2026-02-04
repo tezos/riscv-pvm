@@ -312,7 +312,7 @@ where
         mut listener: impl MemoryGovernanceListener,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: AtomMode,
+        M: DataSpaceMode,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 

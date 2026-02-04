@@ -87,7 +87,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: AtomMode,
+        M: DataSpaceMode,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
             let (main_memory, listener) = state.memory_with_listener();

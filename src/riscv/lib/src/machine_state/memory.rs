@@ -269,7 +269,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: AtomMode;
+        M: DataSpaceMode;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(
@@ -310,7 +310,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: AtomMode,
+        M: AtomMode + DataSpaceMode,
     {
         self.deallocate_pages(address, length)?;
         self.protect_pages(address, length, Permissions::NONE, listener)

@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::ops::Index;
 use std::ops::RangeInclusive;
 
 use bincode::Decode;
@@ -12,14 +11,12 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
-use octez_riscv_data::components::atom::Atom;
-use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::atom::CloneAtomMode;
-use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
+use octez_riscv_data::components::data_space::DataSpace;
+use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
-use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -33,14 +30,12 @@ use perfect_derive::perfect_derive;
 
 use super::Address;
 use super::address_to_page_index;
-use crate::array_utils::boxed_from_fn;
 use crate::state_backend::NarrowlySized;
-use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct PagePermissions<const PAGES: usize, M: Mode> {
-    pages: Box<[Atom<bool, M>; PAGES]>,
+    pages: DataSpace<M>,
 }
 
 impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
@@ -53,10 +48,10 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     #[inline]
     pub unsafe fn can_access(&self, pages: RangeInclusive<u64>) -> bool
     where
-        M: AtomMode,
+        M: DataSpaceMode,
     {
         for page in pages {
-            if unsafe { !self.pages.get_unchecked(page as usize).read() } {
+            if unsafe { self.pages.read::<u8>(page as usize) == 0 } {
                 return false;
             }
         }
@@ -76,10 +71,10 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     pub unsafe fn can_access_narrow<E>(&self, address: Address) -> bool
     where
         E: NarrowlySized,
-        M: AtomMode,
+        M: DataSpaceMode,
     {
         let start_page = address_to_page_index(address);
-        if unsafe { !self.pages.get_unchecked(start_page).read() } {
+        if unsafe { self.pages.read::<u8>(start_page) == 0 } {
             return false;
         }
 
@@ -88,53 +83,55 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
             .wrapping_sub(1);
 
         let end_page = address_to_page_index(end_address);
-        unsafe { self.pages.get_unchecked(end_page).read() }
+        unsafe { self.pages.read::<u8>(end_page) != 0 }
     }
 
     /// Change the access permissions for the given range.
     pub fn modify_access(&mut self, pages: RangeInclusive<u64>, accessible: bool)
     where
-        M: AtomMode,
+        M: DataSpaceMode,
     {
         pages.filter(|&page| page < PAGES as u64).for_each(|page| {
-            self.pages[page as usize].write(accessible);
+            // SAFETY: TODO
+            unsafe {
+                self.pages.write(page as usize, accessible as u8);
+            }
         })
     }
 
     /// Reset access permissions on all pages.
     pub fn reset(&mut self)
     where
-        M: AtomMode,
+        M: DataSpaceMode,
     {
-        self.pages.iter_mut().for_each(|page| page.write(false));
+        for page in 0..PAGES {
+            // SAFETY: TODO
+            unsafe {
+                self.pages.write(page, 0u8);
+            }
+        }
     }
 }
 
 impl<'normal, const PAGES: usize> Provable<'normal> for PagePermissions<PAGES, Normal> {
     type Prover = PagePermissions<PAGES, Prove<'normal>>;
 
-    fn start_proof(&'normal self) -> Self::Prover {
-        let pages = self
-            .pages
-            .iter()
-            .map(Atom::start_proof)
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Collecting into an array of the same length should always succeed");
-
-        PagePermissions { pages }
-    }
-}
-
-impl<const PAGES: usize, M: AtomMode> Default for PagePermissions<PAGES, M> {
-    fn default() -> Self {
+    fn start_proof(&self) -> PagePermissions<PAGES, Prove<'_>> {
         PagePermissions {
-            pages: boxed_from_fn(Atom::default),
+            pages: self.pages.start_proof(),
         }
     }
 }
 
-impl<const PAGES: usize, M: CloneAtomMode> CloneState for PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: DataSpaceMode> Default for PagePermissions<PAGES, M> {
+    fn default() -> Self {
+        PagePermissions {
+            pages: DataSpace::new(PAGES),
+        }
+    }
+}
+
+impl<const PAGES: usize, M: CloneDataSpaceMode> CloneState for PagePermissions<PAGES, M> {
     fn clone_state(&self) -> Self {
         Self {
             pages: self.pages.clone_state(),
@@ -149,7 +146,7 @@ impl<C, const PAGES: usize> Decode<C> for PagePermissions<PAGES, Normal> {
     }
 }
 
-impl<const PAGES: usize, M: EncodeAtomMode> Encode for PagePermissions<PAGES, M> {
+impl<const PAGES: usize, M: EncodeDataSpaceMode> Encode for PagePermissions<PAGES, M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.pages.encode(encoder)
     }
@@ -159,19 +156,16 @@ impl<const PAGES: usize, M, F> Foldable<F> for PagePermissions<PAGES, M>
 where
     M: Mode,
     F: Fold,
-    Atom<bool, M>: Foldable<F>,
+    DataSpace<M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
-        let page_generator = |idx| self.pages.index(idx);
-        IndexableSeqAsTree::new(PAGES, MERKLE_ARITY, &page_generator).fold(builder)
+        self.pages.fold(builder)
     }
 }
 impl<const PAGES: usize> FromProof for PagePermissions<PAGES, Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = merkle_proof::Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof)?;
-        let result = result.map(|pages| Self {
-            pages: pages.into_boxed_array(),
-        });
+        let result = DataSpace::from_proof(proof)?;
+        let result = result.map(|pages| Self { pages });
         Ok(result)
     }
 }
