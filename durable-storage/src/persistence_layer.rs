@@ -453,63 +453,18 @@ impl Drop for PersistenceLayer {
     }
 }
 
-/// Utilities for testing or benchmarking the persistence layer.
-#[cfg(any(test, feature = "bench"))]
-pub mod utils {
-    use std::path::Path;
-
-    use tempfile::TempDir;
-
-    /// A temporary directory used for testing
-    pub struct TestableTmpdir {
-        tempdir: TempDir,
-    }
-
-    impl TestableTmpdir {
-        /// Create a new temporary directory for testing
-        pub fn new() -> Self {
-            let tempdir = TempDir::new().expect("Should be able to create temp dir");
-
-            Self { tempdir }
-        }
-
-        // The path of the temporary directory
-        pub fn path(&self) -> &Path {
-            self.tempdir.path()
-        }
-    }
-
-    impl Default for TestableTmpdir {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    impl Drop for TestableTmpdir {
-        fn drop(&mut self) {
-            if std::thread::panicking() {
-                eprintln!(
-                    "Test failed, preserving temp dir at {:?} for inspection",
-                    self.tempdir.path()
-                );
-                self.tempdir.disable_cleanup(true);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::Strategy;
     use proptest::prelude::any;
     use proptest::proptest;
     use rocksdb::properties::ESTIMATE_NUM_KEYS;
 
-    use super::utils::TestableTmpdir;
     use super::*;
 
     fn checkpoint_db_path(db: &PersistenceLayer) -> PathBuf {
