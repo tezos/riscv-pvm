@@ -74,6 +74,7 @@ impl Tree {
     }
 
     #[inline]
+    #[cfg(any(feature = "bench", test))]
     /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
     pub fn get(&self, key: &Key, resolver: &impl Resolver<Arc<Node>, Node>) -> Option<&Value> {
         let node = self.root()?;

@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use octez_riscv_data::hash::Hash;
 
-use crate::avl::node::Value;
 use crate::avl::resolver::ArcResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
@@ -61,12 +60,6 @@ impl MerkleLayer {
         Ok(self.clone())
     }
 
-    /// Clear all data from the [MerkleLayer].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
-    pub fn clear(&mut self) {
-        self.tree.take();
-    }
-
     /// Generates a commitment for the [MerkleLayer].
     pub fn commit(&mut self) -> Result<CommitId, MerkleLayerError> {
         // Note that although we're doing in order
@@ -85,12 +78,6 @@ impl MerkleLayer {
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) {
         self.tree.delete(key, &mut self.resolver);
-    }
-
-    /// Returns an immutable reference to the data stored for a given [Key].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
-    pub fn get(&mut self, key: &Key) -> Option<&Value> {
-        self.tree.get(key, &self.resolver)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
@@ -119,6 +106,8 @@ mod tests {
 
     use super::MerkleLayer;
     use crate::avl::node::Node;
+    use crate::avl::node::Value;
+    use crate::avl::tree::Tree;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
@@ -126,6 +115,16 @@ mod tests {
     impl MerkleLayer {
         fn tree(&self) -> &Tree {
             &self.tree
+        }
+
+        /// Clear all data from the [MerkleLayer].
+        fn clear(&mut self) {
+            self.tree.take();
+        }
+
+        /// Returns an immutable reference to the data stored for a given [Key].
+        fn get(&mut self, key: &Key) -> Option<&Value> {
+            self.tree.get(key, &self.resolver)
         }
     }
 
