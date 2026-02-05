@@ -112,6 +112,29 @@ impl<M: AtomMode> Outbox<M> {
         let level_index = current_level as usize % self.levels.len();
         self.levels[level_index].write_message(message, current_level)
     }
+
+    /// Read the message associated with the given level and index from outbox.
+    ///
+    /// Returns `None` if:
+    /// - The given level is not stored in the outbox because it is either older than
+    ///   the size of the outbox or it corresponds to a future level
+    /// - The given index doesn't exist for the given level
+    #[expect(dead_code, reason = "Used in RV-877")]
+    pub(crate) fn read_message(
+        &self,
+        current_level: u32,
+        message_level: usize,
+        index: usize,
+    ) -> Option<&[u8]> {
+        let current_level = current_level as usize;
+        if message_level < current_level.saturating_sub(TEST_OUTBOX_SIZE)
+            || message_level > current_level
+        {
+            return None;
+        }
+        let level_index = message_level % self.levels.len();
+        self.levels[level_index].read_message(message_level, index)
+    }
 }
 
 impl Outbox<Normal> {
@@ -215,6 +238,13 @@ impl<M: AtomMode> OutboxLevel<M> {
         self.next_index.write(next_index as u32 + 1);
 
         Ok(())
+    }
+
+    fn read_message(&self, level: usize, index: usize) -> Option<&[u8]> {
+        if self.level.read() != level as u32 || index as u32 >= self.next_index.read() {
+            return None;
+        }
+        Some(&self.messages[index])
     }
 }
 
