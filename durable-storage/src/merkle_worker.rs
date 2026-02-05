@@ -8,6 +8,7 @@
 //! background thread. It allows non-blocking `set`, `write` and `delete` operations while still
 //! providing synchronous access to `hash` and `commit` operations.
 
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -34,11 +35,31 @@ impl ValueWriter for HashWriter {
     }
 
     fn write(old_data: &mut Value, offset: usize, data: &[u8]) {
-        let mut old: [u8; Hash::DIGEST_SIZE] = [0; Hash::DIGEST_SIZE]; // TODO
-        old_data.read(0, &mut old);
+        if offset == 0 {
+            return Self::set(old_data, data);
+        }
+        assert_eq!(old_data.len(), Hash::DIGEST_SIZE);
 
-        let hashes = vec![old.into(), Hash::hash_bytes(&offset.to_le_bytes()), Hash::hash_bytes(data)];
-        let data: &[u8; Hash::DIGEST_SIZE]= &Hash::combine_hashes(hashes);
+        let mut old: [MaybeUninit<u8>; Hash::DIGEST_SIZE] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+
+        let mut cursor = 0;
+        while cursor != Hash::DIGEST_SIZE {
+            cursor += old_data.read(cursor, unsafe {
+                std::slice::from_raw_parts_mut(
+                    old.as_mut_ptr().add(cursor) as *mut u8,
+                    Hash::DIGEST_SIZE - cursor,
+                )
+            });
+        }
+        let old: [u8; Hash::DIGEST_SIZE] = unsafe { std::mem::transmute(old) };
+
+        let hashes = vec![
+            old.into(),
+            Hash::hash_bytes(&offset.to_le_bytes()),
+            Hash::hash_bytes(data),
+        ];
+        let data: &[u8; Hash::DIGEST_SIZE] = &Hash::combine_hashes(hashes);
         old_data.set(data);
     }
 }
