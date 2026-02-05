@@ -2446,6 +2446,7 @@ dependencies = [
  "hex",
  "log",
  "octez-riscv-data",
+ "octez-riscv-durable-storage",
  "proptest",
  "rand 0.9.2",
  "rocksdb",
