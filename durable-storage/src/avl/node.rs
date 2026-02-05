@@ -53,6 +53,7 @@ struct NodeHashRepresentation<'a, Value> {
 
 impl Node {
     #[inline]
+    #[cfg(any(feature = "bench", test))]
     /// The data stored in the [`Node`].
     pub(crate) fn data(&self) -> &Value {
         &self.data
@@ -97,6 +98,7 @@ impl Node {
         &mut self.balance_factor
     }
 
+    #[cfg(any(feature = "bench", test))]
     /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
     pub(super) fn get<'a>(
         mut node: &'a Arc<Node>,
