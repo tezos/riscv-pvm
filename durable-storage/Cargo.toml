@@ -27,6 +27,7 @@ criterion.workspace = true
 octez-riscv-test-utils.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+octez-riscv-durable-storage = { path = ".", features = ["bench"] }
 
 [features]
 bench = []
