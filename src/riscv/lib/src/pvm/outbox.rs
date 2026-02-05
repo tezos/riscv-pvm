@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2026 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -63,6 +64,15 @@ const OUTBOX_MERKLE_ARITY: usize = 2;
 /// The arity used to Merkleise arrays in each level
 const LEVEL_MERKLE_ARITY: usize = 2;
 
+#[derive(Error, Debug)]
+pub(crate) enum OutboxError {
+    #[error("Outbox is full")]
+    OutboxFull,
+
+    #[error("Outbox message exceeds allowable size of {MAX_OUTPUT_SIZE}. Found: {size}")]
+    OutboxMessageTooLarge { size: usize },
+}
+
 /// Outbox state
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Outbox<M: Mode> {
@@ -75,6 +85,23 @@ impl<M: AtomMode> Outbox<M> {
         for level in self.levels.iter_mut() {
             *level = OutboxLevel::default()
         }
+    }
+
+    /// Write `message` to the outbox at the current level. Returns `Err(OutboxFull)`
+    /// if the outbox is full.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `current_level` is lt the last recorded level in the modded outbox
+    /// level slot
+    #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
+    pub(crate) fn write_message(
+        &mut self,
+        message: OutboxMessage,
+        current_level: u32,
+    ) -> Result<(), OutboxError> {
+        let level_index = current_level as usize % self.levels.len();
+        self.levels[level_index].write_message(message, current_level)
     }
 }
 
@@ -146,8 +173,40 @@ impl<C> Decode<C> for Outbox<Normal> {
 
 #[perfect_derive(Clone, PartialEq, Eq)]
 struct OutboxLevel<M: Mode> {
-    messages: Box<[Atom<Vec<u8>, M>]>,
+    messages: Box<[Atom<Box<[u8]>, M>]>,
+    /// Next available message slot
     next_index: Atom<u32, M>,
+    /// The level associated with this OutboxLevel
+    level: Atom<u32, M>,
+}
+
+impl<M: AtomMode> OutboxLevel<M> {
+    fn write_message(
+        &mut self,
+        message: OutboxMessage,
+        current_level: u32,
+    ) -> Result<(), OutboxError> {
+        let previous_level = self.level.read();
+        assert!(
+            current_level >= previous_level,
+            "current_level {current_level} must be gte to any level already stored in the outbox. Found {previous_level}"
+        );
+
+        if current_level > previous_level {
+            self.next_index.write(0);
+            self.level.write(current_level);
+        }
+
+        let next_index = self.next_index.read() as usize;
+        if next_index >= MAX_LEVEL_SIZE {
+            return Err(OutboxError::OutboxFull);
+        }
+
+        self.messages[next_index].write(message.0);
+        self.next_index.write(next_index as u32 + 1);
+
+        Ok(())
+    }
 }
 
 impl OutboxLevel<Normal> {
@@ -162,6 +221,7 @@ impl OutboxLevel<Normal> {
         OutboxLevel {
             messages,
             next_index: self.next_index.start_proof(),
+            level: self.level.start_proof(),
         }
     }
 }
@@ -169,11 +229,12 @@ impl OutboxLevel<Normal> {
 impl<M: AtomMode> Default for OutboxLevel<M> {
     fn default() -> Self {
         let mut messages = Vec::with_capacity(MAX_LEVEL_SIZE);
-        messages.resize_with(MAX_LEVEL_SIZE, || Atom::<Vec<u8>, M>::new(Vec::new()));
+        messages.resize_with(MAX_LEVEL_SIZE, || Atom::<Box<[u8]>, M>::new(Box::new([])));
 
         Self {
             messages: messages.into_boxed_slice(),
             next_index: Atom::default(),
+            level: Atom::default(),
         }
     }
 }
@@ -183,6 +244,7 @@ impl<M: CloneAtomMode> CloneState for OutboxLevel<M> {
         Self {
             messages: self.messages.clone_state(),
             next_index: self.next_index.clone_state(),
+            level: self.level.clone_state(),
         }
     }
 }
@@ -191,18 +253,19 @@ impl<M, F> Foldable<F> for OutboxLevel<M>
 where
     M: Mode,
     F: Fold,
-    Atom<Vec<u8>, M>: Foldable<F>,
+    Atom<Box<[u8]>, M>: Foldable<F>,
     Atom<u32, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let message_generator = |idx| self.messages.index(idx);
         let mut builder = builder.into_node_fold();
         builder.add(&IndexableSeqAsTree::new(
-            MAX_LEVEL_SIZE,
+            self.messages.len(),
             LEVEL_MERKLE_ARITY,
             &message_generator,
         ));
         builder.add(&self.next_index);
+        builder.add(&self.level);
         builder.done()
     }
 }
@@ -217,10 +280,12 @@ impl FromProof for OutboxLevel<Verify> {
         })?;
 
         let (proof, next_index) = proof.next_branch()?;
+        let (proof, level) = proof.next_branch()?;
 
         proof.done(OutboxLevel {
             messages,
             next_index,
+            level,
         })
     }
 }
@@ -229,6 +294,7 @@ impl<M: EncodeAtomMode> Encode for OutboxLevel<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.messages.encode(encoder)?;
         self.next_index.encode(encoder)?;
+        self.level.encode(encoder)?;
         Ok(())
     }
 }
@@ -237,52 +303,32 @@ impl<C> Decode<C> for OutboxLevel<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let messages = Decode::decode(decoder)?;
         let next_index = Decode::decode(decoder)?;
+        let level = Decode::decode(decoder)?;
         Ok(Self {
             messages,
             next_index,
+            level,
         })
     }
 }
 
-#[derive(Error, Debug)]
-pub(crate) enum OutboxError {
-    #[error("Outbox message exceeds allowable size of {MAX_OUTPUT_SIZE}. Found: {size}")]
-    OutboxMessageTooLarge { size: usize },
-}
-
-#[derive(Debug, PartialEq, Eq)]
+/// An Outbox Message is a boxed byte slice, restricted to at most [`MAX_OUTPUT_SIZE`]
+/// in length
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub(crate) struct OutboxMessage([u8]);
+pub(crate) struct OutboxMessage(Box<[u8]>);
 
 impl OutboxMessage {
     /// Constructs a zeroed, boxed outbox message buffer of size `size`
     ///
     /// Fails if `size` exceeds [`MAX_OUTPUT_SIZE`]
     #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
-    pub(crate) fn new(size: usize) -> Result<Box<Self>, OutboxError> {
+    pub(crate) fn new(size: usize) -> Result<Self, OutboxError> {
         if size > MAX_OUTPUT_SIZE {
             return Err(OutboxError::OutboxMessageTooLarge { size });
         }
         let boxed_slice = vec![0u8; size].into_boxed_slice();
-        let raw = Box::into_raw(boxed_slice) as *mut OutboxMessage;
-
-        // Safety: Re-wrapping raw pointer back into a Box of equivalent
-        // type (guaranteed by #[repr(transparent)])
-        Ok(unsafe { Box::from_raw(raw) })
-    }
-
-    #[cfg(test)]
-    fn from_boxed_slice(boxed_slice: Box<[u8]>) -> Result<Box<Self>, OutboxError> {
-        if boxed_slice.len() > MAX_OUTPUT_SIZE {
-            return Err(OutboxError::OutboxMessageTooLarge {
-                size: boxed_slice.len(),
-            });
-        }
-        let raw = Box::into_raw(boxed_slice) as *mut OutboxMessage;
-        
-        // Safety: Re-wrapping raw pointer back into a Box of equivalent
-        // type (guaranteed by #[repr(transparent)])
-        Ok(unsafe { Box::from_raw(raw) })
+        Ok(OutboxMessage(boxed_slice))
     }
 }
 
@@ -300,10 +346,95 @@ impl DerefMut for OutboxMessage {
     }
 }
 
-impl From<Box<OutboxMessage>> for Box<[u8]> {
-    fn from(value: Box<OutboxMessage>) -> Self {
-        // SAFETY: OutboxMessage's in memory layout is equivalent to
-        // [u8] as guaranteed by #[repr(transparent)]
-        unsafe { std::mem::transmute(value) }
+#[cfg(test)]
+mod tests {
+    use std::ops::RangeInclusive;
+
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn message_strategy(size_range: RangeInclusive<usize>) -> impl Strategy<Value = OutboxMessage> {
+        proptest::collection::vec(any::<u8>(), size_range)
+            .prop_map(|data| OutboxMessage(data.into_boxed_slice()))
+    }
+
+    fn messages_strategy(
+        size_range: RangeInclusive<usize>,
+        len: usize,
+    ) -> impl Strategy<Value = Vec<OutboxMessage>> {
+        proptest::collection::vec(message_strategy(size_range), len)
+    }
+
+    #[test]
+    fn write_messages_with_varying_sizes() {
+        proptest!(|(
+            messages in messages_strategy(0..=MAX_OUTPUT_SIZE, MAX_LEVEL_SIZE),
+            level in 0u32..TEST_OUTBOX_SIZE as u32
+        )| {
+            let mut outbox = Outbox::<Normal>::default();
+            let idx = level as usize % TEST_OUTBOX_SIZE;
+            for (i, message) in messages.into_iter().enumerate() {
+                prop_assert!(outbox.write_message(message.clone(), level).is_ok());
+
+                prop_assert_eq!(&*outbox.levels[idx].messages[i], &message.0);
+                prop_assert_eq!(*outbox.levels[idx].next_index, (i + 1) as u32);
+                prop_assert_eq!(*outbox.levels[idx].level, level);
+            }
+        });
+    }
+
+    #[test]
+    fn write_message_level_wrap() {
+        proptest!(|(level in 0u32..TEST_OUTBOX_SIZE as u32)| {
+            let mut outbox = Outbox::<Normal>::default();
+            let first_message = OutboxMessage(Box::new([1u8; 32]));
+            let second_message = OutboxMessage(Box::new([2u8; 32]));
+            let idx = level as usize;
+
+            // Write two messages at `level`
+            assert!(outbox.write_message(first_message, level).is_ok());
+            assert!(outbox.write_message(second_message, level).is_ok());
+
+            assert_eq!(*outbox.levels[idx].next_index, 2);
+            assert_eq!(*outbox.levels[idx].level, level);
+
+            // Now write at `level` + TEST_OUTBOX_SIZE which should wrap to `level`
+            let overflow_level = level + TEST_OUTBOX_SIZE as u32;
+            let third_message = OutboxMessage(Box::new([3u8; 32]));
+            assert!(outbox.write_message(third_message.clone(), overflow_level).is_ok());
+
+            assert_eq!(&*outbox.levels[idx].messages[0], &third_message.0);
+            assert_eq!(*outbox.levels[idx].next_index, 1);
+            assert_eq!(*outbox.levels[idx].level, overflow_level);
+        });
+    }
+
+    #[test]
+    fn write_to_full_outbox_fails() {
+        proptest!(|(messages in messages_strategy(0..=64, MAX_LEVEL_SIZE + 10))| {
+            let mut outbox = Outbox::<Normal>::default();
+             for (i, message) in messages.iter().enumerate().take(MAX_LEVEL_SIZE) {
+                assert!(outbox.write_message(message.clone(), 0).is_ok());
+                assert_eq!(*outbox.levels[0].next_index, (i + 1) as u32);
+                assert_eq!(&*outbox.levels[0].messages[i], &message.0);
+            }
+
+            for message in &messages[MAX_LEVEL_SIZE..] {
+                // Verify that outbox is full
+                assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
+
+                prop_assert!(matches!(outbox.write_message(message.clone(), 0), Err(OutboxError::OutboxFull)));
+                prop_assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
+            }
+        });
+    }
+
+    #[test]
+    fn oversized_messages_cannot_be_created() {
+        proptest!(|(size in MAX_OUTPUT_SIZE + 1..=usize::MAX)| {
+            let res = OutboxMessage::new(size);
+            assert!(matches!(res, Err(OutboxError::OutboxMessageTooLarge { size: s }) if s == size));
+        })
     }
 }
