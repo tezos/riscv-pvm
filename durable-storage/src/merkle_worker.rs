@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::avl::node::Value;
+use crate::avl::tree::DataWriter;
 use crate::avl::tree::ValueWriter;
 use crate::commit::CommitId;
 use crate::key::Key;
@@ -30,6 +31,10 @@ pub struct HashWriter;
 
 impl ValueWriter for HashWriter {
     fn set(old_data: &mut Value, data: &[u8]) {
+        if data.len() < Hash::DIGEST_SIZE {
+            DataWriter::set(old_data, data);
+            return;
+        }
         let data: &[u8; Hash::DIGEST_SIZE] = &Hash::hash_bytes(data);
         old_data.set(data);
     }
@@ -38,13 +43,17 @@ impl ValueWriter for HashWriter {
         if offset == 0 {
             return Self::set(old_data, data);
         }
-        assert_eq!(old_data.len(), Hash::DIGEST_SIZE);
+
+        if offset + data.len() < Hash::DIGEST_SIZE {
+            DataWriter::write(old_data, offset, data);
+            return;
+        }
 
         let mut old: [MaybeUninit<u8>; Hash::DIGEST_SIZE] =
             unsafe { MaybeUninit::uninit().assume_init() };
 
         let mut cursor = 0;
-        while cursor != Hash::DIGEST_SIZE {
+        while cursor != old_data.len() {
             cursor += old_data.read(cursor, unsafe {
                 std::slice::from_raw_parts_mut(
                     old.as_mut_ptr().add(cursor) as *mut u8,
@@ -52,6 +61,17 @@ impl ValueWriter for HashWriter {
                 )
             });
         }
+
+        if cursor < Hash::DIGEST_SIZE {
+            let uninit = unsafe {
+                std::slice::from_raw_parts_mut(
+                    old.as_mut_ptr().add(cursor) as *mut u8,
+                    Hash::DIGEST_SIZE - cursor,
+                )
+            };
+            uninit.fill(0);
+        }
+
         let old: [u8; Hash::DIGEST_SIZE] = unsafe { std::mem::transmute(old) };
 
         let hashes = vec![
