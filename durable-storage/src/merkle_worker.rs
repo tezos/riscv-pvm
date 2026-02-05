@@ -16,6 +16,7 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::avl::tree::DataWriter;
 use crate::commit::CommitId;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
@@ -55,7 +56,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<MerkleLayer, MerkleLayerError>>,
+        response: oneshot::Sender<Result<MerkleLayer<DataWriter>, MerkleLayerError>>,
     },
 }
 
@@ -130,7 +131,7 @@ impl MerkleWorker {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer) -> Self {
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<DataWriter>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         async_handle.spawn(async move {
@@ -228,6 +229,7 @@ mod tests {
     use proptest::prop_assert_eq;
     use tokio::runtime::Handle;
 
+    use crate::avl::tree::DataWriter;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
@@ -272,7 +274,7 @@ mod tests {
             handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
-            layer: &mut MerkleLayer,
+            layer: &mut MerkleLayer<DataWriter>,
         ) {
             match self {
                 Self::Write { key, offset, value } => {

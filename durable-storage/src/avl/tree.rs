@@ -21,6 +21,36 @@ use crate::key::Key;
 #[derive(Clone, Default, Debug)]
 pub struct Tree(Option<Arc<Node>>);
 
+pub trait ValueWriter {
+    fn set(old_data: &mut Value, data: &[u8]);
+
+    fn write(old_data: &mut Value, offset: usize, data: &[u8]);
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct DataWriter;
+
+impl ValueWriter for DataWriter {
+    fn set(old_data: &mut Value, data: &[u8]) {
+        old_data.set(data)
+    }
+
+    fn write(old_data: &mut Value, offset: usize, data: &[u8]) {
+        let Some(new_data_end) = offset.checked_add(data.len()) else {
+            // The asynchronous Merkle worker means that errors can't be returned to the
+            // `Database`.
+            panic!(
+                "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
+                data.len()
+            );
+        };
+
+        let final_len = std::cmp::max(old_data.len(), new_data_end);
+        old_data.resize(final_len);
+        old_data.write(offset, data);
+    }
+}
+
 impl Tree {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
@@ -77,13 +107,13 @@ impl Tree {
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub fn set(
+    pub fn set<Writer: ValueWriter>(
         &mut self,
         key: &Key,
         data: &[u8],
         resolver: &mut impl Resolver<Arc<Node>, Node>,
     ) -> bool {
-        self.upsert(key, 0, |old_data| old_data.set(data), resolver)
+        self.upsert(key, 0, |old_data| Writer::set(old_data, data), resolver)
     }
 
     /// Returns the node [`struct@Hash`], potentially re-hashing uncached [`Node`]s.
@@ -202,7 +232,7 @@ impl Tree {
     /// given offset, overwriting existing data if the node already exists.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn write(
+    pub(crate) fn write<Writer: ValueWriter>(
         &mut self,
         key: &Key,
         offset: usize,
@@ -215,19 +245,7 @@ impl Tree {
             |old_data| {
                 // This shouldn't happen: it's prevented by the `Database` API.
                 assert!(offset <= old_data.len());
-
-                let Some(new_data_end) = offset.checked_add(data.len()) else {
-                    // The asynchronous Merkle worker means that errors can't be returned to the
-                    // `Database`.
-                    panic!(
-                        "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
-                        data.len()
-                    );
-                };
-
-                let final_len = std::cmp::max(old_data.len(), new_data_end);
-                old_data.resize(final_len);
-                old_data.write(offset, data);
+                Writer::write(old_data, offset, data);
             },
             resolver,
         )
@@ -437,7 +455,7 @@ mod tests {
                         continue;
                     }
                     Operation::Upsert(key, value) => {
-                        tree.set(&key, &value, &mut resolver);
+                        tree.set::<DataWriter>(&key, &value, &mut resolver);
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
@@ -471,7 +489,7 @@ mod tests {
             .zip(data)
             .map(|(key, data)| -> Hash {
                 let digest = tree.hash(&resolver);
-                tree.set(key, data.as_bytes(), &mut resolver);
+                tree.set::<DataWriter>(key, data.as_bytes(), &mut resolver);
                 digest
             })
             .collect();

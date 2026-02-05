@@ -2,12 +2,14 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use octez_riscv_data::hash::Hash;
 
 use crate::avl::resolver::ArcResolver;
 use crate::avl::tree::Tree;
+use crate::avl::tree::ValueWriter;
 use crate::commit::CommitId;
 use crate::key::Key;
 use crate::persistence_layer::HashedData;
@@ -26,21 +28,23 @@ pub enum MerkleLayerError {
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
-pub struct MerkleLayer {
+pub struct MerkleLayer<Writer: ValueWriter + Clone> {
     tree: Tree,
     persistence: Arc<PersistenceLayer>,
     resolver: ArcResolver,
+    _writer: PhantomData<Writer>,
 }
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
-impl MerkleLayer {
+impl<Writer: ValueWriter + Clone> MerkleLayer<Writer> {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
     pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
         let resolver = ArcResolver;
-        MerkleLayer {
+        MerkleLayer::<Writer> {
             tree: Tree::default(),
             persistence,
             resolver,
+            _writer: Default::default(),
         }
     }
 
@@ -87,12 +91,13 @@ impl MerkleLayer {
 
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: &[u8]) {
-        self.tree.set(key, data, &mut self.resolver);
+        self.tree.set::<Writer>(key, data, &mut self.resolver);
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
     pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) {
-        self.tree.write(key, offset, data, &mut self.resolver);
+        self.tree
+            .write::<Writer>(key, offset, data, &mut self.resolver);
     }
 }
 
@@ -108,12 +113,14 @@ mod tests {
     use crate::avl::Tree;
     use crate::avl::hash;
     use crate::avl::node::Value;
+    use crate::avl::tree::DataWriter;
+    use crate::avl::tree::ValueWriter;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
-    impl MerkleLayer {
+    impl<Writer: ValueWriter + Clone> MerkleLayer<Writer> {
         fn tree(&self) -> &Tree {
             &self.tree
         }
@@ -129,7 +136,7 @@ mod tests {
         }
     }
 
-    fn new_merkle_layer() -> MerkleLayer {
+    fn new_merkle_layer() -> MerkleLayer<DataWriter> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =

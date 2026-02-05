@@ -10,6 +10,7 @@ use std::ops::Range;
 use rand::prelude::*;
 
 pub use crate::avl::resolver::ArcResolver;
+pub use crate::avl::tree::DataWriter;
 pub use crate::avl::tree::Tree;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;

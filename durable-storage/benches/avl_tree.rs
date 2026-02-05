@@ -9,6 +9,7 @@ use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use octez_riscv_durable_storage::bench::ArcResolver;
+use octez_riscv_durable_storage::bench::DataWriter;
 use octez_riscv_durable_storage::bench::Tree;
 use octez_riscv_durable_storage::bench::generate_keys;
 use octez_riscv_durable_storage::bench::generate_random_bytes_in_range;
@@ -52,7 +53,7 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
     let mut tree = Tree::default();
     for key in &keys[..keys.len() / 2] {
         let random_data = generate_random_bytes_in_range(&mut rng, 1..20);
-        tree.set(key, &random_data, &mut resolver);
+        tree.set::<DataWriter>(key, &random_data, &mut resolver);
     }
 
     c.bench_function("Bench AVL tree with operations", |b| {
@@ -62,7 +63,7 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
                 for operation in operations {
                     match operation {
                         Operation::Upsert(key, value) => {
-                            tree.set(&key, &value, &mut resolver);
+                            tree.set::<DataWriter>(&key, &value, &mut resolver);
                         }
                         Operation::Delete(key) => {
                             tree.delete(&key, &mut resolver);
