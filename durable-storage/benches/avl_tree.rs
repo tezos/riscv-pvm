@@ -9,6 +9,7 @@ use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use octez_riscv_durable_storage::avl::Tree;
+use octez_riscv_durable_storage::avl::resolver::ArcResolver;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::random::generate_keys;
 use octez_riscv_durable_storage::random::generate_random_bytes_in_range;
@@ -47,12 +48,13 @@ fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize)
 fn bench_avl_tree_operations(c: &mut Criterion) {
     let mut rng = rand::rng();
     let keys = generate_keys(&mut rng, KEY_COUNT);
+    let mut resolver = ArcResolver;
 
     // Setting up the tree
     let mut tree = Tree::default();
     for key in &keys[..keys.len() / 2] {
         let random_data = generate_random_bytes_in_range(&mut rng, 1..20);
-        tree.set(key, &random_data);
+        tree.set(key, &random_data, &mut resolver);
     }
 
     c.bench_function("Bench AVL tree with operations", |b| {
@@ -62,13 +64,13 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
                 for operation in operations {
                     match operation {
                         Operation::Get(key) => {
-                            tree.get(&key);
+                            tree.get(&key, &resolver);
                         }
                         Operation::Upsert(key, value) => {
-                            tree.set(&key, &value);
+                            tree.set(&key, &value, &mut resolver);
                         }
                         Operation::Delete(key) => {
-                            tree.delete(&key);
+                            tree.delete(&key, &mut resolver);
                         }
                     }
                 }
