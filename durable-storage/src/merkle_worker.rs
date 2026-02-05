@@ -16,12 +16,32 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::avl::tree::DataWriter;
+use crate::avl::node::Value;
+use crate::avl::tree::ValueWriter;
 use crate::commit::CommitId;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
 use crate::merkle_layer::MerkleLayerError;
 use crate::persistence_layer::PersistenceLayer;
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct HashWriter;
+
+impl ValueWriter for HashWriter {
+    fn set(old_data: &mut Value, data: &[u8]) {
+        let data: &[u8; Hash::DIGEST_SIZE] = &Hash::hash_bytes(data);
+        old_data.set(data);
+    }
+
+    fn write(old_data: &mut Value, offset: usize, data: &[u8]) {
+        let mut old: [u8; Hash::DIGEST_SIZE] = [0; Hash::DIGEST_SIZE]; // TODO
+        old_data.read(0, &mut old);
+
+        let hashes = vec![old.into(), Hash::hash_bytes(&offset.to_le_bytes()), Hash::hash_bytes(data)];
+        let data: &[u8; Hash::DIGEST_SIZE]= &Hash::combine_hashes(hashes);
+        old_data.set(data);
+    }
+}
 
 /// Commands that can be sent to the Merkle worker background thread
 enum Command {
@@ -56,7 +76,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<MerkleLayer<DataWriter>, MerkleLayerError>>,
+        response: oneshot::Sender<Result<MerkleLayer<HashWriter>, MerkleLayerError>>,
     },
 }
 
@@ -131,7 +151,7 @@ impl MerkleWorker {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer<DataWriter>) -> Self {
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<HashWriter>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         async_handle.spawn(async move {
@@ -229,7 +249,7 @@ mod tests {
     use proptest::prop_assert_eq;
     use tokio::runtime::Handle;
 
-    use crate::avl::tree::DataWriter;
+    use super::HashWriter;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
@@ -274,7 +294,7 @@ mod tests {
             handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
-            layer: &mut MerkleLayer<DataWriter>,
+            layer: &mut MerkleLayer<HashWriter>,
         ) {
             match self {
                 Self::Write { key, offset, value } => {
