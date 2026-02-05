@@ -19,7 +19,7 @@ const KEY_COUNT: usize = 10_000_000;
 const OPERATIONS_PER_SAMPLE: usize = 10_000;
 
 #[derive(Debug, Clone)]
-pub enum Operation {
+enum Operation {
     Upsert(Key, Bytes),
     Delete(Key),
 }
