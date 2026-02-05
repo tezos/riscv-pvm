@@ -20,7 +20,7 @@ pub trait Resolver<Id, Value> {
 
 /// Provide values identified by an [`Arc`].
 #[derive(Clone, Debug)]
-pub(crate) struct ArcResolver;
+pub struct ArcResolver;
 
 impl<T: Clone> Resolver<Arc<T>, T> for ArcResolver {
     fn resolve<'a>(&self, id: &'a Arc<T>) -> &'a T {

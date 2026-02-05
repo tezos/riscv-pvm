@@ -5,12 +5,13 @@
 //! Implementation of a Merkleisable AVL tree.
 
 pub(crate) mod node;
-pub(crate) mod resolver;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
+        pub mod resolver;
         pub mod tree;
     } else {
+        pub(crate) mod resolver;
         pub(crate) mod tree;
     }
 }
