@@ -52,13 +52,6 @@ struct NodeHashRepresentation<'a, Value> {
 }
 
 impl Node {
-    #[inline]
-    #[cfg(any(feature = "bench", test))]
-    /// The data stored in the [`Node`].
-    pub(crate) fn data(&self) -> &Value {
-        &self.data
-    }
-
     /// Create a new leaf [`Node`] from the given key and data.
     pub(crate) fn new(key: Key, data: impl Into<Value>) -> Self {
         Node {
@@ -96,23 +89,6 @@ impl Node {
     /// A mutable reference to the difference in heights between child branches.
     pub(super) fn balance_factor_mut(&mut self) -> &mut i64 {
         &mut self.balance_factor
-    }
-
-    #[cfg(any(feature = "bench", test))]
-    /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
-    pub(super) fn get<'a>(
-        mut node: &'a Arc<Node>,
-        key: &Key,
-        resolver: &impl Resolver<Arc<Node>, Node>,
-    ) -> Option<&'a Value> {
-        loop {
-            let resolved_node = resolver.resolve(node);
-            match resolved_node.key().cmp(key) {
-                Ordering::Equal => return Some(resolved_node.data()),
-                Ordering::Greater => node = resolved_node.left_ref().root()?,
-                Ordering::Less => node = resolved_node.right_ref().root()?,
-            }
-        }
     }
 
     #[inline]
@@ -582,6 +558,28 @@ pub(crate) fn hash<'a>(node: &'a Arc<Node>, resolver: &impl Resolver<Arc<Node>, 
 
 #[cfg(test)]
 impl Node {
+    #[inline]
+    /// The data stored in the [`Node`].
+    pub(crate) fn data(&self) -> &Value {
+        &self.data
+    }
+
+    /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
+    pub(super) fn get<'a>(
+        mut node: &'a Arc<Node>,
+        key: &Key,
+        resolver: &impl Resolver<Arc<Node>, Node>,
+    ) -> Option<&'a Value> {
+        loop {
+            let resolved_node = resolver.resolve(node);
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Some(resolved_node.data()),
+                Ordering::Greater => node = resolved_node.left_ref().root()?,
+                Ordering::Less => node = resolved_node.right_ref().root()?,
+            }
+        }
+    }
+
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors(
         &self,
