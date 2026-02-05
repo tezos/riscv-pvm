@@ -62,10 +62,7 @@ impl MerkleLayer {
     }
 
     /// Clear all data from the [MerkleLayer].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn clear(&mut self) {
         self.tree.take();
     }
@@ -91,19 +88,13 @@ impl MerkleLayer {
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn get(&mut self, key: &Key) -> Option<&Value> {
         self.tree.get(key, &self.resolver)
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
         self.tree.get_mut(key, &mut self.resolver)
     }

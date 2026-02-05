@@ -8,11 +8,11 @@ use bytes::Bytes;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use octez_riscv_durable_storage::avl::Tree;
-use octez_riscv_durable_storage::avl::resolver::ArcResolver;
+use octez_riscv_durable_storage::bench::ArcResolver;
+use octez_riscv_durable_storage::bench::Tree;
+use octez_riscv_durable_storage::bench::generate_keys;
+use octez_riscv_durable_storage::bench::generate_random_bytes_in_range;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::random::generate_keys;
-use octez_riscv_durable_storage::random::generate_random_bytes_in_range;
 use rand::prelude::*;
 
 const KEY_COUNT: usize = 10_000_000;

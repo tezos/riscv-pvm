@@ -6,20 +6,13 @@
 
 pub(crate) mod node;
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "bench")] {
-        pub mod resolver;
-        pub mod tree;
-    } else {
-        pub(crate) mod resolver;
-        pub(crate) mod tree;
-    }
-}
+pub(crate) mod resolver;
+pub(crate) mod tree;
 
 // Re-exports for tests and benchmarks
 #[cfg(test)]
 pub(crate) use node::Node;
 #[cfg(test)]
 pub(crate) use node::hash;
-#[cfg(any(test, feature = "bench"))]
+#[cfg(test)]
 pub use tree::Tree;

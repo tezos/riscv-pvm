@@ -2,16 +2,22 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![cfg(feature = "bench")]
+//! Utilities and re-exports for benchmarks
 
 use std::collections::HashSet;
 use std::ops::Range;
 
 use rand::prelude::*;
 
+pub use crate::avl::resolver::ArcResolver;
+pub use crate::avl::tree::Tree;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
+pub use crate::persistence_layer::PersistenceLayerError;
+pub use crate::persistence_layer::utils::TestableTmpdir;
+pub use crate::repo::DirectoryManager;
 
+/// Generates a random [`Key`] with a given length
 pub fn generate_keys(rng: &mut impl Rng, length: usize) -> Vec<Key> {
     let mut tmp: HashSet<Key> = HashSet::with_capacity(length);
     while tmp.len() < length {
