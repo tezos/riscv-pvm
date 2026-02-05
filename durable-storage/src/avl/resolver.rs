@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 /// Trait for resolving identifiers to values.
-pub(crate) trait Resolver<Id, Value> {
+pub trait Resolver<Id, Value> {
     /// Resolve an identifier to a value.
     fn resolve<'a>(&self, id: &'a Id) -> &'a Value;
 
