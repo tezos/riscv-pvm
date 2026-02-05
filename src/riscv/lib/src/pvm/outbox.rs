@@ -14,6 +14,8 @@
 //! - Producing an outbox proof for a given message
 //! - Verifying an outbox proof
 
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ops::Index;
 
 use bincode::Decode;
@@ -42,6 +44,8 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
+use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
+use thiserror::Error;
 
 /// Small outbox size for testing
 ///
@@ -237,5 +241,69 @@ impl<C> Decode<C> for OutboxLevel<Normal> {
             messages,
             next_index,
         })
+    }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum OutboxError {
+    #[error("Outbox message exceeds allowable size of {MAX_OUTPUT_SIZE}. Found: {size}")]
+    OutboxMessageTooLarge { size: usize },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub(crate) struct OutboxMessage([u8]);
+
+impl OutboxMessage {
+    /// Constructs a zeroed, boxed outbox message buffer of size `size`
+    ///
+    /// Fails if `size` exceeds [`MAX_OUTPUT_SIZE`]
+    #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
+    pub(crate) fn new(size: usize) -> Result<Box<Self>, OutboxError> {
+        if size > MAX_OUTPUT_SIZE {
+            return Err(OutboxError::OutboxMessageTooLarge { size });
+        }
+        let boxed_slice = vec![0u8; size].into_boxed_slice();
+        let raw = Box::into_raw(boxed_slice) as *mut OutboxMessage;
+
+        // Safety: Re-wrapping raw pointer back into a Box of equivalent
+        // type (guaranteed by #[repr(transparent)])
+        Ok(unsafe { Box::from_raw(raw) })
+    }
+
+    #[cfg(test)]
+    fn from_boxed_slice(boxed_slice: Box<[u8]>) -> Result<Box<Self>, OutboxError> {
+        if boxed_slice.len() > MAX_OUTPUT_SIZE {
+            return Err(OutboxError::OutboxMessageTooLarge {
+                size: boxed_slice.len(),
+            });
+        }
+        let raw = Box::into_raw(boxed_slice) as *mut OutboxMessage;
+        
+        // Safety: Re-wrapping raw pointer back into a Box of equivalent
+        // type (guaranteed by #[repr(transparent)])
+        Ok(unsafe { Box::from_raw(raw) })
+    }
+}
+
+impl Deref for OutboxMessage {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for OutboxMessage {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<Box<OutboxMessage>> for Box<[u8]> {
+    fn from(value: Box<OutboxMessage>) -> Self {
+        // SAFETY: OutboxMessage's in memory layout is equivalent to
+        // [u8] as guaranteed by #[repr(transparent)]
+        unsafe { std::mem::transmute(value) }
     }
 }
