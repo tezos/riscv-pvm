@@ -23,7 +23,7 @@ pub type Value = Bytes<Normal>;
 
 /// A node that supports rebalancing and Merklisation.
 #[derive(Clone, Default, Debug)]
-pub(crate) struct Node {
+pub struct Node {
     key: Key,
     data: Value,
     left: Tree,
