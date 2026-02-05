@@ -74,14 +74,6 @@ impl Tree {
     }
 
     #[inline]
-    #[cfg(any(feature = "bench", test))]
-    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub fn get(&self, key: &Key, resolver: &impl Resolver<Arc<Node>, Node>) -> Option<&Value> {
-        let node = self.root()?;
-        Node::get(node, key, resolver)
-    }
-
-    #[inline]
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
@@ -282,6 +274,13 @@ impl<'a> Iterator for TreeIterator<'a> {
 
 #[cfg(test)]
 impl Tree {
+    #[inline]
+    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
+    pub fn get(&self, key: &Key, resolver: &impl Resolver<Arc<Node>, Node>) -> Option<&Value> {
+        let node = self.root()?;
+        Node::get(node, key, resolver)
+    }
+
     /// Asserts that the [`Tree`] is a valid AVL tree
     pub(crate) fn check(&self, resolver: &impl Resolver<Arc<Node>, Node>) {
         let inorder = self.is_inorder(resolver);
