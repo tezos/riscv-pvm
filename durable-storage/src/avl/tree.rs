@@ -93,17 +93,6 @@ impl Tree {
         self.upsert(key, 0, |old_data| old_data.set(data), resolver)
     }
 
-    #[inline]
-    /// A mutable reference to the data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub(crate) fn get_mut(
-        &mut self,
-        key: &Key,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Option<&mut Value> {
-        let node = self.root_mut()?;
-        Node::get_mut(node, key, resolver)
-    }
-
     /// Returns the node [`struct@Hash`], potentially re-hashing uncached [`Node`]s.
     ///
     /// If the [`struct@Hash`] has been cached, the memo is returned. Otherwise, the

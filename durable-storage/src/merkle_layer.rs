@@ -93,12 +93,6 @@ impl MerkleLayer {
         self.tree.get(key, &self.resolver)
     }
 
-    /// Returns a mutable reference to the data stored for a given [Key].
-    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
-    pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
-        self.tree.get_mut(key, &mut self.resolver)
-    }
-
     /// Returns the root hash, potentially re-hashing uncached nodes.
     pub fn hash(&mut self) -> Hash {
         self.tree.hash(&self.resolver)
@@ -117,8 +111,6 @@ impl MerkleLayer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use bytes::Bytes;
     use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::*;
@@ -739,110 +731,6 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
         test_mavl_delete_keys(&keys);
-    }
-
-    #[test]
-    fn test_mavl_get_mut() {
-        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
-        let data = Bytes::from("get_mut");
-        let mut ml = new_merkle_layer();
-        let empty_hash = ml.hash();
-        ml.set(&key, &data.clone());
-        let full_hash = ml.hash();
-        assert_ne!(empty_hash, full_hash);
-
-        let data2 = Bytes::from("mutated with larger data");
-
-        let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-        data_mut.set(&data2);
-
-        assert_ne!(empty_hash, ml.hash());
-        assert_ne!(full_hash, ml.hash());
-
-        let before_node = Node::new(key.clone(), data);
-        let after_node = Node::new(key.clone(), data2);
-
-        let get_node = ml
-            .get(&key)
-            .expect("The node should be retrieved successfully");
-
-        assert_ne!(&get_node, &before_node.data());
-        assert_eq!(&get_node, &after_node.data());
-
-        ml.tree().check(&ml.resolver);
-    }
-
-    #[test]
-    fn test_mavl_get_mut_cow() {
-        let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
-        let data = Bytes::from("get_mut_cow");
-
-        let mut ml = new_merkle_layer();
-
-        let empty_hash = ml.hash();
-        ml.set(&key, &data);
-        let before_hash = ml.hash();
-        assert_ne!(empty_hash, before_hash);
-
-        let mut ml2 = ml.clone();
-        assert_eq!(before_hash, ml2.hash());
-
-        let data2 = Bytes::from("mutated");
-
-        let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-        data_mut.set(&data2);
-
-        assert_ne!(empty_hash, ml.hash());
-        assert_ne!(before_hash, ml.hash());
-        assert_ne!(ml2.hash(), ml.hash());
-
-        let before_node = Node::new(key.clone(), data);
-
-        let get_node = ml2
-            .get(&key)
-            .expect("The node should be retrieved successfully");
-
-        assert_eq!(&get_node, &before_node.data());
-
-        ml.tree().check(&ml.resolver);
-    }
-
-    proptest! {
-        #[test]
-        fn test_mavl_get_mut_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
-            let data = Bytes::from("get_mut_prop");
-            let mut ml = new_merkle_layer();
-
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, &data);
-            }
-
-            let data2 = Bytes::from("mutated");
-            let mut seen = HashSet::new();
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-
-                let before_hash = ml.hash();
-                let data_mut = ml.get_mut(&key).expect("The operation should succeed");
-                data_mut.set(&data2);
-
-                let before_node = Node::new(key.clone(), data.clone());
-                let after_node = Node::new(key.clone(), data2.clone());
-
-                let get_node = ml
-                    .get(&key)
-                    .expect("The node should be retrieved successfully");
-
-                assert_ne!(&get_node, &before_node.data());
-                assert_eq!(&get_node, &after_node.data());
-
-                prop_assert_eq!(before_hash == ml.hash(), seen.contains(&key));
-                seen.insert(key);
-            }
-
-            ml.tree().check(&ml.resolver);
-        }
     }
 
     #[test]
