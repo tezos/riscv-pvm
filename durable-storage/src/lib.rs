@@ -34,7 +34,6 @@ cfg_if::cfg_if! {
         pub mod merkle_layer;
         pub mod merkle_worker;
         pub mod persistence_layer;
-        pub mod repo;
         pub mod random;
     } else {
         mod avl;
@@ -42,7 +41,6 @@ cfg_if::cfg_if! {
         mod merkle_worker;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
         pub(crate) mod persistence_layer;
-        mod repo;
     }
 }
 
@@ -50,3 +48,4 @@ pub mod commit;
 pub mod database;
 pub mod key;
 pub mod registry;
+mod repo;

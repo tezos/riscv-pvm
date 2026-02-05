@@ -202,12 +202,12 @@ impl Registry {
 mod tests {
     use bytes::Bytes;
     use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_test_utils::TestableTmpdir;
 
     use super::Registry;
     use super::RegistryManifest;
     use crate::commit::CommitId;
     use crate::key::Key;
-    use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
     fn setup_registry() -> (TestableTmpdir, Registry) {

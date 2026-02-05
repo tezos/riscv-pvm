@@ -6,6 +6,7 @@
 //! Common utilities for octez-riscv integration tests
 
 use std::fs;
+use std::path::Path;
 
 use const_format::concatcp;
 use octez_riscv::machine_state::memory::MemoryConfig;
@@ -13,6 +14,7 @@ use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::stepper::pvm::PvmStepper;
 use rand::Rng;
 use rand::seq::SliceRandom;
+use tempfile::TempDir;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
 const ASSETS_DIR: &str = std::env!("OCTEZ_RISCV_ASSETS_DIR");
@@ -59,6 +61,43 @@ pub const ETHERLINK: TestConfig = TestConfig {
     kernel_path: concatcp!(ASSETS_DIR, "/etherlink"),
     inbox_path: concatcp!(ASSETS_DIR, "/etherlink-regression-inbox.json"),
 };
+
+/// A temporary directory used for testing
+pub struct TestableTmpdir {
+    tempdir: TempDir,
+}
+
+impl TestableTmpdir {
+    /// Create a new temporary directory for testing
+    pub fn new() -> Self {
+        let tempdir = TempDir::new().expect("Should be able to create temp dir");
+
+        Self { tempdir }
+    }
+
+    /// The path of the temporary directory
+    pub fn path(&self) -> &Path {
+        self.tempdir.path()
+    }
+}
+
+impl Default for TestableTmpdir {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for TestableTmpdir {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "Test failed, preserving temp dir at {:?} for inspection",
+                self.tempdir.path()
+            );
+            self.tempdir.disable_cleanup(true);
+        }
+    }
+}
 
 /// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
 pub fn make_stepper_factory<MC: MemoryConfig>(

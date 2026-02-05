@@ -183,6 +183,7 @@ mod tests {
     use std::collections::HashSet;
 
     use bytes::Bytes;
+    use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -192,7 +193,6 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
-    use crate::persistence_layer::utils::TestableTmpdir;
     use crate::repo::DirectoryManager;
 
     fn new_database(handle: &Handle) -> Database {

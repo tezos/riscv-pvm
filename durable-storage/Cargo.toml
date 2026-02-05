@@ -24,6 +24,7 @@ tokio.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true
+octez-riscv-test-utils.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
