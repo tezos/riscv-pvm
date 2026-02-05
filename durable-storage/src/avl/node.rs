@@ -113,36 +113,6 @@ impl Node {
         }
     }
 
-    /// A mutable reference to the data stored in a [`Node`] within the subtree of this [`Node`]
-    /// with a given [`Key`] .
-    pub(super) fn get_mut<'a>(
-        mut node: &'a mut Arc<Node>,
-        key: &Key,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Option<&'a mut Value> {
-        loop {
-            let ordering = {
-                let node_ref = resolver.resolve(node);
-                node_ref.key().cmp(key)
-            };
-            match ordering {
-                Ordering::Equal => {
-                    let node_mut = resolver.resolve_mut(node);
-                    node_mut.invalidate_hash();
-                    return Some(&mut node_mut.data);
-                }
-                Ordering::Greater => {
-                    let node_mut = resolver.resolve_mut(node);
-                    node = node_mut.left_mut().root_mut()?;
-                }
-                Ordering::Less => {
-                    let node_mut = resolver.resolve_mut(node);
-                    node = node_mut.right_mut().root_mut()?;
-                }
-            }
-        }
-    }
-
     #[inline]
     /// The [`Key`] used for determining the [`Node`].
     pub(super) fn key(&self) -> &Key {
