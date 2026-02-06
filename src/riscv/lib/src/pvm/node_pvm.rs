@@ -18,6 +18,8 @@ use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
+use super::outbox::outbox_proof::OutboxProof;
+use super::outbox::outbox_proof::Output;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
@@ -192,6 +194,25 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
         let proof = proof_state.produce_proof().ok()?;
         Some(proof)
     }
+
+    pub fn produce_outbox_proof(
+        &self,
+        message: Vec<u8>,
+        level: usize,
+        index: usize,
+    ) -> Option<OutboxProof> {
+        let proof_state = self.state.start_proof();
+
+        let read_message = proof_state.get_outbox_message(level, index)?;
+
+        let proof = proof_state.produce_proof().ok()?;
+
+        if read_message == message {
+            return Some(OutboxProof::new(proof.into_tree(), level, index));
+        }
+
+        None
+    }
 }
 
 impl NodePvm<Verify, EmptyPageCache> {
@@ -221,6 +242,24 @@ impl NodePvm<Verify, EmptyPageCache> {
             }
 
             Some(pvm.input_request())
+        })
+    }
+
+    pub fn verify_outbox_proof(&mut self, proof: OutboxProof) -> Option<Output> {
+        self.with_backend_mut(|pvm| {
+            if !pvm.level_is_set.read() {
+                return None;
+            }
+
+            let level = pvm.level.read();
+            let message = pvm
+                .outbox
+                .read_message(level, proof.info.level, proof.info.index)?;
+
+            Some(Output {
+                message: message.to_vec(),
+                info: proof.info,
+            })
         })
     }
 }

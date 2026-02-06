@@ -43,6 +43,7 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::linux;
 use super::outbox::Outbox;
+use super::outbox::outbox_proof::OutboxProof;
 use super::reveals::RevealRequest;
 use crate::default::ConstDefault;
 use crate::machine_state;
@@ -347,6 +348,28 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
             }
         }
     }
+
+    /// Get the outbox message at the given level and index. This is the state transition
+    /// captured in outbox proofs.
+    ///
+    /// Returns `None` if the requested message is not found in the outbox.
+    pub(crate) fn get_outbox_message(&self, level: usize, index: usize) -> Option<Vec<u8>>
+    where
+        M: AtomMode,
+    {
+        if !self.level_is_set.read() {
+            return None;
+        }
+
+        let current_level = self.level.read();
+
+        eprintln!("Current level {current_level}, getting message at {level}/{index}");
+
+        let message = self.outbox.read_message(current_level, level, index)?;
+
+        // TODO maybe return slice instead?
+        Some(message.to_vec())
+    }
 }
 
 impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Pvm<MC, PC, Normal> {
@@ -383,6 +406,18 @@ where
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
+    }
+
+    pub(crate) fn produce_outbox_proof(
+        &self,
+        _message: Vec<u8>,
+        level: usize,
+        index: usize,
+    ) -> Option<OutboxProof> {
+        let merkle_tree = MerkleTree::from_foldable(self);
+        let merkle_proof: MerkleProof = merkle_tree.compress();
+
+        Some(OutboxProof::new(merkle_proof, level, index))
     }
 }
 

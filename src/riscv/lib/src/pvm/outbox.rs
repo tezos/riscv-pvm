@@ -15,6 +15,8 @@
 //! - Producing an outbox proof for a given message
 //! - Verifying an outbox proof
 
+pub mod outbox_proof;
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::ops::Index;
@@ -119,7 +121,6 @@ impl<M: AtomMode> Outbox<M> {
     /// - The given level is not stored in the outbox because it is either older than
     ///   the size of the outbox or it corresponds to a future level
     /// - The given index doesn't exist for the given level
-    #[expect(dead_code, reason = "Used in RV-877")]
     pub(crate) fn read_message(
         &self,
         current_level: u32,

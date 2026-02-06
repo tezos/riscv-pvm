@@ -7,7 +7,7 @@ mod common;
 pub mod hooks;
 pub(crate) mod linux;
 pub mod node_pvm;
-mod outbox;
+pub mod outbox;
 mod reveals;
 mod tezos;
 

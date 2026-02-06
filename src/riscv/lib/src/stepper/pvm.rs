@@ -42,6 +42,7 @@ use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
+use crate::pvm::outbox::outbox_proof::OutboxProof;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofPart;
@@ -152,6 +153,28 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
         let proof = proof_stepper.pvm.produce_proof().ok()?;
         Some(proof)
     }
+
+    pub fn produce_outbox_proof<'a>(
+        &'a self,
+        message: Vec<u8>,
+        level: usize,
+        index: usize,
+    ) -> Option<OutboxProof>
+    where
+        MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    {
+        let proof_stepper = self.start_proof_mode();
+
+        let read_message = proof_stepper.get_outbox_message(level, index)?;
+
+        if read_message == message {
+            return proof_stepper
+                .pvm
+                .produce_outbox_proof(message, level, index);
+        }
+
+        None
+    }
 }
 
 impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode>
@@ -238,6 +261,14 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpac
             StepperStatus::Running { steps: 1 } | StepperStatus::Exited { steps: 1, .. } => true,
             _ => false,
         }
+    }
+
+    /// Get the outbox message at the given level and index. This is the state transition
+    /// captured in outbox proofs.
+    ///
+    /// Returns `None` if the requested message is not found in the outbox.
+    fn get_outbox_message(&self, level: usize, index: usize) -> Option<Vec<u8>> {
+        self.pvm.get_outbox_message(level, index)
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.
