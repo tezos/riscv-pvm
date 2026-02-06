@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -55,7 +56,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<MerkleLayer<PersistenceLayer>>,
+        response: oneshot::Sender<MerkleLayer<PersistenceLayer, Normal>>,
     },
 }
 
@@ -93,7 +94,7 @@ impl MerkleWorker {
         Ok(worker)
     }
 
-    /// See [`MerkleLayer::clone_with`].
+    /// See [`MerkleLayer::try_clone_with`].
     pub(crate) fn clone_with(
         &self,
         handle: &Handle,
@@ -119,7 +120,7 @@ impl MerkleWorker {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer<PersistenceLayer>) -> Self {
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<PersistenceLayer, Normal>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
 
         async_handle.spawn(async move {
@@ -160,7 +161,7 @@ impl MerkleWorker {
                         persistence_layer,
                         response,
                     } => {
-                        let result = layer.clone_with(persistence_layer);
+                        let result = layer.try_clone_with(persistence_layer);
                         let _ = response.send(result);
                     }
                 }
@@ -228,6 +229,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
     use proptest::prelude::Just;
     use proptest::prelude::Strategy;
     use proptest::prop_assert_eq;
@@ -278,7 +280,7 @@ mod tests {
             handle: &Handle,
             dir_manager: &DirectoryManager,
             worker: &mut MerkleWorker,
-            layer: &mut MerkleLayer<PersistenceLayer>,
+            layer: &mut MerkleLayer<PersistenceLayer, Normal>,
         ) {
             match self {
                 Self::Write { key, offset, value } => {
@@ -316,7 +318,7 @@ mod tests {
                     let persistence_layer = PersistenceLayer::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
-                    *layer = layer.clone_with(persistence_layer);
+                    *layer = layer.try_clone_with(persistence_layer);
 
                     let persistence_worker = PersistenceLayer::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
