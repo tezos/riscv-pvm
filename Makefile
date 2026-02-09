@@ -4,13 +4,13 @@
 
 ### Generic top-level targets
 
-all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all
+all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all docs/all
 
 build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
 
 build-deps-slim: riscv/build-deps-slim
 
-check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check check-format
+check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check docs/check check-format
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
@@ -61,6 +61,9 @@ etherlink/%:
 
 assets/%:
 	@make -C assets ${@:assets/%=%}
+
+docs/%:
+	@make -C docs ${@:docs/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
 .PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format codecov.json audit build test clean

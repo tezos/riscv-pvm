@@ -12,6 +12,8 @@
   fswatch,
   inotify-tools,
   pkgsCross,
+  nodejs,
+  pnpm,
 }:
 mkShell {
   name = "tezos-shell";
@@ -33,6 +35,10 @@ mkShell {
     # These are needed for downloads and stuff
     cacert
     curl
+
+    # NodeJS stuff for documentation
+    nodejs
+    pnpm
   ]
   ++ (
     if stdenv.isDarwin then
