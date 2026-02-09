@@ -5,14 +5,13 @@
 //! Interface for a Merklisable node of an AVL tree
 
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 use bincode::Encode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
+use perfect_derive::perfect_derive;
 
 use super::tree::Tree;
 use crate::avl::resolver::Resolver;
@@ -35,12 +34,12 @@ struct NodeHashRepresentation<'a, Value> {
 }
 
 /// A node that supports rebalancing and Merklisation.
-#[derive(Clone, Default, Debug)]
-pub struct Node {
+#[perfect_derive(Clone, Default, Debug)]
+pub struct Node<Id> {
     key: Key,
     data: Value,
-    left: Tree,
-    right: Tree,
+    left: Tree<Id>,
+    right: Tree<Id>,
 
     /// A cache for the hash of this node. This uses `OnceLock` so that updating the cache is a
     /// non-mutating operation.
@@ -52,7 +51,7 @@ pub struct Node {
     balance_factor: i64,
 }
 
-impl Node {
+impl<Id> Node<Id> {
     /// Create a new leaf [`Node`] from the given key and data.
     pub(crate) fn new(key: Key, data: impl Into<Value>) -> Self {
         Node {
@@ -65,10 +64,7 @@ impl Node {
 
     /// Converts the [`Node`] to an encoded, serialisable representation,
     /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
-    pub(crate) fn to_encode<'a>(
-        &'a self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
-    ) -> impl Encode + 'a {
+    pub(crate) fn to_encode<'a>(&'a self, resolver: &impl Resolver<Id, Self>) -> impl Encode + 'a {
         // Recursively hashes any left child and its children. Stops when a hash was cached or a
         // node is blinded.
         let left = self.left_ref().root().map(|node| resolver.hash(node));
@@ -90,7 +86,7 @@ impl Node {
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
-    pub(crate) fn hash(&self, resolver: &impl Resolver<Arc<Self>, Self>) -> &Hash {
+    pub(crate) fn hash(&self, resolver: &impl Resolver<Id, Self>) -> &Hash {
         self.hash.get_or_init(|| {
             let data = self.to_encode(resolver);
             Hash::hash_encodable(data).expect("The hashing should not fail")
@@ -117,14 +113,14 @@ impl Node {
 
     #[inline]
     /// A mutable reference to the left branch.
-    pub(super) fn left_mut(&mut self) -> &mut Tree {
+    pub(super) fn left_mut(&mut self) -> &mut Tree<Id> {
         self.invalidate_hash();
         &mut self.left
     }
 
     #[inline]
     /// An immutable reference to the left branch.
-    pub(super) fn left_ref(&self) -> &Tree {
+    pub(super) fn left_ref(&self) -> &Tree<Id> {
         &self.left
     }
 
@@ -134,9 +130,12 @@ impl Node {
     /// The subtree of the [`Node`] must already have balance factor in the range of -2..=2, else
     /// it is an invalid AVL tree.
     pub(super) fn rebalance(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         let resolved_node = resolver.resolve(node)?;
         let balance_factor = resolved_node.balance_factor();
         match balance_factor {
@@ -178,9 +177,12 @@ impl Node {
     ///  - The [`Node`] at the root of the new subtree.
     ///  - `true` if the [`Tree`] has shrunk in size.
     pub(super) fn replace_with_successor(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(Arc<Node>, bool), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(Id, bool), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
 
         // If the right child has a left child, the successor is the min of the left child's subtree.
@@ -223,20 +225,22 @@ impl Node {
 
         Self::rebalance(&mut successor, resolver)?;
 
-        let shrank = node_mut.balance_factor().abs() == 1 && successor.balance_factor == 0;
+        let successor_balance_factor = resolver.resolve(&successor)?.balance_factor();
+        let shrank = node_mut.balance_factor().abs() == 1 && successor_balance_factor == 0;
+
         Ok((successor, shrank))
     }
 
     #[inline]
     /// A mutable reference to the right branch.
-    pub(super) fn right_mut(&mut self) -> &mut Tree {
+    pub(super) fn right_mut(&mut self) -> &mut Tree<Id> {
         self.invalidate_hash();
         &mut self.right
     }
 
     #[inline]
     /// An immutable reference to the right branch.
-    pub(super) fn right_ref(&self) -> &Tree {
+    pub(super) fn right_ref(&self) -> &Tree<Id> {
         &self.right
     }
 
@@ -248,9 +252,12 @@ impl Node {
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if this [`Node`]'s subtree has shrunk in size.
     pub(super) fn take_min(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(Tree, Tree, bool), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(Tree<Id>, Tree<Id>, bool), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
 
         let old_node_bf = node_mut.balance_factor();
@@ -283,8 +290,11 @@ impl Node {
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Value),
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: Clone + From<Self>,
+    {
         // SAFETY: The default recursion limit in Rust is 128
         // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
         //
@@ -347,9 +357,12 @@ impl Node {
     /// Assumes this [`Node`]'s balance factor is 2 and the right [`Node`]'s balance factor is +1
     /// or 0.
     fn rotate_left(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
         let mut right = node_mut
             .right_mut()
@@ -411,9 +424,12 @@ impl Node {
     ///
     /// Assumes this [`Node`]'s balance factor is -2 and the left [Node]'s balance factor is +1.
     fn rotate_left_right(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
 
         let mut left = node_mut
@@ -426,15 +442,14 @@ impl Node {
             .right_mut()
             .take()
             .expect("Left's right child must exist for the left rotation of the left node");
+        let left_right_mut = resolver.resolve_mut(&mut left_right)?;
 
         // From the `rotate_left` derivation, the first rotation does:
         //   new_A_bf_1 = old_A_bf - 1 + std::cmp::min(-A.right.balance_factor, 0)
         // As this function assumes old_A_bf is +1:
         //   new_A_bf_1 = std::cmp::min(-A.right.balance_factor, 0)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        left_mut.balance_factor = std::cmp::min(-left_right.balance_factor, 0);
-
-        let left_right_mut = resolver.resolve_mut(&mut left_right)?;
+        left_mut.balance_factor = std::cmp::min(-left_right_mut.balance_factor, 0);
 
         // B's right child is between B and B, it's moved to node's left
         node_mut.left = left_right_mut.right.take().into();
@@ -474,9 +489,12 @@ impl Node {
     /// Assumes this [`Node`]'s balance factor is -2 and the left [`Node`]'s balance factor is -1
     /// or 0.
     fn rotate_right(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
         let mut left = node_mut
             .left_mut()
@@ -538,9 +556,12 @@ impl Node {
     ///
     /// Assumes this [`Node`]'s balance factor is +2 and the left [Node]'s balance factor is -1.
     fn rotate_right_left(
-        node: &mut Arc<Node>,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        node: &mut Id,
+        resolver: &mut impl Resolver<Id, Self>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         let node_mut = resolver.resolve_mut(node)?;
         let mut right = node_mut
             .right_mut()
@@ -552,15 +573,14 @@ impl Node {
             .left_mut()
             .take()
             .expect("Right's left child must exist for the right rotation of the right node");
+        let right_left_mut = resolver.resolve_mut(&mut right_left)?;
 
         // From the `rotate_right` derivation, the first rotation does:
         //   new_A_bf_1 = old_A_bf + 1 + std::cmp::max(0, -A.left.balance_factor)
         // As this function assumes old_A_bf is -1:
         //   new_A_bf_1 = std::cmp::max(0, -A.left.balance_factor)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        right_mut.balance_factor = std::cmp::max(0, -right_left.balance_factor);
-
-        let right_left_mut = resolver.resolve_mut(&mut right_left)?;
+        right_mut.balance_factor = std::cmp::max(0, -right_left_mut.balance_factor);
 
         // B's left child is between node and B, it's moved to node's right
         node_mut.right = right_left_mut.left.take().into();
@@ -586,7 +606,7 @@ impl Node {
 }
 
 #[cfg(test)]
-impl Node {
+impl<Id> Node<Id> {
     #[inline]
     /// The data stored in the [`Node`].
     pub(crate) fn data(&self) -> &Value {
@@ -595,9 +615,9 @@ impl Node {
 
     /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
     pub(super) fn get<'a>(
-        mut node: &'a Arc<Node>,
+        mut node: &'a Id,
         key: &Key,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Self>,
     ) -> Result<Option<&'a Value>, OperationalError> {
         loop {
             let resolved_node = resolver.resolve(node)?;
@@ -622,8 +642,11 @@ impl Node {
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &impl Resolver<Id, Self>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: std::fmt::Debug,
+    {
         let left_height = self.left_ref().height(resolver)?;
         let right_height = self.right_ref().height(resolver)?;
         let calculated_balance_factor = right_height as i64 - left_height as i64;
@@ -642,7 +665,7 @@ impl Node {
     /// Returns the height of this [`Node`]'s subtree.
     pub(super) fn height(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Self>,
     ) -> Result<u32, OperationalError> {
         let left_height = self.left_ref().height(resolver)?;
         let right_height = self.right_ref().height(resolver)?;
@@ -652,7 +675,7 @@ impl Node {
     /// Returns true if this [`Node`]'s subtree is balanced.
     pub(super) fn is_balanced(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Self>,
     ) -> Result<bool, OperationalError> {
         let balance_factor = self.balance_factor();
         if balance_factor.abs() > 1 {
@@ -669,7 +692,7 @@ impl Node {
         &self,
         min: &Key,
         max: &Key,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Self>,
     ) -> Result<bool, OperationalError> {
         if self.key() < min || self.key() > max {
             return Ok(false);

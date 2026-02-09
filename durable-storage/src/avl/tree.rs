@@ -5,10 +5,9 @@
 //! Interface for an optional root [`Node`] of a Merklisable AVL tree
 
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::sync::Arc;
 
 use octez_riscv_data::hash::Hash;
+use perfect_derive::perfect_derive;
 
 use super::node::Node;
 use super::node::Value;
@@ -19,18 +18,22 @@ use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
-#[derive(Clone, Default, Debug)]
-pub struct Tree(Option<Arc<Node>>);
+#[perfect_derive(Clone, Default, Debug)]
+#[derive(derive_more::From)]
+pub struct Tree<Id>(Option<Id>);
 
-impl Tree {
+impl<Id> Tree<Id> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
     pub fn delete(
         &mut self,
         key: &Key,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: Clone,
+    {
         let old_balance_factor = self.balance_factor(resolver)?;
         let Some(node) = self.root_mut() else {
             // The key does not exist so nothing will happen.
@@ -86,8 +89,11 @@ impl Tree {
         &mut self,
         key: &Key,
         data: &[u8],
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: Clone + From<Node<Id>>,
+    {
         self.upsert(key, 0, |old_data| old_data.set(data), resolver)
     }
 
@@ -97,22 +103,34 @@ impl Tree {
     /// [`struct@Hash`] is calculated and cached.
     pub(crate) fn hash(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<Hash, OperationalError> {
-        let encodable = self.0.as_deref().map(|node| node.to_encode(resolver));
+        let encodable = self
+            .0
+            .as_ref()
+            .map(|id| {
+                let node = resolver.resolve(id)?;
+                let value = node.to_encode(resolver);
+                Ok(value)
+            })
+            .transpose()?;
         Ok(Hash::hash_encodable(encodable).expect("Should be hashable"))
     }
 
     /// Creates an in-order iterator for the [`Node`]s in the [`Tree`]
-    pub(crate) fn iter(&self) -> TreeIterator {
+    pub(crate) fn iter<'tree, 'res, Res: Resolver<Id, Node<Id>>>(
+        &'tree self,
+        resolver: &'res Res,
+    ) -> TreeIterator<'tree, 'res, Id, Res> {
         TreeIterator {
             stack: vec![],
             current: self,
+            resolver,
         }
     }
 
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
-    pub(crate) const fn take(&mut self) -> Option<Arc<Node>> {
+    pub(crate) const fn take(&mut self) -> Option<Id> {
         self.0.take()
     }
 
@@ -120,7 +138,7 @@ impl Tree {
     /// The difference in heights between any child branches in the [`Tree`].
     pub(super) fn balance_factor(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<i64, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(0);
@@ -133,13 +151,13 @@ impl Tree {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&Arc<Node>> {
+    pub(super) fn root(&self) -> Option<&Id> {
         self.0.as_ref()
     }
 
     #[inline]
     /// A mutable reference to the root [`Node`].
-    pub(super) fn root_mut(&mut self) -> Option<&mut Arc<Node>> {
+    pub(super) fn root_mut(&mut self) -> Option<&mut Id> {
         self.0.as_mut()
     }
 
@@ -152,8 +170,11 @@ impl Tree {
     ///  - True if the [`Tree`] has shrunk in size.
     pub(super) fn take_min(
         &mut self,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(Tree, Tree, bool), OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<(Tree<Id>, Tree<Id>, bool), OperationalError>
+    where
+        Id: Clone,
+    {
         let Some(node_arc) = self.root_mut() else {
             return Ok((None.into(), None.into(), false));
         };
@@ -180,8 +201,11 @@ impl Tree {
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Value),
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: Clone + From<Node<Id>>,
+    {
         let node = self.root_mut();
         let Some(node) = node else {
             // We can't create a new `Node` with a non-zero offset.
@@ -195,7 +219,10 @@ impl Tree {
             data(&mut new_data);
 
             // The key does not exist and a new `Node` shall be created.
-            self.0 = Some(Arc::new(Node::new(key.clone(), new_data)));
+            let new_node: Node<Id> = Node::new(key.clone(), new_data);
+            let new_id = Id::from(new_node);
+            self.0 = Some(new_id);
+
             return Ok(true);
         };
         let grew = resolver
@@ -218,8 +245,11 @@ impl Tree {
         key: &Key,
         offset: usize,
         data: &[u8],
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: Clone + From<Node<Id>>,
+    {
         self.upsert(
             key,
             offset,
@@ -251,8 +281,11 @@ impl Tree {
     /// AVL tree.
     fn rebalance(
         &mut self,
-        resolver: &mut impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        resolver: &mut impl Resolver<Id, Node<Id>>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: Clone,
+    {
         match self.root_mut() {
             Some(node) => Node::rebalance(node, resolver),
             None => Ok(()),
@@ -260,41 +293,40 @@ impl Tree {
     }
 }
 
-impl From<Option<Arc<Node>>> for Tree {
-    fn from(node: Option<Arc<Node>>) -> Self {
-        Tree(node)
-    }
-}
-
 /// Used for iterating through the nodes of the [`Tree`] tree in order.
-pub(crate) struct TreeIterator<'a> {
-    stack: Vec<&'a Arc<Node>>,
-    current: &'a Tree,
+pub(crate) struct TreeIterator<'tree, 'res, Id, Res> {
+    stack: Vec<&'tree Id>,
+    current: &'tree Tree<Id>,
+    resolver: &'res Res,
 }
 
-impl<'a> Iterator for TreeIterator<'a> {
-    type Item = &'a Arc<Node>;
+impl<'tree, 'res, Id, Res: Resolver<Id, Node<Id>>> Iterator for TreeIterator<'tree, 'res, Id, Res> {
+    type Item = &'tree Id;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.current.root() {
             self.stack.push(node);
-            self.current = node.left_ref();
+
+            let resolved_node = self.resolver.resolve(node).ok()?;
+            self.current = resolved_node.left_ref();
         }
 
         let ret = self.stack.pop()?;
-        self.current = ret.right_ref();
+        let resolved_node = self.resolver.resolve(ret).ok()?;
+        self.current = resolved_node.right_ref();
+
         Some(ret)
     }
 }
 
 #[cfg(test)]
-impl Tree {
+impl<Id> Tree<Id> {
     #[inline]
     /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
     pub fn get(
         &self,
         key: &Key,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<Option<&Value>, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(None);
@@ -305,8 +337,11 @@ impl Tree {
     /// Asserts that the [`Tree`] is a valid AVL tree
     pub(crate) fn check(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
-    ) -> Result<(), OperationalError> {
+        resolver: &impl Resolver<Id, Node<Id>>,
+    ) -> Result<(), OperationalError>
+    where
+        Id: std::fmt::Debug,
+    {
         let inorder = self.is_inorder(resolver)?;
         let is_balanced = self.is_balanced(resolver)?;
         let has_correct_balance_factors = self.has_correct_balance_factors(resolver)?;
@@ -325,7 +360,7 @@ impl Tree {
     /// Returns true if the [`Tree`] is in-order.
     pub(crate) fn is_inorder(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<bool, OperationalError> {
         self.is_inorder_inner(
             &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
@@ -337,8 +372,11 @@ impl Tree {
     /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
-    ) -> Result<bool, OperationalError> {
+        resolver: &impl Resolver<Id, Node<Id>>,
+    ) -> Result<bool, OperationalError>
+    where
+        Id: std::fmt::Debug,
+    {
         match self.root() {
             None => Ok(true),
             Some(node) => resolver
@@ -350,7 +388,7 @@ impl Tree {
     /// Returns the height of the [`Tree`].
     pub(super) fn height(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<u32, OperationalError> {
         match self.root() {
             None => Ok(0),
@@ -361,7 +399,7 @@ impl Tree {
     /// Returns true if the [`Tree`] is balanced.
     pub(super) fn is_balanced(
         &self,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<bool, OperationalError> {
         match self.root() {
             None => Ok(true),
@@ -376,7 +414,7 @@ impl Tree {
         &self,
         min: &Key,
         max: &Key,
-        resolver: &impl Resolver<Arc<Node>, Node>,
+        resolver: &impl Resolver<Id, Node<Id>>,
     ) -> Result<bool, OperationalError> {
         match self.root() {
             None => Ok(true),
@@ -397,6 +435,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcResolver;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
@@ -441,10 +480,12 @@ mod tests {
             })
     }
 
-    fn compare_tree_to_reference(tree: &Tree, reference: &BTreeMap<Key, Bytes>) {
-        let tree_iter = tree.iter();
+    fn compare_tree_to_reference(tree: &Tree<ArcNodeId>, reference: &BTreeMap<Key, Bytes>) {
+        let resolver = ArcResolver;
+        let tree_iter = tree.iter(&resolver);
         let mut reference_iter = reference.iter();
         for node in tree_iter {
+            let node = resolver.resolve(node).unwrap();
             if let Some((key, value)) = reference_iter.next() {
                 assert_eq!(node.key(), key);
                 assert_eq!(node.data(), value);
@@ -462,7 +503,7 @@ mod tests {
     proptest! {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
-            let mut tree: Tree = Default::default();
+            let mut tree: Tree<ArcNodeId> = Default::default();
             let mut reference: BTreeMap<Key, Bytes> = BTreeMap::new();
             let mut resolver = ArcResolver;
             for operation in operations {
@@ -503,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_hash_consistency() {
-        let mut tree: Tree = Default::default();
+        let mut tree: Tree<ArcNodeId> = Default::default();
         let mut resolver = ArcResolver;
 
         let data = ["42", "6 * 9", "1337", "31337"];

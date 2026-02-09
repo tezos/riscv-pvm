@@ -30,20 +30,28 @@ pub trait Resolver<Id, Value> {
     fn resolve_mut<'a>(&mut self, id: &'a mut Id) -> Result<&'a mut Value, OperationalError>;
 }
 
+/// ID for a node that is always present
+#[derive(Debug, Clone, derive_more::From)]
+#[from(Node<Self>)]
+pub struct ArcNodeId(Arc<Node<Self>>);
+
 /// Provide values identified by an [`Arc`].
 #[derive(Clone, Debug)]
 pub struct ArcResolver;
 
-impl Resolver<Arc<Node>, Node> for ArcResolver {
-    fn hash<'a>(&self, id: &'a Arc<Node>) -> &'a Hash {
-        id.hash(self)
+impl Resolver<ArcNodeId, Node<ArcNodeId>> for ArcResolver {
+    fn hash<'a>(&self, id: &'a ArcNodeId) -> &'a Hash {
+        id.0.hash(self)
     }
 
-    fn resolve<'a>(&self, id: &'a Arc<Node>) -> Result<&'a Node, OperationalError> {
-        Ok(id.as_ref())
+    fn resolve<'a>(&self, id: &'a ArcNodeId) -> Result<&'a Node<ArcNodeId>, OperationalError> {
+        Ok(id.0.as_ref())
     }
 
-    fn resolve_mut<'a>(&mut self, id: &'a mut Arc<Node>) -> Result<&'a mut Node, OperationalError> {
-        Ok(Arc::make_mut(id))
+    fn resolve_mut<'a>(
+        &mut self,
+        id: &'a mut ArcNodeId,
+    ) -> Result<&'a mut Node<ArcNodeId>, OperationalError> {
+        Ok(Arc::make_mut(&mut id.0))
     }
 }
