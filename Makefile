@@ -4,19 +4,19 @@
 
 ### Generic top-level targets
 
-all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all
+all: pvm/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all
 
-build-deps: riscv/build-deps jstz/build-deps etherlink/build-deps
+build-deps: pvm/build-deps jstz/build-deps etherlink/build-deps
 
-build-deps-slim: riscv/build-deps-slim
+build-deps-slim: pvm/build-deps-slim
 
-check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check check-format
+check: pvm/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check check-format
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
-test: riscv/test jstz/test etherlink/test
+test: pvm/test jstz/test etherlink/test
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
+clean: pvm/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
 ### Specific top-level targets
 
@@ -41,8 +41,8 @@ codecov.json: riscv/test-deps
 
 ### Target proxies
 
-riscv/%:
-	@make -C src/riscv ${@:riscv/%=%}
+pvm/%:
+	@make -C pvm ${@:pvm/%=%}
 
 sandbox/%:
 	@make -C tools/sandbox ${@:sandbox/%=%}

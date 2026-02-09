@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-  "src/riscv/lib",
+  "pvm",
   "durable-storage",
   "data",
   "tools/sandbox",
@@ -128,7 +128,7 @@ version = "1"
 features = ["full"]
 
 [workspace.dependencies.octez-riscv]
-path = "src/riscv/lib"
+path = "pvm"
 
 [workspace.dependencies.octez-riscv-data]
 path = "data"
