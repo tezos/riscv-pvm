@@ -48,7 +48,7 @@ jobs:
             code-coverage: true
             title: Code Coverage
           - runs-on: macos-latest
-            make-target: check build
+            make-target: check
             title: MacOS Checks
 
     name: ${{ matrix.title }}
