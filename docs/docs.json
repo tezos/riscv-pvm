@@ -1,0 +1,45 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "RISC-V PVM",
+  "colors": {
+    "primary": "#16A34A",
+    "light": "#07C983",
+    "dark": "#15803D"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "General",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": ["index"]
+          },
+          {
+            "group": "Contributing",
+            "pages": ["commit-messages"]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [],
+    "primary": {
+      "type": "button",
+      "label": "Source",
+      "href": "https://github.com/tezos/riscv-pvm"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude", "perplexity", "mcp", "cursor", "vscode"]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/tezos/riscv-pvm",
+      "slack": "https://tezos.slack.com/archives/C0848T7VDDL"
+    }
+  }
+}

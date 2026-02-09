@@ -15,3 +15,6 @@ target
 # Profiling outputs
 riscv-sandbox-profile.json
 perf.data
+
+# NodeJS
+node_modules
