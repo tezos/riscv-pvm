@@ -30,14 +30,12 @@
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "bench")] {
-        pub mod avl;
         pub mod merkle_layer;
         pub mod merkle_worker;
         pub mod persistence_layer;
         pub mod repo;
         pub mod random;
     } else {
-        mod avl;
         mod merkle_layer;
         mod merkle_worker;
         #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
@@ -46,6 +44,7 @@ cfg_if::cfg_if! {
     }
 }
 
+pub mod avl;
 pub mod commit;
 pub mod database;
 pub mod key;
