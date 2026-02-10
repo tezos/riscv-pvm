@@ -28,24 +28,13 @@
 //! - **Persistence layer**: Responsible for actually persisting the basic get, set, delete
 //!   operations on disk.
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "bench")] {
-        pub mod avl;
-        pub mod merkle_layer;
-        pub mod merkle_worker;
-        pub mod persistence_layer;
-        pub mod random;
-    } else {
-        mod avl;
-        mod merkle_layer;
-        mod merkle_worker;
-        #[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
-        pub(crate) mod persistence_layer;
-    }
-}
-
+pub mod avl;
 pub mod commit;
 pub mod database;
 pub mod key;
+mod merkle_layer;
+mod merkle_worker;
+#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
+pub(crate) mod persistence_layer;
 pub mod registry;
 pub mod repo;

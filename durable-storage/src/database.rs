@@ -19,8 +19,8 @@ use crate::key::Key;
 use crate::merkle_worker::MerkleWorker;
 use crate::merkle_worker::MerkleWorkerError;
 use crate::persistence_layer::PersistenceLayer;
-use crate::persistence_layer::PersistenceLayerError;
-use crate::repo::DirectoryManager;
+pub use crate::persistence_layer::PersistenceLayerError;
+pub use crate::repo::DirectoryManager;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
