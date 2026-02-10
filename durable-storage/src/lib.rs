@@ -48,4 +48,4 @@ pub mod commit;
 pub mod database;
 pub mod key;
 pub mod registry;
-mod repo;
+pub mod repo;

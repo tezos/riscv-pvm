@@ -191,7 +191,7 @@ impl Registry {
         let manifest = RegistryManifest { database_hashes };
         let encoded = serialise(&manifest)?;
 
-        let commit_path = self.repo.commit_dir(&registry_commit);
+        let commit_path = self.repo.registry_commit_file(&registry_commit);
         std::fs::write(&commit_path, &encoded)?;
 
         Ok(registry_commit)
@@ -465,7 +465,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_path = registry.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
@@ -494,7 +494,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_path = registry.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
@@ -545,7 +545,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.commit_dir(&root_commit);
+        let commit_path = registry.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
