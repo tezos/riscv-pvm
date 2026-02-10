@@ -14,6 +14,7 @@ pub(crate) mod tests {
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Provable;
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use crate::default::ConstDefault;

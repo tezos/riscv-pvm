@@ -46,6 +46,7 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use page_cache::CodePage;
@@ -215,9 +216,10 @@ impl<MC: memory::MemoryConfig, M: AtomMode + DataSpaceMode> Default for MachineC
     }
 }
 
-impl<MC: memory::MemoryConfig> MachineCoreState<MC, Normal> {
-    /// Return a proof-generating version of this MachineCoreState.
-    pub fn start_proof(&self) -> MachineCoreState<MC, Prove<'_>> {
+impl<'normal, MC: memory::MemoryConfig> Provable<'normal> for MachineCoreState<MC, Normal> {
+    type Prover = MachineCoreState<MC, Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         MachineCoreState {
             hart: self.hart.start_proof(),
             main_memory: MC::start_proof(&self.main_memory),
@@ -294,12 +296,15 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDat
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> MachineState<MC, PC, Normal> {
-    /// Return a proof-generating version of this MachineState.
-    pub fn start_proof(&self) -> MachineState<MC, EmptyPageCache, Prove<'_>> {
+impl<'normal, MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> Provable<'normal>
+    for MachineState<MC, PC, Normal>
+{
+    type Prover = MachineState<MC, EmptyPageCache, Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         MachineState {
             core: self.core.start_proof(),
-            page_cache: <EmptyPageCache as PageCache<MC, Prove<'_>>>::new(),
+            page_cache: <EmptyPageCache as PageCache<MC, Prove<'normal>>>::new(),
         }
     }
 }

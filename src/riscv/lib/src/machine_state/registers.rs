@@ -37,6 +37,7 @@ use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::elem::Elem;
@@ -259,9 +260,10 @@ impl<M: AtomMode> XRegisters<M> {
     }
 }
 
-impl XRegisters<Normal> {
-    /// Return a proof-generating version of this XRegisters.
-    pub fn start_proof(&self) -> XRegisters<Prove<'_>> {
+impl<'normal> Provable<'normal> for XRegisters<Normal> {
+    type Prover = XRegisters<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         XRegisters {
             registers: self.registers.start_proof(),
         }
@@ -642,9 +644,10 @@ impl<M: AtomMode> FRegisters<M> {
     }
 }
 
-impl FRegisters<Normal> {
-    /// Return a proof-generating version of this FRegisters.
-    pub fn start_proof(&self) -> FRegisters<Prove<'_>> {
+impl<'normal> Provable<'normal> for FRegisters<Normal> {
+    type Prover = FRegisters<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         FRegisters {
             registers: self.registers.start_proof(),
         }

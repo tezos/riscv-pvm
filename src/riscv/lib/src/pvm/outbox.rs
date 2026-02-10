@@ -42,6 +42,7 @@ use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -114,9 +115,10 @@ impl<M: AtomMode> Outbox<M> {
     }
 }
 
-impl Outbox<Normal> {
-    /// Return a proof-generating version of this outbox
-    pub fn start_proof(&self) -> Outbox<Prove<'_>> {
+impl<'normal> Provable<'normal> for Outbox<Normal> {
+    type Prover = Outbox<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         let levels = self
             .levels
             .iter()
@@ -218,9 +220,10 @@ impl<M: AtomMode> OutboxLevel<M> {
     }
 }
 
-impl OutboxLevel<Normal> {
-    /// Return a proof-generating version of this outbox level
-    fn start_proof(&self) -> OutboxLevel<Prove<'_>> {
+impl<'normal> Provable<'normal> for OutboxLevel<Normal> {
+    type Prover = OutboxLevel<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         let messages = self
             .messages
             .iter()

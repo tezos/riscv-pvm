@@ -21,6 +21,7 @@ use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::catch_not_found_and_more;

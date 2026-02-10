@@ -15,6 +15,7 @@ use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::catch_not_found;

@@ -36,6 +36,7 @@ use octez_riscv_data::merkle_tree::MerkleTree;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -349,24 +350,6 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, Normal>> Pvm<MC, PC, Normal> {
-    /// Return a proof-generating version of this PVM.
-    pub(crate) fn start_proof(&self) -> PvmProve<'_, MC> {
-        Pvm {
-            machine_state: self.machine_state.start_proof(),
-            outbox: self.outbox.start_proof(),
-            reveal_request: self.reveal_request.start_proof(),
-            system_state: self.system_state.start_proof(),
-            version: self.version.start_proof(),
-            tick: self.tick.start_proof(),
-            message_counter: self.message_counter.start_proof(),
-            level: self.level.start_proof(),
-            level_is_set: self.level_is_set.start_proof(),
-            status: self.status.start_proof(),
-        }
-    }
-}
-
 impl<'a, MC: MemoryConfig> Pvm<MC, EmptyPageCache, Prove<'a>>
 where
     MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
@@ -383,6 +366,27 @@ where
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
+    }
+}
+
+impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>> Provable<'normal>
+    for Pvm<MC, PC, Normal>
+{
+    type Prover = PvmProve<'normal, MC>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        Pvm {
+            machine_state: self.machine_state.start_proof(),
+            outbox: self.outbox.start_proof(),
+            reveal_request: self.reveal_request.start_proof(),
+            system_state: self.system_state.start_proof(),
+            version: self.version.start_proof(),
+            tick: self.tick.start_proof(),
+            message_counter: self.message_counter.start_proof(),
+            level: self.level.start_proof(),
+            level_is_set: self.level_is_set.start_proof(),
+            status: self.status.start_proof(),
+        }
     }
 }
 
