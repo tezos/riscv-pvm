@@ -21,6 +21,7 @@ use crate::hash::Hash;
 use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::utils::assert_eq_found;
 use crate::mode::utils::assert_not_found;

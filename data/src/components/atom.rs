@@ -36,6 +36,7 @@ use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::Source;
@@ -87,19 +88,6 @@ impl<T: 'static> Atom<T, Normal> {
 
         std::mem::offset_of!(Self, atom)
     };
-
-    /// Construct an [`Atom`] in [`Prove`] mode.
-    ///
-    /// The initial proof value is equal to that of the given [`Atom`] in [`Normal`] mode.
-    pub fn start_proof(&self) -> Atom<T, Prove<'_>> {
-        Atom {
-            atom: ProveImpl {
-                previous: Source::Borrowed(&self.atom),
-                current: None,
-                read: Cell::new(false),
-            },
-        }
-    }
 }
 
 impl<T: 'static> Atom<T, Verify> {
@@ -114,6 +102,20 @@ impl<T: 'static> Atom<T, Prove<'_>> {
     /// Was the value accessed (read or written) during proof generation?
     pub fn was_accessed(&self) -> bool {
         self.atom.read.get() || self.atom.current.is_some()
+    }
+}
+
+impl<'normal, T: 'static> Provable<'normal> for Atom<T, Normal> {
+    type Prover = Atom<T, Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        Atom {
+            atom: ProveImpl {
+                previous: Source::Borrowed(&self.atom),
+                current: None,
+                read: Cell::new(false),
+            },
+        }
     }
 }
 

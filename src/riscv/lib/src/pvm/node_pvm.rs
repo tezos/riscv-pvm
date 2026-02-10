@@ -13,6 +13,7 @@ use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use thiserror::Error;

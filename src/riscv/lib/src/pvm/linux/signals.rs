@@ -30,6 +30,7 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::elem::Elem;
@@ -437,9 +438,10 @@ impl<M: Mode> SignalActions<M> {
     }
 }
 
-impl SignalActions<Normal> {
-    /// Return a proof-generating version of this SignalActions.
-    pub fn start_proof(&self) -> SignalActions<Prove<'_>> {
+impl<'normal> Provable<'normal> for SignalActions<Normal> {
+    type Prover = SignalActions<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         SignalActions {
             actions: self.actions.each_ref().map(|action| action.start_proof()),
             flags: self.flags.each_ref().map(|flags| flags.start_proof()),

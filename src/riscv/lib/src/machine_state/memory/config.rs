@@ -8,6 +8,7 @@ use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 

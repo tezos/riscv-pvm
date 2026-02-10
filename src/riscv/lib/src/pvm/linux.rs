@@ -38,6 +38,7 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use parameters::SystemCallResultExecution;
@@ -995,9 +996,10 @@ impl<M: Mode> SupervisorState<M> {
     }
 }
 
-impl SupervisorState<Normal> {
-    /// Return a proof-generating version of this SupervisorState.
-    pub fn start_proof(&self) -> SupervisorState<Prove<'_>> {
+impl<'normal> Provable<'normal> for SupervisorState<Normal> {
+    type Prover = SupervisorState<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         SupervisorState {
             tid_address: self.tid_address.start_proof(),
             exited: self.exited,

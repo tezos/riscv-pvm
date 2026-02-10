@@ -28,6 +28,7 @@ use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -121,9 +122,10 @@ impl<M: Mode> ReservationSet<M> {
     }
 }
 
-impl ReservationSet<Normal> {
-    /// Return a proof-generating version of this ReservationSet.
-    pub fn start_proof(&self) -> ReservationSet<Prove<'_>> {
+impl<'normal> Provable<'normal> for ReservationSet<Normal> {
+    type Prover = ReservationSet<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         ReservationSet {
             start_addr: self.start_addr.start_proof(),
         }

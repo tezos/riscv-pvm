@@ -115,3 +115,12 @@ pub trait Modal {
     /// Representation in [`Verify`] mode
     type Verify;
 }
+
+/// Types that implement this can be switched to [`Prove`] mode
+pub trait Provable<'normal> {
+    /// Variant of [`Self`] in [`Prove`] mode
+    type Prover: 'normal;
+
+    /// Start proving.
+    fn start_proof(&'normal self) -> Self::Prover;
+}

@@ -57,6 +57,7 @@ mod tests {
     use octez_riscv_data::merkle_tree::MerkleTreeFold;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Provable;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
@@ -164,8 +165,10 @@ mod tests {
             foo.bar = Atom::new(foo.bar.read() * 2);
         }
 
-        impl Foo<Normal> {
-            fn start_proof(&self) -> Foo<Prove<'_>> {
+        impl<'normal> Provable<'normal> for Foo<Normal> {
+            type Prover = Foo<Prove<'normal>>;
+
+            fn start_proof(&'normal self) -> Self::Prover {
                 Foo {
                     bar: self.bar.start_proof(),
                 }

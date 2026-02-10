@@ -36,6 +36,7 @@ use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::Source;
@@ -163,13 +164,6 @@ impl<M: BytesMode> Bytes<M> {
     }
 }
 
-impl Bytes<Normal> {
-    /// Start proof generation for this byte array.
-    pub fn start_proof(&self) -> Bytes<Prove<'_>> {
-        Bytes::from_raw_source(&self.bytes)
-    }
-}
-
 impl<'a> Bytes<Prove<'a>> {
     /// Construct the state component in [`Prove`] mode given the source data representing the state
     /// at the beginning of the proof recording.
@@ -218,6 +212,14 @@ impl Bytes<Verify> {
         for (gap_addr, gap_zeros) in gaps {
             self.bytes.data.define(gap_addr, vec![0u8; gap_zeros]);
         }
+    }
+}
+
+impl<'normal> Provable<'normal> for Bytes<Normal> {
+    type Prover = Bytes<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        Bytes::from_raw_source(&self.bytes)
     }
 }
 

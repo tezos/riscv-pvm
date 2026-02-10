@@ -30,6 +30,7 @@ use crate::merkle_proof::SuspendedResult;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::not_found;
@@ -139,13 +140,6 @@ impl<M: DataSpaceMode> DataSpace<M> {
 }
 
 impl DataSpace<Normal> {
-    /// Start proof generation for this data space.
-    pub fn start_proof(&self) -> DataSpace<Prove<'_>> {
-        DataSpace {
-            data_space: Bytes::from_raw_source(&self.data_space),
-        }
-    }
-
     /// Fill the data space with a given value.
     ///
     /// This method is specialised to the `Normal` mode to make it more efficient.
@@ -183,6 +177,16 @@ impl DataSpace<Verify> {
 
         self.data_space.zero_init_range(start_page..end_page);
         self.data_space.write(addr, bytes);
+    }
+}
+
+impl<'normal> Provable<'normal> for DataSpace<Normal> {
+    type Prover = DataSpace<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        DataSpace {
+            data_space: Bytes::from_raw_source(&self.data_space),
+        }
     }
 }
 

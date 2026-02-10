@@ -26,6 +26,7 @@ use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -109,9 +110,10 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     }
 }
 
-impl<const PAGES: usize> PagePermissions<PAGES, Normal> {
-    /// Return a proof-generating version of this PagePermissions.
-    pub fn start_proof(&self) -> PagePermissions<PAGES, Prove<'_>> {
+impl<'normal, const PAGES: usize> Provable<'normal> for PagePermissions<PAGES, Normal> {
+    type Prover = PagePermissions<PAGES, Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         let pages = self
             .pages
             .iter()

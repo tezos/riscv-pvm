@@ -28,6 +28,7 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -352,9 +353,10 @@ impl<M: Mode> CSRegisters<M> {
     }
 }
 
-impl CSRegisters<Normal> {
-    /// Return a proof-generating version of this CSRegisters.
-    pub fn start_proof(&self) -> CSRegisters<Prove<'_>> {
+impl<'normal> Provable<'normal> for CSRegisters<Normal> {
+    type Prover = CSRegisters<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
         CSRegisters {
             fflags: self.fflags.start_proof(),
             frm: self.frm.start_proof(),
