@@ -261,7 +261,7 @@ impl PersistenceLayer {
 
     /// Creates a new `PersistenceLayer` instance within the given `repo`.
     pub fn new(repo: &DirectoryManager) -> Result<Self, PersistenceLayerError> {
-        let tempdir = repo.new_temporary_dir()?;
+        let tempdir = repo.temp_database_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
 
         // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
@@ -284,7 +284,7 @@ impl PersistenceLayer {
         db: &rocksdb::DB,
         repo: &DirectoryManager,
     ) -> Result<Self, PersistenceLayerError> {
-        let tempdir = repo.new_temporary_dir()?;
+        let tempdir = repo.temp_database_dir()?;
         let checkpoint_path = tempdir.path().join("checkpoint");
 
         // Note that we want the checkpoint object to be dropped before opening the DB in order to
@@ -322,7 +322,7 @@ impl PersistenceLayer {
 
     /// Checks out a specific commit in the repository from the given `repo`
     pub fn checkout(repo: &DirectoryManager, id: &CommitId) -> Result<Self, PersistenceLayerError> {
-        let db_path = repo.commit_dir(id);
+        let db_path = repo.database_commit_dir(id);
 
         // We assume the commit is not found if the folder does not exist.
         if !Path::exists(&db_path) {
@@ -346,7 +346,7 @@ impl PersistenceLayer {
         repo: &DirectoryManager,
         id: &CommitId,
     ) -> Result<(), PersistenceLayerError> {
-        let checkpoint_path = repo.commit_dir(id);
+        let checkpoint_path = repo.database_commit_dir(id);
 
         // If the path already exists, we overwrite the existing commit. This is highly unlikely to
         // happen anyway if the commits are a hash of the content.
@@ -762,7 +762,7 @@ mod tests {
             ));
         }
 
-        let path_b = repo.commit_dir(&commit_id);
+        let path_b = repo.database_commit_dir(&commit_id);
         drop(db_b);
         assert!(path_b.exists(), "Checked out DB should persist on disk");
     }
@@ -830,7 +830,7 @@ mod tests {
             ));
         }
 
-        let path_c = repo.commit_dir(&commit_id);
+        let path_c = repo.database_commit_dir(&commit_id);
         drop(db_c);
         assert!(path_c.exists(), "Checked out DB should persist on disk");
     }
