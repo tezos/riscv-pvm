@@ -2,15 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![cfg(feature = "bench")]
-
 use std::collections::HashSet;
 use std::ops::Range;
 
+use octez_riscv_durable_storage::key::KEY_MAX_SIZE;
+use octez_riscv_durable_storage::key::Key;
 use rand::prelude::*;
-
-use crate::key::KEY_MAX_SIZE;
-use crate::key::Key;
 
 pub fn generate_keys(rng: &mut impl Rng, length: usize) -> Vec<Key> {
     let mut tmp: HashSet<Key> = HashSet::with_capacity(length);

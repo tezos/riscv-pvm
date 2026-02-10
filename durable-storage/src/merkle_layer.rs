@@ -62,10 +62,7 @@ impl MerkleLayer {
     }
 
     /// Clear all data from the [MerkleLayer].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn clear(&mut self) {
         self.tree.take();
     }
@@ -91,19 +88,13 @@ impl MerkleLayer {
     }
 
     /// Returns an immutable reference to the data stored for a given [Key].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn get(&mut self, key: &Key) -> Option<&Value> {
         self.tree.get(key, &self.resolver)
     }
 
     /// Returns a mutable reference to the data stored for a given [Key].
-    #[cfg_attr(
-        not(any(test, feature = "bench")),
-        expect(dead_code, reason = "Not pub in `Database`")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Not pub in `Database`"))]
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut Value> {
         self.tree.get_mut(key, &mut self.resolver)
     }
@@ -135,9 +126,7 @@ mod tests {
     use proptest::proptest;
 
     use super::MerkleLayer;
-    use crate::avl::Node;
-    use crate::avl::Tree;
-    use crate::avl::hash;
+    use crate::avl::node::Node;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
@@ -983,7 +972,7 @@ mod tests {
             let serialised =
                 octez_riscv_data::serialisation::serialise(node.to_encode(&merkle_layer.resolver))
                     .expect("We should be able to serialise the node");
-            let node_hash = hash(node, &merkle_layer.resolver);
+            let node_hash = crate::avl::node::hash(node, &merkle_layer.resolver);
             let blob = merkle_layer
                 .persistence
                 .blob_get(node_hash)

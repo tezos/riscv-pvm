@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+mod random;
+
 use std::hint::black_box;
 
 use bytes::Bytes;
@@ -12,14 +14,14 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use octez_riscv_durable_storage::database::Database;
 use octez_riscv_durable_storage::database::DatabaseError;
+use octez_riscv_durable_storage::database::DirectoryManager;
+use octez_riscv_durable_storage::database::PersistenceLayerError;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::persistence_layer::PersistenceLayerError;
-use octez_riscv_durable_storage::random::generate_keys;
-use octez_riscv_durable_storage::random::generate_random_bytes;
-use octez_riscv_durable_storage::random::generate_random_bytes_in_range;
-use octez_riscv_durable_storage::repo::DirectoryManager;
 use octez_riscv_test_utils::TestableTmpdir;
 use rand::rng;
+use random::generate_keys;
+use random::generate_random_bytes;
+use random::generate_random_bytes_in_range;
 use serde::Deserialize;
 use tokio::runtime::Handle;
 
