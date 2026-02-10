@@ -101,7 +101,7 @@ impl Database {
 
         let source_slice = &value_ref[offset..end];
         output.put_slice(source_slice);
-        Ok(end)
+        Ok(source_slice.len())
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
@@ -475,32 +475,36 @@ mod tests {
                 prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
                 let read_data_before = read_data;
 
-                database
+                let read = database
                     .read(&key, data.len(), read_data.as_mut_slice())
                     .expect("A zero-sized write should succeed");
+                prop_assert_eq!(read, 0);
                 prop_assert_eq!(read_data, read_data_before);
 
                 // Whole value write
-                database
+                let read = database
                     .read(&key, 0, read_data.as_mut_slice())
                     .expect("Writing the whole value should succeed");
+                prop_assert_eq!(read, data.len());
                 prop_assert_eq!(&read_data[..data.len()], data.as_slice());
                 prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
 
                 // Partial value write
                 prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
-                database
+                let read = database
                     .read(&key, data.len() - 1, read_data[1..2].as_mut())
                     .expect("A partial write should succeed");
+                prop_assert_eq!(read, 1);
                 prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
                 prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
                 prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
 
                 // Write limited by buffer
                 let mut small_buffer: [u8; 3] = [0, 0 ,0];
-                database
+                let read = database
                     .read(&key, 0, small_buffer.as_mut_slice())
                     .expect("Writing into a smaller buffer should succeed");
+                prop_assert_eq!(read, small_buffer.len());
                 prop_assert_eq!(&small_buffer, &data[0..3]);
             }
         }
