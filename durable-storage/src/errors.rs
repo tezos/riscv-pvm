@@ -78,6 +78,9 @@ pub enum OperationalError {
 
     #[error("Error while writing to file: {error}")]
     FileWriteFailed { error: std::io::Error },
+
+    #[error("Error in resolution of ID")]
+    Resolver,
 }
 
 /// Errors that occur because of incorrect usage

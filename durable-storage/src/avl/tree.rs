@@ -500,6 +500,72 @@ mod tests {
         );
     }
 
+    #[derive(Debug)]
+    struct FailOnKeyResolver {
+        fail_on: Key,
+    }
+
+    impl Resolver<ArcNodeId, Node<ArcNodeId>> for FailOnKeyResolver {
+        fn hash<'a>(&self, id: &'a ArcNodeId) -> &'a Hash {
+            ArcResolver.hash(id)
+        }
+
+        fn resolve<'a>(&self, id: &'a ArcNodeId) -> Result<&'a Node<ArcNodeId>, OperationalError> {
+            let node = ArcResolver.resolve(id)?;
+
+            if node.key() == &self.fail_on {
+                return Err(OperationalError::Resolver);
+            }
+
+            Ok(node)
+        }
+
+        fn resolve_mut<'a>(
+            &mut self,
+            id: &'a mut ArcNodeId,
+        ) -> Result<&'a mut Node<ArcNodeId>, OperationalError> {
+            let node = ArcResolver.resolve_mut(id)?;
+
+            if node.key() == &self.fail_on {
+                return Err(OperationalError::Resolver);
+            }
+
+            Ok(node)
+        }
+    }
+
+    #[test]
+    fn get_distinguishes_missing_key_from_resolution_error() {
+        let root = Key::new(&[2]).expect("The key should be valid.");
+        let left = Key::new(&[1]).expect("The key should be valid.");
+        let missing = Key::new(&[0]).expect("The key should be valid.");
+        let no_failure_key = Key::new(&[255]).expect("The key should be valid.");
+
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut setup_resolver = ArcResolver;
+        tree.set(&root, b"root", &mut setup_resolver)
+            .expect("Setting the root should succeed.");
+        tree.set(&left, b"left", &mut setup_resolver)
+            .expect("Setting the left child should succeed.");
+
+        let ok_resolver = FailOnKeyResolver {
+            fail_on: no_failure_key,
+        };
+        assert!(
+            matches!(tree.get(&missing, &ok_resolver), Ok(None)),
+            "Missing key lookup should be distinguishable as Ok(None)."
+        );
+
+        let failing_resolver = FailOnKeyResolver { fail_on: left };
+        assert!(
+            matches!(
+                tree.get(&missing, &failing_resolver),
+                Err(OperationalError::Resolver)
+            ),
+            "Resolver failures should be propagated as Err."
+        );
+    }
+
     proptest! {
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
