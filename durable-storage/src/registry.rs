@@ -7,8 +7,13 @@
 //! This module provides the Registry struct, which is responsible for managing multiple
 //! databases within the durable storage system.
 
+use std::convert::Infallible;
+
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::mode::Modal;
+use octez_riscv_data::mode::Mode;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::serialise;
 use tokio::runtime::Runtime;
 
@@ -55,13 +60,12 @@ struct RegistryManifest {
 }
 
 /// Registry that owns a set of databases backed by a directory manager.
-pub struct Registry {
-    repo: DirectoryManager,
-    databases: Vec<Database>,
-    runtime: Runtime,
+#[repr(transparent)]
+pub struct Registry<M: Mode> {
+    inner: M::Select<RegistryTemplate>,
 }
 
-impl Registry {
+impl Registry<Normal> {
     /// Creates a new, empty Registry.
     ///
     /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
@@ -73,15 +77,47 @@ impl Registry {
             .map_err(RegistryError::Runtime)?;
 
         Ok(Registry {
-            repo,
-            databases: Vec::new(),
-            runtime,
+            inner: NormalImpl {
+                repo,
+                databases: Vec::new(),
+                runtime,
+            },
         })
     }
 
+    /// Commit the registry state and return its commit ID.
+    ///
+    /// The registry state commit ID is computed as the Merkle root of the commit IDs
+    /// of all underlying databases, and the registry manifest is stored at the
+    /// corresponding commit path.
+    pub fn commit(&self) -> Result<CommitId, RegistryError> {
+        let mut database_hashes = Vec::with_capacity(self.inner.databases.len());
+
+        for database in &self.inner.databases {
+            let hash = database.commit(&self.inner.repo)?;
+            database_hashes.push(hash);
+        }
+        let registry_commit = CommitId::compute_root_hash(&database_hashes);
+
+        let manifest = RegistryManifest { database_hashes };
+        let encoded = serialise(&manifest)?;
+
+        let commit_path = self.inner.repo.registry_commit_file(&registry_commit);
+        std::fs::write(&commit_path, &encoded)?;
+
+        Ok(registry_commit)
+    }
+}
+
+impl<M: RegistryMode> Registry<M> {
+    /// Are there no databases in the registry?
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Get the number of databases held in the registry.
-    pub fn size(&self) -> usize {
-        self.databases.len()
+    pub fn len(&self) -> usize {
+        M::len(self)
     }
 
     /// Resize the registry to the given `new_size`.
@@ -89,39 +125,17 @@ impl Registry {
     /// Growing the registry creates new databases, while shrinking drops
     /// databases from the end.
     pub fn resize(&mut self, new_size: usize) -> Result<(), RegistryError> {
-        while self.size() < new_size {
-            let database = Database::try_new(self.runtime.handle(), &self.repo)?;
-            self.databases.push(database);
-        }
-
-        while self.size() > new_size {
-            self.databases.pop();
-        }
-
-        Ok(())
+        M::resize(self, new_size)
     }
 
     /// Get a reference to the database at the given `index`.
-    pub fn get_database_ref(&self, index: usize) -> Result<&Database, RegistryError> {
-        self.databases
-            .get(index)
-            .ok_or(RegistryError::InvalidDatabaseIndex)
+    pub fn database(&self, index: usize) -> Result<&Database, RegistryError> {
+        M::database(self, index)
     }
 
     /// Get a mutable reference to the database at the given `index`.
-    pub fn get_database_mut(&mut self, index: usize) -> Result<&mut Database, RegistryError> {
-        self.databases
-            .get_mut(index)
-            .ok_or(RegistryError::InvalidDatabaseIndex)
-    }
-
-    /// Check the given `index` is valid for a database in the registry.
-    fn validate_index(&self, index: usize) -> Result<(), RegistryError> {
-        if index >= self.databases.len() {
-            Err(RegistryError::InvalidDatabaseIndex)
-        } else {
-            Ok(())
-        }
+    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database, RegistryError> {
+        M::database_mut(self, index)
     }
 
     /// Copy the contents of database at `src_index` to database at `dst_index`.
@@ -130,19 +144,7 @@ impl Registry {
         src_index: usize,
         dst_index: usize,
     ) -> Result<(), RegistryError> {
-        self.validate_index(src_index)?;
-        self.validate_index(dst_index)?;
-
-        if src_index == dst_index {
-            // No-op if copying to the same index.
-            return Ok(());
-        }
-
-        let db_copy =
-            self.databases[src_index].try_clone_with(self.runtime.handle(), &self.repo)?;
-        self.databases[dst_index] = db_copy;
-
-        Ok(())
+        M::copy_database(self, src_index, dst_index)
     }
 
     /// Move the contents of database at `src_index` to database at `dst_index`. The source
@@ -152,65 +154,176 @@ impl Registry {
         src_index: usize,
         dst_index: usize,
     ) -> Result<(), RegistryError> {
-        self.validate_index(src_index)?;
-        self.validate_index(dst_index)?;
+        M::move_database(self, src_index, dst_index)
+    }
+
+    /// Clear the database at the given `index`.
+    pub fn clear_database(&mut self, index: usize) -> Result<(), RegistryError> {
+        M::clear_database(self, index)
+    }
+}
+
+/// Modal template for the [`Registry`]
+///
+/// This is used to select the appropriate implementation for the mode.
+enum RegistryTemplate {}
+
+impl Modal for RegistryTemplate {
+    type Normal = NormalImpl;
+
+    type Prove<'normal> = Infallible;
+
+    type Verify = Infallible;
+}
+
+/// Modes that implement this support operations on [`Registry`]
+pub trait RegistryMode: Mode {
+    /// See [`Registry::len`]
+    fn len(this: &Registry<Self>) -> usize;
+
+    /// See [`Registry::resize`]
+    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), RegistryError>;
+
+    /// See [`Registry::database`]
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database, RegistryError>;
+
+    /// See [`Registry::database_mut`]
+    fn database_mut(
+        this: &mut Registry<Self>,
+        index: usize,
+    ) -> Result<&mut Database, RegistryError>;
+
+    /// See [`Registry::copy_database`]
+    fn copy_database(
+        this: &mut Registry<Self>,
+        src: usize,
+        dst: usize,
+    ) -> Result<(), RegistryError>;
+
+    /// See [`Registry::move_database`]
+    fn move_database(
+        this: &mut Registry<Self>,
+        src: usize,
+        dst: usize,
+    ) -> Result<(), RegistryError>;
+
+    /// See [`Registry::clear_database`]
+    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), RegistryError>;
+}
+
+impl RegistryMode for Normal {
+    fn len(this: &Registry<Self>) -> usize {
+        this.inner.databases.len()
+    }
+
+    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), RegistryError> {
+        while this.len() < new_size {
+            let database = Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
+            this.inner.databases.push(database);
+        }
+
+        this.inner.databases.truncate(new_size);
+
+        Ok(())
+    }
+
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database, RegistryError> {
+        this.inner
+            .databases
+            .get(index)
+            .ok_or(RegistryError::InvalidDatabaseIndex)
+    }
+
+    fn database_mut(
+        this: &mut Registry<Self>,
+        index: usize,
+    ) -> Result<&mut Database, RegistryError> {
+        this.inner
+            .databases
+            .get_mut(index)
+            .ok_or(RegistryError::InvalidDatabaseIndex)
+    }
+
+    fn copy_database(
+        this: &mut Registry<Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), RegistryError> {
+        this.inner.validate_index(src_index)?;
+        this.inner.validate_index(dst_index)?;
 
         if src_index == dst_index {
             // No-op if copying to the same index.
             return Ok(());
         }
 
-        let empty = Database::try_new(self.runtime.handle(), &self.repo)?;
-        let db_to_move = std::mem::replace(&mut self.databases[src_index], empty);
-        self.databases[dst_index] = db_to_move;
+        let db_copy = this.inner.databases[src_index]
+            .try_clone_with(this.inner.runtime.handle(), &this.inner.repo)?;
+        this.inner.databases[dst_index] = db_copy;
 
         Ok(())
     }
 
-    /// Clear the database at the given `index`.
-    pub fn clear_database(&mut self, index: usize) -> Result<(), RegistryError> {
-        self.validate_index(index)?;
-        self.databases[index] = Database::try_new(self.runtime.handle(), &self.repo)?;
-        Ok(())
-    }
+    fn move_database(
+        this: &mut Registry<Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), RegistryError> {
+        this.inner.validate_index(src_index)?;
+        this.inner.validate_index(dst_index)?;
 
-    /// Commit the registry state and return its commit ID.
-    ///
-    /// The registry state commit ID is computed as the Merkle root of the commit IDs
-    /// of all underlying databases, and the registry manifest is stored at the
-    /// corresponding commit path.
-    pub fn commit(&self) -> Result<CommitId, RegistryError> {
-        let mut database_hashes = Vec::with_capacity(self.databases.len());
-
-        for database in &self.databases {
-            let hash = database.commit(&self.repo)?;
-            database_hashes.push(hash);
+        if src_index == dst_index {
+            // No-op if moving to the same index.
+            return Ok(());
         }
-        let registry_commit = CommitId::compute_root_hash(&database_hashes);
 
-        let manifest = RegistryManifest { database_hashes };
-        let encoded = serialise(&manifest)?;
+        let empty = Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
+        let db_to_move = std::mem::replace(&mut this.inner.databases[src_index], empty);
+        this.inner.databases[dst_index] = db_to_move;
 
-        let commit_path = self.repo.registry_commit_file(&registry_commit);
-        std::fs::write(&commit_path, &encoded)?;
+        Ok(())
+    }
 
-        Ok(registry_commit)
+    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), RegistryError> {
+        this.inner.validate_index(index)?;
+        this.inner.databases[index] =
+            Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
+        Ok(())
+    }
+}
+
+/// Registry implementation for the [`Normal`] mode
+struct NormalImpl {
+    repo: DirectoryManager,
+    databases: Vec<Database>,
+    runtime: Runtime,
+}
+
+impl NormalImpl {
+    /// Check the given `index` is valid for a database in the registry.
+    fn validate_index(&self, index: usize) -> Result<(), RegistryError> {
+        if index >= self.databases.len() {
+            Err(RegistryError::InvalidDatabaseIndex)
+        } else {
+            Ok(())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_test_utils::TestableTmpdir;
 
     use super::Registry;
-    use super::RegistryManifest;
     use crate::commit::CommitId;
     use crate::key::Key;
+    use crate::registry::RegistryManifest;
     use crate::repo::DirectoryManager;
 
-    fn setup_registry() -> (TestableTmpdir, Registry) {
+    fn setup_registry() -> (TestableTmpdir, Registry<Normal>) {
         let tmpdir = TestableTmpdir::new();
         let base_dir = tmpdir.path().join("registry");
         let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
@@ -219,7 +332,7 @@ mod tests {
         (tmpdir, registry)
     }
 
-    fn setup_size_2_registry() -> (TestableTmpdir, Registry) {
+    fn setup_size_2_registry() -> (TestableTmpdir, Registry<Normal>) {
         let (tmpdir, mut registry) = setup_registry();
         registry
             .resize(2)
@@ -228,7 +341,7 @@ mod tests {
     }
 
     fn seed_copy_move(
-        registry: &mut Registry,
+        registry: &mut Registry<Normal>,
         src_index: usize,
         dst_index: usize,
     ) -> ([(Key, &'static [u8]); 2], Key) {
@@ -243,41 +356,49 @@ mod tests {
         ];
 
         for (key, value) in src_pairs.iter() {
-            registry.databases[src_index]
+            registry.inner.databases[src_index]
                 .write(key.clone(), 0, Bytes::copy_from_slice(value))
                 .expect("Writing to source should succeed");
         }
 
         // Write values to destination that should be overwritten.
-        registry.databases[dst_index]
+        registry.inner.databases[dst_index]
             .write(key_a, 0, Bytes::copy_from_slice(b"old_a"))
             .expect("Writing to destination should succeed");
-        registry.databases[dst_index]
+        registry.inner.databases[dst_index]
             .write(key_c.clone(), 0, Bytes::copy_from_slice(b"old_c"))
             .expect("Writing to destination should succeed");
 
         (src_pairs, key_c)
     }
 
-    fn assert_pairs_present(registry: &Registry, db_index: usize, pairs: &[(Key, &'static [u8])]) {
+    fn assert_pairs_present(
+        registry: &Registry<Normal>,
+        db_index: usize,
+        pairs: &[(Key, &'static [u8])],
+    ) {
         for (key, value) in pairs.iter() {
             assert!(
-                registry.databases[db_index]
+                registry.inner.databases[db_index]
                     .exists(key)
                     .expect("Checking destination should succeed")
             );
             let mut buf = vec![0u8; value.len()];
-            registry.databases[db_index]
+            registry.inner.databases[db_index]
                 .read(key, 0, buf.as_mut_slice())
                 .expect("Reading from destination should succeed");
             assert_eq!(&buf, value);
         }
     }
 
-    fn assert_pairs_absent(registry: &Registry, db_index: usize, pairs: &[(Key, &'static [u8])]) {
+    fn assert_pairs_absent(
+        registry: &Registry<Normal>,
+        db_index: usize,
+        pairs: &[(Key, &'static [u8])],
+    ) {
         for (key, _value) in pairs.iter() {
             assert!(
-                !registry.databases[db_index]
+                !registry.inner.databases[db_index]
                     .exists(key)
                     .expect("Checking source should succeed"),
                 "Key should not exist in source after move."
@@ -288,8 +409,7 @@ mod tests {
     #[test]
     fn test_new() {
         let (_tmpdir, registry) = setup_registry();
-
-        assert!(registry.size() == 0);
+        assert!(registry.is_empty());
     }
 
     #[test]
@@ -300,13 +420,13 @@ mod tests {
             .resize(4)
             .expect("Growing the registry should succeed.");
 
-        assert_eq!(registry.size(), 4);
+        assert_eq!(registry.len(), 4);
 
         registry
             .resize(1)
             .expect("Shrinking the registry should succeed.");
 
-        assert_eq!(registry.size(), 1);
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]
@@ -318,9 +438,7 @@ mod tests {
             .expect("Growing the registry should succeed.");
 
         for i in 0..3 {
-            registry
-                .get_database_ref(i)
-                .expect("Database should exist.");
+            registry.database(i).expect("Database should exist.");
         }
     }
 
@@ -340,7 +458,7 @@ mod tests {
         assert_pairs_present(&registry, dst_index, &src_pairs);
 
         assert!(
-            !registry.databases[dst_index]
+            !registry.inner.databases[dst_index]
                 .exists(&key_c)
                 .expect("Checking destination should succeed"),
             "Key C should not exist in destination after copy."
@@ -439,7 +557,7 @@ mod tests {
 
         let db_index = 0;
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.databases[db_index]
+        registry.inner.databases[db_index]
             .write(key.clone(), 0, Bytes::copy_from_slice(b"some_value"))
             .expect("Writing to database should succeed");
 
@@ -448,7 +566,7 @@ mod tests {
             .expect("Clearing the database should succeed");
 
         assert!(
-            !registry.databases[db_index]
+            !registry.inner.databases[db_index]
                 .exists(&key)
                 .expect("Checking database should succeed"),
             "Key should not exist after clearing the database."
@@ -465,7 +583,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.registry_commit_file(&root_commit);
+        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
@@ -480,11 +598,12 @@ mod tests {
             .expect("Growing the registry should succeed.");
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.databases[0]
+        registry.inner.databases[0]
             .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
             .expect("Writing to database should succeed");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
+            .inner
             .databases
             .iter()
             .map(|db| db.hash().into())
@@ -494,7 +613,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.registry_commit_file(&root_commit);
+        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
@@ -509,7 +628,7 @@ mod tests {
             .expect("Growing the registry should succeed.");
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.databases[0]
+        registry.inner.databases[0]
             .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
             .expect("Writing to database should succeed");
 
@@ -528,14 +647,15 @@ mod tests {
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
-        registry.databases[0]
+        registry.inner.databases[0]
             .write(key_a.clone(), 0, Bytes::copy_from_slice(b"alpha"))
             .expect("Writing to database 0 should succeed");
-        registry.databases[1]
+        registry.inner.databases[1]
             .write(key_b.clone(), 0, Bytes::copy_from_slice(b"beta"))
             .expect("Writing to database 1 should succeed");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
+            .inner
             .databases
             .iter()
             .map(|db| db.hash().into())
@@ -545,7 +665,7 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.repo.registry_commit_file(&root_commit);
+        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
             deserialise(&commit_bytes).expect("Manifest should be deserialisable");
