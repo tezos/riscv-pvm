@@ -129,12 +129,12 @@ impl<M: RegistryMode> Registry<M> {
     }
 
     /// Get a reference to the database at the given `index`.
-    pub fn database(&self, index: usize) -> Result<&Database, RegistryError> {
+    pub fn database(&self, index: usize) -> Result<&Database<M>, RegistryError> {
         M::database(self, index)
     }
 
     /// Get a mutable reference to the database at the given `index`.
-    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database, RegistryError> {
+    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database<M>, RegistryError> {
         M::database_mut(self, index)
     }
 
@@ -185,13 +185,13 @@ pub trait RegistryMode: Mode {
     fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), RegistryError>;
 
     /// See [`Registry::database`]
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database, RegistryError>;
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, RegistryError>;
 
     /// See [`Registry::database_mut`]
     fn database_mut(
         this: &mut Registry<Self>,
         index: usize,
-    ) -> Result<&mut Database, RegistryError>;
+    ) -> Result<&mut Database<Self>, RegistryError>;
 
     /// See [`Registry::copy_database`]
     fn copy_database(
@@ -227,7 +227,7 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database, RegistryError> {
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, RegistryError> {
         this.inner
             .databases
             .get(index)
@@ -237,7 +237,7 @@ impl RegistryMode for Normal {
     fn database_mut(
         this: &mut Registry<Self>,
         index: usize,
-    ) -> Result<&mut Database, RegistryError> {
+    ) -> Result<&mut Database<Self>, RegistryError> {
         this.inner
             .databases
             .get_mut(index)
@@ -295,7 +295,7 @@ impl RegistryMode for Normal {
 /// Registry implementation for the [`Normal`] mode
 struct NormalImpl {
     repo: DirectoryManager,
-    databases: Vec<Database>,
+    databases: Vec<Database<Normal>>,
     runtime: Runtime,
 }
 

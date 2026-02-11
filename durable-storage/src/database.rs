@@ -7,11 +7,15 @@
 //! This module provides a database type to unify operations between the Merkle worker and the
 //! persistence layer.
 
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Modal;
+use octez_riscv_data::mode::Mode;
+use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
@@ -21,16 +25,6 @@ use crate::merkle_worker::MerkleWorkerError;
 use crate::persistence_layer::PersistenceLayer;
 pub use crate::persistence_layer::PersistenceLayerError;
 pub use crate::repo::DirectoryManager;
-
-/// An isolated key-space, independent from other [`Database`]s, on which database operations can
-/// be performed, e.g. read, write, delete.
-///
-/// This structure unifies the [`PersistenceLayer`] and Merkle layer (via the [`MerkleWorker`]) to
-/// allow for persistent storage alongside a representation which can provide a root hash.
-pub struct Database {
-    persistent: Arc<PersistenceLayer>,
-    merkle: MerkleWorker,
-}
 
 #[derive(Debug, thiserror::Error)]
 /// Errors that can occur during operations on a [`Database`].
@@ -45,33 +39,63 @@ pub enum DatabaseError {
     PersistenceLayer(#[from] PersistenceLayerError),
 }
 
-impl Database {
-    /// Remove a key from the database.
-    pub fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
-        self.persistent.delete(key.as_ref())?;
-        self.merkle.delete(key);
-        Ok(())
+/// An isolated key-space, independent from other [`Database`]s, on which database operations can
+/// be performed, e.g. read, write, delete.
+///
+/// This structure unifies the [`PersistenceLayer`] and Merkle layer (via the [`MerkleWorker`]) to
+/// allow for persistent storage alongside a representation which can provide a root hash.
+#[repr(transparent)]
+pub struct Database<M: Mode> {
+    inner: M::Select<DatabaseTemplate>,
+}
+
+impl Database<Normal> {
+    /// Try to construct a new Database
+    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
+        let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
+        let merkle = MerkleWorker::new(handle, persistent.clone())?;
+        Ok(Database {
+            inner: NormalImpl { persistent, merkle },
+        })
     }
 
-    /// Returns true if the provided key exists in the database, false if it does not.
-    pub fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
-        match self.persistent.get(key.as_ref()) {
-            Ok(_) => Ok(true),
-            Err(PersistenceLayerError::KeyNotFound) => Ok(false),
-            Err(other_error) => Err(other_error.into()),
-        }
-    }
-
-    /// Obtain, and possibly calculate, the root hash of the database>
-    pub fn hash(&self) -> Hash {
-        self.merkle.hash()
+    /// Try to create a cheap clone of the Database.
+    pub fn try_clone_with(
+        &self,
+        handle: &Handle,
+        repo: &DirectoryManager,
+    ) -> Result<Self, DatabaseError> {
+        let persistent: Arc<PersistenceLayer> = self.inner.persistent.try_clone(repo)?.into();
+        Ok(Database {
+            inner: NormalImpl {
+                persistent: persistent.clone(),
+                merkle: self.inner.merkle.clone_with(handle, persistent)?,
+            },
+        })
     }
 
     /// Commit the current database state to the repository and return its root hash.
     pub(crate) fn commit(&self, repo: &DirectoryManager) -> Result<CommitId, DatabaseError> {
-        let commit_id = self.merkle.commit()?;
-        self.persistent.commit(repo, &commit_id)?;
+        let commit_id = self.inner.merkle.commit()?;
+        self.inner.persistent.commit(repo, &commit_id)?;
         Ok(commit_id)
+    }
+}
+
+impl<M: DatabaseMode> Database<M> {
+    /// Remove a key from the database.
+    pub fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
+        M::delete(self, key)
+    }
+
+    /// Returns true if the provided key exists in the database, false if it does not.
+    pub fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
+        M::exists(self, key)
+    }
+
+    /// Obtain, and possibly calculate, the root hash of the database.
+    pub fn hash(&self) -> Hash {
+        M::hash(self)
     }
 
     /// Read a portion of the value associated with the provided key. The read data will be written
@@ -86,9 +110,109 @@ impl Database {
         &self,
         key: &Key,
         offset: usize,
+        output: impl BufMut,
+    ) -> Result<usize, DatabaseError> {
+        M::read(self, key, offset, output)
+    }
+
+    /// Inserts the value associated with the provided key, replacing any data already associated
+    /// with the key.
+    pub fn set(&mut self, key: Key, data: Bytes) -> Result<(), DatabaseError> {
+        M::set(self, key, data)
+    }
+
+    /// Modify the value associated with the provided key. `offset` specifies from where to start
+    /// writing within the associated value, appending if it is equal to the length. Non-existent
+    /// keys have the implicit length 0, so they are writeable.
+    ///
+    /// Non-zero offsets require checking the existence and length of an existing value, making
+    /// them more expensive.
+    ///
+    /// Fails if:
+    ///  - The offset is non-zero and the key does not exist.
+    ///  - The offset is larger than the length of the associated value.
+    ///  - The offset plus the length of the data would overflow.
+    pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, DatabaseError> {
+        M::write(self, key, offset, data)
+    }
+
+    /// Retrieve the length of the value associated with the provided key.
+    ///
+    /// Fails if:
+    ///  - The key does not exist in the database.
+    pub fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
+        M::value_length(self, key)
+    }
+}
+
+/// Modal template for the [`Database`]
+///
+/// This is used to select the appropriate implementation for the mode.
+enum DatabaseTemplate {}
+
+impl Modal for DatabaseTemplate {
+    type Normal = NormalImpl;
+
+    type Prove<'normal> = Infallible;
+
+    type Verify = Infallible;
+}
+
+/// Modes that implement this support operations on [`Database`]
+pub trait DatabaseMode: Mode {
+    /// See [`Database::exists`]
+    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, DatabaseError>;
+
+    /// See [`Database::value_length`]
+    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, DatabaseError>;
+
+    /// See [`Database::read`]
+    fn read(
+        this: &Database<Self>,
+        key: &Key,
+        offset: usize,
+        buffer: impl BufMut,
+    ) -> Result<usize, DatabaseError>;
+
+    /// See [`Database::set`]
+    fn set(this: &mut Database<Self>, key: Key, value: Bytes) -> Result<(), DatabaseError>;
+
+    /// See [`Database::write`]
+    fn write(
+        this: &mut Database<Self>,
+        key: Key,
+        offset: usize,
+        value: Bytes,
+    ) -> Result<usize, DatabaseError>;
+
+    /// See [`Database::delete`]
+    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), DatabaseError>;
+
+    /// See [`Database::hash`]
+    fn hash(this: &Database<Self>) -> Hash;
+}
+
+impl DatabaseMode for Normal {
+    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, DatabaseError> {
+        match this.inner.persistent.get(key.as_ref()) {
+            Ok(_) => Ok(true),
+            Err(PersistenceLayerError::KeyNotFound) => Ok(false),
+            Err(other_error) => Err(other_error.into()),
+        }
+    }
+
+    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, DatabaseError> {
+        let value = this.inner.persistent.get(key.as_ref())?;
+        Ok(value.as_ref().len())
+    }
+
+    fn read(
+        this: &Database<Self>,
+        key: &Key,
+        offset: usize,
         mut output: impl BufMut,
     ) -> Result<usize, DatabaseError> {
-        let value = self.persistent.get(key.as_ref())?;
+        let value = this.inner.persistent.get(key.as_ref())?;
         let value_ref = value.as_ref();
 
         if offset > value_ref.len() {
@@ -104,78 +228,56 @@ impl Database {
         Ok(source_slice.len())
     }
 
-    /// Inserts the value associated with the provided key, replacing any data already associated
-    /// with the key.
-    pub fn set(&mut self, key: Key, data: Bytes) -> Result<usize, DatabaseError> {
-        let written = data.len();
-        self.persistent.set(&key, &data)?;
-        self.merkle.set(key, data);
-        Ok(written)
+    fn set(this: &mut Database<Self>, key: Key, data: Bytes) -> Result<(), DatabaseError> {
+        this.inner.persistent.set(&key, &data)?;
+        this.inner.merkle.set(key, data);
+        Ok(())
     }
 
-    /// Try to construct a new Database
-    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
-        let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
-        let merkle = MerkleWorker::new(handle, persistent.clone())?;
-        Ok(Self { persistent, merkle })
-    }
-
-    /// Modify the value associated with the provided key. `offset` specifies from where to start
-    /// writing within the associated value, appending if it is equal to the length. Non-existent
-    /// keys have the implicit length 0, so they are writeable.
-    ///
-    /// Non-zero offsets require checking the existence and length of an existing value, making
-    /// them more expensive.
-    ///
-    /// Fails if:
-    ///  - The offset is non-zero and the key does not exist.
-    ///  - The offset is larger than the length of the associated value.
-    ///  - The offset plus the length of the data would overflow.
-    pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, DatabaseError> {
+    fn write(
+        this: &mut Database<Self>,
+        key: Key,
+        offset: usize,
+        data: Bytes,
+    ) -> Result<usize, DatabaseError> {
         // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
         // operation to check if the existing value length is shorter than the offset.
         //
         if offset > 0 {
             // `key_may_exist` uses a Bloom filter, which is cheaper than the 'get' operation.
-            if !self.persistent.key_may_exist(&key) {
+            if !this.inner.persistent.key_may_exist(&key) {
                 return Err(DatabaseError::OffsetTooLarge);
             }
 
             // Checking the length of a value requires a full retrieval. Returns an error if the
             // key does not exist.
-            let len = self.value_length(&key)?;
+            let len = this.value_length(&key)?;
             if offset > len || offset.checked_add(data.len()).is_none() {
                 return Err(DatabaseError::OffsetTooLarge);
             }
         }
 
         let written = data.len();
-        self.persistent.write(&key, offset, &data)?;
-        self.merkle.write(key, offset, data);
+        this.inner.persistent.write(&key, offset, &data)?;
+        this.inner.merkle.write(key, offset, data);
         Ok(written)
     }
 
-    /// Try to create a cheap clone of the Database.
-    pub fn try_clone_with(
-        &self,
-        handle: &Handle,
-        repo: &DirectoryManager,
-    ) -> Result<Self, DatabaseError> {
-        let persistent: Arc<PersistenceLayer> = self.persistent.try_clone(repo)?.into();
-        Ok(Self {
-            persistent: persistent.clone(),
-            merkle: self.merkle.clone_with(handle, persistent)?,
-        })
+    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), DatabaseError> {
+        this.inner.persistent.delete(key.as_ref())?;
+        this.inner.merkle.delete(key);
+        Ok(())
     }
 
-    /// Retrieve the length of the value associated with the provided key.
-    ///
-    /// Fails if:
-    ///  - The key does not exist in the database.
-    pub fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
-        let value = self.persistent.get(key.as_ref())?;
-        Ok(value.as_ref().len())
+    fn hash(this: &Database<Self>) -> Hash {
+        this.inner.merkle.hash()
     }
+}
+
+/// Registry implementation for the [`Database`] mode
+struct NormalImpl {
+    persistent: Arc<PersistenceLayer>,
+    merkle: MerkleWorker,
 }
 
 #[cfg(test)]
@@ -183,6 +285,7 @@ mod tests {
     use std::collections::HashSet;
 
     use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
@@ -195,7 +298,7 @@ mod tests {
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
 
-    fn new_database(handle: &Handle) -> Database {
+    fn new_database(handle: &Handle) -> Database<Normal> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
@@ -263,12 +366,10 @@ mod tests {
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let expected_written = data.len();
-                let result = database
+                database
                     .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-                prop_assert_eq!(result, expected_written);
 
                 let before = database.hash();
                 database.delete(key.clone()).expect("Deleting should succeed");
@@ -297,8 +398,7 @@ mod tests {
         let data: Vec<[u8; 1]> = (1..=5).map(|i| [i * 42]).collect();
 
         for (key, data) in keys.iter().zip(data.iter()) {
-            let expected_written = data.len();
-            let result = database
+            database
                 .set(key.clone(), Bytes::copy_from_slice(data))
                 .expect("Writing should succeed");
             assert!(
@@ -306,7 +406,6 @@ mod tests {
                     .exists(key)
                     .expect("There should be no other `PersistenceLayerError`s")
             );
-            assert_eq!(result, expected_written);
         }
         let before = database.hash();
 
@@ -340,18 +439,15 @@ mod tests {
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data: &[u8] = data;
-                let expected_written = data.len();
 
                 prop_assert_ne!(database.exists(&key)
                         .expect("There should be no other `PersistenceLayerError`s"),
                     seen.insert(key.clone()));
 
-                let result = database
+                database
                     .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-
-                prop_assert_eq!(result, expected_written);
             }
         }
     }
@@ -374,15 +470,12 @@ mod tests {
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data: &[u8] = data;
-                let expected_written = data.len();
 
                 let before = database.hash();
 
-                let result = database
+                database
                     .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
-
-                prop_assert_eq!(result, expected_written);
 
                 let after = database.hash();
 
@@ -450,12 +543,9 @@ mod tests {
                 let read_data_before = read_data;
 
                 // Set the data
-                prop_assert_eq!(
-                    database
-                        .set(key.clone(), Bytes::copy_from_slice(data))
-                        .expect("Setting should succeed"),
-                    data.len()
-                );
+                database
+                    .set(key.clone(), Bytes::copy_from_slice(data))
+                    .expect("Setting should succeed");
 
                 // The offset is bigger than the value
                 prop_assert!(database.read(&key, data.len() + 1, read_data.as_mut_slice()).is_err());
@@ -542,12 +632,9 @@ mod tests {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data = Bytes::copy_from_slice(data);
 
-                prop_assert_eq!(
-                    database
-                        .set(key.clone(), Bytes::copy_from_slice(&data))
-                        .expect("Writing should succeed"),
-                    data.len()
-                );
+                database
+                    .set(key.clone(), Bytes::copy_from_slice(&data))
+                    .expect("Writing should succeed");
                 prop_assert_eq!(
                     database
                         .value_length(&key)
