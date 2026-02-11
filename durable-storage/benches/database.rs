@@ -12,6 +12,7 @@ use criterion::BatchSize;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::database::Database;
 use octez_riscv_durable_storage::database::DatabaseError;
 use octez_riscv_durable_storage::database::DirectoryManager;
@@ -26,7 +27,7 @@ use serde::Deserialize;
 use tokio::runtime::Handle;
 
 struct BenchmarkState<'a> {
-    database: Database,
+    database: Database<Normal>,
     operations: Vec<Operation>,
     random_data: Vec<u8>,
     read_buffer: Vec<u8>,
