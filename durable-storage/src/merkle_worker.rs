@@ -17,9 +17,9 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::commit::CommitId;
+use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
-use crate::merkle_layer::MerkleLayerError;
 use crate::persistence_layer::PersistenceLayer;
 
 /// Commands that can be sent to the Merkle worker background thread
@@ -46,7 +46,7 @@ enum Command {
     /// Flush the current Merkle state to the persistence layer and obtain a commit ID.
     Commit {
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<CommitId, MerkleLayerError>>,
+        response: oneshot::Sender<Result<CommitId, OperationalError>>,
     },
 
     /// Clone the current Merkle layer.
@@ -55,7 +55,7 @@ enum Command {
         persistence_layer: Arc<PersistenceLayer>,
 
         /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<MerkleLayer, MerkleLayerError>>,
+        response: oneshot::Sender<MerkleLayer>,
     },
 }
 
@@ -67,24 +67,13 @@ pub struct MerkleWorker {
     sender: mpsc::UnboundedSender<Command>,
 }
 
-/// Errors that can occur when interacting with the Merkle worker
-#[derive(Debug, thiserror::Error)]
-pub enum MerkleWorkerError {
-    #[error("Merkle layer error: {0}")]
-    MerkleLayerError(#[from] MerkleLayerError),
-}
-
 impl MerkleWorker {
     /// Create a new Merkle worker with an empty Merkle tree.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    pub fn new(
-        async_handle: &Handle,
-        persistence_layer: Arc<PersistenceLayer>,
-    ) -> Result<Self, MerkleWorkerError> {
+    pub fn new(async_handle: &Handle, persistence_layer: Arc<PersistenceLayer>) -> Self {
         let layer = MerkleLayer::new(persistence_layer);
-        let worker = MerkleWorker::from_layer(async_handle, layer);
-        Ok(worker)
+        MerkleWorker::from_layer(async_handle, layer)
     }
 
     /// Checkout a Merkle worker from an existing commit.
@@ -98,7 +87,7 @@ impl MerkleWorker {
         async_handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
         hash: Hash,
-    ) -> Result<Self, MerkleWorkerError> {
+    ) -> Result<Self, OperationalError> {
         let layer = MerkleLayer::checkout(persistence_layer, hash)?;
         let worker = MerkleWorker::from_layer(async_handle, layer);
         Ok(worker)
@@ -109,7 +98,7 @@ impl MerkleWorker {
         &self,
         handle: &Handle,
         persistence_layer: Arc<PersistenceLayer>,
-    ) -> Result<Self, MerkleWorkerError> {
+    ) -> Result<Self, OperationalError> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -117,11 +106,11 @@ impl MerkleWorker {
                 persistence_layer,
                 response: sender,
             })
-            .expect("Merkle worker should be alive");
+            .map_err(|_error| OperationalError::WorkerThreadDied)?;
 
         let layer = receiver
             .blocking_recv()
-            .expect("Merkle worker should be alive")?;
+            .map_err(|_error| OperationalError::WorkerThreadDied)?;
 
         let worker = Self::from_layer(handle, layer);
         Ok(worker)
@@ -170,51 +159,55 @@ impl MerkleWorker {
     }
 
     /// Non-blocking version of [`MerkleLayer::write`].
-    pub(crate) fn write(&self, key: Key, offset: usize, value: Bytes) {
+    pub(crate) fn write(
+        &self,
+        key: Key,
+        offset: usize,
+        value: Bytes,
+    ) -> Result<(), OperationalError> {
         self.sender
             .send(Command::Write { key, offset, value })
-            .expect("Merkle worker should be alive");
+            .map_err(|_| OperationalError::WorkerThreadDied)
     }
 
     /// Non-blocking version of [`MerkleLayer::set`].
-    pub(crate) fn set(&self, key: Key, value: Bytes) {
+    pub(crate) fn set(&self, key: Key, value: Bytes) -> Result<(), OperationalError> {
         self.sender
             .send(Command::Set { key, value })
-            .expect("Merkle worker should be alive");
+            .map_err(|_| OperationalError::WorkerThreadDied)
     }
 
     /// Non-blocking version of [`MerkleLayer::delete`].
-    pub(crate) fn delete(&self, key: Key) {
+    pub(crate) fn delete(&self, key: Key) -> Result<(), OperationalError> {
         self.sender
             .send(Command::Delete { key })
-            .expect("Merkle worker should be alive");
+            .map_err(|_| OperationalError::WorkerThreadDied)
     }
 
     /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> Hash {
+    pub(crate) fn hash(&self) -> Result<Hash, OperationalError> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
             .send(Command::Hash { response: sender })
-            .expect("Merkle worker should be alive");
+            .map_err(|_| OperationalError::WorkerThreadDied)?;
 
         receiver
             .blocking_recv()
-            .expect("Merkle worker should be alive")
+            .map_err(|_| OperationalError::WorkerThreadDied)
     }
 
     /// See [`MerkleLayer::commit`].
-    pub(crate) fn commit(&self) -> Result<CommitId, MerkleWorkerError> {
+    pub(crate) fn commit(&self) -> Result<CommitId, OperationalError> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
             .send(Command::Commit { response: sender })
-            .expect("Merkle worker should be alive");
+            .map_err(|_| OperationalError::WorkerThreadDied)?;
 
-        let result = receiver
+        receiver
             .blocking_recv()
-            .expect("Merkle worker should be alive")?;
-        Ok(result)
+            .map_err(|_| OperationalError::WorkerThreadDied)?
     }
 }
 
@@ -277,21 +270,21 @@ mod tests {
             match self {
                 Self::Write { key, offset, value } => {
                     layer.write(&key, offset, &value);
-                    worker.write(key, offset, value);
+                    worker.write(key, offset, value).unwrap();
                 }
 
                 Self::Set { key, value } => {
                     layer.set(&key, &value);
-                    worker.set(key, value);
+                    worker.set(key, value).unwrap();
                 }
 
                 Self::Delete { key } => {
                     layer.delete(&key);
-                    worker.delete(key);
+                    worker.delete(key).unwrap();
                 }
 
                 Self::Hash => {
-                    let hash1 = worker.hash();
+                    let hash1 = worker.hash().unwrap();
                     let hash2 = layer.hash();
                     assert_eq!(hash1, hash2);
                 }
@@ -306,9 +299,7 @@ mod tests {
                     let persistence_layer = PersistenceLayer::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
-                    *layer = layer
-                        .clone_with(persistence_layer)
-                        .expect("Cloning a Merkle layer should succeed");
+                    *layer = layer.clone_with(persistence_layer);
 
                     let persistence_worker = PersistenceLayer::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
@@ -373,14 +364,14 @@ mod tests {
 
             let persistence_worker = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
-            let mut merkle_worker = MerkleWorker::new(handle, persistence_worker).expect("Creating a Merkle worker should succeed");
+            let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
             for command in commands {
                 command.run(handle, &dir_manager, &mut merkle_worker, &mut merkle_layer);
             }
 
             let layer_hash = merkle_layer.hash();
-            let worker_hash = merkle_worker.hash();
+            let worker_hash = merkle_worker.hash().unwrap();
             prop_assert_eq!(layer_hash, worker_hash);
         });
     }

@@ -19,39 +19,12 @@ use tokio::runtime::Runtime;
 
 use crate::commit::CommitId;
 use crate::database::Database;
-use crate::database::DatabaseError;
+use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
+use crate::errors::OperationalError;
 use crate::repo::DirectoryManager;
-use crate::repo::DirectoryManagerError;
 
 pub(super) const REGISTRY_ARITY: usize = 2;
-
-#[derive(Debug, thiserror::Error)]
-/// Errors returned by [`Registry`] operations.
-pub enum RegistryError {
-    /// Failed to create the Tokio runtime used by the registry.
-    #[error("Failed to create Tokio runtime: {0}")]
-    Runtime(std::io::Error),
-
-    /// Error reported by the directory manager.
-    #[error("Directory manager error: {0}")]
-    DirectoryManager(#[from] DirectoryManagerError),
-
-    /// Error reported by an underlying database.
-    #[error("Database error: {0}")]
-    Database(#[from] DatabaseError),
-
-    /// Error while serialising a registry commit.
-    #[error("Commit serialization error: {0}")]
-    CommitSerialization(#[from] bincode::error::EncodeError),
-
-    /// Error while reading or writing commit data.
-    #[error("Commit storage error: {0}")]
-    CommitStorage(#[from] std::io::Error),
-
-    /// Error indicating an invalid database index was provided.
-    #[error("Invalid database index")]
-    InvalidDatabaseIndex,
-}
 
 #[derive(Debug, Encode, Decode)]
 /// Structure to store the result of serialising a registry.
@@ -70,11 +43,11 @@ impl Registry<Normal> {
     ///
     /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
     /// `base_dir`.
-    pub fn new(repo: DirectoryManager) -> Result<Self, RegistryError> {
+    pub fn new(repo: DirectoryManager) -> Result<Self, OperationalError> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .build()
-            .map_err(RegistryError::Runtime)?;
+            .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
 
         Ok(Registry {
             inner: NormalImpl {
@@ -90,7 +63,7 @@ impl Registry<Normal> {
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
     /// of all underlying databases, and the registry manifest is stored at the
     /// corresponding commit path.
-    pub fn commit(&self) -> Result<CommitId, RegistryError> {
+    pub fn commit(&self) -> Result<CommitId, OperationalError> {
         let mut database_hashes = Vec::with_capacity(self.inner.databases.len());
 
         for database in &self.inner.databases {
@@ -100,10 +73,12 @@ impl Registry<Normal> {
         let registry_commit = CommitId::compute_root_hash(&database_hashes);
 
         let manifest = RegistryManifest { database_hashes };
-        let encoded = serialise(&manifest)?;
+        let encoded =
+            serialise(&manifest).expect("Serialising the registry manifest should not fail");
 
         let commit_path = self.inner.repo.registry_commit_file(&registry_commit);
-        std::fs::write(&commit_path, &encoded)?;
+        std::fs::write(&commit_path, &encoded)
+            .map_err(|error| OperationalError::FileWriteFailed { error })?;
 
         Ok(registry_commit)
     }
@@ -124,41 +99,33 @@ impl<M: RegistryMode> Registry<M> {
     ///
     /// Growing the registry creates new databases, while shrinking drops
     /// databases from the end.
-    pub fn resize(&mut self, new_size: usize) -> Result<(), RegistryError> {
+    pub fn resize(&mut self, new_size: usize) -> Result<(), Error> {
         M::resize(self, new_size)
     }
 
     /// Get a reference to the database at the given `index`.
-    pub fn database(&self, index: usize) -> Result<&Database<M>, RegistryError> {
+    pub fn database(&self, index: usize) -> Result<&Database<M>, Error> {
         M::database(self, index)
     }
 
     /// Get a mutable reference to the database at the given `index`.
-    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database<M>, RegistryError> {
+    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database<M>, Error> {
         M::database_mut(self, index)
     }
 
     /// Copy the contents of database at `src_index` to database at `dst_index`.
-    pub fn copy_database(
-        &mut self,
-        src_index: usize,
-        dst_index: usize,
-    ) -> Result<(), RegistryError> {
+    pub fn copy_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error> {
         M::copy_database(self, src_index, dst_index)
     }
 
     /// Move the contents of database at `src_index` to database at `dst_index`. The source
     /// database is replaced with an empty database.
-    pub fn move_database(
-        &mut self,
-        src_index: usize,
-        dst_index: usize,
-    ) -> Result<(), RegistryError> {
+    pub fn move_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error> {
         M::move_database(self, src_index, dst_index)
     }
 
     /// Clear the database at the given `index`.
-    pub fn clear_database(&mut self, index: usize) -> Result<(), RegistryError> {
+    pub fn clear_database(&mut self, index: usize) -> Result<(), Error> {
         M::clear_database(self, index)
     }
 }
@@ -182,33 +149,22 @@ pub trait RegistryMode: Mode {
     fn len(this: &Registry<Self>) -> usize;
 
     /// See [`Registry::resize`]
-    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), RegistryError>;
+    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), Error>;
 
     /// See [`Registry::database`]
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, RegistryError>;
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, Error>;
 
     /// See [`Registry::database_mut`]
-    fn database_mut(
-        this: &mut Registry<Self>,
-        index: usize,
-    ) -> Result<&mut Database<Self>, RegistryError>;
+    fn database_mut(this: &mut Registry<Self>, index: usize) -> Result<&mut Database<Self>, Error>;
 
     /// See [`Registry::copy_database`]
-    fn copy_database(
-        this: &mut Registry<Self>,
-        src: usize,
-        dst: usize,
-    ) -> Result<(), RegistryError>;
+    fn copy_database(this: &mut Registry<Self>, src: usize, dst: usize) -> Result<(), Error>;
 
     /// See [`Registry::move_database`]
-    fn move_database(
-        this: &mut Registry<Self>,
-        src: usize,
-        dst: usize,
-    ) -> Result<(), RegistryError>;
+    fn move_database(this: &mut Registry<Self>, src: usize, dst: usize) -> Result<(), Error>;
 
     /// See [`Registry::clear_database`]
-    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), RegistryError>;
+    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), Error>;
 }
 
 impl RegistryMode for Normal {
@@ -216,7 +172,7 @@ impl RegistryMode for Normal {
         this.inner.databases.len()
     }
 
-    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), RegistryError> {
+    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), Error> {
         while this.len() < new_size {
             let database = Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
             this.inner.databases.push(database);
@@ -227,28 +183,29 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, RegistryError> {
-        this.inner
+    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, Error> {
+        let database = this
+            .inner
             .databases
             .get(index)
-            .ok_or(RegistryError::InvalidDatabaseIndex)
+            .ok_or(InvalidArgumentError::DatabaseIndexOutOfBounds)?;
+        Ok(database)
     }
 
-    fn database_mut(
-        this: &mut Registry<Self>,
-        index: usize,
-    ) -> Result<&mut Database<Self>, RegistryError> {
-        this.inner
+    fn database_mut(this: &mut Registry<Self>, index: usize) -> Result<&mut Database<Self>, Error> {
+        let database = this
+            .inner
             .databases
             .get_mut(index)
-            .ok_or(RegistryError::InvalidDatabaseIndex)
+            .ok_or(InvalidArgumentError::DatabaseIndexOutOfBounds)?;
+        Ok(database)
     }
 
     fn copy_database(
         this: &mut Registry<Self>,
         src_index: usize,
         dst_index: usize,
-    ) -> Result<(), RegistryError> {
+    ) -> Result<(), Error> {
         this.inner.validate_index(src_index)?;
         this.inner.validate_index(dst_index)?;
 
@@ -268,7 +225,7 @@ impl RegistryMode for Normal {
         this: &mut Registry<Self>,
         src_index: usize,
         dst_index: usize,
-    ) -> Result<(), RegistryError> {
+    ) -> Result<(), Error> {
         this.inner.validate_index(src_index)?;
         this.inner.validate_index(dst_index)?;
 
@@ -284,7 +241,7 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), RegistryError> {
+    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), Error> {
         this.inner.validate_index(index)?;
         this.inner.databases[index] =
             Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
@@ -301,9 +258,9 @@ struct NormalImpl {
 
 impl NormalImpl {
     /// Check the given `index` is valid for a database in the registry.
-    fn validate_index(&self, index: usize) -> Result<(), RegistryError> {
+    fn validate_index(&self, index: usize) -> Result<(), InvalidArgumentError> {
         if index >= self.databases.len() {
-            Err(RegistryError::InvalidDatabaseIndex)
+            Err(InvalidArgumentError::DatabaseIndexOutOfBounds)
         } else {
             Ok(())
         }
@@ -319,6 +276,8 @@ mod tests {
 
     use super::Registry;
     use crate::commit::CommitId;
+    use crate::errors::Error;
+    use crate::errors::InvalidArgumentError;
     use crate::key::Key;
     use crate::registry::RegistryManifest;
     use crate::repo::DirectoryManager;
@@ -487,13 +446,23 @@ mod tests {
 
         let result = registry.copy_database(0, 2);
         assert!(
-            matches!(result, Err(super::RegistryError::InvalidDatabaseIndex)),
+            matches!(
+                result,
+                Err(Error::InvalidArgument(
+                    InvalidArgumentError::DatabaseIndexOutOfBounds
+                ))
+            ),
             "Copying to invalid index should return InvalidDatabaseIndex error."
         );
 
         let result = registry.copy_database(2, 0);
         assert!(
-            matches!(result, Err(super::RegistryError::InvalidDatabaseIndex)),
+            matches!(
+                result,
+                Err(Error::InvalidArgument(
+                    InvalidArgumentError::DatabaseIndexOutOfBounds
+                ))
+            ),
             "Copying from invalid index should return InvalidDatabaseIndex error."
         );
     }
@@ -524,13 +493,23 @@ mod tests {
 
         let result = registry.move_database(0, 2);
         assert!(
-            matches!(result, Err(super::RegistryError::InvalidDatabaseIndex)),
+            matches!(
+                result,
+                Err(Error::InvalidArgument(
+                    InvalidArgumentError::DatabaseIndexOutOfBounds
+                ))
+            ),
             "Moving to invalid index should return InvalidDatabaseIndex error."
         );
 
         let result = registry.move_database(2, 0);
         assert!(
-            matches!(result, Err(super::RegistryError::InvalidDatabaseIndex)),
+            matches!(
+                result,
+                Err(Error::InvalidArgument(
+                    InvalidArgumentError::DatabaseIndexOutOfBounds
+                ))
+            ),
             "Moving from invalid index should return InvalidDatabaseIndex error."
         );
     }
@@ -606,7 +585,7 @@ mod tests {
             .inner
             .databases
             .iter()
-            .map(|db| db.hash().into())
+            .map(|db| db.hash().unwrap().into())
             .collect();
         let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
 
@@ -658,7 +637,7 @@ mod tests {
             .inner
             .databases
             .iter()
-            .map(|db| db.hash().into())
+            .map(|db| db.hash().unwrap().into())
             .collect();
         let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
 

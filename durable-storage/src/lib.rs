@@ -31,6 +31,7 @@
 pub mod avl;
 pub mod commit;
 pub mod database;
+pub mod errors;
 pub mod key;
 mod merkle_layer;
 mod merkle_worker;

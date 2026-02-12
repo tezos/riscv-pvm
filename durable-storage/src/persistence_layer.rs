@@ -32,7 +32,6 @@ use std::path::Path;
 
 use bincode::BorrowDecode;
 use bincode::Encode;
-use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use rocksdb::ColumnFamilyDescriptor;
 use rocksdb::MergeOperands;
@@ -40,8 +39,10 @@ use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
 use crate::commit::CommitId;
+use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
+use crate::errors::OperationalError;
 use crate::repo::DirectoryManager;
-use crate::repo::DirectoryManagerError;
 
 /// The name of the column family used for storing [`HashedData`].
 const BLOB_CF: &str = "blob";
@@ -64,25 +65,6 @@ impl<'d> HashedData<'d> {
         let hash = Hash::hash_bytes(value);
         Self { hash, value }
     }
-}
-
-/// Errors encountered when interacting with the persistence layer.
-#[derive(Debug, thiserror::Error)]
-pub enum PersistenceLayerError {
-    #[error("Commit not found")]
-    CommitNotFound,
-
-    #[error("Key not found")]
-    KeyNotFound,
-
-    #[error("RocksDB error: {0}")]
-    RocksDB(#[from] rocksdb::Error),
-
-    #[error("Directory manager error: {0}")]
-    DirectoryManager(#[from] DirectoryManagerError),
-
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] EncodeError),
 }
 
 #[derive(BorrowDecode, Encode)]
@@ -253,14 +235,18 @@ pub struct PersistenceLayer {
 
 impl PersistenceLayer {
     /// Creates a checkpoint of the current database at the given `path`.
-    fn checkpoint_at(&self, path: &Path) -> Result<(), PersistenceLayerError> {
+    fn checkpoint_at(&self, path: &Path) -> Result<(), OperationalError> {
         // Note that we want the checkpoint object to be dropped before opening the DB in order to
         // call its destroy method to avoid UB. This happens in this unit expression.
-        Ok(Checkpoint::new(&self.db_instance)?.create_checkpoint(path)?)
+        let checkpoint = Checkpoint::new(&self.db_instance)
+            .map_err(|error| OperationalError::CheckpointCreationFailed { error })?;
+        checkpoint
+            .create_checkpoint(path)
+            .map_err(|error| OperationalError::CheckpointCreationFailed { error })
     }
 
     /// Creates a new `PersistenceLayer` instance within the given `repo`.
-    pub fn new(repo: &DirectoryManager) -> Result<Self, PersistenceLayerError> {
+    pub fn new(repo: &DirectoryManager) -> Result<Self, OperationalError> {
         let tempdir = repo.temp_database_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
 
@@ -271,8 +257,13 @@ impl PersistenceLayer {
             offset_write_full_merge,
             offset_write_partial_merge,
         );
-        let mut db = rocksdb::DB::open(&default_cf_opts, &new_db_path)?;
-        db.create_cf(BLOB_CF, &rocksdb_blob_cf_creation_options())?;
+        let mut db = rocksdb::DB::open(&default_cf_opts, &new_db_path)
+            .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
+        db.create_cf(BLOB_CF, &rocksdb_blob_cf_creation_options())
+            .map_err(|error| OperationalError::ColumnFamilyCreationFailed {
+                name: BLOB_CF.to_owned(),
+                error,
+            })?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
@@ -283,13 +274,16 @@ impl PersistenceLayer {
     fn clone_as_checkpoint(
         db: &rocksdb::DB,
         repo: &DirectoryManager,
-    ) -> Result<Self, PersistenceLayerError> {
+    ) -> Result<Self, OperationalError> {
         let tempdir = repo.temp_database_dir()?;
         let checkpoint_path = tempdir.path().join("checkpoint");
 
         // Note that we want the checkpoint object to be dropped before opening the DB in order to
         // call its destroy method to avoid UB. This happens in this unit expression.
-        Checkpoint::new(db)?.create_checkpoint(&checkpoint_path)?;
+        Checkpoint::new(db)
+            .map_err(|error| OperationalError::CheckpointCreationFailed { error })?
+            .create_checkpoint(&checkpoint_path)
+            .map_err(|error| OperationalError::CheckpointCreationFailed { error })?;
 
         let mut default_cf_opts = rocksdb_clone_as_checkpoint_options();
         default_cf_opts.set_merge_operator(
@@ -305,7 +299,8 @@ impl PersistenceLayer {
                 ColumnFamilyDescriptor::new("default", default_cf_opts),
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
             ],
-        )?;
+        )
+        .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
@@ -316,17 +311,17 @@ impl PersistenceLayer {
     /// Clones the current `PersistenceLayer` instance.
     ///
     /// Operations on the cloned instance will have no effect on the original instance.
-    pub fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, PersistenceLayerError> {
+    pub fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, OperationalError> {
         Self::clone_as_checkpoint(&self.db_instance, repo)
     }
 
     /// Checks out a specific commit in the repository from the given `repo`
-    pub fn checkout(repo: &DirectoryManager, id: &CommitId) -> Result<Self, PersistenceLayerError> {
+    pub fn checkout(repo: &DirectoryManager, id: &CommitId) -> Result<Self, OperationalError> {
         let db_path = repo.database_commit_dir(id);
 
         // We assume the commit is not found if the folder does not exist.
         if !Path::exists(&db_path) {
-            return Err(PersistenceLayerError::CommitNotFound);
+            return Err(OperationalError::CommitNotFound);
         };
 
         let default_cf_opts = rocksdb_clone_as_checkpoint_options();
@@ -335,17 +330,14 @@ impl PersistenceLayer {
             rocksdb::DB::open_cf_descriptors(&rocksdb_clone_as_checkpoint_options(), &db_path, [
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
                 ColumnFamilyDescriptor::new("default", default_cf_opts),
-            ])?;
+            ])
+            .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
         Self::clone_as_checkpoint(&db, repo)
     }
 
     /// Commits the current state to the repository within the given `repo`
-    pub fn commit(
-        &self,
-        repo: &DirectoryManager,
-        id: &CommitId,
-    ) -> Result<(), PersistenceLayerError> {
+    pub fn commit(&self, repo: &DirectoryManager, id: &CommitId) -> Result<(), OperationalError> {
         let checkpoint_path = repo.database_commit_dir(id);
 
         // If the path already exists, we overwrite the existing commit. This is highly unlikely to
@@ -370,32 +362,63 @@ impl PersistenceLayer {
     }
 
     /// Retrieves the hashed data associated with its hash as the key.
-    pub fn blob_get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, PersistenceLayerError> {
-        self.db_instance
-            .get_pinned_cf(self.blob_cf(), key.as_ref())?
-            .ok_or(PersistenceLayerError::KeyNotFound)
+    pub fn blob_get(&self, key: &Hash) -> Result<impl AsRef<[u8]>, Error> {
+        let key = key.as_ref();
+        let entry = self
+            .db_instance
+            .get_pinned_cf(self.blob_cf(), key)
+            .map_err(|error| OperationalError::GetFailed {
+                column: BLOB_CF.to_string(),
+                key: key.to_owned(),
+                error,
+            })?;
+
+        match entry {
+            Some(value) => Ok(value),
+            None => Err(InvalidArgumentError::KeyNotFound)?,
+        }
     }
 
     /// Sets a value for the given key.
-    pub fn blob_set(&self, blob: &HashedData) -> Result<(), PersistenceLayerError> {
-        Ok(self
-            .db_instance
-            .put_cf(self.blob_cf(), blob.hash, blob.value)?)
+    pub fn blob_set(&self, blob: &HashedData) -> Result<(), OperationalError> {
+        self.db_instance
+            .put_cf(self.blob_cf(), blob.hash, blob.value)
+            .map_err(|error| OperationalError::PutFailed {
+                column: BLOB_CF.to_string(),
+                key: blob.hash.as_ref().to_owned(),
+                error,
+            })
     }
 
     /// Deletes a value associated with the given key.
-    pub fn blob_delete(&self, key: &Hash) -> Result<(), PersistenceLayerError> {
-        Ok(self.db_instance.delete_cf(self.blob_cf(), key.as_ref())?)
+    pub fn blob_delete(&self, key: &Hash) -> Result<(), OperationalError> {
+        let key = key.as_ref();
+        self.db_instance
+            .delete_cf(self.blob_cf(), key)
+            .map_err(|error| OperationalError::DeleteFailed {
+                column: BLOB_CF.to_string(),
+                key: key.to_owned(),
+                error,
+            })
     }
 }
 
 // Interface used by the Data layer which operates over raw key-value pairs.
 impl PersistenceLayer {
     /// Retrieves a value associated with the given key.
-    pub fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, PersistenceLayerError> {
-        self.db_instance
-            .get_pinned(key.as_ref())?
-            .ok_or(PersistenceLayerError::KeyNotFound)
+    pub fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        let value = self.db_instance.get_pinned(key.as_ref()).map_err(|error| {
+            OperationalError::GetFailed {
+                column: "default".to_owned(),
+                key: key.as_ref().to_owned(),
+                error,
+            }
+        })?;
+
+        match value {
+            Some(value) => Ok(value),
+            None => Err(InvalidArgumentError::KeyNotFound)?,
+        }
     }
 
     /// Sets a value for the given key.
@@ -403,8 +426,14 @@ impl PersistenceLayer {
         &self,
         key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<(), PersistenceLayerError> {
-        Ok(self.db_instance.put(key.as_ref(), value.as_ref())?)
+    ) -> Result<(), OperationalError> {
+        self.db_instance
+            .put(key.as_ref(), value.as_ref())
+            .map_err(|error| OperationalError::PutFailed {
+                column: "default".to_owned(),
+                key: key.as_ref().to_owned(),
+                error,
+            })
     }
 
     /// Writes a value for the given key with a given offset.
@@ -413,20 +442,32 @@ impl PersistenceLayer {
         key: impl AsRef<[u8]>,
         offset: usize,
         value: impl AsRef<[u8]>,
-    ) -> Result<(), PersistenceLayerError> {
+    ) -> Result<(), OperationalError> {
         let payload_struct = OffsetWriteMergePayload {
             offset,
             value: value.as_ref(),
         };
-        let payload = octez_riscv_data::serialisation::serialise(payload_struct)?;
+        let payload = octez_riscv_data::serialisation::serialise(payload_struct)
+            .expect("Merge operator serialisation should always succeed");
 
-        self.db_instance.merge(key.as_ref(), payload)?;
-        Ok(())
+        self.db_instance
+            .merge(key.as_ref(), payload)
+            .map_err(|error| OperationalError::MergeFailed {
+                key: key.as_ref().to_owned(),
+                offset,
+                error,
+            })
     }
 
     /// Deletes a value associated with the given key.
-    pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), PersistenceLayerError> {
-        Ok(self.db_instance.delete(key.as_ref())?)
+    pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        self.db_instance
+            .delete(key.as_ref())
+            .map_err(|error| OperationalError::DeleteFailed {
+                column: "default".to_owned(),
+                key: key.as_ref().to_owned(),
+                error,
+            })
     }
 
     /// Returns false if the key doesn't exist and true if it may
@@ -537,7 +578,7 @@ mod tests {
             // Initially the key should not be found
             assert!(matches!(
                 db.blob_get(&key),
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
 
             db.blob_set(&blob).expect("Should be able to set a value");
@@ -574,7 +615,7 @@ mod tests {
                 .expect("Should be able to delete the value");
             assert!(matches!(
                 db.blob_get(&key),
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
 
             assert_eq!(
@@ -587,15 +628,21 @@ mod tests {
                 // These operations shouldn't affect the data column family
                 let data_a = db.get(&blob.hash);
                 let data_b = db.get(&blob2.hash);
-                assert!(matches!(data_a, Err(PersistenceLayerError::KeyNotFound)));
-                assert!(matches!(data_b, Err(PersistenceLayerError::KeyNotFound)));
+                assert!(matches!(
+                    data_a,
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+                ));
+                assert!(matches!(
+                    data_b,
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+                ));
             }
 
             db.blob_delete(&key2)
                 .expect("Should be able to delete the second value");
             assert!(matches!(
                 db.blob_get(&key2),
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
 
             let nonexistent_blob = HashedData::from_value(b"non_existent");
@@ -664,7 +711,7 @@ mod tests {
                 retrieved_third_from_b.is_err()
                     && matches!(
                         retrieved_third_from_b.err(),
-                        Some(PersistenceLayerError::KeyNotFound)
+                        Some(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
                     )
             );
         }
@@ -753,12 +800,12 @@ mod tests {
             let retrieved_nonexistent = db_b.blob_get(&hash_zero_digest);
             assert!(matches!(
                 retrieved_nonexistent,
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
             let retrieved_nonexistent = db_b.get(&[1u8; 32]);
             assert!(matches!(
                 retrieved_nonexistent,
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
         }
 
@@ -776,10 +823,7 @@ mod tests {
 
         let commit_id: CommitId = Hash::hash_bytes(b"nonexistent_commit").into();
         let db_result = PersistenceLayer::checkout(&repo, &commit_id);
-        assert!(matches!(
-            db_result,
-            Err(PersistenceLayerError::CommitNotFound)
-        ));
+        assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
     }
 
     #[test]
@@ -826,7 +870,7 @@ mod tests {
             let retrieved_c = db_c.blob_get(&blob_c.hash);
             assert!(matches!(
                 retrieved_c,
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
         }
 
@@ -876,7 +920,7 @@ mod tests {
             let retrieved_b = db_check_1.blob_get(&blob_b.hash);
             assert!(matches!(
                 retrieved_b,
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
         }
 
@@ -945,7 +989,7 @@ mod tests {
             // Initially the key should not be found
             assert!(matches!(
                 db.get(&key),
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
 
             db.set(&key, &value).expect("Should be able to set a value");
@@ -970,7 +1014,7 @@ mod tests {
                 let other_key = format!("other_{key}");
                 assert!(matches!(
                     db.get(&other_key),
-                    Err(PersistenceLayerError::KeyNotFound)
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
                 ));
             }
 
@@ -1034,7 +1078,7 @@ mod tests {
                 let other_key = format!("other_{key}");
                 assert!(matches!(
                     db.get(&other_key),
-                    Err(PersistenceLayerError::KeyNotFound)
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
                 ));
             }
 
@@ -1044,18 +1088,18 @@ mod tests {
                 let blob2 = HashedData::from_value(value2.as_bytes());
                 assert!(matches!(
                     db.blob_get(&blob1.hash),
-                    Err(PersistenceLayerError::KeyNotFound)
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
                 ));
                 assert!(matches!(
                     db.blob_get(&blob2.hash),
-                    Err(PersistenceLayerError::KeyNotFound)
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
                 ));
             }
 
             db.delete(&key).expect("Should be able to delete the value");
             assert!(matches!(
                 db.get(&key),
-                Err(PersistenceLayerError::KeyNotFound)
+                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
             ));
         };
 

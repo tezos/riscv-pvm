@@ -14,9 +14,9 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::database::Database;
-use octez_riscv_durable_storage::database::DatabaseError;
 use octez_riscv_durable_storage::database::DirectoryManager;
-use octez_riscv_durable_storage::database::PersistenceLayerError;
+use octez_riscv_durable_storage::errors::Error;
+use octez_riscv_durable_storage::errors::InvalidArgumentError;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_test_utils::TestableTmpdir;
 use rand::rng;
@@ -233,8 +233,7 @@ fn bench_run(mut state: BenchmarkState) {
                 );
             }
             Operation::Delete { key } => match state.database.delete(key) {
-                Ok(_)
-                | Err(DatabaseError::PersistenceLayer(PersistenceLayerError::KeyNotFound)) => {}
+                Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                 Err(e) => panic!("The deletion should succeed: {e:?}"),
             },
             Operation::Exists { key } => {
@@ -244,21 +243,19 @@ fn bench_run(mut state: BenchmarkState) {
                     .expect("The existence check should succeed");
             }
             Operation::Hash => {
-                black_box(state.database.hash());
+                black_box(state.database.hash().expect("Hash should be calculated"));
             }
             Operation::Read { key, size } => {
                 match state
                     .database
                     .read(&key, 0, &mut state.read_buffer[0..size])
                 {
-                    Ok(_)
-                    | Err(DatabaseError::PersistenceLayer(PersistenceLayerError::KeyNotFound)) => {}
+                    Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The read should succeed: {e:?}"),
                 }
             }
             Operation::ValueLength { key } => match state.database.value_length(&key) {
-                Ok(_)
-                | Err(DatabaseError::PersistenceLayer(PersistenceLayerError::KeyNotFound)) => {}
+                Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                 Err(e) => panic!("The value length calculation should succeed: {e:?}"),
             },
             Operation::Write { key, size } => {
@@ -266,8 +263,7 @@ fn bench_run(mut state: BenchmarkState) {
                     .database
                     .set(key, Bytes::copy_from_slice(&state.random_data[0..size]))
                 {
-                    Ok(_)
-                    | Err(DatabaseError::PersistenceLayer(PersistenceLayerError::KeyNotFound)) => {}
+                    Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The write should succeed: {e:?}"),
                 }
             }
