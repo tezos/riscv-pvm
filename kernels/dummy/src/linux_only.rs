@@ -90,7 +90,7 @@ pub fn dummy() {
         let mut buffer = [0u8; 256];
         libc::getcwd(buffer.as_mut_ptr().cast(), buffer.len());
 
-        let cstr = CStr::from_bytes_with_nul_unchecked(&buffer);
+        let cstr = CStr::from_bytes_until_nul(&buffer).expect("Valid CStr");
 
         test_write(c"The current working directory is: ");
         test_write(cstr);
