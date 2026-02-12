@@ -241,6 +241,11 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
         let proof_state = self.state.start_proof();
         proof_state.produce_outbox_proof(output_info)
     }
+
+    /// Get the outbox messages for the specified level
+    pub fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
+        self.with_backend(|pvm| pvm.get_outbox_messages(level))
+    }
 }
 
 impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
