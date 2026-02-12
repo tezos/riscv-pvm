@@ -9,32 +9,27 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::de::BorrowDecoder;
 
+use crate::errors::InvalidArgumentError;
+
 /// Maximum size of a key in bytes
 pub const KEY_MAX_SIZE: usize = 256;
-
-/// Errors related to construction of keys.
-#[derive(Debug, thiserror::Error)]
-pub enum KeyError {
-    /// The maximum size of a key is [`KEY_MAX_SIZE`].
-    #[error("The provided key is too long")]
-    KeyTooLong,
-}
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
 #[derive(Clone, Debug, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Key(Vec<u8>);
 
 impl Key {
-    pub fn new(bytes: &[u8]) -> Result<Self, KeyError> {
+    /// Create a new key from a byte slice, ensuring it is valid.
+    pub fn new(bytes: &[u8]) -> Result<Self, InvalidArgumentError> {
         Self::check_bytes_validity(bytes)?;
 
         Ok(Key(bytes.to_vec()))
     }
 
     /// Check whether a given byte-slice is a valid key.
-    fn check_bytes_validity(bytes: &[u8]) -> Result<(), KeyError> {
+    fn check_bytes_validity(bytes: &[u8]) -> Result<(), InvalidArgumentError> {
         if bytes.len() > KEY_MAX_SIZE {
-            return Err(KeyError::KeyTooLong);
+            return Err(InvalidArgumentError::KeyTooLong);
         }
 
         Ok(())

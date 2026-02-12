@@ -4,22 +4,13 @@
 
 //! Repository management for the Durable Storage
 
-use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
 use tempfile::TempDir;
 
 use crate::commit::CommitId;
-
-#[derive(Debug, thiserror::Error)]
-pub enum DirectoryManagerError {
-    #[error("Failed instantiating a new directory manager: {0}")]
-    New(io::Error),
-
-    #[error("Failed creating a new temporary directory: {0}")]
-    Temporary(io::Error),
-}
+use crate::errors::OperationalError;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
@@ -40,10 +31,15 @@ impl DirectoryManager {
     /// - If the folder does not exist, it will be created and the [`DirectoryManager`] will be
     ///   empty.
     /// - If the folder exists, it will assume a valid repository for the paths managed.
-    pub fn new(path: &Path) -> Result<Self, DirectoryManagerError> {
-        let ensure_dir_exists = |dir: &PathBuf| -> Result<(), DirectoryManagerError> {
+    pub fn new(path: &Path) -> Result<Self, OperationalError> {
+        let ensure_dir_exists = |dir: &PathBuf| -> Result<(), OperationalError> {
             if !dir.exists() {
-                std::fs::create_dir_all(dir).map_err(DirectoryManagerError::New)?;
+                std::fs::create_dir_all(dir).map_err(|error| {
+                    OperationalError::DirCreationFailed {
+                        path: dir.clone(),
+                        error,
+                    }
+                })?;
             }
 
             Ok(())
@@ -74,14 +70,17 @@ impl DirectoryManager {
     ///
     /// Note: The folder corresponding to the returned [`TempDir`] will be deleted once the
     /// [`TempDir`] is dropped.
-    pub fn temp_database_dir(&self) -> Result<TempDir, DirectoryManagerError> {
+    pub fn temp_database_dir(&self) -> Result<TempDir, OperationalError> {
         // Use the tempfile crate to create a random directory name.
         let mut tempdir = tempfile::Builder::new();
 
         let tempdir = tempdir
             .prefix("db_")
             .tempdir_in(&self.temp_databases_dir)
-            .map_err(DirectoryManagerError::Temporary)?;
+            .map_err(|error| OperationalError::TempCreationFailed {
+                path: self.temp_databases_dir.clone(),
+                error,
+            })?;
 
         Ok(tempdir)
     }

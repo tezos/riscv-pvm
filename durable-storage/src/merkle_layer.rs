@@ -5,24 +5,15 @@
 use std::sync::Arc;
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::serialisation;
 
 use crate::avl::resolver::ArcResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
+use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::persistence_layer::HashedData;
 use crate::persistence_layer::PersistenceLayer;
-use crate::persistence_layer::PersistenceLayerError;
-
-/// Errors for fallible [MerkleLayer] operations.
-#[derive(Debug, thiserror::Error)]
-pub enum MerkleLayerError {
-    #[error("Some error happened while trying to encode the node {0}")]
-    EncodeError(#[from] bincode::error::EncodeError),
-
-    #[error("Some error happened during the interaction with the persistence layer {0}")]
-    PersistenceLayerError(#[from] PersistenceLayerError),
-}
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
@@ -48,26 +39,24 @@ impl MerkleLayer {
     pub fn checkout(
         _persistence: Arc<PersistenceLayer>,
         _root: Hash,
-    ) -> Result<Self, MerkleLayerError> {
+    ) -> Result<Self, OperationalError> {
         todo!()
     }
 
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    pub fn clone_with(
-        &self,
-        _persistence: Arc<PersistenceLayer>,
-    ) -> Result<Self, MerkleLayerError> {
-        Ok(self.clone())
+    pub fn clone_with(&self, _persistence: Arc<PersistenceLayer>) -> Self {
+        self.clone()
     }
 
     /// Generates a commitment for the [MerkleLayer].
-    pub fn commit(&mut self) -> Result<CommitId, MerkleLayerError> {
+    pub fn commit(&mut self) -> Result<CommitId, OperationalError> {
         // Note that although we're doing in order
         // iteration of the nodes the hashes are
         // calculated during the encoding of the node
         // if necessary.
         for node in self.tree.iter() {
-            let value = octez_riscv_data::serialisation::serialise(node.to_encode(&self.resolver))?;
+            let value = serialisation::serialise(node.to_encode(&self.resolver))
+                .expect("Serialisation of node data should not fail");
             let blob = HashedData::from_value(value.as_slice());
             self.persistence.blob_set(&blob)?;
         }

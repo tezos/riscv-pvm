@@ -19,25 +19,13 @@ use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
+use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
+use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_worker::MerkleWorker;
-use crate::merkle_worker::MerkleWorkerError;
 use crate::persistence_layer::PersistenceLayer;
-pub use crate::persistence_layer::PersistenceLayerError;
 pub use crate::repo::DirectoryManager;
-
-#[derive(Debug, thiserror::Error)]
-/// Errors that can occur during operations on a [`Database`].
-pub enum DatabaseError {
-    #[error("The offset is too large")]
-    OffsetTooLarge,
-
-    #[error("Merkle worker error: {0}")]
-    MerkleWorker(#[from] MerkleWorkerError),
-
-    #[error("Persistence layer error: {0}")]
-    PersistenceLayer(#[from] PersistenceLayerError),
-}
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
@@ -51,9 +39,9 @@ pub struct Database<M: Mode> {
 
 impl Database<Normal> {
     /// Try to construct a new Database
-    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, DatabaseError> {
+    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, OperationalError> {
         let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
-        let merkle = MerkleWorker::new(handle, persistent.clone())?;
+        let merkle = MerkleWorker::new(handle, persistent.clone());
         Ok(Database {
             inner: NormalImpl { persistent, merkle },
         })
@@ -64,7 +52,7 @@ impl Database<Normal> {
         &self,
         handle: &Handle,
         repo: &DirectoryManager,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, OperationalError> {
         let persistent: Arc<PersistenceLayer> = self.inner.persistent.try_clone(repo)?.into();
         Ok(Database {
             inner: NormalImpl {
@@ -75,7 +63,7 @@ impl Database<Normal> {
     }
 
     /// Commit the current database state to the repository and return its root hash.
-    pub(crate) fn commit(&self, repo: &DirectoryManager) -> Result<CommitId, DatabaseError> {
+    pub(crate) fn commit(&self, repo: &DirectoryManager) -> Result<CommitId, OperationalError> {
         let commit_id = self.inner.merkle.commit()?;
         self.inner.persistent.commit(repo, &commit_id)?;
         Ok(commit_id)
@@ -84,17 +72,17 @@ impl Database<Normal> {
 
 impl<M: DatabaseMode> Database<M> {
     /// Remove a key from the database.
-    pub fn delete(&mut self, key: Key) -> Result<(), DatabaseError> {
+    pub fn delete(&mut self, key: Key) -> Result<(), Error> {
         M::delete(self, key)
     }
 
     /// Returns true if the provided key exists in the database, false if it does not.
-    pub fn exists(&self, key: &Key) -> Result<bool, DatabaseError> {
+    pub fn exists(&self, key: &Key) -> Result<bool, Error> {
         M::exists(self, key)
     }
 
     /// Obtain, and possibly calculate, the root hash of the database.
-    pub fn hash(&self) -> Hash {
+    pub fn hash(&self) -> Result<Hash, OperationalError> {
         M::hash(self)
     }
 
@@ -106,18 +94,13 @@ impl<M: DatabaseMode> Database<M> {
     /// Fails if:
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
-    pub fn read(
-        &self,
-        key: &Key,
-        offset: usize,
-        output: impl BufMut,
-    ) -> Result<usize, DatabaseError> {
+    pub fn read(&self, key: &Key, offset: usize, output: impl BufMut) -> Result<usize, Error> {
         M::read(self, key, offset, output)
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
     /// with the key.
-    pub fn set(&mut self, key: Key, data: Bytes) -> Result<(), DatabaseError> {
+    pub fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         M::set(self, key, data)
     }
 
@@ -132,7 +115,7 @@ impl<M: DatabaseMode> Database<M> {
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
     ///  - The offset plus the length of the data would overflow.
-    pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, DatabaseError> {
+    pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
         M::write(self, key, offset, data)
     }
 
@@ -140,7 +123,7 @@ impl<M: DatabaseMode> Database<M> {
     ///
     /// Fails if:
     ///  - The key does not exist in the database.
-    pub fn value_length(&self, key: &Key) -> Result<usize, DatabaseError> {
+    pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
         M::value_length(self, key)
     }
 }
@@ -161,10 +144,10 @@ impl Modal for DatabaseTemplate {
 /// Modes that implement this support operations on [`Database`]
 pub trait DatabaseMode: Mode {
     /// See [`Database::exists`]
-    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, DatabaseError>;
+    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, Error>;
 
     /// See [`Database::value_length`]
-    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, DatabaseError>;
+    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, Error>;
 
     /// See [`Database::read`]
     fn read(
@@ -172,10 +155,10 @@ pub trait DatabaseMode: Mode {
         key: &Key,
         offset: usize,
         buffer: impl BufMut,
-    ) -> Result<usize, DatabaseError>;
+    ) -> Result<usize, Error>;
 
     /// See [`Database::set`]
-    fn set(this: &mut Database<Self>, key: Key, value: Bytes) -> Result<(), DatabaseError>;
+    fn set(this: &mut Database<Self>, key: Key, value: Bytes) -> Result<(), Error>;
 
     /// See [`Database::write`]
     fn write(
@@ -183,25 +166,25 @@ pub trait DatabaseMode: Mode {
         key: Key,
         offset: usize,
         value: Bytes,
-    ) -> Result<usize, DatabaseError>;
+    ) -> Result<usize, Error>;
 
     /// See [`Database::delete`]
-    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), DatabaseError>;
+    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), Error>;
 
     /// See [`Database::hash`]
-    fn hash(this: &Database<Self>) -> Hash;
+    fn hash(this: &Database<Self>) -> Result<Hash, OperationalError>;
 }
 
 impl DatabaseMode for Normal {
-    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, DatabaseError> {
+    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, Error> {
         match this.inner.persistent.get(key.as_ref()) {
             Ok(_) => Ok(true),
-            Err(PersistenceLayerError::KeyNotFound) => Ok(false),
-            Err(other_error) => Err(other_error.into()),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => Ok(false),
+            Err(other_error) => Err(other_error),
         }
     }
 
-    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, DatabaseError> {
+    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
         Ok(value.as_ref().len())
     }
@@ -211,12 +194,12 @@ impl DatabaseMode for Normal {
         key: &Key,
         offset: usize,
         mut output: impl BufMut,
-    ) -> Result<usize, DatabaseError> {
+    ) -> Result<usize, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
         let value_ref = value.as_ref();
 
         if offset > value_ref.len() {
-            return Err(DatabaseError::OffsetTooLarge);
+            return Err(InvalidArgumentError::OffsetTooLarge)?;
         }
 
         let end = offset
@@ -228,9 +211,9 @@ impl DatabaseMode for Normal {
         Ok(source_slice.len())
     }
 
-    fn set(this: &mut Database<Self>, key: Key, data: Bytes) -> Result<(), DatabaseError> {
+    fn set(this: &mut Database<Self>, key: Key, data: Bytes) -> Result<(), Error> {
         this.inner.persistent.set(&key, &data)?;
-        this.inner.merkle.set(key, data);
+        this.inner.merkle.set(key, data)?;
         Ok(())
     }
 
@@ -239,37 +222,37 @@ impl DatabaseMode for Normal {
         key: Key,
         offset: usize,
         data: Bytes,
-    ) -> Result<usize, DatabaseError> {
+    ) -> Result<usize, Error> {
         // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
         // operation to check if the existing value length is shorter than the offset.
         //
         if offset > 0 {
             // `key_may_exist` uses a Bloom filter, which is cheaper than the 'get' operation.
             if !this.inner.persistent.key_may_exist(&key) {
-                return Err(DatabaseError::OffsetTooLarge);
+                return Err(InvalidArgumentError::KeyNotFound)?;
             }
 
             // Checking the length of a value requires a full retrieval. Returns an error if the
             // key does not exist.
             let len = this.value_length(&key)?;
             if offset > len || offset.checked_add(data.len()).is_none() {
-                return Err(DatabaseError::OffsetTooLarge);
+                return Err(InvalidArgumentError::OffsetTooLarge)?;
             }
         }
 
         let written = data.len();
         this.inner.persistent.write(&key, offset, &data)?;
-        this.inner.merkle.write(key, offset, data);
+        this.inner.merkle.write(key, offset, data)?;
         Ok(written)
     }
 
-    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), DatabaseError> {
+    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), Error> {
         this.inner.persistent.delete(key.as_ref())?;
-        this.inner.merkle.delete(key);
+        this.inner.merkle.delete(key)?;
         Ok(())
     }
 
-    fn hash(this: &Database<Self>) -> Hash {
+    fn hash(this: &Database<Self>) -> Result<Hash, OperationalError> {
         this.inner.merkle.hash()
     }
 }
@@ -337,7 +320,7 @@ mod tests {
                 expected.insert(key, value);
             }
 
-            let expected_hash = database.hash();
+            let expected_hash = database.hash().expect("Hash should be calculated");
             let commit_id = database.commit(&repo).expect("Commit should succeed");
 
             prop_assert_eq!(&expected_hash, commit_id.as_hash());
@@ -371,9 +354,9 @@ mod tests {
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
 
-                let before = database.hash();
+                let before = database.hash().expect("Hash should be calculated");
                 database.delete(key.clone()).expect("Deleting should succeed");
-                let after = database.hash();
+                let after = database.hash().expect("Hash should be calculated");
                 assert_ne!(before, after);
                 prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
             }
@@ -407,7 +390,7 @@ mod tests {
                     .expect("There should be no other `PersistenceLayerError`s")
             );
         }
-        let before = database.hash();
+        let before = database.hash().expect("Hash should be calculated");
 
         // Delete a nonexistent key
         let nonexistent_key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
@@ -419,7 +402,7 @@ mod tests {
         assert!(database.delete(nonexistent_key).is_ok());
 
         // Ensure the root hash is unchanged
-        let after = database.hash();
+        let after = database.hash().expect("Hash should be calculated");
         assert_eq!(before, after);
     }
 
@@ -471,13 +454,13 @@ mod tests {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
                 let data: &[u8] = data;
 
-                let before = database.hash();
+                let before = database.hash().expect("Hash should be calculated");
 
                 database
                     .set(key.clone(), Bytes::copy_from_slice(data))
                     .expect("Writing should succeed");
 
-                let after = database.hash();
+                let after = database.hash().expect("Hash should be calculated");
 
                 let existing_pair = !seen.insert((key, data));
                 // Avoid the edge case of an identical hash from a previously seen identical
@@ -507,14 +490,14 @@ mod tests {
             .set(key.clone(), Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
 
-        let before = database.hash();
+        let before = database.hash().expect("Hash should be calculated");
 
         // Mutate the same key
         database
             .set(key.clone(), Bytes::copy_from_slice(&mutated_data))
             .expect("Writing should succeed");
 
-        let after = database.hash();
+        let after = database.hash().expect("Hash should be calculated");
         assert_ne!(before, after);
 
         // Revert the value of the same key to the original value and check the hash reverts to the
@@ -522,7 +505,7 @@ mod tests {
         database
             .set(key.clone(), Bytes::copy_from_slice(&original_data))
             .expect("Writing should succeed");
-        let reverted = database.hash();
+        let reverted = database.hash().expect("Hash should be calculated");
         assert_eq!(before, reverted);
     }
 
