@@ -182,7 +182,6 @@ impl Outbox<Normal> {
     ///
     /// Warning: The caller must ensure that `level` is within the outbox
     /// validity window
-    #[cfg_attr(not(test), expect(dead_code, reason = "outbox not in use"))]
     pub(crate) fn read_level(&self, level: u32) -> Box<[Box<[u8]>]> {
         let level_index = self.level_index(level);
         self.levels[level_index].read_level(level)
@@ -292,6 +291,34 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         }
 
         Ok(())
+    }
+}
+
+impl<MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
+    Pvm<MC, PC, DS, Normal>
+{
+    /// Retrieves the outbox messages for a given level. Returns None if the level is
+    /// not in the outbox
+    pub(crate) fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
+        self.check_level_in_outbox(level).ok()?;
+
+        let result = self
+            .outbox
+            .read_level(level)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, msg)| {
+                OutboxMessage::try_from(msg).ok().map(|message| Output {
+                    message,
+                    info: OutputInfo {
+                        level,
+                        index: i as u32,
+                    },
+                })
+            })
+            .collect();
+
+        Some(result)
     }
 }
 
@@ -507,6 +534,11 @@ pub(crate) mod tests {
         len: usize,
     ) -> impl Strategy<Value = Vec<OutboxMessage>> {
         proptest::collection::vec(message_strategy(size_range), len)
+    }
+
+    fn oversized_message_strategy() -> impl Strategy<Value = Box<[u8]>> {
+        proptest::collection::vec(any::<u8>(), MAX_OUTPUT_SIZE + 1..=MAX_OUTPUT_SIZE + 64)
+            .prop_map(|data| data.into_boxed_slice())
     }
 
     #[test]
@@ -744,6 +776,7 @@ pub(crate) mod tests {
             let info = OutputInfo { level: 0, index: 0 };
             let output = pvm.get_outbox_message(info);
             prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
+            prop_assert!(pvm.get_outbox_messages(0).is_none());
 
             pvm.level_is_set.write(true);
             pvm.level.write(write_level);
@@ -760,6 +793,7 @@ pub(crate) mod tests {
             };
             let output = pvm.get_outbox_message(info);
             prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
+            prop_assert!(pvm.get_outbox_messages(write_level + 1).is_none());
         })
     }
 
@@ -784,6 +818,8 @@ pub(crate) mod tests {
             }
 
             // Read messages back at write_level
+            let all_outputs = pvm.get_outbox_messages(write_level).unwrap();
+            prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: write_level,
@@ -792,12 +828,16 @@ pub(crate) mod tests {
                 let output = pvm.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
                 prop_assert_eq!(output.info, info);
+                prop_assert_eq!(&all_outputs[i].message, message);
+                prop_assert_eq!(all_outputs[i].info, info);
             }
 
             // Also verify we can read with current_level up to write_level + TEST_OUTBOX_SIZE - 1
             let future_level = write_level + (TEST_OUTBOX_SIZE as u32) - 1;
             pvm.level.write(future_level);
 
+            let all_outputs = pvm.get_outbox_messages(write_level).unwrap();
+            prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: write_level,
@@ -805,6 +845,8 @@ pub(crate) mod tests {
                 };
                 let output = pvm.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
+                prop_assert_eq!(&all_outputs[i].message, message);
+                prop_assert_eq!(all_outputs[i].info, info);
             }
         });
     }
@@ -849,8 +891,11 @@ pub(crate) mod tests {
                 let output = pvm.get_outbox_message(info);
                 prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }))
             }
+            prop_assert!(pvm.get_outbox_messages(write_level).is_none());
 
             // Reading at wrapped level for indices 0..N should work
+            let all_outputs = pvm.get_outbox_messages(wrapped_level).unwrap();
+            prop_assert_eq!(all_outputs.len(), second_messages.len());
             for (i, message) in second_messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: wrapped_level,
@@ -858,6 +903,8 @@ pub(crate) mod tests {
                 };
                 let output = pvm.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
+                prop_assert_eq!(&all_outputs[i].message, message);
+                prop_assert_eq!(all_outputs[i].info, info);
             }
 
             // Reading at wrapped level for indices N..M should fail
@@ -868,6 +915,60 @@ pub(crate) mod tests {
                 };
                 let output = pvm.get_outbox_message(info);
                 prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
+            }
+        });
+    }
+
+    #[test]
+    fn get_outbox_messages_filters_oversized_messages() {
+        let strategy = (
+            proptest::collection::vec(message_strategy(0..), 0..5),
+            proptest::collection::vec(oversized_message_strategy(), 0..5),
+            0u32..1000,
+        )
+            .prop_flat_map(|(valid, oversized, level)| {
+                let total = valid.len() + oversized.len();
+                let valid_count = valid.len();
+                proptest::sample::subsequence((0..total).collect::<Vec<_>>(), valid_count).prop_map(
+                    move |valid_slots| (valid.clone(), oversized.clone(), level, valid_slots),
+                )
+            });
+
+        proptest!(|((valid_messages, oversized_messages, level, valid_slots) in strategy)| {
+            type MC = M1M;
+            type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
+
+            let total = valid_messages.len() + oversized_messages.len();
+            let level_index = level as usize % TEST_OUTBOX_SIZE;
+
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
+            pvm.level_is_set.write(true);
+            pvm.level.write(level);
+
+            // Place valid messages at the chosen slots, oversized at the rest
+            let mut valid_iter = valid_messages.iter();
+            let mut oversized_iter = oversized_messages.iter();
+            for slot in 0..total {
+                let bytes: Box<[u8]> = if valid_slots.contains(&slot) {
+                    valid_iter.next().unwrap().clone().into()
+                } else {
+                    oversized_iter.next().unwrap().clone()
+                };
+                pvm.outbox.levels[level_index].messages[slot].write(bytes);
+            }
+            pvm.outbox.levels[level_index].next_index.write(total as u32);
+            pvm.outbox.levels[level_index].level.write(level);
+
+            let outputs = pvm.get_outbox_messages(level).unwrap();
+            prop_assert_eq!(outputs.len(), valid_messages.len());
+
+            for (output, (&slot, expected)) in outputs.iter().zip(
+                valid_slots.iter().zip(valid_messages.iter()),
+            ) {
+                prop_assert_eq!(output.info.index, slot as u32);
+                prop_assert_eq!(output.info.level, level);
+                prop_assert_eq!(&*output.message, expected.as_ref() as &[u8]);
             }
         });
     }
