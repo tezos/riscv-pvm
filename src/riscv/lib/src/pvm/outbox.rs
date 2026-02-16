@@ -34,17 +34,20 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
+use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 use tezos_smart_rollup_constants::riscv::SbiError;
@@ -114,6 +117,31 @@ impl From<OutboxWriteError> for SbiError {
             OutboxWriteError::FullOutbox => Self::FullOutbox,
             OutboxWriteError::MessageError(e) => e.into(),
         }
+    }
+}
+
+/// An outbox proof, containing a partial Merkle tree of a PVM state which ties
+/// an outbox message with the PVM state in which the outbox includes it
+#[derive(Debug, Encode)]
+pub struct OutboxProof {
+    proof: MerkleProof,
+    info: OutputInfo,
+}
+
+impl OutboxProof {
+    /// Create a new outbox proof from the given Merkle proof and output information
+    pub(crate) fn new(proof: MerkleProof, info: OutputInfo) -> Self {
+        Self { proof, info }
+    }
+
+    /// Get the state hash of the outbox proof
+    pub fn state_hash(&self) -> Hash {
+        self.proof.root_hash()
+    }
+
+    /// Serialise the outbox proof
+    pub fn serialise(&self) -> Vec<u8> {
+        serialise(self).expect("Serialisation of an outbox proof should not fail")
     }
 }
 

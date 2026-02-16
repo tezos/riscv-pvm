@@ -26,6 +26,9 @@ use thiserror::Error;
 use super::Pvm;
 use super::durable_storage::DurableStorage;
 use super::durable_storage::DurableStorageDummy;
+use super::outbox::OutboxProof;
+use super::outbox::OutboxProofError;
+use super::outbox::OutputInfo;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
@@ -209,6 +212,20 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
 
         let proof = proof_state.produce_proof().ok()?;
         Some(proof)
+    }
+
+    /// Produce an outbox proof by recording the Merkle proof of a state transition
+    /// in which the outbox message at the given level and index is read.
+    pub fn produce_outbox_proof<'normal>(
+        &'normal self,
+        output_info: OutputInfo,
+    ) -> Result<OutboxProof, OutboxProofError>
+    where
+        DS: Provable<'normal>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    {
+        let proof_state = self.state.start_proof();
+        proof_state.produce_outbox_proof(output_info)
     }
 }
 

@@ -46,6 +46,9 @@ use crate::pvm::durable_storage::DurableStorage;
 use crate::pvm::durable_storage::DurableStorageDummy;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
+use crate::pvm::outbox::OutboxProof;
+use crate::pvm::outbox::OutboxProofError;
+use crate::pvm::outbox::OutputInfo;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofPart;
@@ -171,6 +174,21 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
 
         let proof = proof_stepper.pvm.produce_proof().ok()?;
         Some(proof)
+    }
+
+    /// Produce an outbox proof by recording the Merkle proof of a state transition
+    /// in which the outbox message at the given level and index is read.
+    pub fn produce_outbox_proof<'normal>(
+        &'normal self,
+        output_info: OutputInfo,
+    ) -> Result<OutboxProof, OutboxProofError>
+    where
+        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS: Provable<'normal>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    {
+        let proof_stepper = self.start_proof_mode();
+        proof_stepper.pvm.produce_outbox_proof(output_info)
     }
 }
 
