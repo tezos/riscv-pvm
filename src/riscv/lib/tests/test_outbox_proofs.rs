@@ -11,9 +11,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use octez_riscv::machine_state::memory::M64M;
+use octez_riscv::pvm::outbox::OutboxMessage;
 use octez_riscv::pvm::outbox::OutboxProof;
+use octez_riscv::pvm::outbox::Output;
 use octez_riscv::pvm::outbox::OutputInfo;
 use octez_riscv::stepper::Stepper;
+use octez_riscv::stepper::pvm::verify_outbox_proof;
 use octez_riscv_test_utils::*;
 
 /// The maximum size in bytes expected for an outbox proof (message size is 4096 B)
@@ -33,17 +36,21 @@ fn test_outbox_proofs(inputs: &TestConfig) {
 
     let _result = stepper.step_max(Bound::Unbounded);
 
-    let output_info = OutputInfo {
-        level: stepper.level().unwrap(),
-        index: 0,
+    // The output needs to match an outbox message written by the tested kernel during its run
+    let output = Output {
+        message: OutboxMessage::try_from(vec![0x1; 4096].into_boxed_slice()).unwrap(),
+        info: OutputInfo {
+            level: stepper.level().unwrap(),
+            index: 0,
+        },
     };
 
     eprintln!(
         "> Producing outbox proof for message at level {}, index {}...",
-        output_info.level, output_info.index
+        output.info.level, output.info.index
     );
     let start = Instant::now();
-    let proof = stepper.produce_outbox_proof(output_info).unwrap();
+    let proof = stepper.produce_outbox_proof(output.info).unwrap();
     let time = start.elapsed();
 
     let proof_serialisation: Vec<u8> = OutboxProof::serialise(&proof);
@@ -57,12 +64,19 @@ fn test_outbox_proofs(inputs: &TestConfig) {
         )
     };
 
-    assert_eq!(stepper.hash(), proof.state_hash());
-
     let mut mint = goldenfile::Mint::new(inputs.golden_dir);
     let mut proof_capture = mint.new_goldenfile("outbox_proof").unwrap();
     let proof_bytes = hex::encode(proof_serialisation);
     writeln!(proof_capture, "{proof_bytes}").unwrap();
+
+    // Check that:
+    // - the outbox proof is for the expected state
+    // - the outbox proof verifies, yielding the message we expected the kernel wrote
+    //   at that outbox position
+    eprintln!("> Verifying outbox proof ...");
+    assert_eq!(stepper.hash(), proof.state_hash());
+    let output_from_proof = verify_outbox_proof(&proof).unwrap();
+    assert_eq!(output, output_from_proof);
 }
 
 #[test]

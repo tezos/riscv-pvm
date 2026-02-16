@@ -7,6 +7,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
 use octez_riscv_data::mode::utils::NotFound;
 
+use crate::pvm::outbox::OutboxProofError;
 use crate::state_backend::ProofError;
 
 /// Error during proof verification
@@ -29,6 +30,9 @@ pub enum ProofVerificationFailure {
 
     #[error("Final state hash mismatch (expected {expected}, computed {computed})")]
     FinalHashMismatch { expected: Hash, computed: Hash },
+
+    #[error(transparent)]
+    OutboxProofError(#[from] OutboxProofError),
 }
 
 impl From<CaughtNotFoundOrPanic> for ProofVerificationFailure {
