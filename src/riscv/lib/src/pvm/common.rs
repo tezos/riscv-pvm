@@ -109,11 +109,11 @@ pub(crate) type PvmProve<'a, MC, DS> = Pvm<MC, EmptyPageCache, DS, Prove<'a>>;
 /// Proof-generating virtual machine
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
+    pub(crate) system_state: linux::SupervisorState<M>,
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
     pub(crate) durable_storage: DS,
     pub(crate) outbox: Outbox<M>,
     pub(crate) reveal_request: RevealRequest<M>,
-    pub(crate) system_state: linux::SupervisorState<M>,
     version: Atom<u64, M>,
     pub(crate) tick: Atom<u64, M>,
     pub(crate) message_counter: Atom<u64, M>,
