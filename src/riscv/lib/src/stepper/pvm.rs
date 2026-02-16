@@ -50,6 +50,7 @@ use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::outbox::OutboxProof;
 use crate::pvm::outbox::OutboxProofError;
+use crate::pvm::outbox::Output;
 use crate::pvm::outbox::OutputInfo;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::OwnedProofPart;
@@ -60,6 +61,8 @@ use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
+
+type PvmStepperMemConfig = M1G;
 
 /// Error during PVM stepping
 #[derive(Debug, derive_more::From, thiserror::Error, derive_more::Display)]
@@ -74,7 +77,7 @@ pub enum PvmStepperError {
 /// Wrapper over a PVM that lets you step through it
 pub struct PvmStepper<
     H,
-    MC: MemoryConfig = M1G,
+    MC: MemoryConfig = PvmStepperMemConfig,
     DS = DurableStorageDummy,
     PC: PageCache<MC, M> = PageCacheInterpreted<MC>,
     M: Mode = Normal,
@@ -504,4 +507,12 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorag
             }
         }
     }
+}
+
+/// Verify an outbox proof by constructing a PVM state from the Merkle proof and
+/// reading the outbox message at the given level and index.
+pub fn verify_outbox_proof(outbox_proof: &OutboxProof) -> Result<Output, ProofVerificationFailure> {
+    Pvm::<PvmStepperMemConfig, EmptyPageCache, DurableStorageDummy, Verify>::verify_outbox_proof(
+        outbox_proof,
+    )
 }

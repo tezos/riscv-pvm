@@ -109,20 +109,18 @@ pub enum OutboxProofError {
     MessageError(#[from] OutboxMessageError),
 }
 
-/// An outbox proof, containing a partial Merkle tree of a PVM state which ties
+/// An outbox proof contains a partial Merkle tree of a PVM state which ties
 /// an outbox message with the PVM state in which the outbox includes it
 #[derive(Debug, Encode)]
 pub struct OutboxProof {
-    proof: MerkleProof,
-    info: OutputInfo,
+    /// Compressed Merkle tree of the PVM state. A valid proof contains an outbox message
+    /// at the level and index given by `info`.
+    pub proof: MerkleProof,
+    /// The level and index of the outbox message which can be read from the proof.
+    pub info: OutputInfo,
 }
 
 impl OutboxProof {
-    /// Create a new outbox proof from the given Merkle proof and output information
-    pub(crate) fn new(proof: MerkleProof, info: OutputInfo) -> Self {
-        Self { proof, info }
-    }
-
     /// Get the state hash of the outbox proof
     pub fn state_hash(&self) -> Hash {
         self.proof.root_hash()
@@ -468,7 +466,7 @@ impl<C> Decode<C> for OutboxLevel<Normal> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::ops::Bound::*;
     use std::ops::RangeBounds;
     use std::ops::RangeInclusive;
@@ -504,7 +502,7 @@ mod tests {
             .prop_map(|data| OutboxMessage::try_from(data.into_boxed_slice()).unwrap())
     }
 
-    fn messages_strategy(
+    pub(crate) fn messages_strategy(
         size_range: impl RangeBounds<usize>,
         len: usize,
     ) -> impl Strategy<Value = Vec<OutboxMessage>> {

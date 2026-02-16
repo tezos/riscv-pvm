@@ -39,6 +39,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::mode::utils::catch_not_found;
 use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
@@ -49,6 +50,7 @@ use super::linux;
 use super::outbox::Outbox;
 use super::outbox::OutboxProof;
 use super::outbox::OutboxProofError;
+use super::outbox::Output;
 use super::outbox::OutputInfo;
 use super::reveals::RevealRequest;
 use crate::default::ConstDefault;
@@ -64,6 +66,7 @@ use crate::range_utils::less_than_bound;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::proof_backend::proof::deserialise_owned;
+use crate::state_backend::verify_backend::ProofVerificationFailure;
 
 /// Type of input that can be passed to the PVM
 pub enum PvmInput<'a> {
@@ -390,9 +393,12 @@ where
         let proof_output = self.get_outbox_message(output_info)?;
 
         let merkle_tree = MerkleTree::from_foldable(self);
-        let merkle_proof: MerkleProof = merkle_tree.compress();
+        let proof: MerkleProof = merkle_tree.compress();
 
-        Ok(OutboxProof::new(merkle_proof, proof_output.info))
+        Ok(OutboxProof {
+            proof,
+            info: proof_output.info,
+        })
     }
 }
 
@@ -560,6 +566,28 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
         let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
         Some(pvm)
     }
+
+    /// Verify an outbox proof by constructing a PVM state from the Merkle proof and
+    /// reading the outbox message at the given level and index.
+    ///
+    /// The outbox proof is invalid if the Merkle proof does not encode a PVM state in
+    /// which the given outbox message is present. Attempting to access absent data
+    /// will panic in [`Verify`] mode. These panics are caught and returned as
+    /// [`ProofVerificationFailure::AbsentDataAccess`].
+    pub fn verify_outbox_proof(
+        outbox_proof: &OutboxProof,
+    ) -> Result<Output, ProofVerificationFailure>
+    where
+        DS: DurableStorage<Verify>,
+    {
+        let proof_tree = ProofTree::Present(&outbox_proof.proof);
+
+        catch_not_found(move || {
+            let (pvm, _): (Self, _) = deserialise_owned::deserialise(proof_tree)?;
+            pvm.get_outbox_message(outbox_proof.info)
+                .map_err(ProofVerificationFailure::from)
+        })?
+    }
 }
 
 /// An [`InputRequest`] is what the PVM expects as input for a specific tick.
@@ -610,6 +638,7 @@ where
 mod tests {
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode_test;
+    use proptest::prop_assert;
     use proptest::proptest;
     use rand::RngExt;
     use rand::rng;
@@ -633,6 +662,8 @@ mod tests {
     use crate::pvm::durable_storage::DurableStorageDummy;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
+    use crate::pvm::outbox::TEST_OUTBOX_SIZE;
+    use crate::pvm::outbox::tests::messages_strategy;
 
     impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS, M: Mode> Pvm<MC, PC, DS, M> {
         /// Handle an exception using the defined Execution Environment.
@@ -948,4 +979,114 @@ mod tests {
         // Reveal data returned correctly
         assert_eq!(reveal_result_buffer, reveal_data[..OUTPUT_BUFFER_SIZE]);
     });
+
+    #[test]
+    fn test_outbox_proofs() {
+        proptest!(|(
+            messages in messages_strategy(0.., 5),
+            level in TEST_OUTBOX_SIZE as u32 + 1..1000,
+        )| {
+            type MC = M1M;
+            type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
+
+            // Setup PVM
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
+            pvm.level_is_set.write(true);
+            pvm.level.write(level);
+
+            // Write messages to the outbox at level `level`
+            for message in &messages {
+                prop_assert!(pvm.outbox.write_message(message.clone(), level).is_ok());
+            }
+
+            // Produce and verify an outbox proof for every message written in the outbox
+            for (i, message) in messages.into_iter().enumerate() {
+                let proof_pvm = pvm.start_proof();
+                let outbox_proof = proof_pvm
+                    .produce_outbox_proof(OutputInfo {
+                        level,
+                        index: i as u32,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    Pvm::<MC, PC, DS, Verify>::verify_outbox_proof(&outbox_proof)
+                        .unwrap()
+                        .message,
+                    message
+                );
+
+                // Also try to verify an invalid proof which doesn't contain a message
+                // at the given level and index
+                let info_wrong_level = OutputInfo {
+                    // Test with a different invalid level on every iteration
+                    level: outbox_proof.info.level - outbox_proof.info.index - 1,
+                    ..outbox_proof.info
+                };
+                let proof_wrong_level = OutboxProof {
+                    info: info_wrong_level,
+                    ..outbox_proof
+                };
+                assert!(matches!(
+                    Pvm::<MC, PC, DS, Verify>::verify_outbox_proof(&proof_wrong_level).unwrap_err(),
+                    ProofVerificationFailure::AbsentDataAccess(..)
+                ));
+            }
+
+            // Check that producing an outbox proof for an index which wasn't written at
+            // the given level fails
+            let invalid_index_info = OutputInfo { level, index: 5 };
+            assert_eq!(
+                pvm.start_proof()
+                    .produce_outbox_proof(invalid_index_info)
+                    .unwrap_err(),
+                OutboxProofError::MessageNotFound {
+                    info: invalid_index_info
+                }
+            );
+
+            // Check that producing an outbox proof for an index in an empty level fails
+            let empty_level_info = OutputInfo {
+                level: level - 1,
+                index: 0,
+            };
+            assert_eq!(
+                pvm.start_proof()
+                    .produce_outbox_proof(empty_level_info)
+                    .unwrap_err(),
+                OutboxProofError::MessageNotFound {
+                    info: empty_level_info
+                }
+            );
+
+            // Check that producing an outbox proof for a future level fails
+            let future_level_info = OutputInfo {
+                level: level + 1,
+                index: 0,
+            };
+            assert_eq!(
+                pvm.start_proof()
+                    .produce_outbox_proof(future_level_info)
+                    .unwrap_err(),
+                OutboxProofError::LevelNotFound {
+                    level: future_level_info.level
+                }
+            );
+
+            // Check that producing an outbox proof for a level which is too old fails
+            let future_level_info = OutputInfo {
+                level: level.checked_sub(TEST_OUTBOX_SIZE as u32).unwrap(),
+                index: 0,
+            };
+            assert_eq!(
+                pvm.start_proof()
+                    .produce_outbox_proof(future_level_info)
+                    .unwrap_err(),
+                OutboxProofError::LevelNotFound {
+                    level: future_level_info.level
+                }
+            );
+
+        });
+    }
 }

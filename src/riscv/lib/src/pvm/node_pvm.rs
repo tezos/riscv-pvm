@@ -28,6 +28,7 @@ use super::durable_storage::DurableStorage;
 use super::durable_storage::DurableStorageDummy;
 use super::outbox::OutboxProof;
 use super::outbox::OutboxProofError;
+use super::outbox::Output;
 use super::outbox::OutputInfo;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
@@ -38,6 +39,7 @@ use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
 use crate::state_backend::proof_backend::proof::Proof;
+use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::storage;
 use crate::storage::Repo;
 
@@ -270,6 +272,14 @@ impl PartialEq for NodePvm {
 }
 
 impl Eq for NodePvm {}
+
+/// Verify an outbox proof by constructing a PVM state from the Merkle proof and
+/// reading the outbox message at the given level and index.
+pub fn verify_outbox_proof(outbox_proof: &OutboxProof) -> Result<Output, ProofVerificationFailure> {
+    Pvm::<NodePvmMemConfig, EmptyPageCache, DurableStorageDummy, Verify>::verify_outbox_proof(
+        outbox_proof,
+    )
+}
 
 #[derive(Error, Debug)]
 pub enum PvmStorageError {
