@@ -32,7 +32,7 @@ use tezos_smart_rollup_constants::riscv::REVEAL_REQUEST_MAX_SIZE;
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct RevealRequest<M: Mode> {
     /// Reveal request payload
-    pub bytes: Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>,
+    pub bytes: Atom<Box<[u8; REVEAL_REQUEST_MAX_SIZE]>, M>,
     /// Size of reveal request payload
     pub size: Atom<u64, M>,
 }
@@ -61,7 +61,7 @@ impl<'normal> Provable<'normal> for RevealRequest<Normal> {
 impl<M: AtomMode> Default for RevealRequest<M> {
     fn default() -> Self {
         Self {
-            bytes: Atom::new([0; REVEAL_REQUEST_MAX_SIZE]),
+            bytes: Atom::new(crate::array_utils::boxed_from_fn(|| 0)),
             size: Atom::default(),
         }
     }
@@ -80,7 +80,7 @@ impl<M, F> Foldable<F> for RevealRequest<M>
 where
     M: Mode,
     F: Fold,
-    Atom<[u8; REVEAL_REQUEST_MAX_SIZE], M>: Foldable<F>,
+    Atom<Box<[u8; REVEAL_REQUEST_MAX_SIZE]>, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
