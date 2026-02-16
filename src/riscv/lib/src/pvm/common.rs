@@ -45,6 +45,9 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use super::durable_storage::DurableStorage;
 use super::linux;
 use super::outbox::Outbox;
+use super::outbox::OutboxProof;
+use super::outbox::OutboxProofError;
+use super::outbox::OutputInfo;
 use super::reveals::RevealRequest;
 use crate::default::ConstDefault;
 use crate::machine_state;
@@ -373,6 +376,20 @@ where
         let proof = Proof::new(merkle_proof, final_hash);
 
         Ok(proof)
+    }
+
+    /// Produce an outbox proof by recording the Merkle proof of a state transition
+    /// in which the outbox message at the given level and index is read.
+    pub(crate) fn produce_outbox_proof(
+        &self,
+        output_info: OutputInfo,
+    ) -> Result<OutboxProof, OutboxProofError> {
+        let proof_output = self.get_outbox_message(output_info)?;
+
+        let merkle_tree = MerkleTree::from_foldable(self);
+        let merkle_proof: MerkleProof = merkle_tree.compress();
+
+        Ok(OutboxProof::new(merkle_proof, proof_output.info))
     }
 }
 
