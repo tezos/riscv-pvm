@@ -50,6 +50,11 @@ use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 use tezos_smart_rollup_constants::riscv::SbiError;
 use thiserror::Error;
 
+use super::Pvm;
+use super::durable_storage::DurableStorage;
+use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::PageCache;
+
 /// Small outbox size for testing
 ///
 /// Currently, this is the length of the fixed-size array which holds all the outbox levels.
@@ -66,20 +71,48 @@ const OUTBOX_MERKLE_ARITY: usize = 2;
 /// The arity used to Merkleise arrays in each level
 const LEVEL_MERKLE_ARITY: usize = 2;
 
-#[derive(Error, Debug)]
-pub(crate) enum OutboxError {
-    #[error("Outbox is full")]
-    OutboxFull,
-
-    #[error("Outbox message exceeds allowable size of {MAX_OUTPUT_SIZE}. Found: {size}")]
-    OutboxMessageTooLarge { size: usize },
+/// The outbox level and the index within that level for an outbox message
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Encode)]
+pub struct OutputInfo {
+    pub level: u32,
+    pub index: u32,
 }
 
-impl From<OutboxError> for SbiError {
-    fn from(value: OutboxError) -> Self {
-        match value {
-            OutboxError::OutboxFull => Self::FullOutbox,
-            OutboxError::OutboxMessageTooLarge { .. } => Self::OutputTooLarge,
+/// A raw outbox message and its outbox information
+#[derive(Debug, PartialEq, Eq)]
+pub struct Output {
+    pub message: OutboxMessage,
+    pub info: OutputInfo,
+}
+
+/// Errors which can be raised when producing or verifying an outbox proof
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum OutboxProofError {
+    #[error("The outbox does not contain the level {level}")]
+    LevelNotFound { level: u32 },
+
+    #[error("The outbox for level {} does not contain a message at index {}", info.level, info.index)]
+    MessageNotFound { info: OutputInfo },
+
+    #[error(transparent)]
+    MessageError(#[from] OutboxMessageError),
+}
+
+/// Errors which can be raised when writing a message to the outbox
+#[derive(Error, Debug)]
+pub(crate) enum OutboxWriteError {
+    #[error("Outbox is full")]
+    FullOutbox,
+
+    #[error(transparent)]
+    MessageError(#[from] OutboxMessageError),
+}
+
+impl From<OutboxWriteError> for SbiError {
+    fn from(err: OutboxWriteError) -> Self {
+        match err {
+            OutboxWriteError::FullOutbox => Self::FullOutbox,
+            OutboxWriteError::MessageError(e) => e.into(),
         }
     }
 }
@@ -98,8 +131,9 @@ impl<M: AtomMode> Outbox<M> {
         }
     }
 
-    /// Write `message` to the outbox at the current level. Returns `Err(OutboxFull)`
-    /// if the outbox is full.
+    /// Write `message` to the outbox at the current level
+    ///
+    /// Returns `OutboxWriteError::FullOutbox` if the outbox is full.
     ///
     /// # Panics
     ///
@@ -109,13 +143,29 @@ impl<M: AtomMode> Outbox<M> {
         &mut self,
         message: OutboxMessage,
         current_level: u32,
-    ) -> Result<(), OutboxError> {
+    ) -> Result<(), OutboxWriteError> {
         let level_index = self.level_index(current_level);
         self.levels[level_index].write_message(message, current_level)
     }
 
+    /// Get the internal index in the outbox corresponding to the given level
     fn level_index(&self, level: u32) -> usize {
         level as usize % self.levels.len()
+    }
+
+    /// Read the message associated with the given level and index from outbox
+    fn read_message(&self, info: OutputInfo) -> Result<Output, OutboxProofError> {
+        let level_index = self.level_index(info.level);
+        let message = self.levels[level_index].read_message(info)?;
+        Ok(Output {
+            info,
+            message: message.try_into()?,
+        })
+    }
+
+    /// Get the number of levels stored in the outbox
+    fn len(&self) -> usize {
+        self.levels.len()
     }
 }
 
@@ -198,6 +248,45 @@ impl<C> Decode<C> for Outbox<Normal> {
     }
 }
 
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
+    /// Get the outbox message at the given level and index. This is the state transition
+    /// captured in outbox proofs.
+    pub fn get_outbox_message(&self, info: OutputInfo) -> Result<Output, OutboxProofError>
+    where
+        M: AtomMode,
+    {
+        // This check reads the current level which ensures it is also included in the
+        // proof when running in `Prove` mode.
+        self.check_level_in_outbox(info.level)?;
+
+        self.outbox.read_message(info)
+    }
+
+    fn check_level_in_outbox(&self, level: u32) -> Result<(), OutboxProofError>
+    where
+        M: AtomMode,
+    {
+        // An uninitialised outbox contains no levels
+        if !self.level_is_set.read() {
+            return Err(OutboxProofError::LevelNotFound { level });
+        }
+        let current_level = self.level.read();
+
+        // A future level is not in the outbox
+        if level > current_level {
+            return Err(OutboxProofError::LevelNotFound { level });
+        }
+
+        // Levels older than the size of the outbox are not in the outbox
+        let oldest_outbox_level = current_level.saturating_sub(self.outbox.len() as u32 - 1);
+        if level < oldest_outbox_level {
+            return Err(OutboxProofError::LevelNotFound { level });
+        }
+
+        Ok(())
+    }
+}
+
 #[perfect_derive(Clone, PartialEq, Eq)]
 struct OutboxLevel<M: Mode> {
     messages: Box<[Atom<Box<[u8]>, M>]>,
@@ -212,7 +301,7 @@ impl<M: AtomMode> OutboxLevel<M> {
         &mut self,
         message: OutboxMessage,
         current_level: u32,
-    ) -> Result<(), OutboxError> {
+    ) -> Result<(), OutboxWriteError> {
         let last_written_level = self.level.read();
         assert!(
             current_level >= last_written_level,
@@ -226,13 +315,20 @@ impl<M: AtomMode> OutboxLevel<M> {
 
         let next_index = self.next_index.read() as usize;
         if next_index >= MAX_LEVEL_SIZE {
-            return Err(OutboxError::OutboxFull);
+            return Err(OutboxWriteError::FullOutbox);
         }
 
         self.messages[next_index].write(message.0);
         self.next_index.write(next_index as u32 + 1);
 
         Ok(())
+    }
+
+    fn read_message(&self, info: OutputInfo) -> Result<Box<[u8]>, OutboxProofError> {
+        if self.level.read() != info.level || info.index >= self.next_index.read() {
+            return Err(OutboxProofError::MessageNotFound { info });
+        }
+        Ok(self.messages[info.index as usize].clone())
     }
 }
 
@@ -361,22 +457,49 @@ impl<C> Decode<C> for OutboxLevel<Normal> {
     }
 }
 
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum OutboxMessageError {
+    #[error(
+        "The size of the outbox message is {size} B, which is larger than the maximum message size ({MAX_OUTPUT_SIZE})."
+    )]
+    MessageTooLarge { size: usize },
+}
+
+impl From<OutboxMessageError> for SbiError {
+    fn from(err: OutboxMessageError) -> Self {
+        match err {
+            OutboxMessageError::MessageTooLarge { .. } => Self::OutputTooLarge,
+        }
+    }
+}
+
 /// An Outbox Message is a boxed byte slice, restricted to at most [`MAX_OUTPUT_SIZE`]
 /// in length
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub(crate) struct OutboxMessage(Box<[u8]>);
+pub struct OutboxMessage(Box<[u8]>);
 
 impl OutboxMessage {
     /// Constructs a zeroed, boxed outbox message buffer of size `size`
     ///
     /// Fails if `size` exceeds [`MAX_OUTPUT_SIZE`]
-    pub(crate) fn new(size: usize) -> Result<Self, OutboxError> {
+    pub(crate) fn new(size: usize) -> Result<Self, OutboxMessageError> {
         if size > MAX_OUTPUT_SIZE {
-            return Err(OutboxError::OutboxMessageTooLarge { size });
+            return Err(OutboxMessageError::MessageTooLarge { size });
         }
         let boxed_slice = vec![0u8; size].into_boxed_slice();
         Ok(OutboxMessage(boxed_slice))
+    }
+}
+
+impl TryFrom<Box<[u8]>> for OutboxMessage {
+    type Error = OutboxMessageError;
+
+    fn try_from(value: Box<[u8]>) -> Result<Self, Self::Error> {
+        if value.len() > MAX_OUTPUT_SIZE {
+            return Err(OutboxMessageError::MessageTooLarge { size: value.len() });
+        }
+        Ok(OutboxMessage(value))
     }
 }
 
@@ -404,6 +527,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::machine_state::memory::M1M;
+    use crate::machine_state::page_cache::EmptyPageCache;
+    use crate::pvm::durable_storage::DurableStorageDummy;
 
     fn safe_size_range(size_range: impl RangeBounds<usize>) -> RangeInclusive<usize> {
         let start_bound = match size_range.start_bound() {
@@ -432,6 +558,20 @@ mod tests {
         len: usize,
     ) -> impl Strategy<Value = Vec<OutboxMessage>> {
         proptest::collection::vec(message_strategy(size_range), len)
+    }
+
+    #[test]
+    fn test_outbox_message_too_large() {
+        let size = MAX_OUTPUT_SIZE + 1;
+        assert_eq!(
+            OutboxMessage::try_from(vec![1u8; size].into_boxed_slice()),
+            Err(OutboxMessageError::MessageTooLarge { size })
+        );
+
+        proptest!(|(size in MAX_OUTPUT_SIZE + 1..)| {
+            let res = OutboxMessage::new(size).unwrap_err();
+            assert!(matches!(res.into(), SbiError::OutputTooLarge));
+        })
     }
 
     #[test]
@@ -492,24 +632,16 @@ mod tests {
                 // Verify that outbox is full
                 assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
 
-                prop_assert!(matches!(outbox.write_message(message.clone(), 0), Err(OutboxError::OutboxFull)));
+                prop_assert!(matches!(outbox.write_message(message.clone(), 0), Err(OutboxWriteError::FullOutbox)));
                 prop_assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
             }
         });
     }
 
     #[test]
-    fn oversized_messages_cannot_be_created() {
-        proptest!(|(size in MAX_OUTPUT_SIZE + 1..=usize::MAX)| {
-            let res = OutboxMessage::new(size);
-            assert!(matches!(res, Err(OutboxError::OutboxMessageTooLarge { size: s }) if s == size));
-        })
-    }
-
-    #[test]
     fn read_level_after_write() {
         proptest!(|(
-            messages in proptest::collection::vec(message_strategy(1..=MAX_OUTPUT_SIZE), 1..MAX_LEVEL_SIZE),
+            messages in proptest::collection::vec(message_strategy(1..), 1..MAX_LEVEL_SIZE),
             level in 0u32..1000
         )| {
             let mut outbox = Outbox::<Normal>::default();
@@ -557,6 +689,245 @@ mod tests {
             let outbox = Outbox::<Normal>::default();
             let result = outbox.read_level(level);
             prop_assert_eq!(result.len(), 0)
+        });
+    }
+
+    #[test]
+    fn test_read_message() {
+        proptest!(|(
+            messages in messages_strategy(0.., 5),
+            write_level in 0u32..1000
+        )| {
+            let mut outbox = Outbox::<Normal>::default();
+
+            // Write messages at write_level
+            for message in &messages {
+                prop_assert!(outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Read messages back
+            for (i, message) in messages.iter().enumerate() {
+                let info = OutputInfo {
+                    level: write_level,
+                    index: i as u32,
+                };
+                let output = outbox.read_message(info).unwrap();
+                prop_assert_eq!(&*output.message, &*message.0);
+                prop_assert_eq!(output.info, info);
+            }
+        });
+    }
+
+    #[test]
+    fn test_read_message_with_invalid_index_fails() {
+        proptest!(|(
+            messages in messages_strategy(0.., 5),
+            write_level in 0u32..1000,
+            invalid_offset in 0usize..10
+        )| {
+            let mut outbox = Outbox::<Normal>::default();
+
+            // Write N messages at write_level
+            for message in &messages {
+                prop_assert!(outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Try to read with index >= N
+            let invalid_index = messages.len() + invalid_offset;
+            let info = OutputInfo {
+                level: write_level,
+                index: invalid_index as u32,
+            };
+            let output = outbox.read_message(info);
+            prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
+        });
+    }
+
+    #[test]
+    fn test_read_message_after_level_wraparound() {
+        proptest!(|(
+            messages in messages_strategy(0.., 15),
+            write_level in 0u32..1000
+        )| {
+            let mut outbox = Outbox::<Normal>::default();
+
+            // Write messages at write_level
+            for message in &messages {
+                prop_assert!(outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Try to read at the wrapped level without writing to it first
+            // The wrapped level maps to the same outbox slot but differs from the stored level
+            let wrapped_level = write_level + TEST_OUTBOX_SIZE as u32;
+            for i in 0..messages.len() {
+                let info = OutputInfo {
+                    level: wrapped_level,
+                    index: i as u32,
+                };
+                let output = outbox.read_message(info);
+                prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
+            }
+        });
+    }
+
+    #[test]
+    fn test_read_message_from_empty_level_fails() {
+        proptest!(|(
+            level in 0u32..1000,
+            index in 0u32..MAX_LEVEL_SIZE as u32
+        )| {
+            let outbox = Outbox::<Normal>::default();
+
+            let info = OutputInfo { level, index };
+            let output = outbox.read_message(info);
+            prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
+        });
+    }
+
+    #[test]
+    fn test_get_outbox_message_from_future_level_fails() {
+        proptest!(|(
+            messages in messages_strategy(0.., 5),
+            write_level in 0u32..1000
+        )| {
+            type MC = M1M;
+            type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
+
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
+            pvm.reset();
+
+            // Getting a message from an uninitialised outbox fails
+            let info = OutputInfo { level: 0, index: 0 };
+            let output = pvm.get_outbox_message(info);
+            prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
+
+            pvm.level_is_set.write(true);
+            pvm.level.write(write_level);
+
+            // Write messages at write_level
+            for message in &messages {
+                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Getting a message at a future level fails
+            let info = OutputInfo {
+                level: write_level + 1,
+                index: 0,
+            };
+            let output = pvm.get_outbox_message(info);
+            prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
+        })
+    }
+
+    #[test]
+    fn test_get_outbox_message_from_valid_level() {
+        proptest!(|(
+            messages in messages_strategy(0.., 5),
+            write_level in 0u32..1000
+        )| {
+            type MC = M1M;
+            type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
+
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
+            pvm.reset();
+
+            pvm.level_is_set.write(true);
+            pvm.level.write(write_level);
+
+            // Write messages at write_level
+            for message in &messages {
+                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Read messages back at write_level
+            for (i, message) in messages.iter().enumerate() {
+                let info = OutputInfo {
+                    level: write_level,
+                    index: i as u32,
+                };
+                let output = pvm.get_outbox_message(info).unwrap();
+                prop_assert_eq!(&output.message, message);
+                prop_assert_eq!(output.info, info);
+            }
+
+            // Also verify we can read with current_level up to write_level + TEST_OUTBOX_SIZE - 1
+            let future_level = write_level + (TEST_OUTBOX_SIZE as u32) - 1;
+            pvm.level.write(future_level);
+
+            for (i, message) in messages.iter().enumerate() {
+                let info = OutputInfo {
+                    level: write_level,
+                    index: i as u32,
+                };
+                let output = pvm.get_outbox_message(info).unwrap();
+                prop_assert_eq!(&output.message, message);
+            }
+        });
+    }
+
+    #[test]
+    fn test_get_outbox_message_from_old_level_fails() {
+        proptest!(|(
+            first_messages in messages_strategy(0.., 15),
+            second_messages in messages_strategy(0.., 5),
+            write_level in TEST_OUTBOX_SIZE as u32..1000
+        )| {
+            type MC = M1M;
+            type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
+
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
+            pvm.reset();
+
+            let m = first_messages.len();
+            let n = second_messages.len();
+
+            // Write M messages at write_level
+            for message in &first_messages {
+                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+            }
+
+            // Write N messages at write_level + TEST_OUTBOX_SIZE (where N < M)
+            let wrapped_level = write_level + TEST_OUTBOX_SIZE as u32;
+            for message in &second_messages {
+                prop_assert!(pvm.outbox.write_message(message.clone(), wrapped_level).is_ok());
+            }
+
+            // Set up PVM level at the wrapped level
+            pvm.level_is_set.write(true);
+            pvm.level.write(wrapped_level);
+
+            // Reading at old level should fail
+            for i in 0..m {
+                let info = OutputInfo {
+                    level: write_level,
+                    index: i as u32,
+                };
+                let output = pvm.get_outbox_message(info);
+                prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }))
+            }
+
+            // Reading at wrapped level for indices 0..N should work
+            for (i, message) in second_messages.iter().enumerate() {
+                let info = OutputInfo {
+                    level: wrapped_level,
+                    index: i as u32,
+                };
+                let output = pvm.get_outbox_message(info).unwrap();
+                prop_assert_eq!(&output.message, message);
+            }
+
+            // Reading at wrapped level for indices N..M should fail
+            for i in n..m {
+                let info = OutputInfo {
+                    level: wrapped_level,
+                    index: i as u32,
+                };
+                let output = pvm.get_outbox_message(info);
+                prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
+            }
         });
     }
 }
