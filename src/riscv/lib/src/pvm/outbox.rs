@@ -531,6 +531,12 @@ impl TryFrom<Box<[u8]>> for OutboxMessage {
     }
 }
 
+impl From<OutboxMessage> for Box<[u8]> {
+    fn from(message: OutboxMessage) -> Self {
+        message.0
+    }
+}
+
 impl Deref for OutboxMessage {
     type Target = [u8];
 
