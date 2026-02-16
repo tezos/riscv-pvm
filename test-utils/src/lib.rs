@@ -102,6 +102,8 @@ impl Drop for TestableTmpdir {
 /// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
 pub fn make_stepper_factory<MC: MemoryConfig>(
     inputs: &TestConfig,
+    address: Option<[u8; 20]>,
+    preimages_dir: Option<Box<Path>>,
 ) -> impl Fn() -> PvmStepper<NoHooks, MC> {
     let program = fs::read(inputs.kernel_path).expect("Kernel path should be valid");
 
@@ -111,11 +113,18 @@ pub fn make_stepper_factory<MC: MemoryConfig>(
         .expect("Inbox path should be valid");
     let inbox = inbox.build();
 
-    let address = [0; 20];
+    let address = address.unwrap_or([0; 20]);
 
     move || {
-        PvmStepper::<NoHooks, MC>::new(&program, inbox.clone(), NoHooks, address, 1, None)
-            .expect("PvmStepper initialisation arguments should be valid")
+        PvmStepper::<NoHooks, MC>::new(
+            &program,
+            inbox.clone(),
+            NoHooks,
+            address,
+            1,
+            preimages_dir.clone(),
+        )
+        .expect("PvmStepper initialisation arguments should be valid")
     }
 }
 

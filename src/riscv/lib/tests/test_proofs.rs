@@ -88,7 +88,7 @@ fn test_etherlink_initial_proof_regression() {
 }
 
 fn test_initial_proof_regression(inputs: TestConfig) {
-    let make_stepper = make_stepper_factory::<M64M>(&inputs);
+    let make_stepper = make_stepper_factory::<M64M>(&inputs, None, None);
     let mut stepper = make_stepper();
 
     eprintln!("> Producing proof ...");
@@ -109,7 +109,7 @@ where
     MC::State<Normal>: Foldable<HashFold>,
     for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
 {
-    let make_stepper = make_stepper_factory::<MC>(&inputs);
+    let make_stepper = make_stepper_factory::<MC>(&inputs, None, None);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);
