@@ -951,6 +951,7 @@ mod tests {
     use crate::parser::parse_uncompressed_instruction;
     use crate::program::Program;
     use crate::pvm::Pvm;
+    use crate::pvm::durable_storage::DurableStorageDummy;
     use crate::pvm::handle_system_call;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux::signals::Signal;
@@ -1061,7 +1062,8 @@ mod tests {
     #[test]
     fn test_page_cache_state() {
         let base_state = {
-            let mut state = Pvm::<M64M, PageCacheInterpreted<_>, Normal>::default();
+            let mut state =
+                Pvm::<M64M, PageCacheInterpreted<_>, DurableStorageDummy, Normal>::default();
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.

@@ -42,6 +42,7 @@ use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
+use super::durable_storage::DurableStorage;
 use super::linux;
 use super::outbox::Outbox;
 use super::reveals::RevealRequest;
@@ -103,12 +104,13 @@ impl fmt::Display for PvmStatus {
 const INITIAL_VERSION: u64 = 0;
 
 /// Proof generator for the PVM.
-pub(crate) type PvmProve<'a, MC> = Pvm<MC, EmptyPageCache, Prove<'a>>;
+pub(crate) type PvmProve<'a, MC, DS> = Pvm<MC, EmptyPageCache, DS, Prove<'a>>;
 
 /// Proof-generating virtual machine
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct Pvm<MC: MemoryConfig, PC, M: Mode> {
+pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
+    pub(crate) durable_storage: DS,
     pub(crate) outbox: Outbox<M>,
     pub(crate) reveal_request: RevealRequest<M>,
     pub(crate) system_state: linux::SupervisorState<M>,
@@ -120,15 +122,17 @@ pub struct Pvm<MC: MemoryConfig, PC, M: Mode> {
     pub(crate) status: Atom<PvmStatus, M>,
 }
 
-impl<MC, PC, M> Default for Pvm<MC, PC, M>
+impl<MC, PC, DS, M> Default for Pvm<MC, PC, DS, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
+    DS: Default,
     M: AtomMode + DataSpaceMode,
 {
     fn default() -> Self {
         Self {
             machine_state: machine_state::MachineState::default(),
+            durable_storage: DS::default(),
             outbox: Outbox::<M>::default(),
             reveal_request: RevealRequest::default(),
             system_state: linux::SupervisorState::default(),
@@ -142,13 +146,14 @@ where
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
     /// Reset the PVM.
     pub fn reset(&mut self)
     where
         M: AtomMode + DataSpaceMode,
     {
         self.machine_state.reset();
+        self.durable_storage.reset();
         self.outbox.reset();
         self.version.write(INITIAL_VERSION);
         self.tick.write(0);
@@ -350,9 +355,11 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
     }
 }
 
-impl<'a, MC: MemoryConfig> Pvm<MC, EmptyPageCache, Prove<'a>>
+impl<'a, MC, DS> Pvm<MC, EmptyPageCache, DS, Prove<'a>>
 where
+    MC: MemoryConfig,
     MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
+    DS: DurableStorage<Prove<'a>> + Foldable<MerkleTreeFold> + Foldable<HashFold>,
 {
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
@@ -369,14 +376,15 @@ where
     }
 }
 
-impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>> Provable<'normal>
-    for Pvm<MC, PC, Normal>
+impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: Provable<'normal>> Provable<'normal>
+    for Pvm<MC, PC, DS, Normal>
 {
-    type Prover = PvmProve<'normal, MC>;
+    type Prover = PvmProve<'normal, MC, DS::Prover>;
 
     fn start_proof(&'normal self) -> Self::Prover {
         Pvm {
             machine_state: self.machine_state.start_proof(),
+            durable_storage: self.durable_storage.start_proof(),
             outbox: self.outbox.start_proof(),
             reveal_request: self.reveal_request.start_proof(),
             system_state: self.system_state.start_proof(),
@@ -390,12 +398,13 @@ impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>> Provable<'normal>
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode> CloneState
-    for Pvm<MC, PC, M>
+impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: CloneState, M: CloneAtomMode + CloneDataSpaceMode>
+    CloneState for Pvm<MC, PC, DS, M>
 {
     fn clone_state(&self) -> Self {
         Self {
             machine_state: self.machine_state.clone_state(),
+            durable_storage: self.durable_storage.clone_state(),
             outbox: self.outbox.clone_state(),
             reveal_request: self.reveal_request.clone_state(),
             system_state: self.system_state.clone_state(),
@@ -409,13 +418,14 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMo
     }
 }
 
-impl<MC, PC, M, F> Foldable<F> for Pvm<MC, PC, M>
+impl<MC, PC, DS, M, F> Foldable<F> for Pvm<MC, PC, DS, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     M: Mode,
     F: Fold,
     machine_state::MachineState<MC, PC, M>: Foldable<F>,
+    DS: Foldable<F>,
     Outbox<M>: Foldable<F>,
     RevealRequest<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
@@ -427,6 +437,7 @@ where
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
         builder.add(&self.machine_state);
+        builder.add(&self.durable_storage);
         builder.add(&self.outbox);
         builder.add(&self.reveal_request);
         builder.add(&self.system_state);
@@ -440,11 +451,12 @@ where
     }
 }
 
-impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
+impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, machine_state) = proof.next_branch()?;
+        let (proof, durable_storage) = proof.next_branch()?;
         let (proof, outbox) = proof.next_branch()?;
         let (proof, reveal_request) = proof.next_branch()?;
         let (proof, system_state) = proof.next_branch()?;
@@ -457,6 +469,7 @@ impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
 
         proof.done(Self {
             machine_state,
+            durable_storage,
             outbox,
             reveal_request,
             system_state,
@@ -470,14 +483,16 @@ impl<MC: MemoryConfig> FromProof for Pvm<MC, EmptyPageCache, Verify> {
     }
 }
 
-impl<MC, PC, M> Encode for Pvm<MC, PC, M>
+impl<MC, PC, DS, M> Encode for Pvm<MC, PC, DS, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
+    DS: Encode,
     M: EncodeAtomMode + EncodeDataSpaceMode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.machine_state.encode(encoder)?;
+        self.durable_storage.encode(encoder)?;
         self.outbox.encode(encoder)?;
         self.reveal_request.encode(encoder)?;
         self.system_state.encode(encoder)?;
@@ -491,15 +506,17 @@ where
     }
 }
 
-impl<C, MC, PC> Decode<C> for Pvm<MC, PC, Normal>
+impl<C, MC, PC, DS> Decode<C> for Pvm<MC, PC, DS, Normal>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, Normal>,
+    DS: Decode<C>,
     MC::State<Normal>: Decode<C>,
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             machine_state: Decode::decode(decoder)?,
+            durable_storage: Decode::decode(decoder)?,
             outbox: Decode::decode(decoder)?,
             reveal_request: Decode::decode(decoder)?,
             system_state: Decode::decode(decoder)?,
@@ -513,7 +530,7 @@ where
     }
 }
 
-impl<MC: MemoryConfig> Pvm<MC, EmptyPageCache, Verify> {
+impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
         let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
@@ -589,10 +606,11 @@ mod tests {
     use crate::machine_state::registers::a6;
     use crate::machine_state::registers::a7;
     use crate::pvm::common::tests::memory::Address;
+    use crate::pvm::durable_storage::DurableStorageDummy;
     use crate::pvm::hooks::StdoutDebugHooks;
     use crate::pvm::linux;
 
-    impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> Pvm<MC, PC, M> {
+    impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS, M: Mode> Pvm<MC, PC, DS, M> {
         /// Handle an exception using the defined Execution Environment.
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
@@ -617,9 +635,10 @@ mod tests {
     fn test_read_input() {
         type MC = M1M;
         type PC = EmptyPageCache;
+        type DS = DurableStorageDummy;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, Normal>::default();
+        let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -721,11 +740,12 @@ mod tests {
         )|{
             type MC = M1M;
             type PC = EmptyPageCache;
+            type DS = DurableStorageDummy;
 
             let mut buffer = Vec::new();
 
             // Setup PVM
-            let mut pvm = Pvm::<MC, PC, Normal>::default();
+            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
             pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
@@ -768,9 +788,10 @@ mod tests {
     mode_test!(test_reveal, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
+        type DS = DurableStorageDummy;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::default();
+        let mut pvm = Pvm::<MC, PC, DS, F>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
@@ -838,9 +859,10 @@ mod tests {
     mode_test!(test_reveal_insufficient_buffer_size, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
+        type DS = DurableStorageDummy;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::default();
+        let mut pvm = Pvm::<MC, PC, DS, F>::default();
         pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 

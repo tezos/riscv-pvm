@@ -16,6 +16,7 @@ use octez_riscv::machine_state::page_cache::EmptyPageCache;
 use octez_riscv::machine_state::page_cache::PageCache;
 use octez_riscv::machine_state::page_cache::PageCacheInterpreted;
 use octez_riscv::machine_state::page_cache::PageCacheOutlineJit;
+use octez_riscv::pvm::durable_storage::DurableStorageDummy;
 use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -104,7 +105,7 @@ fn test_regression_for_block<PC: PageCache<M64M, Normal>>(
         ];
         const ORIGINATION_LEVEL: u32 = 1;
 
-        let mut stepper = PvmStepper::<_, M64M, Normal, PC>::new(
+        let mut stepper = PvmStepper::<_, M64M, DurableStorageDummy, PC, Normal>::new(
             &program,
             inbox,
             hooks,
