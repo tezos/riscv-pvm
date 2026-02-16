@@ -259,7 +259,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, PC, M> {
     }
 }
 
-impl<MC, PC, M> Pvm<MC, PC, M>
+impl<MC, PC, DS, M> Pvm<MC, PC, DS, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,

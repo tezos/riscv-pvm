@@ -16,6 +16,7 @@ use std::time::Duration;
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::machine_state::page_cache::PageCache;
+use octez_riscv::pvm::durable_storage::DurableStorageDummy;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
@@ -82,7 +83,7 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, PC> = PvmStepper<Console<'static>, MC, Normal, PC>;
+type PvmStepperRunner<MC, PC> = PvmStepper<Console<'static>, MC, DurableStorageDummy, PC, Normal>;
 
 pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>>(
     program: &[u8],
@@ -101,7 +102,7 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, PC: PageCache<MC, Norma
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, Normal, PC>::new(
+    let stepper = PvmStepper::<_, MC, DurableStorageDummy, PC, Normal>::new(
         program,
         inbox.build(),
         console,

@@ -8,17 +8,24 @@ use std::path::Path;
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use super::Pvm;
+use super::durable_storage::DurableStorage;
+use super::durable_storage::DurableStorageDummy;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
@@ -41,18 +48,18 @@ type NodePvmMemConfig = crate::machine_state::memory::M64M;
 
 type NodePvmPageCache = PageCacheInterpreted<NodePvmMemConfig>;
 
-type NodePvmState<M, PC> = Pvm<NodePvmMemConfig, PC, M>;
+type NodePvmState<M, PC, DS> = Pvm<NodePvmMemConfig, PC, DS, M>;
 
 #[perfect_derive(Clone, Default)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
-pub struct NodePvm<M: Mode = Normal, PC: PageCache<NodePvmMemConfig, M> = NodePvmPageCache> {
-    state: Box<NodePvmState<M, PC>>,
+pub struct NodePvm<M: Mode = Normal, PC = NodePvmPageCache, DS = DurableStorageDummy> {
+    state: Box<NodePvmState<M, PC, DS>>,
 }
 
-impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
+impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm<M, PC, DS> {
     /// Wrap the given PVM state.
-    pub fn wrap(state: NodePvmState<M, PC>) -> Self {
+    pub fn wrap(state: NodePvmState<M, PC, DS>) -> Self {
         Self {
             state: Box::new(state),
         }
@@ -60,14 +67,14 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
 
     fn with_backend_mut<T, F>(&mut self, f: F) -> T
     where
-        F: FnOnce(&mut NodePvmState<M, PC>) -> T,
+        F: FnOnce(&mut NodePvmState<M, PC, DS>) -> T,
     {
         f(&mut self.state)
     }
 
     fn with_backend<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&NodePvmState<M, PC>) -> T,
+        F: FnOnce(&NodePvmState<M, PC, DS>) -> T,
     {
         f(&self.state)
     }
@@ -161,24 +168,34 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>> NodePvm<M, PC> {
     }
 }
 
-impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
+impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePvm<Normal, PC, DS> {
     /// Construct an empty PVM state.
-    pub fn empty() -> Self {
+    pub fn empty() -> Self
+    where
+        DS: Default,
+    {
         Self::default()
     }
 
     /// Compute the root hash of the PVM state.
-    pub fn hash(&self) -> Hash {
+    pub fn hash(&self) -> Hash
+    where
+        DS: Foldable<HashFold>,
+    {
         self.with_backend(Hash::from_foldable)
     }
 
     /// Produce the Merkle proof corresponding to the next step of the PVM.
     /// If the next step is an input request, provide the given input.
-    pub fn produce_proof(
-        &self,
+    pub fn produce_proof<'normal>(
+        &'normal self,
         input: Option<PvmInput>,
         pvm_hooks: impl PvmHooks,
-    ) -> Option<Proof> {
+    ) -> Option<Proof>
+    where
+        DS: Provable<'normal>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    {
         let mut proof_state = self.state.start_proof();
 
         match input {
@@ -195,7 +212,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>> NodePvm<Normal, PC> {
     }
 }
 
-impl NodePvm<Verify, EmptyPageCache> {
+impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
     /// Verify the proof with the given input by evaluating one step.
     /// Upon success, return the input request which corresponds to the initial state of the proof.
     pub fn verify_proof(
@@ -204,7 +221,10 @@ impl NodePvm<Verify, EmptyPageCache> {
         final_state_hash: &Hash,
         input: Option<PvmInput>,
         pvm_hooks: impl PvmHooks,
-    ) -> Option<InputRequest> {
+    ) -> Option<InputRequest>
+    where
+        for<'a> DS: Foldable<PartialHashFold<'a>>,
+    {
         self.with_backend_mut(|pvm| {
             match input {
                 None => pvm.eval_one(pvm_hooks),

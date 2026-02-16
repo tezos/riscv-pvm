@@ -763,7 +763,7 @@ impl<M: Mode> SupervisorState<M> {
     }
 }
 
-impl<MC, PC, M> Pvm<MC, PC, M>
+impl<MC, PC, DS, M> Pvm<MC, PC, DS, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
@@ -860,14 +860,16 @@ mod tests {
     use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::sp;
     use crate::pvm::Pvm;
+    use crate::pvm::durable_storage::DurableStorageDummy;
     use crate::pvm::linux::VirtAddr;
 
     mode_test!(test_step_into_handler, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
+        type DS = DurableStorageDummy;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::default();
+        let mut pvm = Pvm::<MC, PC, DS, F>::default();
 
         pvm.machine_state.reset();
 
@@ -942,9 +944,10 @@ mod tests {
     mode_test!(test_jump_to_restorer, F, {
         type MC = M1M;
         type PC = EmptyPageCache;
+        type DS = DurableStorageDummy;
 
         // Setup PVM
-        let mut pvm = Pvm::<MC, PC, F>::default();
+        let mut pvm = Pvm::<MC, PC, DS, F>::default();
 
         pvm.machine_state.reset();
 

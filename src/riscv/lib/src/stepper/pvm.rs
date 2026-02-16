@@ -18,6 +18,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -41,6 +42,8 @@ use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
+use crate::pvm::durable_storage::DurableStorage;
+use crate::pvm::durable_storage::DurableStorageDummy;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::range_utils::bound_saturating_sub;
@@ -67,10 +70,11 @@ pub enum PvmStepperError {
 pub struct PvmStepper<
     H,
     MC: MemoryConfig = M1G,
-    M: Mode = Normal,
+    DS = DurableStorageDummy,
     PC: PageCache<MC, M> = PageCacheInterpreted<MC>,
+    M: Mode = Normal,
 > {
-    pvm: Pvm<MC, PC, M>,
+    pvm: Pvm<MC, PC, DS, M>,
     hooks: H,
     inbox: Inbox,
     rollup_address: [u8; 20],
@@ -79,9 +83,11 @@ pub struct PvmStepper<
 }
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
-type PvmVerify<MC> = PvmStepper<NoHooks, MC, Verify, EmptyPageCache>;
+type PvmVerify<MC, DS> = PvmStepper<NoHooks, MC, DS, EmptyPageCache, Verify>;
 
-impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
+impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
+    PvmStepper<H, MC, DS, PC, Normal>
+{
     /// Create a new PVM stepper.
     pub fn new(
         program: &[u8],
@@ -90,7 +96,10 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
         rollup_address: [u8; 20],
         origination_level: u32,
         preimages_dir: Option<Box<Path>>,
-    ) -> Result<Self, PvmStepperError> {
+    ) -> Result<Self, PvmStepperError>
+    where
+        DS: Default,
+    {
         let mut pvm = Pvm::default();
 
         let program = Program::<MC>::from_elf(program)?;
@@ -114,14 +123,22 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
     pub fn hash(&self) -> Hash
     where
         MC::State<Normal>: Foldable<HashFold>,
+        DS: Foldable<HashFold>,
     {
         Hash::from_foldable(&self.pvm)
     }
 }
 
-impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, PC> {
+impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
+    PvmStepper<H, MC, DS, PC, Normal>
+{
     /// Create a new stepper in which the existing PVM is put into [`Prove`] mode.
-    pub fn start_proof_mode(&self) -> PvmStepper<NoHooks, MC, Prove, EmptyPageCache> {
+    pub fn start_proof_mode<'normal>(
+        &'normal self,
+    ) -> PvmStepper<NoHooks, MC, DS::Prover, EmptyPageCache, Prove<'normal>>
+    where
+        DS: Provable<'normal>,
+    {
         PvmStepper {
             pvm: self.pvm.start_proof(),
             rollup_address: self.rollup_address,
@@ -141,9 +158,11 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
 
     /// Produce the Merkle proof for evaluating one step on the given PVM state.
     /// The given stepper takes one step.
-    pub fn produce_proof<'a>(&'a mut self) -> Option<Proof>
+    pub fn produce_proof<'normal>(&'normal mut self) -> Option<Proof>
     where
-        MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS: Provable<'normal>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
     {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
@@ -155,8 +174,13 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>> PvmStepper<H, MC, Normal, P
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode>
-    PvmStepper<H, MC, M, PC>
+impl<
+    H: PvmHooks,
+    MC: MemoryConfig,
+    PC: PageCache<MC, M>,
+    DS: DurableStorage<M>,
+    M: AtomMode + DataSpaceMode,
+> PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
@@ -245,13 +269,14 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpac
     pub fn rebind_via_clone(&mut self)
     where
         M: CloneAtomMode + CloneDataSpaceMode,
+        DS: CloneState,
     {
         self.pvm = self.pvm.clone_state();
     }
 }
 
-impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
-    PvmStepper<H, MC, M, PC>
+impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
+    PvmStepper<H, MC, DS, PC, M>
 {
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
     ///
@@ -259,6 +284,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
     pub fn verify_proof_using_raw_bytes(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
         for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        DS: FromProof + DurableStorage<Verify>,
     {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
         let (pvm, merkle_tree) = deserialise_stream::deserialise(&tree_serialisation)
@@ -283,6 +310,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
         for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        DS: FromProof + DurableStorage<Verify>,
     {
         let proof_tree = ProofTree::Present(proof.tree());
         let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree)
@@ -303,8 +332,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
 
     fn to_verify_stepper(
         &self,
-        pvm: Pvm<MC, EmptyPageCache, Verify>,
-    ) -> Result<PvmVerify<MC>, ProofVerificationFailure> {
+        pvm: Pvm<MC, EmptyPageCache, DS, Verify>,
+    ) -> Result<PvmVerify<MC, DS>, ProofVerificationFailure> {
         Ok(PvmStepper {
             pvm,
             rollup_address: self.rollup_address,
@@ -323,8 +352,13 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>>
-    PvmStepper<H, MC, M, PC>
+impl<
+    H: PvmHooks,
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode,
+    PC: PageCache<MC, M>,
+    DS: DurableStorage<M>,
+> PvmStepper<H, MC, DS, PC, M>
 {
     /// Perform one evaluation step.
     pub fn eval_one(&mut self) {
@@ -332,7 +366,9 @@ impl<H: PvmHooks, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<M
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify, EmptyPageCache> {
+impl<H: PvmHooks, MC: MemoryConfig, DS: DurableStorage<Verify>>
+    PvmStepper<H, MC, DS, EmptyPageCache, Verify>
+{
     /// Try to take one step. Stepping in the [`Verify`] mode may panic
     /// when attempting to access absent data. Catches the case of verifying an invalid proof, as
     /// [`ProofVerificationFailure::AbsentDataAccess`] and all other panics
@@ -362,6 +398,7 @@ impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify, EmptyPageCache> {
     ) -> Result<(), ProofVerificationFailure>
     where
         for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
+        for<'a> DS: Foldable<PartialHashFold<'a>>,
     {
         let stepper = self.try_step_partial()?;
 
@@ -384,8 +421,8 @@ impl<H: PvmHooks, MC: MemoryConfig> PvmStepper<H, MC, Verify, EmptyPageCache> {
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>> Stepper
-    for PvmStepper<H, MC, Normal, PC>
+impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>> Stepper
+    for PvmStepper<H, MC, DS, PC, Normal>
 {
     type MemoryConfig = MC;
 
