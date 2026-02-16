@@ -28,7 +28,7 @@ fn test_etherlink_determinism() {
 }
 
 fn test_determinism(inputs: TestConfig) {
-    let make_stepper = make_stepper_factory(&inputs);
+    let make_stepper = make_stepper_factory(&inputs, None, None);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);

@@ -8,7 +8,7 @@ pub mod durable_storage;
 pub mod hooks;
 pub(crate) mod linux;
 pub mod node_pvm;
-pub(crate) mod outbox;
+pub mod outbox;
 mod reveals;
 mod tezos;
 
