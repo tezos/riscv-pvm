@@ -24,7 +24,6 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
-use octez_riscv_data::store::BlobStore;
 use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
@@ -327,7 +326,7 @@ pub struct PvmStorage<BS> {
     repo: Repo<BS>,
 }
 
-impl<BS: BlobStore> PvmStorage<BS> {
+impl<BS: PersistentBlobStore> PvmStorage<BS> {
     pub fn close(self) {
         self.repo.close()
     }
@@ -342,9 +341,7 @@ impl<BS: BlobStore> PvmStorage<BS> {
         let pvm = self.repo.checkout_serialised(id)?;
         Ok(NodePvm::wrap(pvm))
     }
-}
 
-impl<BS: PersistentBlobStore> PvmStorage<BS> {
     /// Load or create new repo at `path`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, PvmStorageError> {
         let repo = Repo::load(path)?;
