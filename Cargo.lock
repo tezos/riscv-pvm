@@ -2475,6 +2475,7 @@ version = "0.0.0"
 dependencies = [
  "arbitrary-int",
  "bincode",
+ "cfg-if",
  "cranelift",
  "cranelift-jit",
  "cranelift-module",

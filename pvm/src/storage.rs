@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 mod chunked_io;
+pub mod rocksdb_store;
 
 use std::io;
 use std::io::Write;
@@ -25,6 +26,7 @@ use octez_riscv_data::store::BlobStore;
 use octez_riscv_data::store::BlobStoreError;
 use octez_riscv_data::store::fold::BlobStoreFold;
 use octez_riscv_data::store::unfold::BlobStoreUnfold;
+use octez_riscv_durable_storage::errors::OperationalError;
 use thiserror::Error;
 
 const CHUNK_SIZE: usize = 4096;
@@ -43,6 +45,9 @@ pub enum StorageError {
     #[error("Invalid repo")]
     InvalidRepo,
 
+    #[error("RocksDBStore error: {0:?}")]
+    RocksDBError(#[from] OperationalError),
+
     #[error("Committed chunk {0} not found")]
     ChunkNotFound(String),
 
@@ -53,8 +58,8 @@ pub enum StorageError {
     UnfoldError(#[from] UnfoldError),
 }
 
-/// A subtrait for `BlobStore` to provide extra functionality required by the PVM storage to export
-/// PVM snapshots.
+/// A subtrait for `BlobStore` to provide extra functionality required by the PVM storage to
+/// persist and export PVM snapshots.
 pub trait PersistentBlobStore: BlobStore {
     /// Initialise a store. Either create a new directory if `path` does not exist or initialise in
     /// an existing directory.
@@ -63,6 +68,13 @@ pub trait PersistentBlobStore: BlobStore {
     fn init_from_path(path: impl AsRef<Path>) -> Result<Self, StorageError>
     where
         Self: Sized;
+
+    /// Some implementations do not automatically persist all the blobs; when the blob store is
+    /// dropped, they will be lost. Calling this method will take a 'snapshot' of the state of the
+    /// blob store which is persistent at the `path` the store was created from.
+    ///
+    /// This will be a no-op in implementations where it is uneccessary.
+    fn persist(&self) -> Result<(), StorageError>;
 
     /// Copy a specific blob across to a different store. While this should be functionally
     /// equivalent to using `blob_get` followed by `blob_set` to copy the blob across, it could in
@@ -125,6 +137,11 @@ impl PersistentBlobStore for Store {
         Ok(Store {
             path: path.into_boxed_path(),
         })
+    }
+
+    fn persist(&self) -> Result<(), StorageError> {
+        // With `Store` the blobs are automatically persisted, so this is a no-op.
+        Ok(())
     }
 
     fn export_blob(&self, other: &mut Self, hash: Hash) -> Result<(), StorageError> {
@@ -208,6 +225,9 @@ impl<BS: PersistentBlobStore> Repo<BS> {
             self.backend.export_blob(&mut other, chunk)?;
         }
         self.backend.export_blob(&mut other, id)?;
+
+        other.persist()?;
+
         Ok(())
     }
 
@@ -227,15 +247,15 @@ impl<BS: PersistentBlobStore> Repo<BS> {
         let source = BlobStoreUnfold::new(Arc::clone(&self.backend), id);
         let state = State::unfold(source)?;
 
-        let other = Self::init_empty(path)?;
-        let builder = BlobStoreFold::from(Arc::new(other));
+        let other = Arc::new(Self::init_empty(path)?);
+        let builder = BlobStoreFold::from(Arc::clone(&other));
         state.fold(builder)?;
+
+        other.persist()?;
 
         Ok(())
     }
-}
 
-impl<BS: BlobStore> Repo<BS> {
     pub fn new(store: BS) -> Self {
         Repo {
             backend: Arc::new(store),
@@ -259,6 +279,8 @@ impl<BS: BlobStore> Repo<BS> {
         let hashed_commit_bytes = HashedData::from_data(commit_bytes);
         self.backend.blob_set(&hashed_commit_bytes)?;
 
+        self.backend.persist()?;
+
         Ok(hashed_commit_bytes.hash())
     }
 
@@ -275,6 +297,8 @@ impl<BS: BlobStore> Repo<BS> {
         let hashed_commit_bytes = HashedData::from_data(commit_bytes);
         self.backend.blob_set(&hashed_commit_bytes)?;
 
+        self.backend.persist()?;
+
         Ok(hashed_commit_bytes.hash())
     }
 
@@ -284,8 +308,11 @@ impl<BS: BlobStore> Repo<BS> {
         subject: &impl Foldable<BlobStoreFold<BS>>,
     ) -> Result<Hash, StorageError> {
         let builder = BlobStoreFold::from(Arc::clone(&self.backend));
+        let hash = subject.fold(builder)?;
 
-        Ok(subject.fold(builder)?)
+        self.backend.persist()?;
+
+        Ok(hash)
     }
 
     /// Checkout the bytes committed under `id`, if the commit exists.
