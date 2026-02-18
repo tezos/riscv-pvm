@@ -18,10 +18,7 @@ use octez_riscv_data::mode::Provable;
 /// Implementing types provide an interface for durable storage
 // XXX: Parameter M is currently not used. As we add methods to this trait, they need to be able to
 // constrain M. Remove this comment once we have added methods that require M.
-pub trait DurableStorage<M: Mode> {
-    /// Reset the durable storage to its initial state.
-    fn reset(&mut self);
-}
+pub trait DurableStorage<M: Mode> {}
 
 /// Dummy implementation for Durable Storage
 ///
@@ -33,9 +30,7 @@ pub trait DurableStorage<M: Mode> {
 #[derive(Debug, Default, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct DurableStorageDummy;
 
-impl<M: Mode> DurableStorage<M> for DurableStorageDummy {
-    fn reset(&mut self) {}
-}
+impl<M: Mode> DurableStorage<M> for DurableStorageDummy {}
 
 impl<F: Fold> Foldable<F> for DurableStorageDummy {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
