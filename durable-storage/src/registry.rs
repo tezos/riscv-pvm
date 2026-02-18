@@ -8,6 +8,7 @@
 //! databases within the durable storage system.
 
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -48,6 +49,7 @@ impl Registry<Normal> {
             .worker_threads(1)
             .build()
             .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
+        let runtime = Arc::new(runtime);
 
         Ok(Registry {
             inner: NormalImpl {
@@ -127,6 +129,15 @@ impl<M: RegistryMode> Registry<M> {
     /// Clear the database at the given `index`.
     pub fn clear_database(&mut self, index: usize) -> Result<(), Error> {
         M::clear_database(self, index)
+    }
+}
+
+impl<M: CloneRegistryMode> Registry<M> {
+    /// Try to clone the registry.
+    ///
+    /// This can fail for mode-specific reasons.
+    pub fn try_clone(&self) -> Result<Self, OperationalError> {
+        M::try_clone(self)
     }
 }
 
@@ -249,11 +260,39 @@ impl RegistryMode for Normal {
     }
 }
 
+/// Modes that implement this marker support cloning of the [`Registry`] type
+pub trait CloneRegistryMode: Mode {
+    /// See [`Registry::try_clone`]
+    fn try_clone(this: &Registry<Self>) -> Result<Registry<Self>, OperationalError>;
+}
+
+impl CloneRegistryMode for Normal {
+    fn try_clone(this: &Registry<Self>) -> Result<Registry<Self>, OperationalError> {
+        let runtime = this.inner.runtime.clone();
+        let repo = this.inner.repo.clone();
+
+        let databases = this
+            .inner
+            .databases
+            .iter()
+            .map(|db| db.try_clone_with(runtime.handle(), &repo))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Registry {
+            inner: NormalImpl {
+                repo,
+                databases,
+                runtime,
+            },
+        })
+    }
+}
+
 /// Registry implementation for the [`Normal`] mode
 struct NormalImpl {
     repo: DirectoryManager,
     databases: Vec<Database<Normal>>,
-    runtime: Runtime,
+    runtime: Arc<Runtime>,
 }
 
 impl NormalImpl {
