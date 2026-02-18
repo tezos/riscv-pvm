@@ -13,8 +13,6 @@ check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/chec
 
 build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
 
-test: riscv/test jstz/test etherlink/test
-
 clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
 ### Specific top-level targets
@@ -50,13 +48,23 @@ check-format: taplo-check-format
 taplo-check-format:
 	@taplo format --check
 
-codecov.json: riscv/test-deps
+test: jstz/test etherlink/test cargo-nextest-run cargo-test-doc
+
+test-deps: dummy/build page-cache-tester/build
+
+codecov.json: test-deps
 	@cargo llvm-cov \
 		--package octez-riscv \
 		--package octez-riscv-data \
 		--codecov \
 		--output-path $@ \
 		nextest
+
+cargo-nextest-run: test-deps
+	@cargo nextest run --workspace
+
+cargo-test-doc:
+	@cargo test --workspace --doc
 
 ### Target proxies
 
@@ -85,4 +93,4 @@ docs/%:
 	@make -C docs ${@:docs/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format codecov.json audit build test clean
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc
