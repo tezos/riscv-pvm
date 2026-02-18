@@ -914,7 +914,6 @@ mod tests {
     use std::ops::Bound;
     use std::ops::ControlFlow;
 
-    use octez_riscv_data::clone::CloneState;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode_test;
     use proptest::prop_assert_eq;
@@ -1107,7 +1106,7 @@ mod tests {
 
         let alt_state = {
             // Clone the base state to get rid of any ephemeral state that was created.
-            let mut state = base_state.clone_state();
+            let mut state = base_state.try_clone_state().unwrap();
 
             // We want to run the kernel until it exits as that is a good point to compare.
             loop {

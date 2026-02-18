@@ -39,10 +39,12 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::durable_storage::DurableStorage;
+use super::errors::OperationalError;
 use super::linux;
 use super::outbox::Outbox;
 use super::outbox::OutboxProof;
@@ -110,7 +112,7 @@ const INITIAL_VERSION: u64 = 0;
 pub(crate) type PvmProve<'a, MC, DS> = Pvm<MC, EmptyPageCache, DS, Prove<'a>>;
 
 /// Proof-generating virtual machine
-#[perfect_derive(Clone, PartialEq, Eq)]
+#[perfect_derive(PartialEq, Eq)]
 pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     pub(crate) system_state: linux::SupervisorState<M>,
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
@@ -316,6 +318,47 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             }
         }
     }
+
+    /// Attempt to clone the PVM state.
+    pub fn try_clone(&self) -> Result<Self, OperationalError>
+    where
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+    {
+        Ok(Self {
+            system_state: self.system_state.clone(),
+            machine_state: self.machine_state.clone(),
+            durable_storage: self.durable_storage.try_clone()?,
+            outbox: self.outbox.clone(),
+            reveal_request: self.reveal_request.clone(),
+            version: self.version.clone(),
+            tick: self.tick.clone(),
+            message_counter: self.message_counter.clone(),
+            level: self.level.clone(),
+            level_is_set: self.level_is_set.clone(),
+            status: self.status.clone(),
+        })
+    }
+
+    /// Attempt to clone the persistent state of the PVM.
+    pub fn try_clone_state(&self) -> Result<Self, OperationalError>
+    where
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+    {
+        Ok(Self {
+            system_state: self.system_state.clone_state(),
+            machine_state: self.machine_state.clone_state(),
+            // TODO: RV-911: Does the durable storage need a `try_clone_state`?
+            durable_storage: self.durable_storage.try_clone()?,
+            outbox: self.outbox.clone_state(),
+            reveal_request: self.reveal_request.clone_state(),
+            version: self.version.clone_state(),
+            tick: self.tick.clone_state(),
+            message_counter: self.message_counter.clone_state(),
+            level: self.level.clone_state(),
+            level_is_set: self.level_is_set.clone_state(),
+            status: self.status.clone_state(),
+        })
+    }
 }
 
 impl<'a, MC, DS> Pvm<MC, EmptyPageCache, DS, Prove<'a>>
@@ -395,26 +438,6 @@ impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: Provable<'normal>
             level: self.level.start_proof(),
             level_is_set: self.level_is_set.start_proof(),
             status: self.status.start_proof(),
-        }
-    }
-}
-
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: CloneState, M: CloneAtomMode + CloneDataSpaceMode>
-    CloneState for Pvm<MC, PC, DS, M>
-{
-    fn clone_state(&self) -> Self {
-        Self {
-            machine_state: self.machine_state.clone_state(),
-            durable_storage: self.durable_storage.clone_state(),
-            outbox: self.outbox.clone_state(),
-            reveal_request: self.reveal_request.clone_state(),
-            system_state: self.system_state.clone_state(),
-            version: self.version.clone_state(),
-            tick: self.tick.clone_state(),
-            message_counter: self.message_counter.clone_state(),
-            level: self.level.clone_state(),
-            level_is_set: self.level_is_set.clone_state(),
-            status: self.status.clone_state(),
         }
     }
 }
