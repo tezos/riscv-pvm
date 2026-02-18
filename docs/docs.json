@@ -22,6 +22,15 @@
             "pages": ["commit-messages"]
           }
         ]
+      },
+      {
+        "tab": "State Framework",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": ["state-framework/index"]
+          }
+        ]
       }
     ]
   },
