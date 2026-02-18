@@ -10,15 +10,9 @@ all: build test check
 build:
 	@cargo build --release --workspace
 
-.PHONY: test
-test: test-deps
-	@cargo nextest run --workspace
-	@cargo test --workspace --doc
-
 .PHONY: test-deps
 test-deps:
-	@make -C ../.. dummy/build
-	@make -C ../.. page-cache-tester/build
+	@make -C ../.. test-deps
 
 .PHONY: coverage-report
 coverage-report: test-deps
