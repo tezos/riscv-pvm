@@ -5,11 +5,22 @@
 //! Tests for [`Bytes`]
 
 use proptest::collection::vec;
+use proptest::prelude::Just;
+use proptest::prelude::Strategy;
+use proptest::prelude::any;
 use proptest::prop_assert;
 use proptest::prop_assert_eq;
+use proptest::prop_oneof;
 use proptest::proptest;
 
 use crate::components::bytes::Bytes;
+use crate::components::bytes::BytesMode;
+use crate::hash::Hash;
+use crate::hash::PartialHash;
+use crate::merkle_tree::MerkleTree;
+use crate::mode::Normal;
+use crate::mode::Prove;
+use crate::mode::Verify;
 use crate::mode_test;
 
 // Bytes should be empty after creation
@@ -370,3 +381,84 @@ mode_test!(append_adds_to_end, F, {
         prop_assert_eq!(&buffer, &append_data);
     });
 });
+
+// Bytes behaves the same across different modes
+#[test]
+fn bytes_are_same_across_modes() {
+    /// Operations to be issued against the Bytes state component
+    #[derive(Debug, Clone)]
+    enum Op {
+        Read { offset: usize, size: usize },
+        Write { offset: usize, data: Vec<u8> },
+        Len,
+        Resize { new_size: usize },
+    }
+
+    /// Results of operations issued against the Bytes state component
+    #[derive(Debug, PartialEq, Eq)]
+    enum OpResult {
+        Read { read: usize, data: Vec<u8> },
+        Wrote { wrote: usize },
+        Len { len: usize },
+        Void,
+    }
+
+    // Strategies for generating operations to be issued against the Bytes state component
+    let op_strat = prop_oneof![
+        (0usize..100, 0usize..50).prop_map(|(offset, size)| Op::Read { offset, size }),
+        (0usize..100, vec(any::<u8>(), 0..50)).prop_map(|(offset, data)| Op::Write { offset, data }),
+        (0usize..150).prop_map(|new_size| Op::Resize { new_size }),
+        Just(Op::Len),
+    ];
+
+    /// Run the given sequence of operations against the Bytes state component
+    fn run_ops<M: BytesMode>(bytes: &mut Bytes<M>, ops: &[Op]) -> Vec<OpResult> {
+        ops.iter()
+            .map(|op| match op {
+                Op::Read { offset, size } => {
+                    let mut data = vec![0u8; *size];
+                    let read = bytes.read(*offset, &mut data);
+                    OpResult::Read { read, data }
+                }
+
+                Op::Write { offset, data } => {
+                    let wrote = bytes.write(*offset, data);
+                    OpResult::Wrote { wrote }
+                }
+
+                Op::Resize { new_size } => {
+                    bytes.resize(*new_size);
+                    OpResult::Void
+                }
+
+                Op::Len => OpResult::Len { len: bytes.len() },
+            })
+            .collect()
+    }
+
+    proptest!(|(ops in vec(op_strat, 1..20))| {
+        let mut bytes_normal = Bytes::<Normal>::default();
+        let results_normal = run_ops(&mut bytes_normal, &ops);
+        let hash_normal = Hash::from_foldable(&bytes_normal);
+
+        let mut bytes_prove = Bytes::<Prove>::default();
+        let results_prove = run_ops(&mut bytes_prove, &ops);
+        prop_assert_eq!(&results_normal, &results_prove);
+
+        let hash_prove = Hash::from_foldable(&bytes_prove);
+        prop_assert_eq!(hash_normal, hash_prove);
+
+        let merkle_tree = MerkleTree::from_foldable(&bytes_prove);
+        let merkle_proof = merkle_tree.compress();
+
+        let mut bytes_verify = Bytes::<Verify>::default();
+        let results_verify = run_ops(&mut bytes_verify, &ops);
+        prop_assert_eq!(results_normal, results_verify);
+
+        let hash_verify =
+            PartialHash::from_foldable(Some(&merkle_proof), &bytes_verify)
+                .to_hash()
+                .unwrap();
+        prop_assert_eq!(hash_normal, hash_verify);
+    });
+}
