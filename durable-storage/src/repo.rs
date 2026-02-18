@@ -14,6 +14,13 @@ use crate::errors::OperationalError;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
+///
+/// # Clone implementation
+///
+/// This structure stores paths internally. Cloning those is safe as this structure imposes no
+/// ownership over the paths. The [`tempfile`] crate provides safe APIs to create temporary
+/// directories without naming conflicts, so we don't need to worry about that here.
+#[derive(Clone)]
 pub struct DirectoryManager {
     /// Directory prefix for [`crate::database::Database`] instances (temporary)
     temp_databases_dir: PathBuf,
