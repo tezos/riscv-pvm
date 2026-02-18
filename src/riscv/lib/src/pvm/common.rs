@@ -125,30 +125,6 @@ pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     pub(crate) status: Atom<PvmStatus, M>,
 }
 
-impl<MC, PC, DS, M> Default for Pvm<MC, PC, DS, M>
-where
-    MC: MemoryConfig,
-    PC: PageCache<MC, M>,
-    DS: Default,
-    M: AtomMode + DataSpaceMode,
-{
-    fn default() -> Self {
-        Self {
-            machine_state: machine_state::MachineState::default(),
-            durable_storage: DS::default(),
-            outbox: Outbox::<M>::default(),
-            reveal_request: RevealRequest::default(),
-            system_state: linux::SupervisorState::default(),
-            version: Atom::new(INITIAL_VERSION),
-            status: Atom::default(),
-            tick: Atom::default(),
-            message_counter: Atom::default(),
-            level: Atom::default(),
-            level_is_set: Atom::default(),
-        }
-    }
-}
-
 impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
     /// Used for testing, corrupt the state so the following proofs will be incorrect.
     pub fn insert_failure(&mut self)
@@ -374,6 +350,30 @@ where
         let merkle_proof: MerkleProof = merkle_tree.compress();
 
         Ok(OutboxProof::new(merkle_proof, proof_output.info))
+    }
+}
+
+impl<MC, PC, DS, M> Default for Pvm<MC, PC, DS, M>
+where
+    MC: MemoryConfig,
+    PC: PageCache<MC, M>,
+    DS: Default,
+    M: AtomMode + DataSpaceMode,
+{
+    fn default() -> Self {
+        Self {
+            machine_state: machine_state::MachineState::default(),
+            durable_storage: DS::default(),
+            outbox: Outbox::<M>::default(),
+            reveal_request: RevealRequest::default(),
+            system_state: linux::SupervisorState::default(),
+            version: Atom::new(INITIAL_VERSION),
+            status: Atom::default(),
+            tick: Atom::default(),
+            message_counter: Atom::default(),
+            level: Atom::default(),
+            level_is_set: Atom::default(),
+        }
     }
 }
 
