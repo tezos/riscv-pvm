@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::fs::File;
+
 use octez_riscv::pvm::node_pvm::NodePvm;
 use octez_riscv::pvm::node_pvm::PvmStorage;
 use octez_riscv::storage::Repo;
@@ -153,4 +155,28 @@ fn test_pvm_storage() {
     let id2 = repo.commit(&empty).unwrap();
     assert_eq!(id, id2);
     repo.close()
+}
+
+#[test]
+fn test_invalid_repo() {
+    // Error if we try to initialise a repo with a path that is a file, not a directory.
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let tmp_file_path = tmp_dir.path().join("blah");
+    let _tmp_file = File::create(&tmp_file_path).unwrap();
+    assert!(matches!(
+        Repo::load(tmp_file_path),
+        Err(StorageError::InvalidRepo)
+    ));
+
+    // Error if we try to export a snapshot to non-empty directory.
+    let tmp_dir_2 = tempfile::tempdir().unwrap();
+    let mut repo = Repo::load(tmp_dir_2.path()).unwrap();
+
+    let data = vec![];
+    let id = repo.commit(&data).unwrap();
+
+    assert!(matches!(
+        repo.export_snapshot(&id, tmp_dir.path()),
+        Err(StorageError::InvalidRepo)
+    ));
 }
