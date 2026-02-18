@@ -14,11 +14,25 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Provable;
+use octez_riscv_durable_storage::errors::OperationalError;
+use octez_riscv_durable_storage::registry::CloneRegistryMode;
+use octez_riscv_durable_storage::registry::Registry;
 
 /// Implementing types provide an interface for durable storage
-// XXX: Parameter M is currently not used. As we add methods to this trait, they need to be able to
-// constrain M. Remove this comment once we have added methods that require M.
-pub trait DurableStorage<M: Mode> {}
+pub trait DurableStorage<M: Mode>: Sized {
+    fn try_clone(&self) -> Result<Self, OperationalError>
+    where
+        M: CloneRegistryMode;
+}
+
+impl<M: Mode> DurableStorage<M> for Registry<M> {
+    fn try_clone(&self) -> Result<Self, OperationalError>
+    where
+        M: CloneRegistryMode,
+    {
+        M::try_clone(self)
+    }
+}
 
 /// Dummy implementation for Durable Storage
 ///
@@ -30,7 +44,11 @@ pub trait DurableStorage<M: Mode> {}
 #[derive(Debug, Default, Clone, Encode, Decode, PartialEq, Eq)]
 pub struct DurableStorageDummy;
 
-impl<M: Mode> DurableStorage<M> for DurableStorageDummy {}
+impl<M: Mode> DurableStorage<M> for DurableStorageDummy {
+    fn try_clone(&self) -> Result<Self, OperationalError> {
+        Ok(Self)
+    }
+}
 
 impl<F: Fold> Foldable<F> for DurableStorageDummy {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {

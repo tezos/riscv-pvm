@@ -26,6 +26,7 @@ use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::catch_not_found_and_more;
+use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use reveals::RevealRequestResponseMap;
 use tezos_smart_rollup_utils::inbox::Inbox;
 
@@ -44,6 +45,7 @@ use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
 use crate::pvm::durable_storage::DurableStorageDummy;
+use crate::pvm::errors::OperationalError;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::outbox::OutboxProof;
@@ -284,12 +286,13 @@ impl<
     }
 
     /// Re-bind the PVM type by cloning the underlying regions.
-    pub fn rebind_via_clone(&mut self)
+    pub fn rebind_via_clone(&mut self) -> Result<(), OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
         DS: CloneState,
     {
-        self.pvm = self.pvm.clone_state();
+        self.pvm = self.pvm.try_clone_state()?;
+        Ok(())
     }
 }
 

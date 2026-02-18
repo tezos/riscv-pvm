@@ -93,7 +93,9 @@ where
             "Stepper states have diverged after running {steps} steps"
         );
 
-        stepper_lhs.rebind_via_clone();
+        stepper_lhs
+            .rebind_via_clone()
+            .expect("Rebinding should not fail in tests");
     }
 
     assert_eq!(stepper_lhs.hash(), expected_hash);

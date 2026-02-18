@@ -5,6 +5,7 @@
 
 mod common;
 pub mod durable_storage;
+pub mod errors;
 pub mod hooks;
 pub(crate) mod linux;
 pub mod node_pvm;
