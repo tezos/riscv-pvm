@@ -150,22 +150,6 @@ where
 }
 
 impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
-    /// Reset the PVM.
-    pub fn reset(&mut self)
-    where
-        M: AtomMode + DataSpaceMode,
-    {
-        self.machine_state.reset();
-        self.durable_storage.reset();
-        self.outbox.reset();
-        self.version.write(INITIAL_VERSION);
-        self.tick.write(0);
-        self.message_counter.write(0);
-        self.level.write(0);
-        self.level_is_set.write(false);
-        self.status.write(PvmStatus::DEFAULT);
-    }
-
     /// Used for testing, corrupt the state so the following proofs will be incorrect.
     pub fn insert_failure(&mut self)
     where
@@ -656,7 +640,6 @@ mod tests {
 
         // Setup PVM
         let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-        pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
         let level_addr = memory::FIRST_ADDRESS;
@@ -763,7 +746,6 @@ mod tests {
 
             // Setup PVM
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.reset();
             pvm.machine_state
                 .set_all_readable_writeable();
 
@@ -809,7 +791,6 @@ mod tests {
 
         // Setup PVM
         let mut pvm = Pvm::<MC, PC, DS, F>::default();
-        pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
         let input_address = memory::FIRST_ADDRESS;
@@ -880,7 +861,6 @@ mod tests {
 
         // Setup PVM
         let mut pvm = Pvm::<MC, PC, DS, F>::default();
-        pvm.reset();
         pvm.machine_state.set_all_readable_writeable();
 
         const OUTPUT_BUFFER_SIZE: usize = 10;

@@ -152,13 +152,6 @@ pub struct Outbox<M: Mode> {
 }
 
 impl<M: AtomMode> Outbox<M> {
-    /// Reset the outbox
-    pub(crate) fn reset(&mut self) {
-        for level in self.levels.iter_mut() {
-            *level = OutboxLevel::default()
-        }
-    }
-
     /// Write `message` to the outbox at the current level
     ///
     /// Returns `OutboxWriteError::FullOutbox` if the outbox is full.
@@ -829,7 +822,6 @@ mod tests {
             type DS = DurableStorageDummy;
 
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.reset();
 
             // Getting a message from an uninitialised outbox fails
             let info = OutputInfo { level: 0, index: 0 };
@@ -865,7 +857,6 @@ mod tests {
             type DS = DurableStorageDummy;
 
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.reset();
 
             pvm.level_is_set.write(true);
             pvm.level.write(write_level);
@@ -913,7 +904,6 @@ mod tests {
             type DS = DurableStorageDummy;
 
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.reset();
 
             let m = first_messages.len();
             let n = second_messages.len();
