@@ -130,6 +130,9 @@ features = ["full"]
 [workspace.dependencies.octez-riscv]
 path = "src/riscv/lib"
 
+[workspace.dependencies.octez-riscv-durable-storage]
+path = "durable-storage"
+
 [workspace.dependencies.octez-riscv-data]
 path = "data"
 

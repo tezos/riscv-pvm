@@ -2392,6 +2392,7 @@ dependencies = [
  "libsecp256k1",
  "num_enum",
  "octez-riscv-data",
+ "octez-riscv-durable-storage",
  "octez-riscv-test-utils",
  "paste",
  "perfect-derive",
