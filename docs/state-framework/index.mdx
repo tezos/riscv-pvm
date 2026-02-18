@@ -1,0 +1,76 @@
+---
+title: "Overview"
+description: "Mode-driven state framework"
+---
+
+The software we're building operates in one of three modes: **Normal**, **Prove**, or **Verify**.
+
+You can model the system as a state machine parameterised by mode.
+Mode does not change state machine semantics, so behaviour is identical across modes.
+Instead, mode determines what you can do *with* a state machine, not how it behaves.
+In other words, the modes support different use cases on top of the same underlying semantics.
+
+## Functionality Overview
+
+The modes are not used in the same way.
+This section summarises the usage requirements for each mode.
+
+### Number of Transitions
+
+When advancing the state machine, how many transitions are typically requested at once?
+
+| Mode | Transitions | Comment |
+|---|---|---|
+| Normal | ♾️ | Potentially unbounded transitions in a single request |
+| Prove | 1 | Optimised for a single transition; more are possible but not recommended |
+| Verify | 1 | Optimised for a single transition; more are possible but not recommended |
+
+### Transition Throughput
+
+How quickly does the state machine need to transition between states?
+
+| Mode | Speed | Comment |
+|---|---|---|
+| Normal | 🏎️ | Throughput-optimised and expected to run as fast as possible |
+| Prove | 🐢 | Single-transition workload, so slower execution is acceptable within reason |
+| Verify | 🐢 | Single-transition workload, so slower execution is acceptable within reason |
+
+### Environmental Resource Constraints
+
+Can this mode run in resource-constrained environments?
+
+| Mode | Resource-constrained Environment | Comment |
+|---|---|---|
+| Normal | ❌ | Requires a powerful machine |
+| Prove | ❌ | Generally intended for the same machine that runs Normal mode |
+| Verify | ✅ | Designed for resource-constrained environments, such as an L1 node |
+
+### State Hashing
+
+Can this mode produce a hash of the state?
+
+| Mode | State Hashing | Comment |
+|---|---|---|
+| Normal | ✅ | Fully supported and quick to compute |
+| Prove | ✅ | Fully supported |
+| Verify | ✅ <sup>*</sup> | Supported, but requires a valid proof as input |
+
+### Proof Generation and Verification
+
+Which modes support proving a state transition or verifying a resulting proof?
+
+| Mode | Prove | Verify | Comment |
+|---|---|---|---|
+| Normal | ❌ | ❌ | Not supported |
+| Prove | ✅ | ❌ | Intended for proof generation |
+| Verify | ❌ | ✅ | Intended for proof verification |
+
+### Persistence
+
+Can this mode persist full state to disk and load it again?
+
+| Mode | Persistable | Comment |
+|---|---|---|
+| Normal | ✅ | Fully supported |
+| Prove | ❌ | Partially supported, but not used |
+| Verify | ❌ | Not supported |
