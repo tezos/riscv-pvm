@@ -10,7 +10,10 @@ workspace = true
 
 [dependencies]
 const_format.workspace = true
-octez-riscv.workspace = true
 rand.workspace = true
 tempfile.workspace = true
 tezos-smart-rollup-utils.workspace = true
+
+[dependencies.octez-riscv]
+workspace = true
+optional = true

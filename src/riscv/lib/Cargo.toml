@@ -42,7 +42,9 @@ zerocopy-derive.workspace = true
 octez-riscv-data.workspace = true
 unty.workspace = true
 rangemap.workspace = true
-octez-riscv-durable-storage.workspace = true
+
+[dependencies.octez-riscv-durable-storage]
+workspace = true
 
 [dependencies.__tracing_do_not_use_directly]
 workspace = true
@@ -55,8 +57,12 @@ lazy_static.workspace = true
 tempfile.workspace = true
 goldenfile.workspace = true
 octez-riscv-data.workspace = true
-octez-riscv-test-utils.workspace = true
+
+[dev-dependencies.octez-riscv-test-utils]
+workspace = true
+features = ["octez-riscv"]
 
 [features]
 default = []
 log = ["dep:__tracing_do_not_use_directly"]
+rocksdb = ["octez-riscv-durable-storage/rocksdb"]

@@ -132,6 +132,7 @@ path = "src/riscv/lib"
 
 [workspace.dependencies.octez-riscv-durable-storage]
 path = "durable-storage"
+default-features = false
 
 [workspace.dependencies.octez-riscv-data]
 path = "data"

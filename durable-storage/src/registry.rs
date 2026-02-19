@@ -345,19 +345,16 @@ impl<KV> NormalImpl<KV> {
 mod tests {
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_test_utils::TestableTmpdir;
 
     use super::Registry;
-    use crate::commit::CommitId;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::Key;
-    use crate::persistence_layer::PersistenceLayer;
-    use crate::registry::RegistryManifest;
     use crate::repo::DirectoryManager;
+    use crate::storage::TestKeyValueStore;
 
-    fn setup_registry() -> (TestableTmpdir, Registry<PersistenceLayer, Normal>) {
+    fn setup_registry() -> (TestableTmpdir, Registry<TestKeyValueStore, Normal>) {
         let tmpdir = TestableTmpdir::new();
         let base_dir = tmpdir.path().join("registry");
         let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
@@ -366,7 +363,7 @@ mod tests {
         (tmpdir, registry)
     }
 
-    fn setup_size_2_registry() -> (TestableTmpdir, Registry<PersistenceLayer, Normal>) {
+    fn setup_size_2_registry() -> (TestableTmpdir, Registry<TestKeyValueStore, Normal>) {
         let (tmpdir, mut registry) = setup_registry();
         registry
             .resize(2)
@@ -375,7 +372,7 @@ mod tests {
     }
 
     fn seed_copy_move(
-        registry: &mut Registry<PersistenceLayer, Normal>,
+        registry: &mut Registry<TestKeyValueStore, Normal>,
         src_index: usize,
         dst_index: usize,
     ) -> ([(Key, &'static [u8]); 2], Key) {
@@ -407,7 +404,7 @@ mod tests {
     }
 
     fn assert_pairs_present(
-        registry: &Registry<PersistenceLayer, Normal>,
+        registry: &Registry<TestKeyValueStore, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
@@ -426,7 +423,7 @@ mod tests {
     }
 
     fn assert_pairs_absent(
-        registry: &Registry<PersistenceLayer, Normal>,
+        registry: &Registry<TestKeyValueStore, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
@@ -627,11 +624,17 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_empty() {
+        use octez_riscv_data::serialisation;
+
+        use crate::commit::CommitId;
+        use crate::registry::RegistryManifest;
+
         let (_tmpdir, registry) = setup_registry();
 
-        let expected_db_hashes: Vec<super::CommitId> = Vec::new();
+        let expected_db_hashes: Vec<CommitId> = Vec::new();
         let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
 
         let root_commit = registry.commit().expect("Commit should succeed");
@@ -640,12 +643,18 @@ mod tests {
         let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
-            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
         assert_eq!(commit.database_hashes, expected_db_hashes);
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_size_1() {
+        use octez_riscv_data::serialisation;
+
+        use crate::commit::CommitId;
+        use crate::registry::RegistryManifest;
+
         let (_tmpdir, mut registry) = setup_registry();
         registry
             .resize(1)
@@ -670,10 +679,11 @@ mod tests {
         let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
-            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
         assert_eq!(commit.database_hashes, expected_db_hashes);
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_committing_identical_registry_succeeds() {
         let (_tmpdir, mut registry) = setup_registry();
@@ -695,8 +705,14 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_writes_manifest() {
+        use octez_riscv_data::serialisation;
+
+        use crate::commit::CommitId;
+        use crate::registry::RegistryManifest;
+
         let (_tmpdir, mut registry) = setup_size_2_registry();
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -722,7 +738,7 @@ mod tests {
         let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
         let commit: RegistryManifest =
-            deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
         assert_eq!(commit.database_hashes, expected_db_hashes);
     }
 }

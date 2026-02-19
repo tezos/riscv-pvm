@@ -105,3 +105,12 @@ pub trait PersistentKeyValueStore: KeyValueStore + Sized {
         Self::checkout_from_path(&commit_path, working_path)
     }
 }
+
+#[cfg(test)]
+cfg_if::cfg_if! {
+    if #[cfg(feature = "rocksdb")] {
+        pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
+    } else {
+        pub(crate) type TestKeyValueStore = crate::storage::in_memory::InMemoryKeyValueStore;
+    }
+}

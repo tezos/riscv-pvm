@@ -250,13 +250,12 @@ mod tests {
     use crate::avl::node::Node;
     use crate::avl::node::Value;
     use crate::avl::resolver::ArcNodeId;
-    use crate::avl::resolver::Resolver;
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
-    use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
     use crate::storage::KeyValueStore;
+    use crate::storage::TestKeyValueStore;
 
     impl<KV> MerkleLayer<KV, Normal> {
         fn tree(&self) -> &Tree<ArcNodeId> {
@@ -274,13 +273,13 @@ mod tests {
         }
     }
 
-    fn new_merkle_layer() -> MerkleLayer<PersistenceLayer, Normal> {
+    fn new_merkle_layer() -> MerkleLayer<TestKeyValueStore, Normal> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
             DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
 
-        let persistence_layer = PersistenceLayer::new(&repo)
+        let persistence_layer = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
 
@@ -1061,8 +1060,11 @@ mod tests {
     /// - Check whether the data is persisted.
     /// - Check whether the hash contained in the commit id
     ///   is the same as the root hash
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
+        use crate::avl::resolver::Resolver;
+
         let mut merkle_layer = new_merkle_layer();
 
         let keys = [

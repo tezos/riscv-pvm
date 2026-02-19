@@ -7,6 +7,9 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["rocksdb"]
+
 [dependencies]
 bincode.workspace = true
 bytes.workspace = true
@@ -18,11 +21,14 @@ hex.workspace = true
 perfect-derive.workspace = true
 octez-riscv-data.workspace = true
 rand.workspace = true
-rocksdb.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 trait-set.workspace = true
+
+[dependencies.rocksdb]
+workspace = true
+optional = true
 
 [dev-dependencies]
 proptest.workspace = true
@@ -38,3 +44,4 @@ harness = false
 [[bench]]
 name = "database"
 harness = false
+required-features = ["rocksdb"]
