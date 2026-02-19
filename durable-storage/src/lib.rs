@@ -35,7 +35,7 @@ pub mod errors;
 pub mod key;
 mod merkle_layer;
 mod merkle_worker;
-pub(crate) mod persistence_layer;
+pub mod persistence_layer;
 pub mod registry;
 pub mod repo;
 pub mod storage;

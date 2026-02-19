@@ -4,10 +4,11 @@
 
 //! Combined Database interface
 //!
-//! This module provides a database type to unify operations between the Merkle worker and the
-//! persistence layer.
+//! This module provides a database type to unify operations between the Merkle layer and the
+//! key-value store.
 
 use std::convert::Infallible;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::BufMut;
@@ -18,32 +19,36 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 
-use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
+use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::MerkleWorker;
-use crate::persistence_layer::PersistenceLayer;
 pub use crate::repo::DirectoryManager;
-use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
 ///
-/// This structure unifies the [`PersistenceLayer`] and Merkle layer (via the [`MerkleWorker`]) to
-/// allow for persistent storage alongside a representation which can provide a root hash.
+/// This structure unifies the key-value store and Merkle layer to allow for persistent storage
+/// alongside a representation which can provide a root hash.
 #[repr(transparent)]
-pub struct Database<M: Mode> {
-    inner: M::Select<DatabaseTemplate>,
+pub struct Database<KV, M: Mode> {
+    inner: M::Select<DatabaseTemplate<KV>>,
 }
 
-impl Database<Normal> {
+impl<KV> Database<KV, Normal> {
     /// Try to construct a new Database
-    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, OperationalError> {
-        let persistent: Arc<PersistenceLayer> = PersistenceLayer::new(repo)?.into();
+    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, OperationalError>
+    where
+        KV: BackgroundKeyValueStore,
+    {
+        let persistent = KV::new(repo)?;
+        let persistent = Arc::new(persistent);
+
         let merkle = MerkleWorker::new(handle, persistent.clone());
+
         Ok(Database {
             inner: NormalImpl { persistent, merkle },
         })
@@ -54,25 +59,36 @@ impl Database<Normal> {
         &self,
         handle: &Handle,
         repo: &DirectoryManager,
-    ) -> Result<Self, OperationalError> {
-        let persistent: Arc<PersistenceLayer> = self.inner.persistent.try_clone(repo)?.into();
+    ) -> Result<Self, OperationalError>
+    where
+        KV: BackgroundKeyValueStore,
+    {
+        let persistent = self.inner.persistent.try_clone(repo)?;
+        let persistent = Arc::new(persistent);
+
+        let merkle = self.inner.merkle.clone_with(handle, persistent.clone())?;
+
         Ok(Database {
-            inner: NormalImpl {
-                persistent: persistent.clone(),
-                merkle: self.inner.merkle.clone_with(handle, persistent)?,
-            },
+            inner: NormalImpl { persistent, merkle },
         })
     }
 
     /// Commit the current database state to the repository and return its root hash.
-    pub(crate) fn commit(&self, repo: &DirectoryManager) -> Result<CommitId, OperationalError> {
+    pub(crate) fn commit(
+        &self,
+        repo: &DirectoryManager,
+    ) -> Result<crate::commit::CommitId, OperationalError>
+    where
+        KV: PersistentKeyValueStore,
+    {
         let commit_id = self.inner.merkle.commit()?;
         self.inner.persistent.commit(repo, &commit_id)?;
+
         Ok(commit_id)
     }
 }
 
-impl<M: DatabaseMode> Database<M> {
+impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Remove a key from the database.
     pub fn delete(&mut self, key: Key) -> Result<(), Error> {
         M::delete(self, key)
@@ -133,10 +149,10 @@ impl<M: DatabaseMode> Database<M> {
 /// Modal template for the [`Database`]
 ///
 /// This is used to select the appropriate implementation for the mode.
-enum DatabaseTemplate {}
+struct DatabaseTemplate<KV>(PhantomData<KV>, Infallible);
 
-impl Modal for DatabaseTemplate {
-    type Normal = NormalImpl;
+impl<KV> Modal for DatabaseTemplate<KV> {
+    type Normal = NormalImpl<KV>;
 
     type Prove<'normal> = Infallible;
 
@@ -146,39 +162,57 @@ impl Modal for DatabaseTemplate {
 /// Modes that implement this support operations on [`Database`]
 pub trait DatabaseMode: Mode {
     /// See [`Database::exists`]
-    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, Error>;
+    fn exists<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<bool, Error>;
 
     /// See [`Database::value_length`]
-    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, Error>;
+    fn value_length<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<usize, Error>;
 
     /// See [`Database::read`]
-    fn read(
-        this: &Database<Self>,
+    fn read<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
         key: &Key,
         offset: usize,
         buffer: impl BufMut,
     ) -> Result<usize, Error>;
 
     /// See [`Database::set`]
-    fn set(this: &mut Database<Self>, key: Key, value: Bytes) -> Result<(), Error>;
+    fn set<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        value: Bytes,
+    ) -> Result<(), Error>;
 
     /// See [`Database::write`]
-    fn write(
-        this: &mut Database<Self>,
+    fn write<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
         value: Bytes,
     ) -> Result<usize, Error>;
 
     /// See [`Database::delete`]
-    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), Error>;
+    fn delete<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+    ) -> Result<(), Error>;
 
     /// See [`Database::hash`]
-    fn hash(this: &Database<Self>) -> Result<Hash, OperationalError>;
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+    ) -> Result<Hash, OperationalError>;
 }
 
 impl DatabaseMode for Normal {
-    fn exists(this: &Database<Self>, key: &Key) -> Result<bool, Error> {
+    fn exists<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<bool, Error> {
         match this.inner.persistent.get(key.as_ref()) {
             Ok(_) => Ok(true),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => Ok(false),
@@ -186,13 +220,16 @@ impl DatabaseMode for Normal {
         }
     }
 
-    fn value_length(this: &Database<Self>, key: &Key) -> Result<usize, Error> {
+    fn value_length<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<usize, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
         Ok(value.as_ref().len())
     }
 
-    fn read(
-        this: &Database<Self>,
+    fn read<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
         key: &Key,
         offset: usize,
         mut output: impl BufMut,
@@ -213,14 +250,18 @@ impl DatabaseMode for Normal {
         Ok(source_slice.len())
     }
 
-    fn set(this: &mut Database<Self>, key: Key, data: Bytes) -> Result<(), Error> {
+    fn set<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        data: Bytes,
+    ) -> Result<(), Error> {
         this.inner.persistent.set(&key, &data)?;
         this.inner.merkle.set(key, data)?;
         Ok(())
     }
 
-    fn write(
-        this: &mut Database<Self>,
+    fn write<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
         data: Bytes,
@@ -248,21 +289,26 @@ impl DatabaseMode for Normal {
         Ok(written)
     }
 
-    fn delete(this: &mut Database<Self>, key: Key) -> Result<(), Error> {
+    fn delete<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+    ) -> Result<(), Error> {
         this.inner.persistent.delete(key.as_ref())?;
         this.inner.merkle.delete(key)?;
         Ok(())
     }
 
-    fn hash(this: &Database<Self>) -> Result<Hash, OperationalError> {
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+    ) -> Result<Hash, OperationalError> {
         this.inner.merkle.hash()
     }
 }
 
 /// Registry implementation for the [`Database`] mode
-struct NormalImpl {
-    persistent: Arc<PersistenceLayer>,
-    merkle: MerkleWorker<PersistenceLayer>,
+struct NormalImpl<KV> {
+    persistent: Arc<KV>,
+    merkle: MerkleWorker<KV>,
 }
 
 #[cfg(test)]
@@ -285,7 +331,7 @@ mod tests {
     use crate::storage::KeyValueStore;
     use crate::storage::PersistentKeyValueStore;
 
-    fn new_database(handle: &Handle) -> Database<Normal> {
+    fn new_database(handle: &Handle) -> Database<PersistenceLayer, Normal> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
@@ -310,7 +356,7 @@ mod tests {
             let handle = runtime.handle();
             let tmpdir = TestableTmpdir::new();
             let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-            let mut database = Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+            let mut database: Database<PersistenceLayer, _> = Database::try_new(handle, &repo).expect("Creating a test database should succeed");
 
             let mut expected = std::collections::HashMap::new();
             for (key, value) in entries {

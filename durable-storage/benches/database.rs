@@ -18,6 +18,7 @@ use octez_riscv_durable_storage::database::DirectoryManager;
 use octez_riscv_durable_storage::errors::Error;
 use octez_riscv_durable_storage::errors::InvalidArgumentError;
 use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_test_utils::TestableTmpdir;
 use rand::rng;
 use random::generate_keys;
@@ -27,7 +28,7 @@ use serde::Deserialize;
 use tokio::runtime::Handle;
 
 struct BenchmarkState<'a> {
-    database: Database<Normal>,
+    database: Database<PersistenceLayer, Normal>,
     operations: Vec<Operation>,
     random_data: Vec<u8>,
     read_buffer: Vec<u8>,
@@ -130,7 +131,8 @@ const ERC_20_TRANSACTIONS: usize = 10_000;
 const PREPOPULATED_NODE_KEYS_COUNT: usize = 10_000_000;
 
 fn setup_benchmark_state<'a>(handle: &'a Handle, repo: &'a DirectoryManager) -> BenchmarkState<'a> {
-    let mut database = Database::try_new(handle, repo).expect("Creating a database should succeed");
+    let mut database: Database<PersistenceLayer, _> =
+        Database::try_new(handle, repo).expect("Creating a database should succeed");
     let mut rng = rng();
 
     // The performance of operations depends on the number of nodes already stored

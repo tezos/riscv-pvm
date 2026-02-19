@@ -23,6 +23,7 @@ use crate::database::Database;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::persistence_layer::PersistenceLayer;
 use crate::repo::DirectoryManager;
 
 pub(super) const REGISTRY_ARITY: usize = 2;
@@ -106,12 +107,15 @@ impl<M: RegistryMode> Registry<M> {
     }
 
     /// Get a reference to the database at the given `index`.
-    pub fn database(&self, index: usize) -> Result<&Database<M>, Error> {
+    pub fn database(&self, index: usize) -> Result<&Database<PersistenceLayer, M>, Error> {
         M::database(self, index)
     }
 
     /// Get a mutable reference to the database at the given `index`.
-    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database<M>, Error> {
+    pub fn database_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<&mut Database<PersistenceLayer, M>, Error> {
         M::database_mut(self, index)
     }
 
@@ -163,10 +167,16 @@ pub trait RegistryMode: Mode {
     fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), Error>;
 
     /// See [`Registry::database`]
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, Error>;
+    fn database(
+        this: &Registry<Self>,
+        index: usize,
+    ) -> Result<&Database<PersistenceLayer, Self>, Error>;
 
     /// See [`Registry::database_mut`]
-    fn database_mut(this: &mut Registry<Self>, index: usize) -> Result<&mut Database<Self>, Error>;
+    fn database_mut(
+        this: &mut Registry<Self>,
+        index: usize,
+    ) -> Result<&mut Database<PersistenceLayer, Self>, Error>;
 
     /// See [`Registry::copy_database`]
     fn copy_database(this: &mut Registry<Self>, src: usize, dst: usize) -> Result<(), Error>;
@@ -194,7 +204,10 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn database(this: &Registry<Self>, index: usize) -> Result<&Database<Self>, Error> {
+    fn database(
+        this: &Registry<Self>,
+        index: usize,
+    ) -> Result<&Database<PersistenceLayer, Self>, Error> {
         let database = this
             .inner
             .databases
@@ -203,7 +216,10 @@ impl RegistryMode for Normal {
         Ok(database)
     }
 
-    fn database_mut(this: &mut Registry<Self>, index: usize) -> Result<&mut Database<Self>, Error> {
+    fn database_mut(
+        this: &mut Registry<Self>,
+        index: usize,
+    ) -> Result<&mut Database<PersistenceLayer, Self>, Error> {
         let database = this
             .inner
             .databases
@@ -291,7 +307,7 @@ impl CloneRegistryMode for Normal {
 /// Registry implementation for the [`Normal`] mode
 struct NormalImpl {
     repo: DirectoryManager,
-    databases: Vec<Database<Normal>>,
+    databases: Vec<Database<PersistenceLayer, Normal>>,
     runtime: Arc<Runtime>,
 }
 
