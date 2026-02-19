@@ -35,7 +35,7 @@ pub mod errors;
 pub mod key;
 mod merkle_layer;
 mod merkle_worker;
-#[cfg_attr(not(test), expect(dead_code, reason = "Incomplete"))]
 pub(crate) mod persistence_layer;
 pub mod registry;
 pub mod repo;
+pub mod storage;

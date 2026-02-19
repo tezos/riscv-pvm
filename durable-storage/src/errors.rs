@@ -24,6 +24,12 @@ pub enum OperationalError {
         error: std::io::Error,
     },
 
+    #[error("Failed to remove directory {path}: {error}")]
+    DirRemovalFailed {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+
     #[error("Failed to create directory or file in {path}: {error}")]
     TempCreationFailed {
         path: PathBuf,

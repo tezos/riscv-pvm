@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation;
 
 use crate::avl::resolver::ArcResolver;
@@ -12,8 +13,8 @@ use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::persistence_layer::HashedData;
 use crate::persistence_layer::PersistenceLayer;
+use crate::storage::KeyValueStore;
 
 /// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
 #[derive(Clone, Debug)]
@@ -62,8 +63,8 @@ impl MerkleLayer {
             let encoded = node.to_encode(&self.resolver);
             let value = serialisation::serialise(encoded)
                 .expect("Serialisation of node data should not fail");
-            let blob = HashedData::from_value(value.as_slice());
-            self.persistence.blob_set(&blob)?;
+            let blob = HashedData::from_data(value);
+            self.persistence.blob_set(blob)?;
         }
 
         Ok(CommitId::from(self.hash()?))
@@ -109,6 +110,7 @@ mod tests {
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
+    use crate::storage::KeyValueStore;
 
     impl MerkleLayer {
         fn tree(&self) -> &Tree {
@@ -949,7 +951,7 @@ mod tests {
             let encoded = node.to_encode(&merkle_layer.resolver);
             let serialised = octez_riscv_data::serialisation::serialise(encoded)
                 .expect("We should be able to serialise the node");
-            let node_hash = node.hash(&merkle_layer.resolver);
+            let node_hash = *node.hash(&merkle_layer.resolver);
             let blob = merkle_layer
                 .persistence
                 .blob_get(node_hash)
