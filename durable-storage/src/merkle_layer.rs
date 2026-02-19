@@ -7,6 +7,7 @@ use std::sync::Arc;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation;
+use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::ArcNodeId;
 use crate::avl::resolver::ArcResolver;
@@ -15,21 +16,21 @@ use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::persistence_layer::PersistenceLayer;
 use crate::storage::KeyValueStore;
+use crate::storage::PersistentKeyValueStore;
 
-/// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
-#[derive(Clone, Debug)]
-pub struct MerkleLayer {
+/// A layer for transforming data into a Merkle-ised representation before commitment to a
+/// [`PersistentKeyValueStore`].
+#[perfect_derive(Clone, Debug)]
+pub struct MerkleLayer<KV> {
     tree: Tree<ArcNodeId>,
-    persistence: Arc<PersistenceLayer>,
+    persistence: Arc<KV>,
     resolver: ArcResolver,
 }
 
-/// A layer for transforming data into a Merkelised representation before commitment to the [PersistenceLayer].
-impl MerkleLayer {
+impl<KV> MerkleLayer<KV> {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
-    pub fn new(persistence: Arc<PersistenceLayer>) -> Self {
+    pub fn new(persistence: Arc<KV>) -> Self {
         let resolver = ArcResolver;
         MerkleLayer {
             tree: Tree::default(),
@@ -38,16 +39,8 @@ impl MerkleLayer {
         }
     }
 
-    /// Persist the data stored in the [MerkleLayer] to durable storage via the [PersistenceLayer].
-    pub fn checkout(
-        _persistence: Arc<PersistenceLayer>,
-        _root: Hash,
-    ) -> Result<Self, OperationalError> {
-        todo!()
-    }
-
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    pub fn clone_with(&self, persistence: Arc<PersistenceLayer>) -> Self {
+    pub fn clone_with(&self, persistence: Arc<KV>) -> Self {
         Self {
             tree: self.tree.clone(),
             persistence,
@@ -55,6 +48,13 @@ impl MerkleLayer {
         }
     }
 
+    /// Returns the root hash, potentially re-hashing uncached nodes.
+    pub fn hash(&mut self) -> Result<Hash, OperationalError> {
+        self.tree.hash(&self.resolver)
+    }
+}
+
+impl<KV: PersistentKeyValueStore> MerkleLayer<KV> {
     /// Generates a commitment for the [MerkleLayer].
     pub fn commit(&mut self) -> Result<CommitId, OperationalError> {
         // Note that although we're doing in order
@@ -72,16 +72,18 @@ impl MerkleLayer {
 
         Ok(CommitId::from(self.hash()?))
     }
+}
+
+impl<KV: KeyValueStore> MerkleLayer<KV> {
+    /// Load the Merkle layer from the given key-value store.
+    pub fn checkout(_persistence: Arc<KV>, _root: CommitId) -> Result<Self, OperationalError> {
+        todo!()
+    }
 
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) -> Result<(), OperationalError> {
         self.tree.delete(key, &mut self.resolver)?;
         Ok(())
-    }
-
-    /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&mut self) -> Result<Hash, OperationalError> {
-        self.tree.hash(&self.resolver)
     }
 
     /// Sets the data associated with a given [Key].
@@ -117,7 +119,7 @@ mod tests {
     use crate::repo::DirectoryManager;
     use crate::storage::KeyValueStore;
 
-    impl MerkleLayer {
+    impl<KV> MerkleLayer<KV> {
         fn tree(&self) -> &Tree<ArcNodeId> {
             &self.tree
         }
@@ -133,7 +135,7 @@ mod tests {
         }
     }
 
-    fn new_merkle_layer() -> MerkleLayer {
+    fn new_merkle_layer() -> MerkleLayer<PersistenceLayer> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
