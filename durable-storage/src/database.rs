@@ -26,6 +26,8 @@ use crate::key::Key;
 use crate::merkle_worker::MerkleWorker;
 use crate::persistence_layer::PersistenceLayer;
 pub use crate::repo::DirectoryManager;
+use crate::storage::KeyValueStore;
+use crate::storage::PersistentKeyValueStore;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
@@ -225,10 +227,10 @@ impl DatabaseMode for Normal {
     ) -> Result<usize, Error> {
         // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
         // operation to check if the existing value length is shorter than the offset.
-        //
         if offset > 0 {
-            // `key_may_exist` uses a Bloom filter, which is cheaper than the 'get' operation.
-            if !this.inner.persistent.key_may_exist(&key) {
+            // `may_exist` can be cheaper than `get`
+            let may_exist = this.inner.persistent.may_exist(&key)?;
+            if !may_exist {
                 return Err(InvalidArgumentError::KeyNotFound)?;
             }
 
@@ -280,6 +282,8 @@ mod tests {
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
+    use crate::storage::KeyValueStore;
+    use crate::storage::PersistentKeyValueStore;
 
     fn new_database(handle: &Handle) -> Database<Normal> {
         let tmpdir = TestableTmpdir::new();

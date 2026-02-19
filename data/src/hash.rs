@@ -12,6 +12,7 @@ use std::ops::Deref;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::error::EncodeError;
+use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use crate::foldable::Fold;
@@ -152,6 +153,35 @@ impl Hasher {
     /// Returns the number of bytes hashed so far.
     pub fn count(&self) -> u64 {
         self.hasher.count()
+    }
+}
+
+/// Data that has already been hashed
+#[perfect_derive(Debug, Clone)]
+pub struct HashedData<Data> {
+    /// Hash of the underlying data
+    hash: Hash,
+
+    /// Preimage of the hash
+    data: Data,
+}
+
+impl<Data: AsRef<[u8]>> HashedData<Data> {
+    /// Create a new [`HashedData`] instance from the given data.
+    pub fn from_data(data: Data) -> Self {
+        let bytes = data.as_ref();
+        let hash = Hash::hash_bytes(bytes);
+        Self { hash, data }
+    }
+
+    /// Get the hash of the data.
+    pub fn hash(&self) -> Hash {
+        self.hash
+    }
+
+    /// Get a reference to the hashed data.
+    pub fn data(&self) -> &[u8] {
+        self.data.as_ref()
     }
 }
 

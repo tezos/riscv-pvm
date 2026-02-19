@@ -239,6 +239,7 @@ mod tests {
     use crate::merkle_worker::MerkleWorker;
     use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
+    use crate::storage::KeyValueStore;
 
     fn key_strategy() -> impl Strategy<Value = Key> {
         proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..KEY_MAX_SIZE).prop_map(
