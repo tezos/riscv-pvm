@@ -382,68 +382,92 @@ mode_test!(append_adds_to_end, F, {
     });
 });
 
+/// Operations to be issued against an immutable Bytes state component
+#[derive(Debug, Clone)]
+pub(crate) enum BytesOp {
+    Read { offset: usize, size: usize },
+    Len,
+}
+
+impl BytesOp {
+    /// Strategy for generating operations to be issued against the Bytes state component
+    pub(crate) fn any() -> impl Strategy<Value = Self> {
+        prop_oneof![
+            (0usize..100, 0usize..50).prop_map(|(offset, size)| Self::Read { offset, size }),
+            Just(Self::Len),
+        ]
+    }
+
+    /// Run an operation against an immutable Bytes state component.
+    pub(crate) fn run<M: BytesMode>(&self, bytes: &Bytes<M>) -> BytesOpResult {
+        match self {
+            Self::Read { offset, size } => {
+                let mut data = vec![0u8; *size];
+                let read = bytes.read(*offset, &mut data);
+                BytesOpResult::Read { read, data }
+            }
+
+            Self::Len => BytesOpResult::Len { len: bytes.len() },
+        }
+    }
+}
+
+/// Operations to be issued against a mutable Bytes state component
+#[derive(Debug, Clone)]
+pub(crate) enum BytesMutOp {
+    Write { offset: usize, data: Vec<u8> },
+    Resize { new_size: usize },
+    Immutable { op: BytesOp },
+}
+
+impl BytesMutOp {
+    /// Strategy for generating operations to be issued against the Bytes state component
+    pub(crate) fn any() -> impl Strategy<Value = Self> {
+        prop_oneof![
+            (0usize..100, vec(any::<u8>(), 0..50))
+                .prop_map(|(offset, data)| Self::Write { offset, data }),
+            (0usize..150).prop_map(|new_size| Self::Resize { new_size }),
+            BytesOp::any().prop_map(|op| Self::Immutable { op }),
+        ]
+    }
+
+    /// Run the operation against the Bytes state component.
+    pub(crate) fn run<M: BytesMode>(&self, bytes: &mut Bytes<M>) -> BytesOpResult {
+        match self {
+            Self::Write { offset, data } => {
+                let wrote = bytes.write(*offset, data);
+                BytesOpResult::Wrote { wrote }
+            }
+
+            Self::Resize { new_size } => {
+                bytes.resize(*new_size);
+                BytesOpResult::Void
+            }
+
+            Self::Immutable { op } => op.run(bytes),
+        }
+    }
+}
+
+/// Results of operations issued against the Bytes state component
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum BytesOpResult {
+    Read { read: usize, data: Vec<u8> },
+    Wrote { wrote: usize },
+    Len { len: usize },
+    Void,
+}
+
 // Bytes behaves the same across different modes
 #[test]
 fn bytes_are_same_across_modes() {
-    /// Operations to be issued against the Bytes state component
-    #[derive(Debug, Clone)]
-    enum Op {
-        Read { offset: usize, size: usize },
-        Write { offset: usize, data: Vec<u8> },
-        Len,
-        Resize { new_size: usize },
-    }
-
-    /// Results of operations issued against the Bytes state component
-    #[derive(Debug, PartialEq, Eq)]
-    enum OpResult {
-        Read { read: usize, data: Vec<u8> },
-        Wrote { wrote: usize },
-        Len { len: usize },
-        Void,
-    }
-
-    // Strategies for generating operations to be issued against the Bytes state component
-    let op_strat = prop_oneof![
-        (0usize..100, 0usize..50).prop_map(|(offset, size)| Op::Read { offset, size }),
-        (0usize..100, vec(any::<u8>(), 0..50))
-            .prop_map(|(offset, data)| Op::Write { offset, data }),
-        (0usize..150).prop_map(|new_size| Op::Resize { new_size }),
-        Just(Op::Len),
-    ];
-
-    /// Run the given sequence of operations against the Bytes state component
-    fn run_ops<M: BytesMode>(bytes: &mut Bytes<M>, ops: &[Op]) -> Vec<OpResult> {
-        ops.iter()
-            .map(|op| match op {
-                Op::Read { offset, size } => {
-                    let mut data = vec![0u8; *size];
-                    let read = bytes.read(*offset, &mut data);
-                    OpResult::Read { read, data }
-                }
-
-                Op::Write { offset, data } => {
-                    let wrote = bytes.write(*offset, data);
-                    OpResult::Wrote { wrote }
-                }
-
-                Op::Resize { new_size } => {
-                    bytes.resize(*new_size);
-                    OpResult::Void
-                }
-
-                Op::Len => OpResult::Len { len: bytes.len() },
-            })
-            .collect()
-    }
-
-    proptest!(|(ops in vec(op_strat, 1..20))| {
+    proptest!(|(ops in vec(BytesMutOp::any(), 1..20))| {
         let mut bytes_normal = Bytes::<Normal>::default();
-        let results_normal = run_ops(&mut bytes_normal, &ops);
+        let results_normal = ops.iter().map(|op| op.run(&mut bytes_normal)).collect::<Vec<_>>();
         let hash_normal = Hash::from_foldable(&bytes_normal);
 
         let mut bytes_prove = Bytes::<Prove>::default();
-        let results_prove = run_ops(&mut bytes_prove, &ops);
+        let results_prove = ops.iter().map(|op| op.run(&mut bytes_prove)).collect::<Vec<_>>();
         prop_assert_eq!(&results_normal, &results_prove);
 
         let hash_prove = Hash::from_foldable(&bytes_prove);
@@ -453,7 +477,7 @@ fn bytes_are_same_across_modes() {
         let merkle_proof = merkle_tree.compress();
 
         let mut bytes_verify = Bytes::<Verify>::default();
-        let results_verify = run_ops(&mut bytes_verify, &ops);
+        let results_verify = ops.iter().map(|op| op.run(&mut bytes_verify)).collect::<Vec<_>>();
         prop_assert_eq!(results_normal, results_verify);
 
         let hash_verify =

@@ -855,4 +855,4 @@ pub(crate) const NODE_ARITY: usize = 4;
 pub(crate) const PAGE_SIZE: usize = 4096;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
