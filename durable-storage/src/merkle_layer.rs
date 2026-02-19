@@ -44,8 +44,12 @@ impl MerkleLayer {
     }
 
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    pub fn clone_with(&self, _persistence: Arc<PersistenceLayer>) -> Self {
-        self.clone()
+    pub fn clone_with(&self, persistence: Arc<PersistenceLayer>) -> Self {
+        Self {
+            tree: self.tree.clone(),
+            persistence,
+            resolver: ArcResolver,
+        }
     }
 
     /// Generates a commitment for the [MerkleLayer].
