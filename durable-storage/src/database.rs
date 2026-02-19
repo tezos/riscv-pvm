@@ -262,7 +262,7 @@ impl DatabaseMode for Normal {
 /// Registry implementation for the [`Database`] mode
 struct NormalImpl {
     persistent: Arc<PersistenceLayer>,
-    merkle: MerkleWorker,
+    merkle: MerkleWorker<PersistenceLayer>,
 }
 
 #[cfg(test)]

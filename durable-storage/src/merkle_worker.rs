@@ -16,65 +16,247 @@ use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use trait_set::trait_set;
 
 use crate::commit::CommitId;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
-use crate::persistence_layer::PersistenceLayer;
+use crate::storage::KeyValueStore;
+use crate::storage::PersistentKeyValueStore;
 
-/// Commands that can be sent to the Merkle worker background thread
-enum Command {
-    /// Write to the value associated with a key using the given offset.
-    Write {
-        key: Key,
-        offset: usize,
-        value: Bytes,
-    },
+trait_set! {
+    /// [`KeyValueStore`] that can be used in a background thread
+    pub trait BackgroundKeyValueStore = KeyValueStore + Send + Sync + 'static;
 
-    /// Set the value associated with a key.
-    Set { key: Key, value: Bytes },
+    /// [`PersistentKeyValueStore`] that can be used in a background thread
+    pub trait BackgroundPersistentKeyValueStore = PersistentKeyValueStore + BackgroundKeyValueStore;
+}
 
-    /// Delete a key-value pair.
-    Delete { key: Key },
+/// Alias for the inner workings of the [`Command`] struct to make Clippy happy
+type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>) + Send;
 
-    /// Obtain the root hash of the Merkle tree.
-    Hash {
-        /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Hash>,
-    },
+/// Commands that will be sent to the background worker thread to manipulate the Merkle layer
+struct Command<KV>(Box<DynCommand<KV>>);
 
-    /// Flush the current Merkle state to the persistence layer and obtain a commit ID.
-    Commit {
-        /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<Result<CommitId, OperationalError>>,
-    },
+impl<KV> Command<KV> {
+    /// Apply this command to the Merkle layer.
+    fn apply(self, layer: &mut MerkleLayer<KV, Normal>) {
+        self.0(layer);
+    }
 
-    /// Clone the current Merkle layer.
-    Clone {
-        /// The persistence layer to use for the cloned Merkle layer.
-        persistence_layer: Arc<PersistenceLayer>,
+    /// Construct a command that performs a [`MerkleLayer::write`].
+    fn new_write(key: Key, offset: usize, value: Bytes) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            layer
+                .write(&key, offset, &value)
+                .expect("Writing to the Merkle layer should succeed.");
+        }))
+    }
 
-        /// The background thread will write its response to this one-shot channel.
-        response: oneshot::Sender<MerkleLayer<PersistenceLayer, Normal>>,
-    },
+    /// Construct a command that performs a [`MerkleLayer::set`].
+    fn new_set(key: Key, value: Bytes) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            layer
+                .set(&key, &value)
+                .expect("Setting on the Merkle layer should succeed.");
+        }))
+    }
+
+    /// Construct a command that performs a [`MerkleLayer::delete`].
+    fn new_delete(key: Key) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            layer
+                .delete(&key)
+                .expect("Deleting from the Merkle layer should succeed.");
+        }))
+    }
+
+    /// Construct a command that performs a [`MerkleLayer::try_clone_with`].
+    fn new_clone_with(
+        store: Arc<KV>,
+    ) -> (
+        impl FnOnce() -> Result<MerkleLayer<KV, Normal>, OperationalError>,
+        Self,
+    )
+    where
+        KV: Send + Sync + 'static,
+    {
+        let (sender, receiver) = oneshot::channel();
+
+        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            let result = layer.try_clone_with(store);
+            let _ = sender.send(result);
+        }));
+
+        let receive = || {
+            receiver
+                .blocking_recv()
+                .map_err(|_error| OperationalError::WorkerThreadDied)
+        };
+
+        (receive, this)
+    }
+
+    /// Construct a command that performs a [`MerkleLayer::hash`].
+    fn new_hash() -> (impl FnOnce() -> Result<Hash, OperationalError>, Self) {
+        let (sender, receiver) = oneshot::channel();
+
+        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            let result = layer.hash();
+            let _ = sender.send(result);
+        }));
+
+        let receive = || {
+            receiver
+                .blocking_recv()
+                .map_err(|_error| OperationalError::WorkerThreadDied)?
+        };
+
+        (receive, this)
+    }
+
+    /// Construct a command that performs a [`MerkleLayer::commit`].
+    fn new_commit() -> (impl FnOnce() -> Result<CommitId, OperationalError>, Self)
+    where
+        KV: PersistentKeyValueStore,
+    {
+        let (sender, receiver) = oneshot::channel();
+
+        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
+            let result = layer.commit();
+            let _ = sender.send(result);
+        }));
+
+        let receive = || {
+            receiver
+                .blocking_recv()
+                .map_err(|_error| OperationalError::WorkerThreadDied)?
+        };
+
+        (receive, this)
+    }
 }
 
 /// Merkle worker that processes commands asynchronously in a background thread
 ///
 /// It works like the [`MerkleLayer`] but does not block on `set`, `write` and `delete` operations.
-pub struct MerkleWorker {
+pub struct MerkleWorker<KV> {
     /// Send end of the command channel that is connected to the background worker thread
-    sender: mpsc::UnboundedSender<Command>,
+    sender: mpsc::UnboundedSender<Command<KV>>,
 }
 
-impl MerkleWorker {
+impl<KV> MerkleWorker<KV> {
     /// Create a new Merkle worker with an empty Merkle tree.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    pub fn new(async_handle: &Handle, persistence_layer: Arc<PersistenceLayer>) -> Self {
-        let layer = MerkleLayer::new(persistence_layer);
+    pub fn new(async_handle: &Handle, store: Arc<KV>) -> Self
+    where
+        KV: Send + Sync + 'static,
+    {
+        let layer = MerkleLayer::new(store);
         MerkleWorker::from_layer(async_handle, layer)
+    }
+
+    /// Create a Merkle worker from an existing Merkle layer.
+    ///
+    /// The provided handle is used to spawn the background worker thread.
+    fn from_layer(async_handle: &Handle, layer: MerkleLayer<KV, Normal>) -> Self
+    where
+        KV: Send + Sync + 'static,
+    {
+        let (sender, receiver) = mpsc::unbounded_channel();
+
+        async_handle.spawn(async move {
+            let mut layer = layer;
+            let mut receiver: mpsc::UnboundedReceiver<Command<KV>> = receiver;
+
+            while let Some(cmd) = receiver.recv().await {
+                cmd.apply(&mut layer);
+            }
+        });
+
+        MerkleWorker { sender }
+    }
+
+    /// See [`MerkleLayer::try_clone_with`].
+    pub(crate) fn clone_with(
+        &self,
+        handle: &Handle,
+        store: Arc<KV>,
+    ) -> Result<Self, OperationalError>
+    where
+        KV: Send + Sync + 'static,
+    {
+        let (receive, command) = Command::new_clone_with(store);
+        self.sender
+            .send(command)
+            .map_err(|_error| OperationalError::WorkerThreadDied)?;
+
+        let layer = receive()?;
+        let worker = Self::from_layer(handle, layer);
+
+        Ok(worker)
+    }
+
+    /// Non-blocking version of [`MerkleLayer::write`].
+    pub(crate) fn write(
+        &self,
+        key: Key,
+        offset: usize,
+        value: Bytes,
+    ) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
+        let command = Command::new_write(key, offset, value);
+        self.sender
+            .send(command)
+            .map_err(|_| OperationalError::WorkerThreadDied)
+    }
+
+    /// Non-blocking version of [`MerkleLayer::set`].
+    pub(crate) fn set(&self, key: Key, value: Bytes) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
+        let command = Command::new_set(key, value);
+        self.sender
+            .send(command)
+            .map_err(|_| OperationalError::WorkerThreadDied)
+    }
+
+    /// Non-blocking version of [`MerkleLayer::delete`].
+    pub(crate) fn delete(&self, key: Key) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
+        let command = Command::new_delete(key);
+        self.sender
+            .send(command)
+            .map_err(|_| OperationalError::WorkerThreadDied)
+    }
+
+    /// See [`MerkleLayer::hash`].
+    pub(crate) fn hash(&self) -> Result<Hash, OperationalError>
+    where
+        KV: KeyValueStore,
+    {
+        let (receive, command) = Command::new_hash();
+        self.sender
+            .send(command)
+            .map_err(|_| OperationalError::WorkerThreadDied)?;
+
+        receive()
     }
 
     /// Checkout a Merkle worker from an existing commit.
@@ -86,141 +268,28 @@ impl MerkleWorker {
     )]
     pub(crate) fn checkout(
         async_handle: &Handle,
-        persistence_layer: Arc<PersistenceLayer>,
-        hash: CommitId,
-    ) -> Result<Self, OperationalError> {
-        let layer = MerkleLayer::checkout(persistence_layer, hash)?;
+        store: Arc<KV>,
+        commit: CommitId,
+    ) -> Result<Self, OperationalError>
+    where
+        KV: BackgroundPersistentKeyValueStore,
+    {
+        let layer = MerkleLayer::checkout(store, commit)?;
         let worker = MerkleWorker::from_layer(async_handle, layer);
         Ok(worker)
     }
 
-    /// See [`MerkleLayer::try_clone_with`].
-    pub(crate) fn clone_with(
-        &self,
-        handle: &Handle,
-        persistence_layer: Arc<PersistenceLayer>,
-    ) -> Result<Self, OperationalError> {
-        let (sender, receiver) = oneshot::channel();
-
-        self.sender
-            .send(Command::Clone {
-                persistence_layer,
-                response: sender,
-            })
-            .map_err(|_error| OperationalError::WorkerThreadDied)?;
-
-        let layer = receiver
-            .blocking_recv()
-            .map_err(|_error| OperationalError::WorkerThreadDied)?;
-
-        let worker = Self::from_layer(handle, layer);
-        Ok(worker)
-    }
-
-    /// Create a Merkle worker from an existing Merkle layer.
-    ///
-    /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer<PersistenceLayer, Normal>) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
-
-        async_handle.spawn(async move {
-            let mut layer = layer;
-            let mut receiver = receiver;
-
-            while let Some(cmd) = receiver.recv().await {
-                match cmd {
-                    Command::Write { key, offset, value } => {
-                        layer
-                            .write(&key, offset, &value)
-                            .expect("Writing to the Merkle layer should succeed.");
-                    }
-
-                    Command::Set { key, value } => {
-                        layer
-                            .set(&key, &value)
-                            .expect("Set on the Merkle layer should succeed.");
-                    }
-
-                    Command::Delete { key } => {
-                        layer
-                            .delete(&key)
-                            .expect("Delete on the Merkle layer should succeed.");
-                    }
-
-                    Command::Hash { response } => {
-                        let hash = layer.hash().expect("Resolving the tree should succeed.");
-                        let _ = response.send(hash);
-                    }
-
-                    Command::Commit { response } => {
-                        let result = layer.commit();
-                        let _ = response.send(result);
-                    }
-
-                    Command::Clone {
-                        persistence_layer,
-                        response,
-                    } => {
-                        let result = layer.try_clone_with(persistence_layer);
-                        let _ = response.send(result);
-                    }
-                }
-            }
-        });
-
-        MerkleWorker { sender }
-    }
-
-    /// Non-blocking version of [`MerkleLayer::write`].
-    pub(crate) fn write(
-        &self,
-        key: Key,
-        offset: usize,
-        value: Bytes,
-    ) -> Result<(), OperationalError> {
-        self.sender
-            .send(Command::Write { key, offset, value })
-            .map_err(|_| OperationalError::WorkerThreadDied)
-    }
-
-    /// Non-blocking version of [`MerkleLayer::set`].
-    pub(crate) fn set(&self, key: Key, value: Bytes) -> Result<(), OperationalError> {
-        self.sender
-            .send(Command::Set { key, value })
-            .map_err(|_| OperationalError::WorkerThreadDied)
-    }
-
-    /// Non-blocking version of [`MerkleLayer::delete`].
-    pub(crate) fn delete(&self, key: Key) -> Result<(), OperationalError> {
-        self.sender
-            .send(Command::Delete { key })
-            .map_err(|_| OperationalError::WorkerThreadDied)
-    }
-
-    /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> Result<Hash, OperationalError> {
-        let (sender, receiver) = oneshot::channel();
-
-        self.sender
-            .send(Command::Hash { response: sender })
-            .map_err(|_| OperationalError::WorkerThreadDied)?;
-
-        receiver
-            .blocking_recv()
-            .map_err(|_| OperationalError::WorkerThreadDied)
-    }
-
     /// See [`MerkleLayer::commit`].
-    pub(crate) fn commit(&self) -> Result<CommitId, OperationalError> {
-        let (sender, receiver) = oneshot::channel();
-
+    pub(crate) fn commit(&self) -> Result<CommitId, OperationalError>
+    where
+        KV: PersistentKeyValueStore,
+    {
+        let (receive, command) = Command::new_commit();
         self.sender
-            .send(Command::Commit { response: sender })
+            .send(command)
             .map_err(|_| OperationalError::WorkerThreadDied)?;
 
-        receiver
-            .blocking_recv()
-            .map_err(|_| OperationalError::WorkerThreadDied)?
+        receive()
     }
 }
 
@@ -279,7 +348,7 @@ mod tests {
             self,
             handle: &Handle,
             dir_manager: &DirectoryManager,
-            worker: &mut MerkleWorker,
+            worker: &mut MerkleWorker<PersistenceLayer>,
             layer: &mut MerkleLayer<PersistenceLayer, Normal>,
         ) {
             match self {

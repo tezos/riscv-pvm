@@ -22,6 +22,7 @@ rocksdb.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+trait-set.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
