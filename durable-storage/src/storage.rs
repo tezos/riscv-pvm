@@ -4,6 +4,8 @@
 
 //! Storage backends
 
+pub mod in_memory;
+
 use std::path::Path;
 
 use octez_riscv_data::hash::Hash;

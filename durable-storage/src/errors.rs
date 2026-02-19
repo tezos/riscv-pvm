@@ -81,6 +81,9 @@ pub enum OperationalError {
 
     #[error("Error in resolution of ID")]
     Resolver,
+
+    #[error("Encountered a poisoned lock")]
+    LockPoisoned,
 }
 
 /// Errors that occur because of incorrect usage
