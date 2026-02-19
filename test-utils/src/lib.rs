@@ -5,17 +5,12 @@
 
 //! Common utilities for octez-riscv integration tests
 
-use std::fs;
 use std::path::Path;
 
 use const_format::concatcp;
-use octez_riscv::machine_state::memory::MemoryConfig;
-use octez_riscv::pvm::hooks::NoHooks;
-use octez_riscv::stepper::pvm::PvmStepper;
 use rand::RngExt;
 use rand::seq::SliceRandom;
 use tempfile::TempDir;
-use tezos_smart_rollup_utils::inbox::InboxBuilder;
 
 const ASSETS_DIR: &str = std::env!("OCTEZ_RISCV_ASSETS_DIR");
 const KERNELS_DIR: &str = std::env!("OCTEZ_RISCV_KERNELS_DIR");
@@ -123,11 +118,16 @@ impl Drop for TestableTmpdir {
 }
 
 /// Return a function which can produce a [`PvmStepper`] over a given [`TestConfig`].
-pub fn make_stepper_factory<MC: MemoryConfig>(
+#[cfg(feature = "octez-riscv")]
+pub fn make_stepper_factory<MC: octez_riscv::machine_state::memory::MemoryConfig>(
     inputs: &TestConfig,
     address: Option<[u8; 20]>,
-) -> impl Fn() -> PvmStepper<NoHooks, MC> {
-    let program = fs::read(inputs.kernel_path).expect("Kernel path should be valid");
+) -> impl Fn() -> octez_riscv::stepper::pvm::PvmStepper<octez_riscv::pvm::hooks::NoHooks, MC> {
+    use octez_riscv::pvm::hooks::NoHooks;
+    use octez_riscv::stepper::pvm::PvmStepper;
+    use tezos_smart_rollup_utils::inbox::InboxBuilder;
+
+    let program = std::fs::read(inputs.kernel_path).expect("Kernel path should be valid");
 
     let mut inbox = InboxBuilder::new();
     inbox

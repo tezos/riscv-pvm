@@ -326,12 +326,10 @@ mod tests {
     use super::Database;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
-    use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
-    use crate::storage::KeyValueStore;
-    use crate::storage::PersistentKeyValueStore;
+    use crate::storage::TestKeyValueStore;
 
-    fn new_database(handle: &Handle) -> Database<PersistenceLayer, Normal> {
+    fn new_database(handle: &Handle) -> Database<TestKeyValueStore, Normal> {
         let tmpdir = TestableTmpdir::new();
 
         let repo =
@@ -340,6 +338,7 @@ mod tests {
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
     }
 
+    #[cfg(feature = "rocksdb")]
     proptest! {
         #[test]
         fn test_database_commit_persists_state(
@@ -349,6 +348,10 @@ mod tests {
                 1..50,
             ),
         ) {
+            use crate::persistence_layer::PersistenceLayer;
+            use crate::storage::KeyValueStore;
+            use crate::storage::PersistentKeyValueStore;
+
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .build()

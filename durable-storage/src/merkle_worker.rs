@@ -308,9 +308,9 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
-    use crate::persistence_layer::PersistenceLayer;
     use crate::repo::DirectoryManager;
     use crate::storage::KeyValueStore;
+    use crate::storage::TestKeyValueStore;
 
     fn key_strategy() -> impl Strategy<Value = Key> {
         proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..KEY_MAX_SIZE).prop_map(
@@ -339,6 +339,7 @@ mod tests {
             key: Key,
         },
         Hash,
+        #[cfg(feature = "rocksdb")]
         Commit,
         Clone,
     }
@@ -348,8 +349,8 @@ mod tests {
             self,
             handle: &Handle,
             dir_manager: &DirectoryManager,
-            worker: &mut MerkleWorker<PersistenceLayer>,
-            layer: &mut MerkleLayer<PersistenceLayer, Normal>,
+            worker: &mut MerkleWorker<TestKeyValueStore>,
+            layer: &mut MerkleLayer<TestKeyValueStore, Normal>,
         ) {
             match self {
                 Self::Write { key, offset, value } => {
@@ -377,6 +378,7 @@ mod tests {
                     assert_eq!(hash1, hash2);
                 }
 
+                #[cfg(feature = "rocksdb")]
                 Self::Commit => {
                     let commit1 = worker.commit().expect("Commit should succeed");
                     let commit2 = layer.commit().expect("Commit should succeed");
@@ -384,12 +386,12 @@ mod tests {
                 }
 
                 Self::Clone => {
-                    let persistence_layer = PersistenceLayer::new(dir_manager)
+                    let persistence_layer = TestKeyValueStore::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
                     *layer = layer.try_clone_with(persistence_layer);
 
-                    let persistence_worker = PersistenceLayer::new(dir_manager)
+                    let persistence_worker = TestKeyValueStore::new(dir_manager)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_worker = Arc::new(persistence_worker);
                     *worker = worker
@@ -417,19 +419,32 @@ mod tests {
 
             let hash = Just(TestCommand::Hash);
 
+            #[cfg(feature = "rocksdb")]
             let commit = Just(TestCommand::Commit);
 
             let clone = Just(TestCommand::Clone);
 
             // The frequencies are chosen to reflect a typical workload.
-            proptest::prop_oneof![
-                250 => write,
-                250 => set,
-                50 => delete,
-                10 => clone,
-                10 => hash,
-                1 => commit,
-            ]
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "rocksdb")] {
+                    proptest::prop_oneof![
+                        250 => write,
+                        250 => set,
+                        50 => delete,
+                        10 => clone,
+                        10 => hash,
+                        1 => commit,
+                    ]
+                } else {
+                    proptest::prop_oneof![
+                        25 => write,
+                        25 => set,
+                        5 => delete,
+                        1 => clone,
+                        1 => hash,
+                    ]
+                }
+            }
         }
     }
 
@@ -446,11 +461,11 @@ mod tests {
             .expect("Creating the directory manager should succeed");
 
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
-            let persistence_layer = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
+            let persistence_layer = TestKeyValueStore::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
             let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
-            let persistence_worker = PersistenceLayer::new(&dir_manager).expect("Creating a persistence layer should succeed");
+            let persistence_worker = TestKeyValueStore::new(&dir_manager).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
             let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
