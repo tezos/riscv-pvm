@@ -29,6 +29,8 @@ pub struct TestConfig {
     pub kernel_path: &'static str,
     /// Path to inbox
     pub inbox_path: &'static str,
+    /// Path to preimages dir, if required
+    pub preimages_path: Option<&'static str>,
 }
 
 /// Test configuration for the dummy kernel
@@ -36,6 +38,7 @@ pub const DUMMY: TestConfig = TestConfig {
     golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/dummy"),
     kernel_path: concatcp!(ASSETS_DIR, "/riscv-dummy.elf"),
     inbox_path: concatcp!(ASSETS_DIR, "/dummy-kernel-inbox.json"),
+    preimages_path: Some(concatcp!(ASSETS_DIR, "/preimages")),
 };
 
 /// Test configuration which uses the compiled version of the dummy kernel
@@ -53,6 +56,7 @@ pub const JSTZ: TestConfig = TestConfig {
     golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/jstz"),
     kernel_path: concatcp!(ASSETS_DIR, "/jstz"),
     inbox_path: concatcp!(ASSETS_DIR, "/jstz-regression-inbox.json"),
+    preimages_path: None,
 };
 
 /// Test configuration for the Etherlink kernel
@@ -60,6 +64,7 @@ pub const ETHERLINK: TestConfig = TestConfig {
     golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/etherlink"),
     kernel_path: concatcp!(ASSETS_DIR, "/etherlink"),
     inbox_path: concatcp!(ASSETS_DIR, "/etherlink-regression-inbox.json"),
+    preimages_path: None,
 };
 
 /// A temporary directory used for testing
@@ -103,7 +108,6 @@ impl Drop for TestableTmpdir {
 pub fn make_stepper_factory<MC: MemoryConfig>(
     inputs: &TestConfig,
     address: Option<[u8; 20]>,
-    preimages_dir: Option<Box<Path>>,
 ) -> impl Fn() -> PvmStepper<NoHooks, MC> {
     let program = fs::read(inputs.kernel_path).expect("Kernel path should be valid");
 
@@ -116,15 +120,13 @@ pub fn make_stepper_factory<MC: MemoryConfig>(
     let address = address.unwrap_or([0; 20]);
 
     move || {
-        PvmStepper::<NoHooks, MC>::new(
-            &program,
-            inbox.clone(),
-            NoHooks,
-            address,
-            1,
-            preimages_dir.clone(),
-        )
-        .expect("PvmStepper initialisation arguments should be valid")
+        let preimages_dir = inputs
+            .preimages_path
+            .map(std::path::Path::new)
+            .map(Box::from);
+
+        PvmStepper::<NoHooks, MC>::new(&program, inbox.clone(), NoHooks, address, 1, preimages_dir)
+            .expect("PvmStepper initialisation arguments should be valid")
     }
 }
 
