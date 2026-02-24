@@ -7,7 +7,6 @@
 
 use std::io::Write;
 use std::ops::Bound;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use octez_riscv::machine_state::memory::M64M;
@@ -24,11 +23,7 @@ const ROLLUP_ADDRESS: [u8; 20] = [
 ];
 
 fn test_outbox_proofs(inputs: &TestConfig) {
-    let make_stepper = make_stepper_factory::<M64M>(
-        inputs,
-        Some(ROLLUP_ADDRESS),
-        Some(PathBuf::from("../../../assets/preimages").into_boxed_path()),
-    );
+    let make_stepper = make_stepper_factory::<M64M>(inputs, Some(ROLLUP_ADDRESS));
     let mut stepper = make_stepper();
 
     let _result = stepper.step_max(Bound::Unbounded);
