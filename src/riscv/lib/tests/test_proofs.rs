@@ -27,7 +27,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::utils::NotFound;
 use octez_riscv_test_utils::*;
-use rand::Rng;
+use rand::RngExt;
 
 // Jstz tests
 

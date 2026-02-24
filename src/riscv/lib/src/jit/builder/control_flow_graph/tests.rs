@@ -17,6 +17,7 @@ use proptest::prop_assert_eq;
 use proptest::prop_oneof;
 use proptest::test_runner::TestCaseError;
 use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
