@@ -1091,7 +1091,7 @@ mod tests {
     use std::ops::ControlFlow;
 
     use octez_riscv_data::mode_test;
-    use rand::Rng;
+    use rand::RngExt;
 
     use super::parameters::AddressHint;
     use super::parameters::Backend;

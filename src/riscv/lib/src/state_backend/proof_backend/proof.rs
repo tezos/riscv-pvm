@@ -135,7 +135,6 @@ mod tests {
     use octez_riscv_data::merkle_proof::tag::TAG_NODE;
     use octez_riscv_data::merkle_proof::tag::TAG_READ;
     use proptest::proptest;
-    use rand::Fill;
 
     use super::serialise_proof;
     use crate::state_backend::proof_backend::proof::Proof;
@@ -195,7 +194,7 @@ mod tests {
         let length: usize = rand::random::<u64>() as usize % 100 + 1;
 
         let mut raw_array = vec![0; length];
-        Fill::fill(raw_array.as_mut_slice(), &mut rand::rng());
+        rand::Fill::fill_slice(raw_array.as_mut_slice(), &mut rand::rng());
         let blind_hash: Hash = Hash::hash_bytes(&raw_array);
 
         match is_leaf_read {

@@ -12,7 +12,7 @@ use const_format::concatcp;
 use octez_riscv::machine_state::memory::MemoryConfig;
 use octez_riscv::pvm::hooks::NoHooks;
 use octez_riscv::stepper::pvm::PvmStepper;
-use rand::Rng;
+use rand::RngExt;
 use rand::seq::SliceRandom;
 use tempfile::TempDir;
 use tezos_smart_rollup_utils::inbox::InboxBuilder;

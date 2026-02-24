@@ -60,7 +60,7 @@ mod tests {
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
     use octez_riscv_data::serialisation::elem::Elem;
-    use rand::RngCore;
+    use rand::Rng;
 
     use super::*;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;

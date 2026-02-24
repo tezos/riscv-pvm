@@ -101,7 +101,7 @@ pub trait Buddy<M: Mode> {
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::mode_test;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::seq::SliceRandom;
 
     use super::*;
