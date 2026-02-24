@@ -6,9 +6,6 @@
 .PHONY: all
 all: build test check
 
-# The version of nightly that we use for anything that requires it
-NIGHTLY_VERSION = nightly-2025-01-30
-
 .PHONY: build
 build:
 	@cargo build --release --workspace

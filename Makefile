@@ -2,6 +2,9 @@
 #
 # SPDX-License-Identifier: MIT
 
+# The version of nightly that we use for anything that requires it
+NIGHTLY_VERSION = nightly-2025-01-30
+
 ### Generic top-level targets
 
 all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all docs/all
@@ -26,7 +29,7 @@ build-deps-slim: jstz/build-deps etherlink/build-deps
 	@rustup component add rustfmt clippy
 
 	# Install Nightly for formatting with its Rustfmt
-	@rustup toolchain install $(NIGHTLY_VERSION) -c rustfmt -c rust-src
+	@rustup toolchain install ${NIGHTLY_VERSION} -c rustfmt -c rust-src
 
 	# Iterate through all the toolchains. 'rustup show' (before Rustup 1.28) and
 	# 'rustup toolchain install' (Rustup 1.28+) will install the toolchain.
