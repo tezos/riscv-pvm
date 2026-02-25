@@ -1,0 +1,105 @@
+hello world
+revealing...
+I am a revealed message:
+
+                      @@@@
+                   @@@@@@@
+                   @@@@@@@
+                     @@@@@
+                     @@@@@
+                     @@@@@
+                     @@@@@
+                @@@@@@@@@@@@@@@@@@@@@@@@@@
+                @@@@@@@@@@@@@@@@@@@@@@@@@@
+                @@@@@@@@@@@@@@@@@@@@@@@@@
+                     @@@@@         @@@@@
+                     @@@@@        @@@@@
+                     @@@@@       @@@@@
+                     @@@@@      @@@@@
+                     @@@@@     @@@@@
+                     @@@@@    @@@@@
+                     @@@@@   @@@@@
+                     @@@@@  @@@@@@@
+                     @@@@@  @@@@@@@@@
+                     @@@@@  @@@@@@@@@@
+                     @@@@@    @@@@@@@@@@
+                     @@@@@       @@@@@@@@
+                     @@@@@        @@@@@@@
+                     @@@@@@  @@     @@@@@@
+                      @@@@@@@@@     @@@@@@
+                       @@@@@@@       @@@@@@
+                                      @@@@@
+                                      @@@@@
+                        @@@           @@@@@
+                       @@@@@          @@@@@
+                       @@@@@         @@@@@
+                       @@@@@         @@@@@
+                       @@@@@        @@@@@@
+                       @@@@@       @@@@@@
+                        @@@@@@@@@@@@@@@@
+                         @@@@@@@@@@@@@@
+                           @@@@@@@@@
+
+(read input) level: 0x00000000, index: 0x00000000, input: 0001
+(read input) level: 0x00000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x00000000, index: 0x02000000, input: 0101020304
+(read input) level: 0x00000000, index: 0x03000000, input: 0101040302
+(read input) level: 0x00000000, index: 0x04000000, input: 0002
+(read input) level: 0x01000000, index: 0x00000000, input: 0001
+(read input) level: 0x01000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x01000000, index: 0x02000000, input: 010101
+(read input) level: 0x01000000, index: 0x03000000, input: 0002
+(read input) level: 0x02000000, index: 0x00000000, input: 0001
+(read input) level: 0x02000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x02000000, index: 0x02000000, input: 010102
+(read input) level: 0x02000000, index: 0x03000000, input: 0002
+(read input) level: 0x03000000, index: 0x00000000, input: 0001
+(read input) level: 0x03000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x03000000, index: 0x02000000, input: 0000030b42b419240509ddacd12839700b7f720b4aa55e4e00c1a960784e695a8993bb22b150b7929b9fdb75bdf4e47cb3c43a68b0d48e3094092ca42d713addb5
+(read input) level: 0x03000000, index: 0x03000000, input: 0002
+(read input) level: 0x04000000, index: 0x00000000, input: 0001
+(read input) level: 0x04000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x04000000, index: 0x02000000, input: 0002
+(read input) level: 0x05000000, index: 0x00000000, input: 0001
+(read input) level: 0x05000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x05000000, index: 0x02000000, input: 0002
+(read input) level: 0x06000000, index: 0x00000000, input: 0001
+(read input) level: 0x06000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x06000000, index: 0x02000000, input: 0002
+(read input) level: 0x07000000, index: 0x00000000, input: 0001
+(read input) level: 0x07000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x07000000, index: 0x02000000, input: 0002
+(read input) level: 0x08000000, index: 0x00000000, input: 0001
+(read input) level: 0x08000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x08000000, index: 0x02000000, input: 0002
+(read input) level: 0x09000000, index: 0x00000000, input: 0001
+(read input) level: 0x09000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x09000000, index: 0x02000000, input: 0002
+(read input) level: 0x0a000000, index: 0x00000000, input: 0001
+(read input) level: 0x0a000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0a000000, index: 0x02000000, input: 0002
+(read input) level: 0x0b000000, index: 0x00000000, input: 0001
+(read input) level: 0x0b000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0b000000, index: 0x02000000, input: 0002
+(read input) level: 0x0c000000, index: 0x00000000, input: 0001
+(read input) level: 0x0c000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0c000000, index: 0x02000000, input: 0002
+(read input) level: 0x0d000000, index: 0x00000000, input: 0001
+(read input) level: 0x0d000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0d000000, index: 0x02000000, input: 0002
+(read input) level: 0x0e000000, index: 0x00000000, input: 0001
+(read input) level: 0x0e000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0e000000, index: 0x02000000, input: 0002
+(read input) level: 0x0f000000, index: 0x00000000, input: 0001
+(read input) level: 0x0f000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x0f000000, index: 0x02000000, input: 0002
+(read input) level: 0x10000000, index: 0x00000000, input: 0001
+(read input) level: 0x10000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x10000000, index: 0x02000000, input: 0002
+(read input) level: 0x11000000, index: 0x00000000, input: 0001
+(read input) level: 0x11000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x11000000, index: 0x02000000, input: 0002
+(read input) level: 0x12000000, index: 0x00000000, input: 0001
+(read input) level: 0x12000000, index: 0x01000000, input: 00030000000000000000884d6df8296e9e149f2b60776d7a6b2ab6c47107fdda81ec32b5070544c171d5
+(read input) level: 0x12000000, index: 0x02000000, input: 0002
+(read input) 

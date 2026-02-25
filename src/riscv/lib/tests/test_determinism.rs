@@ -32,8 +32,71 @@ fn test_dummy_determinism() {
     test_determinism(DUMMY)
 }
 
+#[test]
+fn test_dummy_no_std_determinism() {
+    test_determinism(DUMMY_NO_STD)
+}
+
+// This test checks that running the stepper step-by-step always
+// advances the pvm _exactly_ by one step.
+//
+// Previously - both read_inut and reveal handling in the stepper
+// would actually advance two steps (even if only one step was
+// requested) - if the first step put the PVM into the
+// 'WaitingForInput' state.
+#[test]
+fn test_single_step_dummy_no_std() {
+    let make_stepper = make_stepper_factory::<M64M>(&DUMMY_NO_STD_UNCHECKED, None);
+
+    let mut base_stepper = make_stepper();
+    let base_result = base_stepper.step_max(Bound::Unbounded);
+    assert!(matches!(base_result, StepperStatus::Exited { .. }));
+
+    let steps = base_result.steps();
+    let base_hash = base_stepper.hash();
+
+    // If we re-do it with identical number of steps, that should work exactly the same.
+    let mut stepper = make_stepper();
+
+    let mut ran_for = 0;
+    for _ in 0..(steps - 1) {
+        let result = stepper.step_max(Bound::Included(1));
+        ran_for += result.steps();
+        assert_eq!(result, StepperStatus::Running { steps: 1 });
+    }
+
+    let result = stepper.step_max(Bound::Included(1));
+    ran_for += result.steps();
+    assert_eq!(result.steps(), 1);
+
+    match (&base_result, &result) {
+        (
+            StepperStatus::Exited {
+                success: success_lhs,
+                status: status_lhs,
+                ..
+            },
+            StepperStatus::Exited {
+                success: success_rhs,
+                status: status_rhs,
+                ..
+            },
+        ) => {
+            assert!(success_lhs);
+            assert!(success_rhs);
+            assert_eq!(status_lhs, status_rhs);
+        }
+        _ => panic!(
+            "Expected successful dummy kernel run. Got base {base_result:?}, single_stepper: {result:?}"
+        ),
+    }
+
+    assert_eq!(base_result.steps(), ran_for);
+    assert_eq!(base_hash, stepper.hash());
+}
+
 fn test_determinism(inputs: TestConfig) {
-    let make_stepper = make_stepper_factory::<MC>(&inputs, None);
+    let make_stepper = make_stepper_factory(&inputs, None);
 
     let mut base_stepper = make_stepper();
     let base_result = base_stepper.step_max(Bound::Unbounded);

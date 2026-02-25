@@ -9,9 +9,9 @@ NIGHTLY_VERSION = nightly-2026-02-24
 
 all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all docs/all
 
-check: riscv/check jstz/check dummy/check page-cache-tester/check etherlink/check assets/check docs/check check-format
+check: riscv/check jstz/check dummy/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check check-format
 
-build: sandbox/build jstz/build dummy/build page-cache-tester/build etherlink/build
+build: sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
 
 clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
 
@@ -50,7 +50,7 @@ taplo-check-format:
 
 test: jstz/test etherlink/test cargo-nextest-run cargo-test-doc
 
-test-deps: dummy/build page-cache-tester/build
+test-deps: dummy/build page-cache-tester/build dummy-no-std/build
 
 codecov.json: test-deps
 	@cargo llvm-cov \
@@ -79,6 +79,9 @@ jstz/%:
 
 dummy/%:
 	@make -C kernels/dummy ${@:dummy/%=%}
+
+dummy-no-std/%:
+	@make -C kernels/dummy-no-std ${@:dummy-no-std/%=%}
 
 page-cache-tester/%:
 	@make -C kernels/page-cache-tester ${@:page-cache-tester/%=%}
