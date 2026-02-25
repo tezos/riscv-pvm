@@ -1,0 +1,18 @@
+[package]
+name = "riscv-dummy-no-std"
+edition = "2024"
+version = "0.0.0"
+
+[dependencies.tezos-smart-rollup-constants]
+git = "https://gitlab.com/tezos/tezos.git"
+version = "0.2.2"
+
+[dependencies.hex]
+version = "0.4.3"
+default-features = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

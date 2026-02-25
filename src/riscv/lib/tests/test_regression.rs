@@ -52,6 +52,11 @@ fn regression_frozen_dummy_kernel() {
 }
 
 #[test]
+fn regression_frozen_dummy_no_std_kernel() {
+    test_regression(DUMMY_NO_STD, true)
+}
+
+#[test]
 fn regression_dummy_kernel() {
     test_regression(DUMMY_UNCHECKED, false)
 }

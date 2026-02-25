@@ -51,6 +51,24 @@ pub const DUMMY_UNCHECKED: TestConfig = TestConfig {
     ..DUMMY
 };
 
+/// Test configuration for the dummy-no-std kernel
+pub const DUMMY_NO_STD: TestConfig = TestConfig {
+    golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/dummy-no-std"),
+    kernel_path: concatcp!(ASSETS_DIR, "/riscv-dummy-no-std"),
+    inbox_path: concatcp!(ASSETS_DIR, "/dummy-kernel-inbox.json"),
+    preimages_path: Some(concatcp!(ASSETS_DIR, "/preimages")),
+};
+
+/// Test configuration for the dummy-no-std kernel which uses the
+/// compiled version instead of the checked-in kernel
+pub const DUMMY_NO_STD_UNCHECKED: TestConfig = TestConfig {
+    kernel_path: concatcp!(
+        KERNELS_DIR,
+        "/dummy-no-std/target/riscv64gc-unknown-none-elf/release/riscv-dummy-no-std"
+    ),
+    ..DUMMY_NO_STD
+};
+
 /// Test configuration for the Jstz kernel
 pub const JSTZ: TestConfig = TestConfig {
     golden_dir: concatcp!(LIB_TESTS_DIR, "/expected/jstz"),
