@@ -355,15 +355,10 @@ mod tests {
 
         // This final add will not cause any ranges to be merged.
         r.add_range_default(2..=10);
-        assert_eq!(r.ranges(), vec![
-            0..=1,
-            2..=2,
-            3..=3,
-            4..=6,
-            7..=9,
-            10..=10,
-            11..=14
-        ]);
+        assert_eq!(
+            r.ranges(),
+            vec![0..=1, 2..=2, 3..=3, 4..=6, 7..=9, 10..=10, 11..=14]
+        );
     }
 
     proptest! {
@@ -438,10 +433,10 @@ mod tests {
         );
         assert_eq!(r.get(&10).map(|r| r.borrow().clone()), None);
 
-        assert_eq!(r.as_vec(), vec![
-            (0..=6, "helloa".to_string()),
-            (7..=9, "worldb".to_string()),
-        ]);
+        assert_eq!(
+            r.as_vec(),
+            vec![(0..=6, "helloa".to_string()), (7..=9, "worldb".to_string()),]
+        );
     }
 
     proptest! {

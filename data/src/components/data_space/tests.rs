@@ -95,21 +95,27 @@ fn stored_format() {
     assert_eq!(buffer, [37, 13]);
 
     // Writing to the entire data space must convert properly to stored format.
-    data_space.write_all::<Flipper>(0, &[
-        Flipper { a: 11, b: 22 },
-        Flipper { a: 13, b: 24 },
-        Flipper { a: 15, b: 26 },
-        Flipper { a: 17, b: 28 },
-    ]);
+    data_space.write_all::<Flipper>(
+        0,
+        &[
+            Flipper { a: 11, b: 22 },
+            Flipper { a: 13, b: 24 },
+            Flipper { a: 15, b: 26 },
+            Flipper { a: 17, b: 28 },
+        ],
+    );
 
     let mut buff = [Flipper::default(); 4];
     data_space.read_all::<Flipper>(0, &mut buff);
-    assert_eq!(buff, [
-        Flipper { a: 11, b: 22 },
-        Flipper { a: 13, b: 24 },
-        Flipper { a: 15, b: 26 },
-        Flipper { a: 17, b: 28 },
-    ]);
+    assert_eq!(
+        buff,
+        [
+            Flipper { a: 11, b: 22 },
+            Flipper { a: 13, b: 24 },
+            Flipper { a: 15, b: 26 },
+            Flipper { a: 17, b: 28 },
+        ]
+    );
 
     let buffer = unsafe { data_space.read::<[u8; 8]>(0) };
     assert_eq!(buffer, [22, 11, 24, 13, 26, 15, 28, 17]);

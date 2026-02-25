@@ -9,7 +9,7 @@
 set -e
 
 # Use nightly for access to llvm-tools-preview
-export RUST_TOOLCHAIN="nightly-2025-01-30"
+export RUST_TOOLCHAIN="nightly-2026-02-24"
 
 USAGE="[ -d: install deps ]"
 

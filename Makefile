@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # The version of nightly that we use for anything that requires it
-NIGHTLY_VERSION = nightly-2025-01-30
+NIGHTLY_VERSION = nightly-2026-02-24
 
 ### Generic top-level targets
 
