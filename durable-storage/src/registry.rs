@@ -8,6 +8,7 @@
 //! databases within the durable storage system.
 
 use std::convert::Infallible;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bincode::Decode;
@@ -23,7 +24,8 @@ use crate::database::Database;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
-use crate::persistence_layer::PersistenceLayer;
+use crate::merkle_worker::BackgroundKeyValueStore;
+use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::DirectoryManager;
 
 pub(super) const REGISTRY_ARITY: usize = 2;
@@ -36,11 +38,11 @@ struct RegistryManifest {
 
 /// Registry that owns a set of databases backed by a directory manager.
 #[repr(transparent)]
-pub struct Registry<M: Mode> {
-    inner: M::Select<RegistryTemplate>,
+pub struct Registry<KV, M: Mode> {
+    inner: M::Select<RegistryTemplate<KV>>,
 }
 
-impl Registry<Normal> {
+impl<KV> Registry<KV, Normal> {
     /// Creates a new, empty Registry.
     ///
     /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
@@ -60,7 +62,9 @@ impl Registry<Normal> {
             },
         })
     }
+}
 
+impl<KV: BackgroundPersistentKeyValueStore> Registry<KV, Normal> {
     /// Commit the registry state and return its commit ID.
     ///
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
@@ -87,7 +91,7 @@ impl Registry<Normal> {
     }
 }
 
-impl<M: RegistryMode> Registry<M> {
+impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
     /// Are there no databases in the registry?
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -107,15 +111,12 @@ impl<M: RegistryMode> Registry<M> {
     }
 
     /// Get a reference to the database at the given `index`.
-    pub fn database(&self, index: usize) -> Result<&Database<PersistenceLayer, M>, Error> {
+    pub fn database(&self, index: usize) -> Result<&Database<KV, M>, Error> {
         M::database(self, index)
     }
 
     /// Get a mutable reference to the database at the given `index`.
-    pub fn database_mut(
-        &mut self,
-        index: usize,
-    ) -> Result<&mut Database<PersistenceLayer, M>, Error> {
+    pub fn database_mut(&mut self, index: usize) -> Result<&mut Database<KV, M>, Error> {
         M::database_mut(self, index)
     }
 
@@ -136,7 +137,7 @@ impl<M: RegistryMode> Registry<M> {
     }
 }
 
-impl<M: CloneRegistryMode> Registry<M> {
+impl<KV: BackgroundKeyValueStore, M: CloneRegistryMode> Registry<KV, M> {
     /// Try to clone the registry.
     ///
     /// This can fail for mode-specific reasons.
@@ -148,10 +149,10 @@ impl<M: CloneRegistryMode> Registry<M> {
 /// Modal template for the [`Registry`]
 ///
 /// This is used to select the appropriate implementation for the mode.
-enum RegistryTemplate {}
+struct RegistryTemplate<KV>(PhantomData<KV>, Infallible);
 
-impl Modal for RegistryTemplate {
-    type Normal = NormalImpl;
+impl<KV> Modal for RegistryTemplate<KV> {
+    type Normal = NormalImpl<KV>;
 
     type Prove<'normal> = Infallible;
 
@@ -161,39 +162,53 @@ impl Modal for RegistryTemplate {
 /// Modes that implement this support operations on [`Registry`]
 pub trait RegistryMode: Mode {
     /// See [`Registry::len`]
-    fn len(this: &Registry<Self>) -> usize;
+    fn len<KV>(this: &Registry<KV, Self>) -> usize;
 
     /// See [`Registry::resize`]
-    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), Error>;
+    fn resize<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        new_size: usize,
+    ) -> Result<(), Error>;
 
     /// See [`Registry::database`]
-    fn database(
-        this: &Registry<Self>,
-        index: usize,
-    ) -> Result<&Database<PersistenceLayer, Self>, Error>;
+    fn database<KV>(this: &Registry<KV, Self>, index: usize) -> Result<&Database<KV, Self>, Error>;
 
     /// See [`Registry::database_mut`]
-    fn database_mut(
-        this: &mut Registry<Self>,
+    fn database_mut<KV>(
+        this: &mut Registry<KV, Self>,
         index: usize,
-    ) -> Result<&mut Database<PersistenceLayer, Self>, Error>;
+    ) -> Result<&mut Database<KV, Self>, Error>;
 
     /// See [`Registry::copy_database`]
-    fn copy_database(this: &mut Registry<Self>, src: usize, dst: usize) -> Result<(), Error>;
+    fn copy_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        src: usize,
+        dst: usize,
+    ) -> Result<(), Error>;
 
     /// See [`Registry::move_database`]
-    fn move_database(this: &mut Registry<Self>, src: usize, dst: usize) -> Result<(), Error>;
+    fn move_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        src: usize,
+        dst: usize,
+    ) -> Result<(), Error>;
 
     /// See [`Registry::clear_database`]
-    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), Error>;
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        index: usize,
+    ) -> Result<(), Error>;
 }
 
 impl RegistryMode for Normal {
-    fn len(this: &Registry<Self>) -> usize {
+    fn len<KV>(this: &Registry<KV, Self>) -> usize {
         this.inner.databases.len()
     }
 
-    fn resize(this: &mut Registry<Self>, new_size: usize) -> Result<(), Error> {
+    fn resize<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        new_size: usize,
+    ) -> Result<(), Error> {
         while this.len() < new_size {
             let database = Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
             this.inner.databases.push(database);
@@ -204,10 +219,7 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn database(
-        this: &Registry<Self>,
-        index: usize,
-    ) -> Result<&Database<PersistenceLayer, Self>, Error> {
+    fn database<KV>(this: &Registry<KV, Self>, index: usize) -> Result<&Database<KV, Self>, Error> {
         let database = this
             .inner
             .databases
@@ -216,10 +228,10 @@ impl RegistryMode for Normal {
         Ok(database)
     }
 
-    fn database_mut(
-        this: &mut Registry<Self>,
+    fn database_mut<KV>(
+        this: &mut Registry<KV, Self>,
         index: usize,
-    ) -> Result<&mut Database<PersistenceLayer, Self>, Error> {
+    ) -> Result<&mut Database<KV, Self>, Error> {
         let database = this
             .inner
             .databases
@@ -228,8 +240,8 @@ impl RegistryMode for Normal {
         Ok(database)
     }
 
-    fn copy_database(
-        this: &mut Registry<Self>,
+    fn copy_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
         src_index: usize,
         dst_index: usize,
     ) -> Result<(), Error> {
@@ -248,8 +260,8 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn move_database(
-        this: &mut Registry<Self>,
+    fn move_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
         src_index: usize,
         dst_index: usize,
     ) -> Result<(), Error> {
@@ -268,7 +280,10 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn clear_database(this: &mut Registry<Self>, index: usize) -> Result<(), Error> {
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        this: &mut Registry<KV, Self>,
+        index: usize,
+    ) -> Result<(), Error> {
         this.inner.validate_index(index)?;
         this.inner.databases[index] =
             Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
@@ -279,11 +294,15 @@ impl RegistryMode for Normal {
 /// Modes that implement this marker support cloning of the [`Registry`] type
 pub trait CloneRegistryMode: Mode {
     /// See [`Registry::try_clone`]
-    fn try_clone(this: &Registry<Self>) -> Result<Registry<Self>, OperationalError>;
+    fn try_clone<KV: BackgroundKeyValueStore>(
+        this: &Registry<KV, Self>,
+    ) -> Result<Registry<KV, Self>, OperationalError>;
 }
 
 impl CloneRegistryMode for Normal {
-    fn try_clone(this: &Registry<Self>) -> Result<Registry<Self>, OperationalError> {
+    fn try_clone<KV: BackgroundKeyValueStore>(
+        this: &Registry<KV, Self>,
+    ) -> Result<Registry<KV, Self>, OperationalError> {
         let runtime = this.inner.runtime.clone();
         let repo = this.inner.repo.clone();
 
@@ -305,13 +324,13 @@ impl CloneRegistryMode for Normal {
 }
 
 /// Registry implementation for the [`Normal`] mode
-struct NormalImpl {
+struct NormalImpl<KV> {
     repo: DirectoryManager,
-    databases: Vec<Database<PersistenceLayer, Normal>>,
+    databases: Vec<Database<KV, Normal>>,
     runtime: Arc<Runtime>,
 }
 
-impl NormalImpl {
+impl<KV> NormalImpl<KV> {
     /// Check the given `index` is valid for a database in the registry.
     fn validate_index(&self, index: usize) -> Result<(), InvalidArgumentError> {
         if index >= self.databases.len() {
@@ -334,10 +353,11 @@ mod tests {
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::Key;
+    use crate::persistence_layer::PersistenceLayer;
     use crate::registry::RegistryManifest;
     use crate::repo::DirectoryManager;
 
-    fn setup_registry() -> (TestableTmpdir, Registry<Normal>) {
+    fn setup_registry() -> (TestableTmpdir, Registry<PersistenceLayer, Normal>) {
         let tmpdir = TestableTmpdir::new();
         let base_dir = tmpdir.path().join("registry");
         let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
@@ -346,7 +366,7 @@ mod tests {
         (tmpdir, registry)
     }
 
-    fn setup_size_2_registry() -> (TestableTmpdir, Registry<Normal>) {
+    fn setup_size_2_registry() -> (TestableTmpdir, Registry<PersistenceLayer, Normal>) {
         let (tmpdir, mut registry) = setup_registry();
         registry
             .resize(2)
@@ -355,7 +375,7 @@ mod tests {
     }
 
     fn seed_copy_move(
-        registry: &mut Registry<Normal>,
+        registry: &mut Registry<PersistenceLayer, Normal>,
         src_index: usize,
         dst_index: usize,
     ) -> ([(Key, &'static [u8]); 2], Key) {
@@ -387,7 +407,7 @@ mod tests {
     }
 
     fn assert_pairs_present(
-        registry: &Registry<Normal>,
+        registry: &Registry<PersistenceLayer, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
@@ -406,7 +426,7 @@ mod tests {
     }
 
     fn assert_pairs_absent(
-        registry: &Registry<Normal>,
+        registry: &Registry<PersistenceLayer, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
