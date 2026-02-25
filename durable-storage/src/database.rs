@@ -309,10 +309,8 @@ mod tests {
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
             let tmpdir = TestableTmpdir::new();
-            let repo =
-                DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-            let mut database =
-                            Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+            let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+            let mut database = Database::try_new(handle, &repo).expect("Creating a test database should succeed");
 
             let mut expected = std::collections::HashMap::new();
             for (key, value) in entries {
@@ -338,13 +336,12 @@ mod tests {
                 prop_assert_eq!(stored.as_ref(), value.as_ref());
             }
         }
-    }
 
-    proptest! {
         #[test]
-        fn test_database_delete(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
+        fn test_database_delete(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+        ) {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .build()
                 .expect("Creating a Tokio runtime should succeed");

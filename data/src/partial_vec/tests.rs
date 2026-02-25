@@ -184,13 +184,10 @@ fn get_with_gaps() {
         &mut acc[item.width()..]
     });
 
-    assert_eq!(defined, vec![
-        Some(true),
-        Some(true),
-        Some(false),
-        Some(true),
-        Some(true)
-    ]);
+    assert_eq!(
+        defined,
+        vec![Some(true), Some(true), Some(false), Some(true), Some(true)]
+    );
 }
 
 /// Check if `is_all_defined` works in various scenarios where there are no gaps

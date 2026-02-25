@@ -118,10 +118,13 @@ fn check_expected_execution(txs: &[Tx], expected_transfers: usize) -> Result<&[T
         .into());
     }
 
-    if !matches!(txs[1].outcome.result, TxExecutionResult::Success {
-        output: OutputType::Create(_),
-        ..
-    }) {
+    if !matches!(
+        txs[1].outcome.result,
+        TxExecutionResult::Success {
+            output: OutputType::Create(_),
+            ..
+        }
+    ) {
         return Err("Expected the second transaction to be a contract deployment".into());
     }
 

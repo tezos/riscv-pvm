@@ -419,10 +419,14 @@ impl PersistentKeyValueStore for PersistenceLayer {
 
         // Open the previous commitment from the given source path
         let mut options = rocksdb_clone_as_checkpoint_options();
-        let read_only_database = rocksdb::DB::open_cf_descriptors(&options, commit_path, [
-            ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-            ColumnFamilyDescriptor::new("default", options.clone()),
-        ])
+        let read_only_database = rocksdb::DB::open_cf_descriptors(
+            &options,
+            commit_path,
+            [
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new("default", options.clone()),
+            ],
+        )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
         // Make a copy to ensure we're not modifying the commitment path's contents
@@ -439,10 +443,14 @@ impl PersistentKeyValueStore for PersistenceLayer {
             offset_write_partial_merge,
         );
 
-        let database = rocksdb::DB::open_cf_descriptors(&options, &checkpoint_path, [
-            ColumnFamilyDescriptor::new("default", options.clone()),
-            ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
-        ])
+        let database = rocksdb::DB::open_cf_descriptors(
+            &options,
+            &checkpoint_path,
+            [
+                ColumnFamilyDescriptor::new("default", options.clone()),
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
+            ],
+        )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
         Ok(Self {
