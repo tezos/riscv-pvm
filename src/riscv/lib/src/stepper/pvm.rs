@@ -52,6 +52,7 @@ use crate::pvm::outbox::OutboxProof;
 use crate::pvm::outbox::OutboxProofError;
 use crate::pvm::outbox::Output;
 use crate::pvm::outbox::OutputInfo;
+use crate::range_utils;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::OwnedProofPart;
 use crate::state_backend::ProofPart;
@@ -88,6 +89,9 @@ pub struct PvmStepper<
     rollup_address: [u8; 20],
     origination_level: u32,
     reveal_request_response_map: RevealRequestResponseMap,
+    /// Whether the pvm stepper has exited. If true,
+    /// attempting to step the pvm will fail
+    has_exited: bool,
 }
 
 /// Variant of the [`PvmStepper`] used for verifying proofs
@@ -124,6 +128,7 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
             rollup_address,
             origination_level,
             reveal_request_response_map,
+            has_exited: false,
         })
     }
 
@@ -161,6 +166,7 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
             hooks: NoHooks,
 
             reveal_request_response_map: self.reveal_request_response_map.clone(),
+            has_exited: false,
         }
     }
 
@@ -206,16 +212,30 @@ impl<
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
+    // TODO RV-573:
+    // There is a divergence from the semantics of the PVM. Namely, when failing to provide input
+    // we actually still take a step whilst transitioning to the 'error mode'. This is needed to
+    // allow the semantics of `run(Unbounded) -> Exited { steps: X }` and `run(X) -> Exited { steps: X }`
+    // to be equivalent. Otherwise, if returning `Exited` for the inbox being drained takes no steps,
+    // we'd actually return `Running { X }` still in the second case. RV-573 will address this by no
+    // longer returning stepper status, but rather allowing parts of the stepper harness, and the pvm, to
+    // be queried directly.
     fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
         // SAFETY: We're in a stepper context where divergence (e.g. early exit) is allowed.
         unsafe {
             if let Some(exit_code) = self.pvm.has_exited() {
+                self.has_exited = true;
                 return StepperStatus::Exited {
                     steps: 0,
                     success: exit_code == 0,
                     status: format!("Exited with code {exit_code}"),
                 };
             }
+        }
+
+        if range_utils::unwrap_bound(steps) == 0 {
+            // we cannot eval steps or provide input
+            return StepperStatus::Running { steps: 0 };
         }
 
         match self.pvm.status() {
@@ -233,19 +253,27 @@ impl<
                     if success {
                         StepperStatus::Running { steps: 1 }
                     } else {
+                        // TODO RV-573: the stepper should take no steps here. We should not return status
+                        // but have it be separately queryable
+                        self.has_exited = true;
                         StepperStatus::Errored {
-                            steps: 0,
+                            steps: 1,
                             cause: "PVM was waiting for input".to_owned(),
                             message: "Providing input did not succeed".to_owned(),
                         }
                     }
                 }
 
-                None => StepperStatus::Exited {
-                    steps: 0,
-                    success: true,
-                    status: "Inbox has been drained".to_owned(),
-                },
+                None => {
+                    // TODO RV-573: the stepper should take no steps here. We should not return status
+                    // but have it be separately queryable
+                    self.has_exited = true;
+                    StepperStatus::Exited {
+                        steps: 1,
+                        success: true,
+                        status: "Inbox has been drained".to_owned(),
+                    }
+                }
             },
 
             PvmStatus::WaitingForReveal => {
@@ -267,8 +295,11 @@ impl<
                 if success {
                     StepperStatus::Running { steps: 1 }
                 } else {
+                    // TODO RV-573: the stepper should take no steps here. We should not return status
+                    // but have it be separately queryable
+                    self.has_exited = true;
                     StepperStatus::Errored {
-                        steps: 0,
+                        steps: 1,
                         cause: "PVM was waiting for reveal response".to_owned(),
                         message: "Providing reveal response did not succeed".to_owned(),
                     }
@@ -372,6 +403,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
             hooks: NoHooks,
 
             reveal_request_response_map: self.reveal_request_response_map.clone(),
+            has_exited: false,
         })
     }
 }
@@ -467,6 +499,14 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorag
     type StepResult = StepperStatus;
 
     fn step_max(&mut self, mut step_bounds: Bound<usize>) -> Self::StepResult {
+        if self.has_exited {
+            return StepperStatus::Errored {
+                steps: 0,
+                cause: "PVM stepper exited previously".to_owned(),
+                message: "Cannot step a PVM Stepper that previously exited".to_owned(),
+            };
+        }
+
         let mut total_steps = 0usize;
 
         loop {
