@@ -28,7 +28,7 @@
         "groups": [
           {
             "group": "Introduction",
-            "pages": ["state-framework/index"]
+            "pages": ["state-framework/index", "state-framework/components"]
           }
         ]
       }
