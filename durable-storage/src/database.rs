@@ -319,7 +319,7 @@ mod tests {
                 let key = Key::new(&key).expect("Size less than KEY_MAX_SIZE");
                 let value = Bytes::copy_from_slice(&value);
                 database
-                    .write(key.clone(), 0, value.clone())
+                    .set(key.clone(), value.clone())
                     .expect("Writing should succeed");
                 expected.insert(key, value);
             }
