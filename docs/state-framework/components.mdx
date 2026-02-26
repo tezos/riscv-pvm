@@ -1,0 +1,133 @@
+---
+title: "State Components"
+description: "Anatomy of state data types"
+---
+
+State data types in this framework are made up of mode-specific and mode-generic components. We refer to these parts as _state components_, regardless of modality.
+
+Not all components serve the same purpose. Some encapsulate state, while others make it reusable.
+
+## Mode Parameter
+
+All state components are parameterised by a mode type, most commonly named `M`.
+
+The `MyState` type constructor below is an example of a state component.
+
+```rust
+struct MyState<M: Mode> {
+    ...
+}
+```
+
+The mode parameter configures the state type for its intended use. For example, to generate a proof for a state transition, you would pick `M = Prove`.
+
+## Mode-Generic Components
+
+Mode-generic components contain no mode-specific logic. They primarily pass the mode parameter through to other components.
+
+For example, if `MyState` were mode-generic, it could look something like this:
+
+```rust
+struct MyState<M: Mode> {
+    first: AnotherState<M>,
+    second: YetAnotherState<M>,
+}
+```
+
+This type does not branch on mode directly. `AnotherState` and `YetAnotherState` handle the mode-specific behaviour.
+
+## Mode-Specific Components
+
+Mode-specific components change their representation and implementation depending on the mode. They require explicit internal handling of the mode.
+
+If `MyState` were a mode-specific component, its definition would look like this:
+
+```rust
+struct MyState<M: Mode> {
+    inner: M::Select<MyStateTemplate>,
+}
+```
+
+### Trait `Modal`
+
+`M::Select` is the mechanism that lets `MyState` change the representation of its `inner` field based on mode. `MyStateTemplate` is a helper type that defines the per-mode mapping by implementing the `Modal` trait.
+
+```rust
+enum MyStateTemplate {}
+
+impl Modal for MyStateTemplate {
+    type Normal = NormalImpl;
+    
+    type Prove<'normal> = ProveImpl<'normal>;
+    
+    type Verify = VerifyImpl;
+}
+```
+
+`M::Select` combined with `Modal` allows mode-based specialisation of the `MyState` type.
+
+The following is not valid code, but conceptually this is what the specialisations look like:
+
+```rust
+struct MyState<Normal> {
+    inner: NormalImpl,
+}
+
+struct MyState<Prove<'normal>> {
+    inner: ProveImpl<'normal>,
+}
+
+struct MyState<Verify> {
+    inner: VerifyImpl,
+}
+```
+
+### Extending `Mode`
+
+In the previous section, we saw how `Mode`/`Modal` change a type's representation based on mode. That leads to the next problem: unless the `M` mode parameter is known exactly, we cannot operate directly on the type selected by `M::Select`, because that type is also unknown.
+
+To solve this, we use traits.
+
+First, we move the mode-dependent functionality of `MyState` into a new trait.
+
+```rust
+trait MyStateMode: Mode {
+    fn some_function(this: &mut MyState<Self>);
+}
+```
+
+With that in place, we implement it for each mode:
+
+```rust
+impl MyStateMode for Normal {
+    ...
+}
+
+impl<'normal> MyStateMode for Prove<'normal> {
+    ...
+}
+
+impl MyStateMode for Verify {
+    ...
+}
+```
+
+This works because each implementation knows the concrete `M` for `MyState`. As a result, `M::Select` resolves to a concrete type we can operate on.
+
+Calling the trait directly can be cumbersome, so we add a convenience method to `MyState`.
+
+```rust
+impl<M: MyStateMode> MyState<M> {
+    fn some_function(&mut self) {
+        M::some_function(self)
+    }
+}
+```
+
+This forwards the call from the method on `MyState` to the corresponding trait method.
+
+### Usage
+
+When using `MyState<M>` in type definitions, we require `M: Mode`.
+
+When interacting with values of type `MyState<M>`, we require `M: MyStateMode`.
