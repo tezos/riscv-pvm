@@ -51,6 +51,9 @@ jobs:
             make-target: check
             title: MacOS Checks
 
+    permissions:
+      actions: read
+
     name: ${{ matrix.title }}
     runs-on: ${{ matrix.runs-on }}
 
