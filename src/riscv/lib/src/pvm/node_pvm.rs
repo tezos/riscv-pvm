@@ -7,6 +7,8 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::components::atom::AtomMode;
+use octez_riscv_data::components::atom::CloneAtomMode;
+use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
@@ -20,6 +22,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
 
@@ -55,7 +58,7 @@ type NodePvmPageCache = PageCacheInterpreted<NodePvmMemConfig>;
 
 type NodePvmState<M, PC, DS> = Pvm<NodePvmMemConfig, PC, DS, M>;
 
-#[perfect_derive(Clone, Default)]
+#[perfect_derive(Default)]
 #[derive(derive_more::Debug)]
 #[debug("NodePvm(<unknown state>)")]
 pub struct NodePvm<M: Mode = Normal, PC = NodePvmPageCache, DS = DurableStorageDummy> {
@@ -68,6 +71,15 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
         Self {
             state: Box::new(state),
         }
+    }
+
+    /// Attempt to clone the PVM state.
+    pub fn try_clone(&self) -> Result<Self, super::errors::OperationalError>
+    where
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+    {
+        let cloned_pvm = self.state.try_clone()?;
+        Ok(Self::wrap(cloned_pvm))
     }
 
     fn with_backend_mut<T, F>(&mut self, f: F) -> T
