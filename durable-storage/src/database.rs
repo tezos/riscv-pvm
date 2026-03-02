@@ -28,6 +28,7 @@ use crate::key::Key;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::MerkleWorker;
 pub use crate::repo::DirectoryManager;
+use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
@@ -144,7 +145,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     }
 }
 
-impl<KV> Foldable<HashFold> for Database<KV, Normal> {
+impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
     fn fold(&self, _builder: HashFold) -> Hash {
         self.inner.merkle.hash().expect("Hashing should not fail")
     }

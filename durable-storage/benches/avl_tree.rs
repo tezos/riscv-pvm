@@ -4,15 +4,17 @@
 mod random;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use octez_riscv_durable_storage::avl::resolver::ArcResolver;
+use octez_riscv_durable_storage::avl::resolver::LazyResolver;
 use octez_riscv_durable_storage::avl::tree::Tree;
 use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::storage::KeyValueStore;
 use rand::prelude::*;
 use random::generate_keys;
 use random::generate_random_bytes_in_range;
@@ -41,6 +43,35 @@ fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize)
         .collect()
 }
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "rocksdb")] {
+        use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+        use octez_riscv_test_utils::TestableTmpdir;
+
+        type TestKeyValueStore = PersistenceLayer;
+        type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+
+        fn setup_repo() -> (TestableTmpdir, TestRepo) {
+            use octez_riscv_durable_storage::repo::DirectoryManager;
+
+            let tmpdir = TestableTmpdir::new();
+            let dir_manager = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
+
+            (tmpdir, dir_manager)
+        }
+    } else {
+        use  octez_riscv_durable_storage::storage::in_memory::InMemoryKeyValueStore;
+        use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
+
+        type TestKeyValueStore = InMemoryKeyValueStore;
+        type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+
+        fn setup_repo() -> ((), TestRepo) {
+            ((), InMemoryRepo)
+        }
+    }
+}
+
 /// This bench inserts half of the [`KEY_COUNT`]
 /// generated keys into an AVL tree and samples from
 /// all of them for the set and delete operations
@@ -48,7 +79,11 @@ fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize)
 fn bench_avl_tree_operations(c: &mut Criterion) {
     let mut rng = rand::rng();
     let keys = generate_keys(&mut rng, KEY_COUNT);
-    let mut resolver = ArcResolver;
+
+    let (_tmpdir, repo) = setup_repo();
+    let persistence_layer =
+        TestKeyValueStore::new(&repo).expect("persistence layer should succeed in being created.");
+    let mut resolver = LazyResolver::new(Arc::new(persistence_layer));
 
     // Setting up the tree
     let mut tree = Tree::default();

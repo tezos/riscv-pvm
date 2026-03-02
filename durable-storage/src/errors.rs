@@ -88,9 +88,23 @@ pub enum OperationalError {
     #[error("Error while writing to file: {error}")]
     FileWriteFailed { error: std::io::Error },
 
+    /// The lazy resolver encountered an internally inconsistent identifier state.
+    ///
+    /// `LazyId` values must always hold either (though can hold both):
+    /// - a hash (`id: Some(hash)`) when the value is not loaded yet, or
+    /// - an in-memory value (`inner` set) when the hash has been consumed.
+    ///
+    /// This error indicates that the state does not satisfy that invariant and is treated as
+    /// fatal because resolver logic can no longer proceed safely.
     #[error("Resolver invariant violated. Either the hash or the value of an ID must exist.")]
     ResolverInvariantViolated,
 
+    /// A content-addressed-storage (`blob_get`) lookup returned an invalid-argument error while
+    /// resolving a known hash.
+    ///
+    /// Resolver lookups are performed with a concrete hash that was already accepted by resolver
+    /// logic. Receiving an [`InvalidArgumentError`] at that point signals an unexpected storage
+    /// contract violation, so it is surfaced as an operational failure with the failing hash.
     #[error("Resolver CAS lookup returned invalid argument for hash {hash:?}: {error}")]
     ResolverCasLookup {
         hash: Hash,
@@ -135,4 +149,14 @@ pub enum Error {
 
     #[error("Invalid argument error: {0}")]
     InvalidArgument(#[from] InvalidArgumentError),
+}
+
+impl Error {
+    pub(super) fn into_resolver_op_error(self, hash: Hash) -> OperationalError {
+        match self {
+            // See [`OperationalError::ResolverCasLookup`]
+            Error::InvalidArgument(error) => OperationalError::ResolverCasLookup { hash, error },
+            Error::Operational(error) => error,
+        }
+    }
 }

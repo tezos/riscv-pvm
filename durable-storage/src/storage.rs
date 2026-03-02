@@ -103,14 +103,21 @@ pub trait PersistentKeyValueStore: KeyValueStore + Sized {
 #[cfg(test)]
 cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
+        /// Key-value store backend used when the `rocksdb` feature is enabled.
         pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
+
+        /// Repository type required to initialise [`TestKeyValueStore`].
         pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
 
-        /// Setup a [TestRepo] to work with [TestKeyValueStore].
+        /// Create a test repository for [`TestKeyValueStore`].
         ///
-        /// Returns two values. The first must be kept in-scope until the end of the test, the second
-        /// is the repo.
-        #[cfg(test)]
+        /// Returns `(keepalive, repo)`:
+        /// - `keepalive` is a temporary directory handle that must stay in scope for the lifetime
+        ///   of `repo`.
+        /// - `repo` is the backend repository value to pass into
+        ///   [`KeyValueStore::new`] / [`KeyValueStore::try_clone`].
+        ///
+        /// TODO RV-942: Refactor the function to avoid the need for `keepalive` return value.
         pub(crate) fn setup_repo() -> (octez_riscv_test_utils::TestableTmpdir, TestRepo) {
             use crate::repo::DirectoryManager;
 
@@ -120,14 +127,15 @@ cfg_if::cfg_if! {
             (tmpdir, dir_manager)
         }
     } else {
+        /// Test key-value store backend used when the `rocksdb` feature is disabled.
         pub(crate) type TestKeyValueStore = crate::storage::in_memory::InMemoryKeyValueStore;
+
+        /// Repository type required to initialise [`TestKeyValueStore`].
         pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
 
-        /// Setup a [TestRepo] to work with [TestKeyValueStore].
+        /// Create a test repository for [`TestKeyValueStore`].
         ///
-        /// Returns two values. The first must be kept in-scope until the end of the test, the second
-        /// is the repo.
-        #[cfg(test)]
+        /// Returns `((), repo)` for signature compatibility with the `rocksdb` branch.
         pub(crate) fn setup_repo() -> ((), TestRepo) {
             ((), in_memory::InMemoryRepo)
         }

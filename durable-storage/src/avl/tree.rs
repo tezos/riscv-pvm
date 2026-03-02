@@ -131,7 +131,14 @@ impl<NodeId> Tree<NodeId> {
         Hash::hash_encodable(encodable).expect("Should be hashable")
     }
 
-    /// Creates an in-order iterator for the [`Node`]s in the [`Tree`]
+    /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
+    ///
+    /// Each call to [`Iterator::next`] first descends as far left as possible from the current
+    /// subtree, pushing the visited node ids onto an explicit stack. Once it reaches an empty
+    /// subtree, it pops the next node from the stack, yields that node, and continues from that
+    /// node's right subtree on the next call.
+    ///
+    /// The iterator yields an error if resolving any intermediate node or subtree fails.
     pub(crate) fn iter<'tree, 'res, TreeId, Value, Res: AvlResolver<NodeId, TreeId, Value>>(
         &'tree self,
         resolver: &'res Res,
@@ -309,32 +316,75 @@ impl<NodeId> Tree<NodeId> {
     }
 }
 
-/// Used for iterating through the nodes of the [`Tree`] tree in order.
-pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, Value, Res> {
+/// Used for iterating through the nodes of the [`Tree`] in-order (left-to-right).
+///
+/// `current` tracks the subtree that still needs to be explored, while `stack` stores the path of
+/// ancestor node ids whose left subtrees have already been explored. This lets the iterator do an
+/// in-order traversal without recursion.
+///
+/// Resolution failures are surfaced as iterator items of type `Err`.
+pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, Value, Resolver> {
     stack: Vec<&'tree NodeId>,
     current: &'tree Tree<NodeId>,
-    resolver: &'res Res,
+    resolver: &'res Resolver,
     _marker: std::marker::PhantomData<fn() -> (TreeId, Value)>,
 }
 
-impl<'tree, 'res, NodeId, TreeId: 'tree, Value: 'tree, Res: AvlResolver<NodeId, TreeId, Value>>
-    Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, Value, Res>
+impl<'tree, 'res, NodeId, TreeId: 'tree, Value: 'tree, Resolver: AvlResolver<NodeId, TreeId, Value>>
+    Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, Value, Resolver>
 {
-    type Item = &'tree NodeId;
+    type Item = Result<&'tree Node<TreeId, Value>, OperationalError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(node) = self.current.root() {
-            self.stack.push(node);
-
-            let resolved_node = self.resolver.resolve(node).ok()?;
-            self.current = resolved_node.left_ref(self.resolver).ok()?;
+        if let Some(root_id) = self.current.root() {
+            if let Err(err) = self.advance_to_leftmost_in_subtree(root_id) {
+                return Some(Err(err));
+            }
         }
 
-        let ret = self.stack.pop()?;
-        let resolved_node = self.resolver.resolve(ret).ok()?;
-        self.current = resolved_node.right_ref(self.resolver).ok()?;
+        match self.pop_and_prepare_right_subtree() {
+            Ok(Some(node)) => Some(Ok(node)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
+    }
+}
 
-        Some(ret)
+impl<'tree, 'res, NodeId, TreeId: 'tree, Value: 'tree, Resolver: AvlResolver<NodeId, TreeId, Value>>
+    TreeIterator<'tree, 'res, NodeId, TreeId, Value, Resolver>
+{
+    /// Helper to descend to the leftmost node in the current subtree, pushing nodes onto the stack.
+    fn advance_to_leftmost_in_subtree(
+        &mut self,
+        mut node_id: &'tree NodeId,
+    ) -> Result<(), OperationalError> {
+        loop {
+            self.stack.push(node_id);
+            let resolved_node = self.resolver.resolve(node_id)?;
+            let left = resolved_node.left_ref(self.resolver)?;
+            match left.root() {
+                Some(left_id) => node_id = left_id,
+                None => {
+                    self.current = left;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Helper to pop the next node from the stack and prepare to traverse its right subtree.
+    fn pop_and_prepare_right_subtree(
+        &mut self,
+    ) -> Result<Option<&'tree Node<TreeId, Value>>, OperationalError> {
+        let node_id = match self.stack.pop() {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        let resolved_node = self.resolver.resolve(node_id)?;
+        let right = resolved_node.right_ref(self.resolver)?;
+        self.current = right;
+        Ok(Some(resolved_node))
     }
 }
 
@@ -457,6 +507,7 @@ mod tests {
     use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
+    use proptest::test_runner::TestCaseError;
 
     use super::*;
     use crate::avl::resolver::ArcNodeId;
@@ -511,7 +562,7 @@ mod tests {
         let tree_iter = tree.iter(&resolver);
         let mut reference_iter = reference.iter();
         for node in tree_iter {
-            let node = resolver.resolve(node).unwrap();
+            let node = node.expect("Tree iterator should yield nodes successfully");
             if let Some((key, value)) = reference_iter.next() {
                 assert_eq!(node.key(), key);
                 assert_eq!(node.data(), value);
@@ -526,9 +577,33 @@ mod tests {
         );
     }
 
+    fn build_tree(keys: &[Key]) -> Result<Tree<ArcNodeId>, OperationalError> {
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut resolver = ArcResolver;
+
+        for key in keys {
+            tree.set(key, key.as_ref(), &mut resolver)?;
+        }
+
+        Ok(tree)
+    }
+
+    fn iterated_keys(tree: &Tree<ArcNodeId>) -> Result<Vec<Key>, OperationalError> {
+        let resolver = ArcResolver;
+        tree.iter(&resolver)
+            .map(|node| node.map(|node| node.key().clone()))
+            .collect()
+    }
+
     #[derive(Debug)]
     struct FailOnKeyResolver {
-        fail_on: Key,
+        target_failure_key: Key,
+    }
+
+    impl FailOnKeyResolver {
+        fn new(target_failure_key: Key) -> Self {
+            Self { target_failure_key }
+        }
     }
 
     impl Resolver<ArcNodeId, Node<ArcTreeId, Bytes<Normal>>> for FailOnKeyResolver {
@@ -542,7 +617,7 @@ mod tests {
         ) -> Result<&'a Node<ArcTreeId, Bytes<Normal>>, OperationalError> {
             let node = ArcResolver.resolve(id)?;
 
-            if node.key() == &self.fail_on {
+            if node.key() == &self.target_failure_key {
                 return Err(OperationalError::ResolverInvariantViolated);
             }
 
@@ -555,7 +630,7 @@ mod tests {
         ) -> Result<&'a mut Node<ArcTreeId, Bytes<Normal>>, OperationalError> {
             let node = ArcResolver.resolve_mut(id)?;
 
-            if node.key() == &self.fail_on {
+            if node.key() == &self.target_failure_key {
                 return Err(OperationalError::ResolverInvariantViolated);
             }
 
@@ -580,8 +655,61 @@ mod tests {
         }
     }
 
+    fn assert_iterator_failure_on_key(
+        tree: &Tree<ArcNodeId>,
+        target_failure_key: &Key,
+        expected_prefix: &[Key],
+    ) -> Result<(), TestCaseError> {
+        let resolver = FailOnKeyResolver::new(target_failure_key.clone());
+        let mut iter = tree.iter(&resolver);
+        let mut observed_prefix = Vec::new();
+
+        loop {
+            match iter.next() {
+                Some(Ok(node)) => observed_prefix.push(node.key().clone()),
+                Some(Err(OperationalError::ResolverInvariantViolated)) => break,
+                Some(Err(err)) => {
+                    return Err(TestCaseError::fail(format!(
+                        "iterator returned an unexpected error: {err:?}"
+                    )));
+                }
+                None => {
+                    return Err(TestCaseError::fail(
+                        "iterator unexpectedly completed without surfacing the resolver failure"
+                            .to_owned(),
+                    ));
+                }
+            }
+        }
+
+        prop_assert_eq!(observed_prefix, expected_prefix);
+
+        // check that the iterator continues to surface the same failure on subsequent calls,
+        // without yielding any more valid nodes.
+        prop_assert!(matches!(
+            iter.next(),
+            Some(Err(OperationalError::ResolverInvariantViolated))
+        ));
+
+        Ok(())
+    }
+
+    fn four_distinct_keys_strategy() -> impl Strategy<Value = [Key; 4]> {
+        proptest::collection::btree_set(any::<u32>(), 4).prop_map(|values| {
+            values
+                .into_iter()
+                .map(|value| {
+                    Key::new(&value.to_be_bytes())
+                        .expect("u32 keys are always shorter than KEY_MAX_SIZE")
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .expect("the strategy always produces exactly four distinct keys")
+        })
+    }
+
     #[test]
-    fn get_distinguishes_missing_key_from_resolution_error() {
+    fn test_get_error_surfacing_vs_missing_key() {
         let root = Key::new(&[2]).expect("The key should be valid.");
         let left = Key::new(&[1]).expect("The key should be valid.");
         let missing = Key::new(&[0]).expect("The key should be valid.");
@@ -591,28 +719,75 @@ mod tests {
         let mut setup_resolver = ArcResolver;
         tree.set(&root, b"root", &mut setup_resolver)
             .expect("Setting the root should succeed.");
+        // The second insert descends from the existing root and populates the root's left subtree;
+        // it does not replace the tree root.
         tree.set(&left, b"left", &mut setup_resolver)
             .expect("Setting the left child should succeed.");
 
-        let ok_resolver = FailOnKeyResolver {
-            fail_on: no_failure_key,
-        };
+        let ok_resolver = FailOnKeyResolver::new(no_failure_key);
         assert!(
             matches!(tree.get(&missing, &ok_resolver), Ok(None)),
             "Missing key lookup should be distinguishable as Ok(None)."
         );
 
-        let failing_resolver = FailOnKeyResolver { fail_on: left };
+        let failing_resolver = FailOnKeyResolver::new(left);
         assert!(
             matches!(
                 tree.get(&missing, &failing_resolver),
                 Err(OperationalError::ResolverInvariantViolated)
             ),
-            "Resolver failures should be propagated as Err."
+            "Resolver failures should be propagated as Error."
         );
     }
 
     proptest! {
+        #[test]
+        fn test_iterator_error_surfacing(
+            ordered_keys in four_distinct_keys_strategy(),
+            fail_on_left in any::<bool>(),
+        ) {
+            let [a, b, c, d] = ordered_keys;
+
+            // Test a two-node and an effectively rebalanced three-node tree.
+            let (two_node_keys, two_node_expected, three_node_keys, three_node_expected, target_failure_key, two_node_failure_prefix) = if fail_on_left {
+                (
+                    vec![c.clone(), b.clone()],
+                    vec![b.clone(), c.clone()],
+                    vec![c.clone(), b.clone(), a.clone()],
+                    vec![a.clone(), b.clone(), c.clone()],
+                    b.clone(),
+                    vec![],
+                )
+            } else {
+                (
+                    vec![b.clone(), c.clone()],
+                    vec![b.clone(), c.clone()],
+                    vec![b.clone(), c.clone(), d.clone()],
+                    vec![b.clone(), c.clone(), d.clone()],
+                    c.clone(),
+                    vec![b.clone()],
+                )
+            };
+
+            let two_node_tree = build_tree(&two_node_keys)?;
+            let three_node_tree = build_tree(&three_node_keys)?;
+            let resolver = ArcResolver;
+
+            prop_assert_eq!(iterated_keys(&two_node_tree)?, two_node_expected);
+            prop_assert_eq!(
+                iterated_keys(&three_node_tree)?,
+                three_node_expected
+            );
+
+            two_node_tree.check(&resolver)?;
+            three_node_tree.check(&resolver)?;
+
+            assert_iterator_failure_on_key(&two_node_tree, &target_failure_key, &two_node_failure_prefix)?;
+            // in the right-side failure case with three nodes, the failure key is the root after rebalancing,
+            // so the iterator will fail immediately without yielding any nodes.
+            assert_iterator_failure_on_key(&three_node_tree, &target_failure_key, &[])?;
+        }
+
         #[test]
         fn avl_driver_test(operations in (1usize..500usize).prop_flat_map(operations_strategy)) {
             let mut tree: Tree<ArcNodeId> = Default::default();

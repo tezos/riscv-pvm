@@ -89,7 +89,7 @@ impl<KV> Command<KV> {
         Self,
     )
     where
-        KV: Send + Sync + 'static,
+        KV: BackgroundKeyValueStore,
     {
         let (sender, receiver) = oneshot::channel();
 
@@ -108,7 +108,10 @@ impl<KV> Command<KV> {
     }
 
     /// Construct a command that performs a [`MerkleLayer::hash`].
-    fn new_hash() -> (impl FnOnce() -> Result<Hash, OperationalError>, Self) {
+    fn new_hash() -> (impl FnOnce() -> Result<Hash, OperationalError>, Self)
+    where
+        KV: KeyValueStore,
+    {
         let (sender, receiver) = oneshot::channel();
 
         let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
@@ -161,7 +164,7 @@ impl<KV> MerkleWorker<KV> {
     /// The provided handle is used to spawn the background worker thread.
     pub fn new(async_handle: &Handle, store: Arc<KV>) -> Self
     where
-        KV: Send + Sync + 'static,
+        KV: BackgroundKeyValueStore,
     {
         let layer = MerkleLayer::new(store);
         MerkleWorker::from_layer(async_handle, layer)
@@ -195,7 +198,7 @@ impl<KV> MerkleWorker<KV> {
         store: Arc<KV>,
     ) -> Result<Self, OperationalError>
     where
-        KV: Send + Sync + 'static,
+        KV: BackgroundKeyValueStore,
     {
         let (receive, command) = Command::new_clone_with(store);
         self.sender
@@ -247,7 +250,10 @@ impl<KV> MerkleWorker<KV> {
     }
 
     /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> Result<Hash, OperationalError> {
+    pub(crate) fn hash(&self) -> Result<Hash, OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         let (receive, command) = Command::new_hash();
         self.sender
             .send(command)
