@@ -2,7 +2,24 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Interface for resolving data from identifiers of [`Tree`] and [`Node`] objects.
+//! Resolution strategies for identifiers of [`Tree`] and [`Node`] objects.
+//!
+//! This module supports two resolver modes:
+//! - [`ArcResolver`] for eagerly loaded values, where node and tree identifiers directly contain
+//!   in-memory data.
+//! - [`LazyResolver`] for hash-backed values, where identifiers can start as hashes and materialise
+//!   values from storage on first access.
+//!
+//! # Lazy loading strategy
+//! `LazyResolver` works with [`LazyId`] wrappers. A `LazyId` keeps a hash (`id`) and/or a loaded
+//! value (`inner`) and transitions from "hash-only" to "value-cached" when `resolve` or
+//! `resolve_mut` is called. This avoids loading the full tree upfront while preserving stable hash
+//! computation.
+//!
+//! # ArcResolver vs LazyResolver
+//! Use [`ArcResolver`] when values are already present and can be shared directly via [`Arc`]. Use
+//! [`LazyResolver`] when values are persisted in a [`KeyValueStore`] and should be fetched on
+//! demand.
 //!
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
@@ -19,7 +36,6 @@ use trait_set::trait_set;
 use super::node::Node;
 use super::tree::Tree;
 use crate::avl::node::NodeHashRepresentation;
-use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -59,7 +75,10 @@ pub struct ArcNodeId(Arc<Node<ArcTreeId, Bytes<Normal>>>);
 #[derive(Debug, Clone, derive_more::From, Default)]
 pub struct ArcTreeId(Tree<ArcNodeId>);
 
-/// Provide values identified by an [`Arc`].
+/// Eager resolver that serves identifiers backed by in-memory [`Arc`] values.
+///
+/// This resolver never touches persistent storage. It is useful for trees already in memory
+/// and for tests.
 #[derive(Clone, Debug)]
 pub struct ArcResolver;
 
@@ -100,10 +119,14 @@ impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
     }
 }
 
-/// Identifier that can be resolved lazily and cached after first load.
+/// Identifier wrapper used by lazy resolution.
 ///
-/// We assume the invariant that if the identifier is not available,
-/// the value must be available, and vice versa.
+/// A `LazyId` is either:
+/// - unresolved, where `id` contains a hash and `inner` is empty, or
+/// - resolved, where `inner` contains the loaded value and `id` may be absent.
+///
+/// This representation lets hashes move through the AVL structure without forcing immediate loads,
+/// while caching loaded values for subsequent accesses.
 #[derive(Default, Debug, Clone)]
 pub struct LazyId<Id, Value> {
     inner: OnceLock<Value>,
@@ -170,20 +193,30 @@ impl Default for LazyTreeId {
     }
 }
 
-/// Resolver that lazily loads AVL nodes from a key-value store.
+/// Resolver that lazily loads AVL nodes and trees from a [`KeyValueStore`].
+///
+/// In contrast to [`ArcResolver`], this resolver can start from hash-only identifiers and defer
+/// storage reads until an identifier is resolved. Loaded values are cached in their corresponding
+/// [`LazyId`] so repeated resolutions avoid extra storage lookups.
 #[derive(Clone, Debug)]
 pub struct LazyResolver<KV> {
     persistence_layer: Arc<KV>,
 }
 
 impl<KV> LazyResolver<KV> {
-    /// Create a resolver backed by the given persistence layer.
+    /// Create a resolver backed by a persistence layer.
+    ///
+    /// The provided store is shared via [`Arc`], which allows cloned resolvers to resolve against
+    /// the same underlying storage.
     pub fn new(persistence_layer: Arc<KV>) -> Self {
         Self { persistence_layer }
     }
 }
 
 impl<KV: KeyValueStore> LazyResolver<KV> {
+    /// Load and decode a node by its content hash.
+    ///
+    /// This performs a `blob_get` lookup and deserialises the returned bytes into a node representation.
     fn load_node(
         &self,
         hash: Hash,
@@ -191,27 +224,21 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
         let bytes = self
             .persistence_layer
             .blob_get(hash)
-            .map_err(|error| match error {
-                Error::InvalidArgument(error) => {
-                    OperationalError::ResolverCasLookup { hash, error }
-                }
-                Error::Operational(error) => error,
-            })?;
+            .map_err(|error| error.into_resolver_op_error(hash))?;
         let noderepr =
             deserialise::<NodeHashRepresentation<Bytes<Normal>, Key, Hash>>(bytes.as_ref())?;
         Ok(Arc::new(Node::from(noderepr)))
     }
 
+    /// Load and decode a tree root reference by its content hash.
+    ///
+    /// The serialised payload is expected to be an optional root node hash, which is then wrapped
+    /// in a lazy node identifier.
     fn load_tree(&self, hash: Hash) -> Result<Tree<LazyNodeId>, OperationalError> {
         let bytes = self
             .persistence_layer
             .blob_get(hash)
-            .map_err(|error| match error {
-                Error::InvalidArgument(error) => {
-                    OperationalError::ResolverCasLookup { hash, error }
-                }
-                Error::Operational(error) => error,
-            })?;
+            .map_err(|error| error.into_resolver_op_error(hash))?;
         let tree_repr = deserialise::<Option<Hash>>(bytes.as_ref())?.map(LazyNodeId::from);
         Ok(Tree::from(tree_repr))
     }

@@ -27,9 +27,8 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation;
 use perfect_derive::perfect_derive;
 
-use crate::avl::resolver::ArcNodeId;
-use crate::avl::resolver::ArcResolver;
-use crate::avl::resolver::Resolver;
+use crate::avl::resolver::LazyNodeId;
+use crate::avl::resolver::LazyResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::Error;
@@ -47,7 +46,10 @@ pub struct MerkleLayer<KV, M: Mode> {
 
 impl<KV> MerkleLayer<KV, Normal> {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
-    pub fn new(persistence: Arc<KV>) -> Self {
+    pub fn new(persistence: Arc<KV>) -> Self
+    where
+        KV: KeyValueStore,
+    {
         MerkleLayer {
             inner: NormalImpl::new(persistence),
         }
@@ -74,27 +76,42 @@ impl<KV> MerkleLayer<KV, Normal> {
 
 impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    pub fn try_clone_with(&self, persistence: Arc<KV>) -> Self {
+    pub fn try_clone_with(&self, persistence: Arc<KV>) -> Self
+    where
+        KV: KeyValueStore,
+    {
         M::try_clone_with(self, persistence)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&mut self) -> Result<Hash, OperationalError> {
+    pub fn hash(&mut self) -> Result<Hash, OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         M::hash(self)
     }
 
     /// Delete the data associated with a given [Key].
-    pub fn delete(&mut self, key: &Key) -> Result<(), OperationalError> {
+    pub fn delete(&mut self, key: &Key) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         M::delete(self, key)
     }
 
     /// Sets the data associated with a given [Key].
-    pub fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError> {
+    pub fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         M::set(self, key, data)
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error> {
+    pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error>
+    where
+        KV: KeyValueStore,
+    {
         M::write(self, key, offset, data)
     }
 }
@@ -102,26 +119,29 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
 /// Modes that implements this trait support Merkle layer operations
 pub trait MerkleLayerMode: Mode {
     /// See [`MerkleLayer::try_clone_with`]
-    fn try_clone_with<KV>(
+    fn try_clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self>;
 
     /// See [`MerkleLayer::hash`]
-    fn hash<KV>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError>;
+    fn hash<KV: KeyValueStore>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError>;
 
     /// See [`MerkleLayer::delete`]
-    fn delete<KV>(this: &mut MerkleLayer<KV, Self>, key: &Key) -> Result<(), OperationalError>;
+    fn delete<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<(), OperationalError>;
 
     /// See [`MerkleLayer::set`]
-    fn set<KV>(
+    fn set<KV: KeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
     ) -> Result<(), OperationalError>;
 
     /// See [`MerkleLayer::write`]
-    fn write<KV>(
+    fn write<KV: KeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -130,7 +150,7 @@ pub trait MerkleLayerMode: Mode {
 }
 
 impl MerkleLayerMode for Normal {
-    fn try_clone_with<KV>(
+    fn try_clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -139,15 +159,18 @@ impl MerkleLayerMode for Normal {
         }
     }
 
-    fn hash<KV>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError> {
+    fn hash<KV: KeyValueStore>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError> {
         Ok(this.inner.hash())
     }
 
-    fn delete<KV>(this: &mut MerkleLayer<KV, Self>, key: &Key) -> Result<(), OperationalError> {
+    fn delete<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<(), OperationalError> {
         this.inner.delete(key)
     }
 
-    fn set<KV>(
+    fn set<KV: KeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
@@ -155,7 +178,7 @@ impl MerkleLayerMode for Normal {
         this.inner.set(key, data)
     }
 
-    fn write<KV>(
+    fn write<KV: KeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -177,9 +200,9 @@ impl<KV> Modal for MerkleLayerTemplate<KV> {
 
 #[derive(Debug)]
 struct NormalImpl<KV> {
-    tree: Tree<ArcNodeId>,
+    tree: Tree<LazyNodeId>,
     persistence: Arc<KV>,
-    resolver: ArcResolver,
+    resolver: LazyResolver<KV>,
 }
 
 impl<KV> NormalImpl<KV> {
@@ -187,8 +210,8 @@ impl<KV> NormalImpl<KV> {
     fn new(persistence: Arc<KV>) -> Self {
         NormalImpl {
             tree: Tree::default(),
-            persistence,
-            resolver: ArcResolver,
+            persistence: persistence.clone(),
+            resolver: LazyResolver::new(persistence),
         }
     }
 
@@ -196,30 +219,42 @@ impl<KV> NormalImpl<KV> {
     fn try_clone_with(&self, persistence: Arc<KV>) -> Self {
         Self {
             tree: self.tree.clone(),
-            persistence,
-            resolver: ArcResolver,
+            persistence: persistence.clone(),
+            resolver: LazyResolver::new(persistence),
         }
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    fn hash(&mut self) -> Hash {
+    fn hash(&mut self) -> Hash
+    where
+        KV: KeyValueStore,
+    {
         self.tree.hash(&self.resolver)
     }
 
     /// Delete the data associated with a given [Key].
-    fn delete(&mut self, key: &Key) -> Result<(), OperationalError> {
+    fn delete(&mut self, key: &Key) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         self.tree.delete(key, &mut self.resolver)?;
         Ok(())
     }
 
     /// Sets the data associated with a given [Key].
-    fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError> {
+    fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError>
+    where
+        KV: KeyValueStore,
+    {
         self.tree.set(key, data, &mut self.resolver)?;
         Ok(())
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error> {
+    fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error>
+    where
+        KV: KeyValueStore,
+    {
         self.tree.write(key, offset, data, &mut self.resolver)?;
         Ok(())
     }
@@ -239,7 +274,7 @@ impl<KV> NormalImpl<KV> {
         // calculated during the encoding of the node
         // if necessary.
         for node in self.tree.iter(&self.resolver) {
-            let node = self.resolver.resolve(node)?;
+            let node = node?;
             let encoded = node.to_encode(&self.resolver);
             let value = serialisation::serialise(encoded)
                 .expect("Serialisation of node data should not fail");
@@ -261,8 +296,9 @@ mod tests {
 
     use super::MerkleLayer;
     use crate::avl::node::Node;
-    use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcTreeId;
+    use crate::avl::resolver::LazyNodeId;
+    use crate::avl::resolver::LazyTreeId;
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
@@ -271,8 +307,8 @@ mod tests {
     use crate::storage::TestRepo;
     use crate::storage::setup_repo;
 
-    impl<KV> MerkleLayer<KV, Normal> {
-        fn tree(&self) -> &Tree<ArcNodeId> {
+    impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
+        fn tree(&self) -> &Tree<LazyNodeId> {
             &self.inner.tree
         }
 
@@ -332,14 +368,14 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let old_node1: Node<ArcTreeId, Bytes<Normal>> =
+        let old_node1: Node<LazyTreeId, Bytes<Normal>> =
             Node::new(keys[0].clone(), bytes::Bytes::copy_from_slice(&data[0]));
-        let new_node1: Node<ArcTreeId, Bytes<Normal>> =
+        let new_node1: Node<LazyTreeId, Bytes<Normal>> =
             Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2: Node<ArcTreeId, Bytes<Normal>> =
+        let node2: Node<LazyTreeId, Bytes<Normal>> =
             Node::new(keys[1].clone(), bytes::Bytes::copy_from_slice(&data[1]));
-        let node3: Node<ArcTreeId, Bytes<Normal>> =
+        let node3: Node<LazyTreeId, Bytes<Normal>> =
             Node::new(keys[2].clone(), bytes::Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
@@ -457,7 +493,7 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -479,7 +515,7 @@ mod tests {
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
-        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -496,7 +532,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data2);
+        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1016,7 +1052,7 @@ mod tests {
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
         let data_len = data.len();
-        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1033,7 +1069,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcTreeId, Bytes<Normal>> =
+        let node: Node<LazyTreeId, Bytes<Normal>> =
             Node::new(key.clone(), bytes::Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
@@ -1094,8 +1130,6 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
-        use crate::avl::resolver::Resolver;
-
         let (_keepalive, repo) = setup_repo();
         let mut merkle_layer = new_merkle_layer(repo);
 
@@ -1130,8 +1164,8 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
-            let node: &Node<ArcTreeId, Bytes<Normal>> =
-                merkle_layer.inner.resolver.resolve(node).unwrap();
+            let node: &Node<LazyTreeId, Bytes<Normal>> =
+                node.expect("The node should be retrieved successfully");
             let encoded = node.to_encode(&merkle_layer.inner.resolver);
             let serialised = octez_riscv_data::serialisation::serialise(encoded)
                 .expect("We should be able to serialise the node");
