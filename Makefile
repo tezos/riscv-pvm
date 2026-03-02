@@ -69,7 +69,7 @@ cargo-test-doc:
 ### Target proxies
 
 riscv/%:
-	@make -C src/riscv ${@:riscv/%=%}
+	@make -C pvm ${@:riscv/%=%}
 
 durable/%:
 	@make -C durable-storage ${@:durable/%=%}

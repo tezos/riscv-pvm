@@ -12,7 +12,7 @@ build:
 
 .PHONY: test-deps
 test-deps:
-	@make -C ../.. test-deps
+	@make -C .. test-deps
 
 .PHONY: coverage-report
 coverage-report: test-deps
@@ -20,11 +20,11 @@ coverage-report: test-deps
 
 .PHONY: coverage
 coverage:
-	@../../scripts/isa-suite-coverage.sh
+	@../scripts/isa-suite-coverage.sh
 
 .PHONY: check
 check:
-	@exec ../../scripts/format.sh --all --check
+	@exec ../scripts/format.sh --all --check
 
 	@cargo update --workspace --locked
 	@cargo check --workspace --all-targets

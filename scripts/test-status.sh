@@ -9,7 +9,7 @@
 set -e
 
 top_level=$(git rev-parse --show-toplevel)
-cd "${top_level}"/src/riscv
+cd "${top_level}"/pvm
 
 # Collect passing/ignored tests
 echo "[INFO]: examining tests"
