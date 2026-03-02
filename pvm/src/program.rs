@@ -177,8 +177,10 @@ mod tests {
 
     #[test]
     fn test_program_from_elf() {
-        const PATH: &str =
-            "../../../kernels/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy";
+        const PATH: &str = std::concat!(
+            std::env!("OCTEZ_RISCV_KERNELS_DIR"),
+            "/dummy/target/riscv64gc-unknown-linux-musl/release/riscv-dummy"
+        );
         let contents =
             fs::read(PATH).expect("Failed read dummy RISC-V kernel (try: make dummy/build)");
 

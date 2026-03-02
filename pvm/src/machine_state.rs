@@ -1066,7 +1066,11 @@ mod tests {
 
             // The `page-cache-tester` kernel is a simple kernel that needs to be built before
             // this test can run. It is located in the `/kernels/page-cache-tester` directory.
-            let contents = fs::read("../../../kernels/page-cache-tester/target/riscv64gc-unknown-linux-musl/debug/page-cache-tester").expect("Could not find `page-cache-tester` kernel. Perhaps you need to build it via `make -C kernels/page-cache-tester build`?");
+            const PATH: &str = std::concat!(
+                std::env!("OCTEZ_RISCV_KERNELS_DIR"),
+                "/page-cache-tester/target/riscv64gc-unknown-linux-musl/debug/page-cache-tester"
+            );
+            let contents = fs::read(PATH).expect("Could not find `page-cache-tester` kernel. Perhaps you need to build it via `make -C kernels/page-cache-tester build`?");
             let program = Program::from_elf(&contents).unwrap();
 
             state.setup_linux_process(&program).unwrap();

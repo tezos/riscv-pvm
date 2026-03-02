@@ -9,7 +9,7 @@
 use std::fs;
 use std::io::Write;
 use std::ops::Bound;
-use std::path::PathBuf;
+use std::path::Path;
 
 use octez_riscv::machine_state::memory::M64M;
 use octez_riscv::machine_state::page_cache::EmptyPageCache;
@@ -103,6 +103,9 @@ fn test_regression_for_block<PC: PageCache<M64M, Normal>>(
         };
 
         let hooks = MintCaptureHooks::new(&mut mint);
+        let preimages_dir = inputs
+            .preimages_path
+            .map(|path| Path::new(path).to_path_buf().into_boxed_path());
 
         const ROLLUP_ADDRESS: [u8; 20] = [
             244, 228, 124, 179, 196, 58, 104, 176, 212, 142, 48, 148, 9, 44, 164, 45, 113, 58, 221,
@@ -116,7 +119,7 @@ fn test_regression_for_block<PC: PageCache<M64M, Normal>>(
             hooks,
             ROLLUP_ADDRESS,
             ORIGINATION_LEVEL,
-            Some(PathBuf::from("../../../assets/preimages").into_boxed_path()),
+            preimages_dir,
         )
         .unwrap();
 

@@ -1,7 +1,3 @@
-# Binary artefacts
-/src/riscv/riscv-dummy.elf
-/src/riscv/riscv-dummy-linux-musl.elf
-
 # Cargo
 target
 
@@ -14,7 +10,10 @@ target
 
 # Profiling outputs
 riscv-sandbox-profile.json
-perf.data
+perf.data*
+*.run
+*.json
+*.svg
 
 # NodeJS
 node_modules
