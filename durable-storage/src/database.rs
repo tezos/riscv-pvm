@@ -74,7 +74,7 @@ impl<KV> Database<KV, Normal> {
     }
 
     /// Commit the current database state to the repository and return its root hash.
-    pub(crate) fn commit(
+    pub fn commit(
         &self,
         repo: &DirectoryManager,
     ) -> Result<crate::commit::CommitId, OperationalError>
