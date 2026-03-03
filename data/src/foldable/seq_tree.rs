@@ -116,56 +116,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::foldable::Fold;
     use crate::foldable::Foldable;
-    use crate::foldable::NodeFold;
     use crate::foldable::seq_tree::IndexableSeqAsTree;
-
-    /// Simple tree data type for testing purposes
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum TestTree {
-        Leaf(usize),
-        Node(Vec<Self>),
-    }
-
-    impl Foldable<TestFolder> for TestTree {
-        fn fold(&self, _builder: TestFolder) -> TestTree {
-            self.clone()
-        }
-    }
-
-    /// Folder for [`TestTree`]
-    struct TestFolder;
-
-    impl Fold for TestFolder {
-        type Folded = TestTree;
-
-        type NodeFold = TestNodeFolder;
-
-        fn into_node_fold(self) -> Self::NodeFold {
-            TestNodeFolder {
-                children: Vec::new(),
-            }
-        }
-    }
-
-    /// Node folder for [`TestTree`]
-    struct TestNodeFolder {
-        children: Vec<TestTree>,
-    }
-
-    impl NodeFold for TestNodeFolder {
-        type Parent = TestFolder;
-
-        fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
-            let folded_child = child.fold(TestFolder);
-            self.children.push(folded_child);
-        }
-
-        fn done(self) -> TestTree {
-            TestTree::Node(self.children)
-        }
-    }
+    use crate::foldable::tests::TestFolder;
+    use crate::foldable::tests::TestTree;
+    use crate::serialisation::serialise;
 
     /// Build a Merkle tree with the given arity from the provided leaves.
     ///
@@ -187,16 +142,21 @@ mod tests {
         nodes.pop().unwrap_or_else(|| unreachable!())
     }
 
+    fn generator(i: usize) -> TestTree {
+        let bytes: Vec<u8> = serialise(i).unwrap();
+        TestTree::Leaf(bytes)
+    }
+
     /// This test ensures that the Merkle tree layout produced by [`IndexableSeqAsTree`] is
     /// consistent with the previous Merkle tree layout used for sequences.
     #[test]
     fn consistency_with_previous_merkle_tree_layout() {
         proptest::proptest!(|(arity in 2usize..=32, max_len in 1..=1024usize)| {
-            let driver = IndexableSeqAsTree::new(max_len, arity, &|i| TestTree::Leaf(i));
+            let driver = IndexableSeqAsTree::new(max_len, arity, &generator);
             let tree = driver.fold(TestFolder);
 
             let custom_tree =
-                build_custom_merkle_tree(arity, (0..max_len).map(TestTree::Leaf).collect());
+                build_custom_merkle_tree(arity, (0..max_len).map(generator).collect());
 
             assert_eq!(
                 tree, custom_tree,
@@ -208,7 +168,7 @@ mod tests {
     /// Test length zero case.
     #[test]
     fn len_zero() {
-        let driver = IndexableSeqAsTree::new(0, 2, &|i| TestTree::Leaf(i));
+        let driver = IndexableSeqAsTree::new(0, 2, &generator);
         let tree = driver.fold(TestFolder);
 
         assert_eq!(tree, TestTree::Node(vec![]));
@@ -217,9 +177,9 @@ mod tests {
     /// Test length one case.
     #[test]
     fn len_one() {
-        let driver = IndexableSeqAsTree::new(1, 2, &|i| TestTree::Leaf(i));
+        let driver = IndexableSeqAsTree::new(1, 2, &generator);
         let tree = driver.fold(TestFolder);
 
-        assert_eq!(tree, TestTree::Leaf(0));
+        assert_eq!(tree, generator(0));
     }
 }
