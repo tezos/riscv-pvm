@@ -17,6 +17,7 @@
 
 mod output;
 
+use std::ops::Deref;
 use std::ops::Index;
 
 use bincode::Decode;
@@ -165,10 +166,7 @@ impl<M: AtomMode> Outbox<M> {
     fn read_message(&self, info: OutputInfo) -> Result<Output, OutboxProofError> {
         let level_index = self.level_index(info.level);
         let message = self.levels[level_index].read_message(info)?;
-        Ok(Output {
-            info,
-            message: message.try_into()?,
-        })
+        Ok(Output { info, message })
     }
 
     /// Get the number of levels stored in the outbox
@@ -182,7 +180,7 @@ impl Outbox<Normal> {
     ///
     /// Warning: The caller must ensure that `level` is within the outbox
     /// validity window
-    pub(crate) fn read_level(&self, level: u32) -> Box<[Box<[u8]>]> {
+    pub(crate) fn read_level(&self, level: u32) -> Box<[OutboxMessage]> {
         let level_index = self.level_index(level);
         self.levels[level_index].read_level(level)
     }
@@ -307,14 +305,12 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
             .read_level(level)
             .into_iter()
             .enumerate()
-            .filter_map(|(i, msg)| {
-                OutboxMessage::try_from(msg).ok().map(|message| Output {
-                    message,
-                    info: OutputInfo {
-                        level,
-                        index: i as u32,
-                    },
-                })
+            .map(|(i, message)| Output {
+                message,
+                info: OutputInfo {
+                    level,
+                    index: i as u32,
+                },
             })
             .collect();
 
@@ -324,7 +320,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
 
 #[perfect_derive(Clone, PartialEq, Eq)]
 struct OutboxLevel<M: Mode> {
-    messages: Box<[Atom<Box<[u8]>, M>]>,
+    messages: Box<[Atom<OutboxMessage, M>]>,
     /// Next available message slot
     next_index: Atom<u32, M>,
     /// The level associated with this OutboxLevel
@@ -353,13 +349,13 @@ impl<M: AtomMode> OutboxLevel<M> {
             return Err(OutboxWriteError::FullOutbox);
         }
 
-        self.messages[next_index].write(message.into());
+        self.messages[next_index].write(message);
         self.next_index.write(next_index as u32 + 1);
 
         Ok(())
     }
 
-    fn read_message(&self, info: OutputInfo) -> Result<Box<[u8]>, OutboxProofError> {
+    fn read_message(&self, info: OutputInfo) -> Result<OutboxMessage, OutboxProofError> {
         if self.level.read() != info.level || info.index >= self.next_index.read() {
             return Err(OutboxProofError::MessageNotFound { info });
         }
@@ -368,7 +364,7 @@ impl<M: AtomMode> OutboxLevel<M> {
 }
 
 impl OutboxLevel<Normal> {
-    fn read_level(&self, level: u32) -> Box<[Box<[u8]>]> {
+    fn read_level(&self, level: u32) -> Box<[OutboxMessage]> {
         let last_written_level = self.level.read();
         debug_assert!(
             level >= last_written_level,
@@ -383,7 +379,7 @@ impl OutboxLevel<Normal> {
 
         self.messages[..next_index]
             .iter()
-            .map(|msg| Box::from(msg.as_ref()))
+            .map(|msg| msg.deref().clone())
             .collect::<Box<[_]>>()
     }
 }
@@ -409,7 +405,7 @@ impl<'normal> Provable<'normal> for OutboxLevel<Normal> {
 impl<M: AtomMode> Default for OutboxLevel<M> {
     fn default() -> Self {
         let mut messages = Vec::with_capacity(MAX_LEVEL_SIZE);
-        messages.resize_with(MAX_LEVEL_SIZE, || Atom::<Box<[u8]>, M>::new(Box::new([])));
+        messages.resize_with(MAX_LEVEL_SIZE, Atom::<OutboxMessage, M>::default);
 
         Self {
             messages: messages.into_boxed_slice(),
@@ -433,7 +429,7 @@ impl<M, F> Foldable<F> for OutboxLevel<M>
 where
     M: Mode,
     F: Fold,
-    Atom<Box<[u8]>, M>: Foldable<F>,
+    Atom<OutboxMessage, M>: Foldable<F>,
     Atom<u32, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
@@ -536,11 +532,6 @@ pub(crate) mod tests {
         proptest::collection::vec(message_strategy(size_range), len)
     }
 
-    fn oversized_message_strategy() -> impl Strategy<Value = Box<[u8]>> {
-        proptest::collection::vec(any::<u8>(), MAX_OUTPUT_SIZE + 1..=MAX_OUTPUT_SIZE + 64)
-            .prop_map(|data| data.into_boxed_slice())
-    }
-
     #[test]
     fn write_messages_with_varying_sizes() {
         proptest!(|(
@@ -552,7 +543,7 @@ pub(crate) mod tests {
             for (i, message) in messages.into_iter().enumerate() {
                 prop_assert!(outbox.write_message(message.clone(), level).is_ok());
 
-                prop_assert_eq!(&*outbox.levels[idx].messages[i], &message.into());
+                prop_assert_eq!(&*outbox.levels[idx].messages[i], &message);
                 prop_assert_eq!(*outbox.levels[idx].next_index, (i + 1) as u32);
                 prop_assert_eq!(*outbox.levels[idx].level, level);
             }
@@ -579,7 +570,7 @@ pub(crate) mod tests {
             let third_message = OutboxMessage::try_from(vec![3u8; 32].into_boxed_slice()).unwrap();
             assert!(outbox.write_message(third_message.clone(), overflow_level).is_ok());
 
-            assert_eq!(&*outbox.levels[idx].messages[0], third_message.as_ref());
+            assert_eq!(&*outbox.levels[idx].messages[0], &third_message);
             assert_eq!(*outbox.levels[idx].next_index, 1);
             assert_eq!(*outbox.levels[idx].level, overflow_level);
         });
@@ -592,7 +583,7 @@ pub(crate) mod tests {
              for (i, message) in messages.iter().enumerate().take(MAX_LEVEL_SIZE) {
                 assert!(outbox.write_message(message.clone(), 0).is_ok());
                 assert_eq!(*outbox.levels[0].next_index, (i + 1) as u32);
-                assert_eq!(&*outbox.levels[0].messages[i], message.as_ref());
+                assert_eq!(&*outbox.levels[0].messages[i], message);
             }
 
             for message in &messages[MAX_LEVEL_SIZE..] {
@@ -623,7 +614,7 @@ pub(crate) mod tests {
 
             prop_assert_eq!(read_messages.len(), messages.len());
             for (i, msg) in messages.iter().enumerate() {
-                prop_assert_eq!(read_messages[i].as_ref(), msg.as_ref() as &[u8]);
+                prop_assert_eq!(&read_messages[i], msg);
             }
         });
     }
@@ -647,11 +638,10 @@ pub(crate) mod tests {
                     prop_assert!(outbox.write_message(msg.clone(), wrap_level as u32).is_ok());
                 }
                 let read_messages = outbox.read_level(wrap_level as u32);
-                let expected_messages: Box<[Box<[u8]>]> = Box::from(
+                let expected_messages = Box::from(
                     messages2[offset]
                         .clone()
                         .into_iter()
-                        .map(|m| m.into())
                         .collect_vec(),
                 );
                 prop_assert_eq!(read_messages, expected_messages);
@@ -915,60 +905,6 @@ pub(crate) mod tests {
                 };
                 let output = pvm.get_outbox_message(info);
                 prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
-            }
-        });
-    }
-
-    #[test]
-    fn get_outbox_messages_filters_oversized_messages() {
-        let strategy = (
-            proptest::collection::vec(message_strategy(0..), 0..5),
-            proptest::collection::vec(oversized_message_strategy(), 0..5),
-            0u32..1000,
-        )
-            .prop_flat_map(|(valid, oversized, level)| {
-                let total = valid.len() + oversized.len();
-                let valid_count = valid.len();
-                proptest::sample::subsequence((0..total).collect::<Vec<_>>(), valid_count).prop_map(
-                    move |valid_slots| (valid.clone(), oversized.clone(), level, valid_slots),
-                )
-            });
-
-        proptest!(|((valid_messages, oversized_messages, level, valid_slots) in strategy)| {
-            type MC = M1M;
-            type PC = EmptyPageCache;
-            type DS = DurableStorageDummy;
-
-            let total = valid_messages.len() + oversized_messages.len();
-            let level_index = level as usize % TEST_OUTBOX_SIZE;
-
-            let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.level_is_set.write(true);
-            pvm.level.write(level);
-
-            // Place valid messages at the chosen slots, oversized at the rest
-            let mut valid_iter = valid_messages.iter();
-            let mut oversized_iter = oversized_messages.iter();
-            for slot in 0..total {
-                let bytes: Box<[u8]> = if valid_slots.contains(&slot) {
-                    valid_iter.next().unwrap().clone().into()
-                } else {
-                    oversized_iter.next().unwrap().clone()
-                };
-                pvm.outbox.levels[level_index].messages[slot].write(bytes);
-            }
-            pvm.outbox.levels[level_index].next_index.write(total as u32);
-            pvm.outbox.levels[level_index].level.write(level);
-
-            let outputs = pvm.get_outbox_messages(level).unwrap();
-            prop_assert_eq!(outputs.len(), valid_messages.len());
-
-            for (output, (&slot, expected)) in outputs.iter().zip(
-                valid_slots.iter().zip(valid_messages.iter()),
-            ) {
-                prop_assert_eq!(output.info.index, slot as u32);
-                prop_assert_eq!(output.info.level, level);
-                prop_assert_eq!(&*output.message, expected.as_ref() as &[u8]);
             }
         });
     }
