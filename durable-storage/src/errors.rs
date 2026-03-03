@@ -86,11 +86,14 @@ pub enum OperationalError {
     #[error("Error while writing to file: {error}")]
     FileWriteFailed { error: std::io::Error },
 
-    #[error("Error in resolution of ID")]
+    #[error("Error in identifier resolution")]
     Resolver,
 
     #[error("Encountered a poisoned lock")]
     LockPoisoned,
+
+    #[error("Error during decoding.")]
+    Decoding(#[from] bincode::error::DecodeError),
 }
 
 /// Errors that occur because of incorrect usage

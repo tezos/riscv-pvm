@@ -122,7 +122,7 @@ impl<NodeId> Tree<NodeId> {
     ///
     /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
     pub(crate) fn hash<TreeId>(&self, resolver: &impl NodeResolver<NodeId, TreeId>) -> Hash {
-        let encodable: Option<Hash> = self.0.as_ref().map(|id| resolver.hash(id));
+        let encodable: Option<Hash> = self.0.as_ref().map(|id| resolver.get_hash(id));
         Hash::hash_encodable(encodable).expect("Should be hashable")
     }
 
@@ -522,8 +522,8 @@ mod tests {
     }
 
     impl Resolver<ArcNodeId, Node<ArcTreeId>> for FailOnKeyResolver {
-        fn hash(&self, id: &ArcNodeId) -> Hash {
-            ArcResolver.hash(id)
+        fn get_hash(&self, id: &ArcNodeId) -> Hash {
+            ArcResolver.get_hash(id)
         }
 
         fn resolve<'a>(&self, id: &'a ArcNodeId) -> Result<&'a Node<ArcTreeId>, OperationalError> {
@@ -551,8 +551,8 @@ mod tests {
     }
 
     impl Resolver<ArcTreeId, Tree<ArcNodeId>> for FailOnKeyResolver {
-        fn hash(&self, id: &ArcTreeId) -> Hash {
-            ArcResolver.hash(id)
+        fn get_hash(&self, id: &ArcTreeId) -> Hash {
+            ArcResolver.get_hash(id)
         }
 
         fn resolve<'a>(&self, id: &'a ArcTreeId) -> Result<&'a Tree<ArcNodeId>, OperationalError> {
