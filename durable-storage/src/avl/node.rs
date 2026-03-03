@@ -4,9 +4,11 @@
 
 //! Interface for a Merklisable node of an AVL tree
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
+use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
@@ -23,15 +25,15 @@ use crate::key::Key;
 /// Value stored in a node
 pub type Value = Bytes<Normal>;
 
-#[derive(Encode)]
 /// A serialisable representation of [`Node`].
-struct NodeHashRepresentation<'a, Value> {
-    key: &'a Key,
-    data: Value,
+#[derive(Encode, Decode)]
+pub(super) struct NodeHashRepresentation<Data, K: Borrow<self::Key>, H: Borrow<self::Hash>> {
+    key: K,
+    data: Data,
     // The hash of the left subtree.
-    left: Hash,
+    left: H,
     // The hash of the right subtree.
-    right: Hash,
+    right: H,
     balance_factor: i64,
 }
 
@@ -51,6 +53,22 @@ pub struct Node<TreeId> {
 
     /// The difference in heights between child branches (right - left).
     balance_factor: i64,
+}
+
+impl<TreeId> From<NodeHashRepresentation<Value, Key, Hash>> for Node<TreeId>
+where
+    TreeId: From<Hash>,
+{
+    fn from(node_repr: NodeHashRepresentation<Value, Key, Hash>) -> Self {
+        Node {
+            key: node_repr.key,
+            data: node_repr.data,
+            left: TreeId::from(node_repr.left),
+            right: TreeId::from(node_repr.right),
+            hash: OnceLock::new(),
+            balance_factor: node_repr.balance_factor,
+        }
+    }
 }
 
 impl<TreeId> Node<TreeId> {
@@ -77,11 +95,11 @@ impl<TreeId> Node<TreeId> {
     ) -> impl Encode + 'a {
         // Recursively hashes any left child and its children. Stops when a hash was cached or a
         // node is blinded.
-        let left = resolver.hash(&self.left);
+        let left = resolver.get_hash(&self.left);
 
         // Recursively hashes any right child and its children. Stops when a hash was cached or a
         // node is blinded.
-        let right = resolver.hash(&self.right);
+        let right = resolver.get_hash(&self.right);
 
         NodeHashRepresentation {
             key: &self.key,

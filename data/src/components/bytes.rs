@@ -11,8 +11,13 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::ops::Range;
 
+use bincode::BorrowDecode;
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::BorrowDecoder;
+use bincode::de::Decoder;
 use bincode::enc::write::Writer;
+use bincode::error::DecodeError;
 use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
@@ -448,6 +453,27 @@ impl From<&[u8]> for Bytes<Normal> {
     fn from(slice: &[u8]) -> Self {
         let bytes = bytes::BytesMut::from(slice);
         Bytes { bytes }
+    }
+}
+
+/// Decode into owned [`Bytes<Normal>`].
+impl<Context> Decode<Context> for Bytes<Normal> {
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let raw = Vec::decode(decoder)?;
+        let bytes = bytes::Bytes::from(raw);
+        Ok(Self::from(bytes))
+    }
+}
+
+/// Decode from borrowed input by delegating to owned decode.
+///
+/// [`Bytes<Normal>`] owns its backing storage, so borrowed decode does not need
+/// a separate representation.
+impl<'de, Context> BorrowDecode<'de, Context> for Bytes<Normal> {
+    fn borrow_decode<D: BorrowDecoder<'de, Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode(decoder)
     }
 }
 
