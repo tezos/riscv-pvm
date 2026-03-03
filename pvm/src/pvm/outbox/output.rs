@@ -9,6 +9,7 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use bincode::Decode;
 use bincode::Encode;
 use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 use tezos_smart_rollup_constants::riscv::SbiError;
@@ -47,9 +48,15 @@ impl From<OutboxMessageError> for SbiError {
 
 /// An outbox message is a boxed byte slice, restricted to at most [`MAX_OUTPUT_SIZE`]
 /// in length
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 #[repr(transparent)]
 pub struct OutboxMessage(Box<[u8]>);
+
+impl Default for OutboxMessage {
+    fn default() -> Self {
+        Self(Box::new([]))
+    }
+}
 
 impl OutboxMessage {
     /// Constructs a zeroed, boxed outbox message buffer of size `size`
