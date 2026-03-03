@@ -142,4 +142,4 @@ pub trait NodeUnfold {
     fn done<T>(self, value: T) -> Result<T, <Self::Parent as Unfold>::Error>;
 }
 
-mod tests;
+pub(crate) mod tests;

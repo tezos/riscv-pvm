@@ -22,6 +22,8 @@ use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
 use crate::foldable::Foldable;
+use crate::foldable::Unfold;
+use crate::foldable::Unfoldable;
 use crate::hash::Hash;
 use crate::hash::HashFold;
 use crate::hash::PartialHash;
@@ -194,6 +196,13 @@ impl<T: Encode + 'static> Foldable<PartialHashFold<'_>> for Atom<T, Verify> {
             }
         };
         PartialHash::Present(hash)
+    }
+}
+
+impl<T: Decode<()>> Unfoldable for Atom<T, Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let atom = source.into_leaf()?;
+        Ok(Atom { atom })
     }
 }
 

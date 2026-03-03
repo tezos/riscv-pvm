@@ -4,6 +4,7 @@
 
 //! Tests for [`Atom`]
 
+use bincode::Encode;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
 use proptest::prelude::Just;
@@ -16,6 +17,10 @@ use proptest::strategy::Strategy;
 
 use crate::components::atom::Atom;
 use crate::components::atom::AtomMode;
+use crate::foldable::Foldable;
+use crate::foldable::Unfoldable;
+use crate::foldable::tests::TestFolder;
+use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_tree::MerkleTree;
@@ -29,6 +34,13 @@ use crate::mode::utils::catch_not_found;
 use crate::mode_test;
 use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
+
+impl<T: Encode> Foldable<TestFolder> for Atom<T, Normal> {
+    fn fold(&self, _builder: TestFolder) -> TestTree {
+        let bytes = serialise(&self.atom).expect("Serialisation should not fail");
+        TestTree::Leaf(bytes)
+    }
+}
 
 mode_test!(init, F, {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -327,4 +339,14 @@ fn atom_is_same_across_modes() {
                 .unwrap();
         prop_assert_eq!(hash_normal, hash_verify);
     });
+}
+
+#[test]
+fn fold_unfold() {
+    let atom: Atom<String, Normal> = Atom::new("Hello world!".to_string());
+
+    let tree = atom.fold(TestFolder);
+    let unfolded = Atom::<String, Normal>::unfold(tree).unwrap();
+
+    assert_eq!(atom, unfolded);
 }
