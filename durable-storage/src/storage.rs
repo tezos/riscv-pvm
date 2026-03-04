@@ -19,13 +19,16 @@ use crate::repo::DirectoryManager;
 
 /// Types that implement this trait can be used as the underlying key-value store
 pub trait KeyValueStore: Sized {
+    /// Type of repository required to initialise a key value store.
+    type Repo;
+
     /// Create a new instance of the key-value store.
     ///
-    /// The backend will use the directories provided by the directory manager, if needed.
-    fn new(repo: &DirectoryManager) -> Result<Self, OperationalError>;
+    /// The backend may make use of the repo provided, for persistence - if required.
+    fn new(repo: &Self::Repo) -> Result<Self, OperationalError>;
 
     /// Attempt to make a copy of the key-value store.
-    fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, OperationalError>;
+    fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
 
     /// Retrieves the data associated with the given hash.
     fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error>;

@@ -40,7 +40,7 @@ pub struct Database<KV, M: Mode> {
 
 impl<KV> Database<KV, Normal> {
     /// Try to construct a new Database
-    pub fn try_new(handle: &Handle, repo: &DirectoryManager) -> Result<Self, OperationalError>
+    pub fn try_new(handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
         KV: BackgroundKeyValueStore,
     {
@@ -55,11 +55,7 @@ impl<KV> Database<KV, Normal> {
     }
 
     /// Try to create a cheap clone of the Database.
-    pub fn try_clone_with(
-        &self,
-        handle: &Handle,
-        repo: &DirectoryManager,
-    ) -> Result<Self, OperationalError>
+    pub fn try_clone_with(&self, handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
         KV: BackgroundKeyValueStore,
     {
@@ -300,7 +296,6 @@ mod tests {
 
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -309,14 +304,20 @@ mod tests {
     use super::Database;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
-    use crate::repo::DirectoryManager;
     use crate::storage::TestKeyValueStore;
 
     fn new_database(handle: &Handle) -> Database<TestKeyValueStore, Normal> {
-        let tmpdir = TestableTmpdir::new();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "rocksdb")] {
+                use crate::repo::DirectoryManager;
+                use octez_riscv_test_utils::TestableTmpdir;
 
-        let repo =
-            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+                let tmpdir = TestableTmpdir::new();
+                let repo = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
+            } else {
+                let repo = crate::storage::in_memory::InMemoryRepo;
+            }
+        };
 
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
     }
@@ -331,7 +332,10 @@ mod tests {
                 1..50,
             ),
         ) {
+            use octez_riscv_test_utils::TestableTmpdir;
+
             use crate::persistence_layer::PersistenceLayer;
+            use crate::repo::DirectoryManager;
             use crate::storage::KeyValueStore;
             use crate::storage::PersistentKeyValueStore;
 

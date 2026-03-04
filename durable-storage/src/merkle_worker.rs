@@ -308,7 +308,6 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
-    use crate::repo::DirectoryManager;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
 
@@ -348,7 +347,7 @@ mod tests {
         fn run(
             self,
             handle: &Handle,
-            dir_manager: &DirectoryManager,
+            repo: &<TestKeyValueStore as KeyValueStore>::Repo,
             worker: &mut MerkleWorker<TestKeyValueStore>,
             layer: &mut MerkleLayer<TestKeyValueStore, Normal>,
         ) {
@@ -386,12 +385,12 @@ mod tests {
                 }
 
                 Self::Clone => {
-                    let persistence_layer = TestKeyValueStore::new(dir_manager)
+                    let persistence_layer = TestKeyValueStore::new(repo)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
                     *layer = layer.try_clone_with(persistence_layer);
 
-                    let persistence_worker = TestKeyValueStore::new(dir_manager)
+                    let persistence_worker = TestKeyValueStore::new(repo)
                         .expect("Creating a persistence layer should succeed");
                     let persistence_worker = Arc::new(persistence_worker);
                     *worker = worker
@@ -456,21 +455,28 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        let tmp_dir = tempfile::tempdir().expect("Creating a temporary directory should succeed");
-        let dir_manager = DirectoryManager::new(tmp_dir.path())
-            .expect("Creating the directory manager should succeed");
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "rocksdb")] {
+                use crate::repo::DirectoryManager;
+
+                let tmp_dir = tempfile::tempdir().expect("Creating a temporary directory should succeed");
+                let repo = DirectoryManager::new(tmp_dir.path()).expect("creating manager should succeed.");
+            } else {
+                let repo = crate::storage::in_memory::InMemoryRepo;
+            }
+        };
 
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
-            let persistence_layer = TestKeyValueStore::new(&dir_manager).expect("Creating a persistence layer should succeed");
+            let persistence_layer = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
             let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
-            let persistence_worker = TestKeyValueStore::new(&dir_manager).expect("Creating a persistence layer should succeed");
+            let persistence_worker = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
             let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
             for command in commands {
-                command.run(handle, &dir_manager, &mut merkle_worker, &mut merkle_layer);
+                command.run(handle, &repo, &mut merkle_worker, &mut merkle_layer);
             }
 
             let layer_hash = merkle_layer.hash().expect("Resolving the tree should succeed.");
