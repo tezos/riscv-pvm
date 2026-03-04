@@ -52,15 +52,6 @@ pub trait KeyValueStore: Sized {
 
     /// Deletes a value associated with the given key.
     fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
-
-    /// Checks if a value associated with the given key may exist. Returns false if the key
-    /// definitely does not exist.
-    ///
-    /// # Performance
-    ///
-    /// `may_exist` may be cheaper to call than `get`, for the purposes of checking whether a
-    /// value does not exist.
-    fn may_exist(&self, key: impl AsRef<[u8]>) -> Result<bool, OperationalError>;
 }
 
 /// Types that implement this trait can be used as a persistent key-value store

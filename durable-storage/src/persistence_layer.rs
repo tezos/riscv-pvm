@@ -365,7 +365,7 @@ impl KeyValueStore for PersistenceLayer {
         // operation to check if the existing value length is shorter than the offset.
         if offset > 0 {
             // `may_exist` can be cheaper than `get`
-            let may_exist = self.may_exist(&key)?;
+            let may_exist = self.db_instance.key_may_exist(&key);
             if !may_exist {
                 return Err(InvalidArgumentError::KeyNotFound)?;
             }
@@ -408,10 +408,6 @@ impl KeyValueStore for PersistenceLayer {
                 key: key.as_ref().to_owned(),
                 error,
             })
-    }
-
-    fn may_exist(&self, key: impl AsRef<[u8]>) -> Result<bool, OperationalError> {
-        Ok(self.db_instance.key_may_exist(key))
     }
 }
 

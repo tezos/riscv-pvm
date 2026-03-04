@@ -174,13 +174,4 @@ impl KeyValueStore for InMemoryKeyValueStore {
 
         Ok(())
     }
-
-    fn may_exist(&self, key: impl AsRef<[u8]>) -> Result<bool, OperationalError> {
-        let store = self
-            .values
-            .read()
-            .map_err(|_| OperationalError::LockPoisoned)?;
-
-        Ok(store.contains_key(key.as_ref()))
-    }
 }
