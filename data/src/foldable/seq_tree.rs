@@ -2,11 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Helpers for sequences that need to fold like trees
+//! Helpers for sequences that need to fold and unfold like trees
 
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
+use crate::foldable::NodeUnfold;
+use crate::foldable::Unfold;
 
 /// Driver for `Foldable` that lets you turn an indexable sequence into a tree-like structure where
 /// the leaves are the items of the sequence
@@ -114,10 +116,86 @@ where
     }
 }
 
+fn descend_helper<U, LeafHandler>(
+    source: U,
+    total_len: usize,
+    current_depth: u32,
+    current_start: usize,
+    arity: usize,
+    for_leaf: &mut LeafHandler,
+) -> Result<(), U::Error>
+where
+    U: Unfold,
+    LeafHandler: FnMut(usize, U) -> Result<(), U::Error>,
+{
+    if total_len == 1 {
+        return for_leaf(current_start, source);
+    }
+
+    let mut source = source.into_node()?;
+
+    if current_depth == 0 {
+        for idx in current_start..current_start + arity {
+            if idx >= total_len {
+                break;
+            }
+
+            source.next_branch_with(|ctx| for_leaf(idx, ctx))?;
+        }
+
+        return source.done(());
+    }
+
+    let next_chunk_len = arity.pow(current_depth);
+
+    for child_no in 0..arity {
+        let next_start = current_start + child_no * next_chunk_len;
+
+        if next_start >= total_len {
+            break;
+        }
+
+        source.next_branch_with(|ctx| {
+            descend_helper(
+                ctx,
+                total_len,
+                current_depth - 1,
+                next_start,
+                arity,
+                for_leaf,
+            )
+        })?
+    }
+
+    source.done(())
+}
+
+/// Use to unfold the components that use `IndexableSeqAsTree` for their fold implementations.
+/// Traverses the tree structure calling `for_leaf` on each of the leaves. That function may do
+/// further unfolding of the leaf if necessary, which is why it may be fallible.
+///
+/// To read about the tree structure used, see the documentation for `IndexableSeqAsTree`.
+pub fn descend_tree<U, LeafHandler>(
+    source: U,
+    arity: usize,
+    length: usize,
+    for_leaf: &mut LeafHandler,
+) -> Result<(), U::Error>
+where
+    U: Unfold,
+    LeafHandler: FnMut(usize, U) -> Result<(), U::Error>,
+{
+    let depth = length.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
+
+    descend_helper(source, length, depth, 0, arity, for_leaf)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::foldable::Foldable;
+    use crate::foldable::Unfold;
     use crate::foldable::seq_tree::IndexableSeqAsTree;
+    use crate::foldable::seq_tree::descend_tree;
     use crate::foldable::tests::TestFolder;
     use crate::foldable::tests::TestTree;
     use crate::serialisation::serialise;
@@ -181,5 +259,28 @@ mod tests {
         let tree = driver.fold(TestFolder);
 
         assert_eq!(tree, generator(0));
+    }
+
+    /// Test that unfolding (using `descend_tree`) is the inverse to folding.
+    #[test]
+    fn fold_unfold() {
+        proptest::proptest!(|(arity in 2usize..=32, max_len in 1..=1024usize)| {
+            let driver = IndexableSeqAsTree::new(max_len, arity, &generator);
+            let tree = driver.fold(TestFolder);
+
+            let mut unfolded: Vec<Option<usize>> = vec![None; max_len];
+
+            let mut for_leaf = |ix: usize, ctx: TestTree| {
+                let value: usize = ctx.into_leaf()?;
+                unfolded[ix] = Some(value);
+                Ok(())
+            };
+
+            descend_tree(tree.clone(), arity, max_len, &mut for_leaf).unwrap();
+
+            for (i, x) in unfolded.iter().enumerate() {
+                assert_eq!(*x, Some(i));
+            }
+        });
     }
 }
