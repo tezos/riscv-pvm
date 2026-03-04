@@ -219,19 +219,36 @@ where
     LeafHandler: FnMut(usize, Proof) -> SuspendedResult<Proof, ()>,
     Proof: Deserialiser,
 {
-    if leaves == 1 {
+    // This is a special case for when the entire tree has only a single leaf. We check
+    // `start_leaf` here to ensure this case isn't used on subsequence recursive calls of the
+    // function, if there is a single element left over at the right hand side of the tree.
+    if leaves == 1 && start_leaf == 0 {
         return for_leaf(start_leaf, proof);
     }
 
     let ctx = proof.into_node()?;
 
-    let mut child_start = start_leaf;
-    let ctx = node_child_length(arity, leaves).try_fold(ctx, |ctx, child_leaves| {
-        let (ctx, ()) = ctx.next_branch_with(|proof| {
-            descend_tree(proof, arity, child_start, child_leaves, for_leaf)
+    if leaves <= arity {
+        let ctx = (0..leaves).try_fold(ctx, |ctx, idx| {
+            let (ctx, ()) = ctx.next_branch_with(|ctx| for_leaf(idx + start_leaf, ctx))?;
+
+            Ok(ctx)
         })?;
 
-        child_start += child_leaves;
+        return ctx.done(());
+    }
+
+    let chunk_len = arity.pow(leaves.saturating_sub(1).checked_ilog(arity).unwrap_or(0));
+    let chunks = leaves.div_ceil(chunk_len);
+
+    let ctx = (0..chunks).try_fold(ctx, |ctx, chunk_idx| {
+        let child_start = start_leaf + chunk_idx * chunk_len;
+
+        let child_leaves = chunk_len.min(leaves - chunk_idx * chunk_len);
+
+        let (ctx, ()) = ctx.next_branch_with(|ctx| {
+            descend_tree(ctx, arity, child_start, child_leaves, for_leaf)
+        })?;
 
         Ok(ctx)
     })?;
@@ -318,15 +335,4 @@ where
 enum SeqTreeProofError {
     #[error("Length node is absent but some item nodes are present")]
     LengthAbsentButItemsPresent,
-}
-
-/// Compute the lengths covered by each child of a node.
-fn node_child_length(arity: usize, length: usize) -> impl Iterator<Item = usize> {
-    let child_max_length = length.div_ceil(arity);
-
-    (0..arity).map(move |idx| {
-        let start = idx * child_max_length;
-        let end = ((idx + 1) * child_max_length).min(length);
-        end.saturating_sub(start)
-    })
 }

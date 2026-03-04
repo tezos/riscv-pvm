@@ -294,6 +294,18 @@ mod tests {
     }
 
     #[test]
+    fn test_data_space_proofs_not_power_of_arity() {
+        proptest!(|(addr in 0..28664usize, val: u64)| {
+            // We use 28672 because it is 7 * 4096 (a data space with 7 pages).
+            test_data_space_with!(28672, |cell| {
+                unsafe {
+                    cell.write::<u64>(addr, val);
+                }
+            });
+        });
+    }
+
+    #[test]
     fn test_data_space_proofs_nothing() {
         test_data_space_with!(65536, |_cell| {});
     }
