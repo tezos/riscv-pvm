@@ -26,7 +26,10 @@ pub trait DurableStorage<M: Mode>: Sized {
         M: CloneRegistryMode;
 }
 
-impl<KV: KeyValueStore + Send + Sync + 'static, M: Mode> DurableStorage<M> for Registry<KV, M> {
+impl<KV: KeyValueStore + Send + Sync + 'static, M: Mode> DurableStorage<M> for Registry<KV, M>
+where
+    KV::Repo: Clone,
+{
     fn try_clone(&self) -> Result<Self, OperationalError>
     where
         M: CloneRegistryMode,

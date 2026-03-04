@@ -263,7 +263,9 @@ impl PersistenceLayer {
 }
 
 impl KeyValueStore for PersistenceLayer {
-    fn new(repo: &DirectoryManager) -> Result<Self, OperationalError> {
+    type Repo = DirectoryManager;
+
+    fn new(repo: &Self::Repo) -> Result<Self, OperationalError> {
         let tempdir = repo.temp_database_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
 
@@ -288,7 +290,7 @@ impl KeyValueStore for PersistenceLayer {
         })
     }
 
-    fn try_clone(&self, repo: &DirectoryManager) -> Result<Self, OperationalError> {
+    fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError> {
         Self::clone_as_checkpoint(&self.db_instance, repo)
     }
 

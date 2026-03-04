@@ -16,7 +16,11 @@ use super::KeyValueStore;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
-use crate::repo::DirectoryManager;
+
+/// Repository used by [`InMemoryKeyValueStore`].
+///
+/// Will never write to disk.
+pub struct InMemoryRepo;
 
 /// In-memory key-value store
 #[derive(Debug, Default)]
@@ -50,11 +54,13 @@ impl InMemoryKeyValueStore {
 }
 
 impl KeyValueStore for InMemoryKeyValueStore {
-    fn new(_repo: &DirectoryManager) -> Result<Self, OperationalError> {
+    type Repo = InMemoryRepo;
+
+    fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
         Ok(Self::default())
     }
 
-    fn try_clone(&self, _repo: &DirectoryManager) -> Result<Self, OperationalError> {
+    fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
         self.try_clone()
     }
 

@@ -255,7 +255,6 @@ impl<KV> NormalImpl<KV> {
 mod tests {
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -267,7 +266,6 @@ mod tests {
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
-    use crate::repo::DirectoryManager;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
 
@@ -288,10 +286,17 @@ mod tests {
     }
 
     fn new_merkle_layer() -> MerkleLayer<TestKeyValueStore, Normal> {
-        let tmpdir = TestableTmpdir::new();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "rocksdb")] {
+                use crate::repo::DirectoryManager;
+                use octez_riscv_test_utils::TestableTmpdir;
 
-        let repo =
-            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+                let tmpdir = TestableTmpdir::new();
+                let repo = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
+            } else {
+                let repo = crate::storage::in_memory::InMemoryRepo;
+            }
+        };
 
         let persistence_layer = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")

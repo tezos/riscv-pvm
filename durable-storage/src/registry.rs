@@ -27,6 +27,7 @@ use crate::errors::OperationalError;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::DirectoryManager;
+use crate::storage::KeyValueStore;
 
 pub(super) const REGISTRY_ARITY: usize = 2;
 
@@ -38,16 +39,16 @@ struct RegistryManifest {
 
 /// Registry that owns a set of databases backed by a directory manager.
 #[repr(transparent)]
-pub struct Registry<KV, M: Mode> {
+pub struct Registry<KV: KeyValueStore, M: Mode> {
     inner: M::Select<RegistryTemplate<KV>>,
 }
 
-impl<KV> Registry<KV, Normal> {
+impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
     /// Creates a new, empty Registry.
     ///
     /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
     /// `base_dir`.
-    pub fn new(repo: DirectoryManager) -> Result<Self, OperationalError> {
+    pub fn new(repo: KV::Repo) -> Result<Self, OperationalError> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .build()
@@ -64,7 +65,7 @@ impl<KV> Registry<KV, Normal> {
     }
 }
 
-impl<KV: BackgroundPersistentKeyValueStore> Registry<KV, Normal> {
+impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV, Normal> {
     /// Commit the registry state and return its commit ID.
     ///
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
@@ -137,7 +138,10 @@ impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
     }
 }
 
-impl<KV: BackgroundKeyValueStore, M: CloneRegistryMode> Registry<KV, M> {
+impl<KV: BackgroundKeyValueStore, M: CloneRegistryMode> Registry<KV, M>
+where
+    KV::Repo: Clone,
+{
     /// Try to clone the registry.
     ///
     /// This can fail for mode-specific reasons.
@@ -149,9 +153,9 @@ impl<KV: BackgroundKeyValueStore, M: CloneRegistryMode> Registry<KV, M> {
 /// Modal template for the [`Registry`]
 ///
 /// This is used to select the appropriate implementation for the mode.
-struct RegistryTemplate<KV>(PhantomData<KV>, Infallible);
+struct RegistryTemplate<KV: KeyValueStore>(PhantomData<KV>, Infallible);
 
-impl<KV> Modal for RegistryTemplate<KV> {
+impl<KV: KeyValueStore> Modal for RegistryTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
     type Prove<'normal> = Infallible;
@@ -162,7 +166,7 @@ impl<KV> Modal for RegistryTemplate<KV> {
 /// Modes that implement this support operations on [`Registry`]
 pub trait RegistryMode: Mode {
     /// See [`Registry::len`]
-    fn len<KV>(this: &Registry<KV, Self>) -> usize;
+    fn len<KV: KeyValueStore>(this: &Registry<KV, Self>) -> usize;
 
     /// See [`Registry::resize`]
     fn resize<KV: BackgroundKeyValueStore>(
@@ -171,10 +175,13 @@ pub trait RegistryMode: Mode {
     ) -> Result<(), Error>;
 
     /// See [`Registry::database`]
-    fn database<KV>(this: &Registry<KV, Self>, index: usize) -> Result<&Database<KV, Self>, Error>;
+    fn database<KV: KeyValueStore>(
+        this: &Registry<KV, Self>,
+        index: usize,
+    ) -> Result<&Database<KV, Self>, Error>;
 
     /// See [`Registry::database_mut`]
-    fn database_mut<KV>(
+    fn database_mut<KV: KeyValueStore>(
         this: &mut Registry<KV, Self>,
         index: usize,
     ) -> Result<&mut Database<KV, Self>, Error>;
@@ -201,7 +208,7 @@ pub trait RegistryMode: Mode {
 }
 
 impl RegistryMode for Normal {
-    fn len<KV>(this: &Registry<KV, Self>) -> usize {
+    fn len<KV: KeyValueStore>(this: &Registry<KV, Self>) -> usize {
         this.inner.databases.len()
     }
 
@@ -219,7 +226,10 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn database<KV>(this: &Registry<KV, Self>, index: usize) -> Result<&Database<KV, Self>, Error> {
+    fn database<KV: KeyValueStore>(
+        this: &Registry<KV, Self>,
+        index: usize,
+    ) -> Result<&Database<KV, Self>, Error> {
         let database = this
             .inner
             .databases
@@ -228,7 +238,7 @@ impl RegistryMode for Normal {
         Ok(database)
     }
 
-    fn database_mut<KV>(
+    fn database_mut<KV: KeyValueStore>(
         this: &mut Registry<KV, Self>,
         index: usize,
     ) -> Result<&mut Database<KV, Self>, Error> {
@@ -296,13 +306,18 @@ pub trait CloneRegistryMode: Mode {
     /// See [`Registry::try_clone`]
     fn try_clone<KV: BackgroundKeyValueStore>(
         this: &Registry<KV, Self>,
-    ) -> Result<Registry<KV, Self>, OperationalError>;
+    ) -> Result<Registry<KV, Self>, OperationalError>
+    where
+        KV::Repo: Clone;
 }
 
 impl CloneRegistryMode for Normal {
     fn try_clone<KV: BackgroundKeyValueStore>(
         this: &Registry<KV, Self>,
-    ) -> Result<Registry<KV, Self>, OperationalError> {
+    ) -> Result<Registry<KV, Self>, OperationalError>
+    where
+        KV::Repo: Clone,
+    {
         let runtime = this.inner.runtime.clone();
         let repo = this.inner.repo.clone();
 
@@ -324,13 +339,13 @@ impl CloneRegistryMode for Normal {
 }
 
 /// Registry implementation for the [`Normal`] mode
-struct NormalImpl<KV> {
-    repo: DirectoryManager,
+struct NormalImpl<KV: KeyValueStore> {
+    repo: KV::Repo,
     databases: Vec<Database<KV, Normal>>,
     runtime: Arc<Runtime>,
 }
 
-impl<KV> NormalImpl<KV> {
+impl<KV: KeyValueStore> NormalImpl<KV> {
     /// Check the given `index` is valid for a database in the registry.
     fn validate_index(&self, index: usize) -> Result<(), InvalidArgumentError> {
         if index >= self.databases.len() {
@@ -351,13 +366,22 @@ mod tests {
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::Key;
-    use crate::repo::DirectoryManager;
     use crate::storage::TestKeyValueStore;
 
     fn setup_registry() -> (TestableTmpdir, Registry<TestKeyValueStore, Normal>) {
         let tmpdir = TestableTmpdir::new();
-        let base_dir = tmpdir.path().join("registry");
-        let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "rocksdb")] {
+                use crate::repo::DirectoryManager;
+
+                let base_dir = tmpdir.path().join("registry");
+                let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
+            } else {
+                let repo = crate::storage::in_memory::InMemoryRepo;
+            }
+        };
+
         let registry = Registry::new(repo).expect("Registry should be created");
 
         (tmpdir, registry)
