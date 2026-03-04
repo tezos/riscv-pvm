@@ -8,7 +8,7 @@
 //! [`Tree`]. When [`MerkleLayer::commit`] is called, the tree is serialised and stored in the KV
 //! and the root hash of the tree is used to identify that commitment of the layer as a
 //! [`CommitId`]. The inverse operation, [`MerkleLayer::checkout`], takes a [`CommitId`] and
-//! reconstructs the tree from the KV.
+//! restores the tree root as a blinded node that is loaded from the KV on demand.
 //!
 //! `M` is an implementation of the PVM's operational [`Mode`].
 //!
@@ -18,13 +18,15 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::serialisation;
+use octez_riscv_data::serialisation::deserialise;
+use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::LazyNodeId;
@@ -36,6 +38,13 @@ use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+
+pub(crate) fn empty_tree_hash() -> Hash {
+    static EMPTY_TREE_HASH: OnceLock<Hash> = OnceLock::new();
+    *EMPTY_TREE_HASH.get_or_init(|| {
+        Hash::hash_encodable(Option::<Hash>::None).expect("Hashing the empty tree should not fail")
+    })
+}
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
 /// [`PersistentKeyValueStore`].
@@ -56,7 +65,7 @@ impl<KV> MerkleLayer<KV, Normal> {
     }
 
     /// Load the Merkle layer from the given key-value store.
-    pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, OperationalError>
+    pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
     where
         KV: KeyValueStore,
     {
@@ -259,9 +268,24 @@ impl<KV> NormalImpl<KV> {
         Ok(())
     }
 
-    /// Load the Merkle layer from the given key-value store.
-    fn checkout(_persistence: Arc<KV>, _root: CommitId) -> Result<Self, OperationalError> {
-        todo!("RV-862: implement checkout")
+    /// Load the Merkle layer from the given key-value store with lazy node loading.
+    fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
+    where
+        KV: KeyValueStore,
+    {
+        let resolver = LazyResolver::new(persistence.clone());
+        let tree = if *root.as_hash() == empty_tree_hash() {
+            Tree::default()
+        } else {
+            let tree_data = persistence.blob_get(*root.as_hash())?;
+            deserialise(tree_data.as_ref()).map_err(OperationalError::from)?
+        };
+
+        Ok(Self {
+            tree,
+            persistence,
+            resolver,
+        })
     }
 
     /// Generates a commitment for the [MerkleLayer].
@@ -269,17 +293,19 @@ impl<KV> NormalImpl<KV> {
     where
         KV: PersistentKeyValueStore,
     {
-        // Note that although we're doing in order
-        // iteration of the nodes the hashes are
-        // calculated during the encoding of the node
-        // if necessary.
+        // Note that although we're doing in-order iteration of the nodes, the hashes are
+        // calculated during the encoding of the node if necessary.
         for node in self.tree.iter(&self.resolver) {
             let node = node?;
             let encoded = node.to_encode(&self.resolver);
-            let value = serialisation::serialise(encoded)
-                .expect("Serialisation of node data should not fail");
+            let value = serialise(encoded).expect("Serialisation of node data should not fail");
             let blob = HashedData::from_data(value);
+            let node_hash = blob.hash();
             self.persistence.blob_set(blob)?;
+
+            let serialised_tree_repr = serialise(Some(node_hash))?;
+            let tree_blob = HashedData::from_data(serialised_tree_repr);
+            self.persistence.blob_set(tree_blob)?;
         }
 
         Ok(CommitId::from(self.hash()))
@@ -1119,6 +1145,146 @@ mod tests {
             }
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
+        }
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[derive(Debug, Clone)]
+    enum GeneratedOperation {
+        // Key, Value
+        Set([u8; 2], Vec<u8>),
+        // Key, Value, offset hint (used to generate a valid offset for existing values)
+        Write([u8; 2], Vec<u8>, u8),
+        // Key
+        Delete([u8; 2]),
+    }
+
+    #[cfg(feature = "rocksdb")]
+    fn generated_operations_strategy(
+        length: usize,
+    ) -> impl Strategy<Value = Vec<GeneratedOperation>> {
+        let count = length.div_ceil(10);
+
+        (
+            prop::collection::vec(any::<[u8; 2]>(), count),
+            prop::collection::vec(prop::collection::vec(any::<u8>(), 0..64), count),
+        )
+            .prop_flat_map(move |(keys, values)| {
+                prop::collection::vec(
+                    prop_oneof![
+                        (
+                            proptest::sample::select(keys.clone()),
+                            proptest::sample::select(values.clone()),
+                        )
+                            .prop_map(|(key, value)| GeneratedOperation::Set(key, value)),
+                        (
+                            proptest::sample::select(keys.clone()),
+                            proptest::sample::select(values),
+                            any::<u8>(),
+                        )
+                            .prop_map(|(key, value, offset_hint)| {
+                                GeneratedOperation::Write(key, value, offset_hint)
+                            }),
+                        proptest::sample::select(keys).prop_map(GeneratedOperation::Delete),
+                    ],
+                    length,
+                )
+            })
+    }
+
+    #[cfg(feature = "rocksdb")]
+    proptest! {
+        #[test]
+        fn test_merkle_layer_checkout_lazy_from_commit(
+            operations in (1usize..100usize).prop_flat_map(generated_operations_strategy)
+        ) {
+            use std::collections::BTreeMap;
+            use std::collections::BTreeSet;
+            use octez_riscv_test_utils::TestableTmpdir;
+            use crate::repo::DirectoryManager;
+
+
+            let tmpdir = TestableTmpdir::new();
+            let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+            let persistence = TestKeyValueStore::new(&repo)
+                .expect("Creating a persistence layer should succeed");
+            let persistence = std::sync::Arc::new(persistence);
+
+            let mut merkle_layer = MerkleLayer::new(persistence.clone());
+            let mut reference: BTreeMap<Key, Vec<u8>> = BTreeMap::new();
+            let mut touched: BTreeSet<Key> = BTreeSet::new();
+
+            for operation in operations {
+                match operation {
+                    GeneratedOperation::Set(bytes, value) => {
+                        let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
+                        merkle_layer
+                            .set(&key, &value)
+                            .expect("Set operation should succeed");
+                        reference.insert(key.clone(), value);
+                        touched.insert(key);
+                    }
+                    GeneratedOperation::Write(bytes, value, offset_hint) => {
+                        let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
+                        let offset = match reference.get(&key) {
+                            Some(existing) if !existing.is_empty() => {
+                                1 + (offset_hint as usize % existing.len())
+                            }
+                            _ => 0,
+                        };
+
+                        merkle_layer
+                            .write(&key, offset, &value)
+                            .expect("Write operation should succeed");
+
+                        let entry = reference.entry(key.clone()).or_default();
+                        let new_len = offset
+                            .checked_add(value.len())
+                            .expect("Generated offset and value length should not overflow");
+                        if entry.len() < new_len {
+                            entry.resize(new_len, 0);
+                        }
+                        entry[offset..new_len].copy_from_slice(&value);
+                        touched.insert(key);
+                    }
+                    GeneratedOperation::Delete(bytes) => {
+                        let key = Key::new(&bytes).expect("Sizes less than KEY_MAX_SIZE");
+                        merkle_layer
+                            .delete(&key)
+                            .expect("Delete operation should succeed");
+                        reference.remove(&key);
+                        touched.insert(key);
+                    }
+                }
+            }
+
+            let expected_hash = merkle_layer.hash().expect("Hash operation should succeed");
+            let commit_id = merkle_layer.commit().expect("Commit operation should succeed");
+
+            let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
+                .expect("Lazy checkout should succeed");
+            let loaded_hash = lazy_loaded.hash().expect("Hash operation should succeed");
+
+            prop_assert_eq!(loaded_hash, expected_hash);
+
+            for key in touched {
+                let expected = reference.get(&key);
+                let loaded = lazy_loaded
+                    .get(&key)
+                    .expect("Lookup in lazy-loaded tree should succeed");
+
+                match (expected, loaded) {
+                    (Some(expected), Some(loaded)) => {
+                        let mut loaded_bytes = vec![0; loaded.len()];
+                        let bytes_read = loaded.read(0, &mut loaded_bytes);
+                        prop_assert_eq!(bytes_read, loaded_bytes.len());
+                        prop_assert_eq!(loaded_bytes.as_slice(), expected.as_slice());
+                    }
+                    (None, None) => {}
+                    (Some(_), None) => panic!("Expected an existing key in lazy-loaded tree: {key:?}"),
+                    (None, Some(_)) => panic!("Expected a missing key in lazy-loaded tree: {key:?}"),
+                }
+            }
         }
     }
 

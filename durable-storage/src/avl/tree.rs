@@ -6,6 +6,10 @@
 
 use std::cmp::Ordering;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::error::DecodeError;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
 use octez_riscv_data::hash::Hash;
@@ -13,6 +17,7 @@ use perfect_derive::perfect_derive;
 
 use super::node::Node;
 use crate::avl::resolver::AvlResolver;
+use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
@@ -123,12 +128,20 @@ impl<NodeId> Tree<NodeId> {
     /// [`Node`]s.
     ///
     /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
+    pub(crate) fn to_encode<TreeId, Value>(
+        &self,
+        resolver: &impl NodeResolver<NodeId, TreeId, Value>,
+    ) -> impl Encode + '_ {
+        self.0.as_ref().map(|id| resolver.get_hash(id))
+    }
+
+    /// Returns the hash of this tree.
     pub(crate) fn hash<TreeId, Value>(
         &self,
         resolver: &impl NodeResolver<NodeId, TreeId, Value>,
     ) -> Hash {
-        let encodable: Option<Hash> = self.0.as_ref().map(|id| resolver.get_hash(id));
-        Hash::hash_encodable(encodable).expect("Should be hashable")
+        let data = self.to_encode(resolver);
+        Hash::hash_encodable(data).expect("The hashing should not fail")
     }
 
     /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
@@ -313,6 +326,13 @@ impl<NodeId> Tree<NodeId> {
             Some(node) => Node::rebalance(node, resolver),
             None => Ok(()),
         }
+    }
+}
+
+impl<C> Decode<C> for Tree<LazyNodeId> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let root_hash: Option<Hash> = Decode::decode(decoder)?;
+        Ok(Tree::from(root_hash.map(LazyNodeId::from)))
     }
 }
 

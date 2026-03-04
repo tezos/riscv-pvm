@@ -117,6 +117,9 @@ pub enum OperationalError {
 
     #[error("Error during decoding.")]
     Decoding(#[from] bincode::error::DecodeError),
+
+    #[error("Error during encoding.")]
+    Encoding(#[from] bincode::error::EncodeError),
 }
 
 /// Errors that occur because of incorrect usage

@@ -235,6 +235,10 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
     /// The serialised payload is expected to be an optional root node hash, which is then wrapped
     /// in a lazy node identifier.
     fn load_tree(&self, hash: Hash) -> Result<Tree<LazyNodeId>, OperationalError> {
+        if hash == crate::merkle_layer::empty_tree_hash() {
+            return Ok(Tree::default());
+        }
+
         let bytes = self
             .persistence_layer
             .blob_get(hash)
@@ -702,8 +706,8 @@ mod tests {
         persist_tree(&lazy_tree, &lazy_resolver, persistence_layer.as_ref());
         assert_eq!(
             persistence_layer.blob_get_calls(),
-            3,
-            "Re-persisting the tree should trigger two loads, one for each child of the root"
+            1,
+            "Re-persisting the tree should not load empty child subtrees from storage"
         );
 
         let reloaded_tree_id = LazyTreeId::from(persisted_tree_hash);
@@ -711,7 +715,7 @@ mod tests {
         let reloaded_tree = lazy_resolver
             .resolve(&reloaded_tree_id)
             .expect("resolving persisted mutated tree should succeed");
-        assert_eq!(persistence_layer.blob_get_calls(), 4);
+        assert_eq!(persistence_layer.blob_get_calls(), 2);
 
         let reloaded_root = reloaded_tree
             .root()
@@ -720,7 +724,7 @@ mod tests {
         let reloaded_node = lazy_resolver
             .resolve(reloaded_root)
             .expect("resolving persisted mutated root node should succeed");
-        assert_eq!(persistence_layer.blob_get_calls(), 5);
+        assert_eq!(persistence_layer.blob_get_calls(), 3);
 
         let mut reloaded_data = vec![0; reloaded_node.data().len()];
         reloaded_node.data().read(0, &mut reloaded_data);

@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 use trait_set::trait_set;
 
 use crate::commit::CommitId;
+use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
@@ -273,7 +274,7 @@ impl<KV> MerkleWorker<KV> {
         async_handle: &Handle,
         store: Arc<KV>,
         commit: CommitId,
-    ) -> Result<Self, OperationalError>
+    ) -> Result<Self, Error>
     where
         KV: BackgroundPersistentKeyValueStore,
     {
