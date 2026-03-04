@@ -12,6 +12,8 @@ use perfect_derive::perfect_derive;
 use super::node::Node;
 use super::node::Value;
 use crate::avl::resolver::Resolver;
+use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 #[cfg(test)]
 use crate::key::KEY_MAX_SIZE;
@@ -94,7 +96,22 @@ impl<Id> Tree<Id> {
     where
         Id: Clone + From<Node<Id>>,
     {
-        self.upsert(key, 0, |old_data| old_data.set(data), resolver)
+        let result = self.upsert(
+            key,
+            0,
+            |old_data| {
+                old_data.set(data);
+                Ok(())
+            },
+            resolver,
+        );
+
+        result.map_err(|e| match e {
+            crate::errors::Error::Operational(e) => e,
+            crate::errors::Error::InvalidArgument(_) => {
+                unreachable!("`set` at offset 0 cannot produce InvalidArgumentError")
+            }
+        })
     }
 
     /// Returns the node [`struct@Hash`], potentially re-hashing uncached [`Node`]s.
@@ -200,9 +217,9 @@ impl<Id> Tree<Id> {
         &mut self,
         key: &Key,
         offset: usize,
-        data: impl FnOnce(&mut Value),
+        data: impl FnOnce(&mut Value) -> Result<(), Error>,
         resolver: &mut impl Resolver<Id, Node<Id>>,
-    ) -> Result<bool, OperationalError>
+    ) -> Result<bool, Error>
     where
         Id: Clone + From<Node<Id>>,
     {
@@ -216,7 +233,7 @@ impl<Id> Tree<Id> {
             // TODO: RV-895: Dynamic creation of the `Bytes` (alias `Value`) state component may cause
             // problems with proof generation
             let mut new_data = Value::default();
-            data(&mut new_data);
+            data(&mut new_data)?;
 
             // The key does not exist and a new `Node` shall be created.
             let new_node: Node<Id> = Node::new(key.clone(), new_data);
@@ -246,7 +263,7 @@ impl<Id> Tree<Id> {
         offset: usize,
         data: &[u8],
         resolver: &mut impl Resolver<Id, Node<Id>>,
-    ) -> Result<bool, OperationalError>
+    ) -> Result<bool, Error>
     where
         Id: Clone + From<Node<Id>>,
     {
@@ -254,21 +271,18 @@ impl<Id> Tree<Id> {
             key,
             offset,
             |old_data| {
-                // This shouldn't happen: it's prevented by the `Database` API.
-                assert!(offset <= old_data.len());
+                if offset > old_data.len() {
+                    return Err(InvalidArgumentError::OffsetTooLarge)?;
+                }
 
                 let Some(new_data_end) = offset.checked_add(data.len()) else {
-                    // The asynchronous Merkle worker means that errors can't be returned to the
-                    // `Database`.
-                    panic!(
-                        "Offset + data.len() overflows (`{offset:?}` + `{:?}`)",
-                        data.len()
-                    );
+                    return Err(InvalidArgumentError::OffsetTooLarge)?;
                 };
 
                 let final_len = std::cmp::max(old_data.len(), new_data_end);
                 old_data.resize(final_len);
                 old_data.write(offset, data);
+                Ok(())
             },
             resolver,
         )

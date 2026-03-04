@@ -361,10 +361,25 @@ impl KeyValueStore for PersistenceLayer {
         offset: usize,
         value: impl AsRef<[u8]>,
     ) -> Result<(), Error> {
-        // TODO: RV-914: This method assumes correct usage. The merge operator would later panic if
-        // the offset is larger than the existing value's length, or if the offset + value length
-        // overflows. This method assumes those parameters are checked, but it is very possible that
-        // they are not. We should consider adding checks here or making the API more robust to
+        // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
+        // operation to check if the existing value length is shorter than the offset.
+        if offset > 0 {
+            // `may_exist` can be cheaper than `get`
+            let may_exist = self.may_exist(&key)?;
+            if !may_exist {
+                return Err(InvalidArgumentError::KeyNotFound)?;
+            }
+
+            // Checking the length of a value requires a full retrieval. Returns an error if the
+            // key does not exist.
+            let len = self
+                .get(key.as_ref())
+                .map_or(0, |stored| stored.as_ref().len());
+            if offset > len || offset.checked_add(value.as_ref().len()).is_none() {
+                return Err(InvalidArgumentError::OffsetTooLarge)?;
+            }
+        }
+
         // misuse.
 
         let payload_struct = OffsetWriteMergePayload {

@@ -19,6 +19,7 @@ use crate::avl::resolver::ArcResolver;
 use crate::avl::resolver::Resolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
+use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -80,7 +81,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), OperationalError> {
+    pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error> {
         M::write(self, key, offset, data)
     }
 }
@@ -112,7 +113,7 @@ pub trait MerkleLayerMode: Mode {
         key: &Key,
         offset: usize,
         data: &[u8],
-    ) -> Result<(), OperationalError>;
+    ) -> Result<(), Error>;
 }
 
 impl MerkleLayerMode for Normal {
@@ -146,7 +147,7 @@ impl MerkleLayerMode for Normal {
         key: &Key,
         offset: usize,
         data: &[u8],
-    ) -> Result<(), OperationalError> {
+    ) -> Result<(), Error> {
         this.inner.write(key, offset, data)
     }
 }
@@ -205,7 +206,7 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Writes the data to the node associated with a given [Key] with the given offset.
-    fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), OperationalError> {
+    fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error> {
         self.tree.write(key, offset, data, &mut self.resolver)?;
         Ok(())
     }

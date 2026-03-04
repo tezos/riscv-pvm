@@ -266,23 +266,6 @@ impl DatabaseMode for Normal {
         offset: usize,
         data: Bytes,
     ) -> Result<usize, Error> {
-        // If the offset is greater than 0 and the key exists, we have to do an expensive 'get'
-        // operation to check if the existing value length is shorter than the offset.
-        if offset > 0 {
-            // `may_exist` can be cheaper than `get`
-            let may_exist = this.inner.persistent.may_exist(&key)?;
-            if !may_exist {
-                return Err(InvalidArgumentError::KeyNotFound)?;
-            }
-
-            // Checking the length of a value requires a full retrieval. Returns an error if the
-            // key does not exist.
-            let len = this.value_length(&key)?;
-            if offset > len || offset.checked_add(data.len()).is_none() {
-                return Err(InvalidArgumentError::OffsetTooLarge)?;
-            }
-        }
-
         let written = data.len();
         this.inner.persistent.write(&key, offset, &data)?;
         this.inner.merkle.write(key, offset, data)?;
