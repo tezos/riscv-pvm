@@ -2,6 +2,19 @@
 //
 // SPDX-License-Identifier: MIT
 
+//! A Merkleised key-value store layer.
+//!
+//! [`MerkleLayer`] wraps a [`KeyValueStore`] (KV) and duplicates all stored data in an AVL
+//! [`Tree`]. When [`MerkleLayer::commit`] is called, the tree is serialised and stored in the KV
+//! and the root hash of the tree is used to identify that commitment of the layer as a
+//! [`CommitId`]. The inverse operation, [`MerkleLayer::checkout`], takes a [`CommitId`] and
+//! reconstructs the tree from the KV.
+//!
+//! `M` is an implementation of the PVM's operational [`Mode`].
+//!
+//! [`MerkleLayer::try_clone_with`] enables forking snapshots. Clones share the underlying tree
+//! cheaply via an `Arc` and diverge upon mutation, using copy-on-write (CoW) semantics.
+
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
