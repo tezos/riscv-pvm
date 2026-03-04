@@ -15,6 +15,7 @@ use perfect_derive::perfect_derive;
 
 use super::tree::Tree;
 use crate::avl::resolver::Resolver;
+use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 
@@ -289,9 +290,9 @@ impl<Id> Node<Id> {
         &mut self,
         key: &Key,
         offset: usize,
-        data: impl FnOnce(&mut Value),
+        data: impl FnOnce(&mut Value) -> Result<(), Error>,
         resolver: &mut impl Resolver<Id, Self>,
-    ) -> Result<bool, OperationalError>
+    ) -> Result<bool, Error>
     where
         Id: Clone + From<Self>,
     {
@@ -315,7 +316,7 @@ impl<Id> Node<Id> {
         match self.key.cmp(key) {
             // The key already exists and should be updated.
             Ordering::Equal => {
-                data(&mut self.data);
+                data(&mut self.data)?;
                 self.invalidate_hash();
                 Ok(false)
             }
