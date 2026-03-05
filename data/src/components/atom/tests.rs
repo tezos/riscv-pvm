@@ -4,11 +4,18 @@
 
 //! Tests for [`Atom`]
 
+use proptest::arbitrary::Arbitrary;
+use proptest::collection::vec;
+use proptest::prelude::Just;
+use proptest::prelude::any;
 use proptest::prop_assert;
 use proptest::prop_assert_eq;
+use proptest::prop_oneof;
 use proptest::proptest;
+use proptest::strategy::Strategy;
 
 use crate::components::atom::Atom;
+use crate::components::atom::AtomMode;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_tree::MerkleTree;
@@ -231,5 +238,93 @@ fn proof_gen() {
             }
             _ => panic!("Expected Merkle tree to contain a single written leaf"),
         }
+    });
+}
+
+/// Operations to be issued against an immutable Atom state component
+#[derive(Debug, Clone)]
+pub(crate) enum AtomOp {
+    Read,
+}
+
+impl AtomOp {
+    /// Strategy for generating operations to be issued against the Atom state component
+    pub(crate) fn any() -> impl Strategy<Value = Self> {
+        Just(Self::Read)
+    }
+
+    /// Run an operation against an immutable Atom state component.
+    pub(crate) fn run<M: AtomMode, T: Copy + 'static>(&self, atom: &Atom<T, M>) -> AtomOpResult<T> {
+        match self {
+            Self::Read => AtomOpResult::Read { value: atom.read() },
+        }
+    }
+}
+
+/// Operations to be issued against a mutable Atom state component
+#[derive(Debug, Clone)]
+pub(crate) enum AtomMutOp<T> {
+    Write { value: T },
+    Immutable { op: AtomOp },
+}
+
+impl<T: Copy + 'static> AtomMutOp<T> {
+    /// Run the operation against the Atom state component.
+    pub(crate) fn run<M: AtomMode>(&self, atom: &mut Atom<T, M>) -> AtomOpResult<T> {
+        match self {
+            Self::Write { value } => {
+                atom.write(*value);
+                AtomOpResult::Void
+            }
+
+            Self::Immutable { op } => op.run(atom),
+        }
+    }
+}
+
+impl<T: Copy + Arbitrary + 'static> AtomMutOp<T> {
+    /// Strategy for generating operations to be issued against the Atom state component
+    pub(crate) fn any() -> impl Strategy<Value = Self> {
+        prop_oneof![
+            any::<T>().prop_map(|value| Self::Write { value }),
+            AtomOp::any().prop_map(|op| Self::Immutable { op }),
+        ]
+    }
+}
+
+/// Results of operations issued against the Atom state component
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AtomOpResult<T> {
+    Read { value: T },
+    Void,
+}
+
+/// Atom behaves the same across different modes
+#[test]
+fn atom_is_same_across_modes() {
+    proptest!(|(initial in any::<u64>(), ops in vec(AtomMutOp::<u64>::any(), 1..20))| {
+        let mut atom_normal = Atom::<u64, Normal>::new(initial);
+        let results_normal = ops.iter().map(|op| op.run(&mut atom_normal)).collect::<Vec<_>>();
+        let hash_normal = Hash::from_foldable(&atom_normal);
+
+        let mut atom_prove = Atom::<u64, Prove>::new(initial);
+        let results_prove = ops.iter().map(|op| op.run(&mut atom_prove)).collect::<Vec<_>>();
+        prop_assert_eq!(&results_normal, &results_prove);
+
+        let hash_prove = Hash::from_foldable(&atom_prove);
+        prop_assert_eq!(hash_normal, hash_prove);
+
+        let merkle_tree = MerkleTree::from_foldable(&atom_prove);
+        let merkle_proof = merkle_tree.compress();
+
+        let mut atom_verify = Atom::<u64, Verify>::new(initial);
+        let results_verify = ops.iter().map(|op| op.run(&mut atom_verify)).collect::<Vec<_>>();
+        prop_assert_eq!(results_normal, results_verify);
+
+        let hash_verify =
+            PartialHash::from_foldable(Some(&merkle_proof), &atom_verify)
+                .to_hash()
+                .unwrap();
+        prop_assert_eq!(hash_normal, hash_verify);
     });
 }
