@@ -4,7 +4,7 @@
 all: check
 
 check: 
-	@cargo check --no-default-features
-	@cargo check
+	@cargo check --all-targets --no-default-features
+	@cargo check --all-targets
 
 .PHONY: all check
