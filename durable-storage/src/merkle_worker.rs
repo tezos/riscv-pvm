@@ -455,16 +455,7 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "rocksdb")] {
-                use crate::repo::DirectoryManager;
-
-                let tmp_dir = tempfile::tempdir().expect("Creating a temporary directory should succeed");
-                let repo = DirectoryManager::new(tmp_dir.path()).expect("creating manager should succeed.");
-            } else {
-                let repo = crate::storage::in_memory::InMemoryRepo;
-            }
-        };
+        let (_keepalive, repo) = crate::storage::setup_repo();
 
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
             let persistence_layer = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");

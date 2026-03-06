@@ -8,8 +8,6 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::key::KEY_MAX_SIZE;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::registry::Registry;
-use octez_riscv_durable_storage::repo::DirectoryManager;
-use octez_riscv_test_utils::TestableTmpdir;
 use proptest::prelude::*;
 use proptest::proptest;
 use proptest::sample::Index;
@@ -251,9 +249,20 @@ fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
 }
 
 fn test_durable_storage_inner(operations: Vec<Operation>) {
-    let tmpdir = TestableTmpdir::new();
-    let base_dir = tmpdir.path().join("registry");
-    let repo = DirectoryManager::new(&base_dir).expect("Failed to create manager");
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "rocksdb")] {
+            use octez_riscv_durable_storage::repo::DirectoryManager;
+            use octez_riscv_test_utils::TestableTmpdir;
+
+            let tmpdir = TestableTmpdir::new();
+            let base_dir = tmpdir.path().join("registry");
+            let repo = DirectoryManager::new(&base_dir).expect("Failed to create manager");
+        } else {
+            use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
+            let repo = InMemoryRepo;
+        }
+    }
+
     let mut registry: Registry<TestKv, Normal> =
         Registry::new(repo).expect("Creating the registry should succeed");
 
