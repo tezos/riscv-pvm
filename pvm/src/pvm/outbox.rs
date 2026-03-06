@@ -35,11 +35,12 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
+use octez_riscv_data::foldable::seq_tree::Many;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_binary;
@@ -67,7 +68,6 @@ use super::node_pvm::NodePvmMemConfig;
 use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
-use crate::pvm::outbox::merkle_proof::ProofError;
 
 /// Small outbox size for testing
 ///
@@ -254,8 +254,7 @@ where
 
 impl FromProof for Outbox<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result =
-            merkle_proof::Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::from_proof(proof)?;
+        let result = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::from_proof(proof)?;
         Ok(result.map(|arr| Outbox {
             levels: arr.into_boxed_array(),
         }))
@@ -472,8 +471,7 @@ impl FromProof for OutboxLevel<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
         let (proof, messages) = proof.next_branch_with(|p| {
-            let result =
-                merkle_proof::Many::<_, LEVEL_MERKLE_ARITY, MAX_LEVEL_SIZE>::from_proof(p)?;
+            let result = Many::<_, LEVEL_MERKLE_ARITY, MAX_LEVEL_SIZE>::from_proof(p)?;
             Ok(result.map(|arr| arr.into_boxed_array()))
         })?;
 
