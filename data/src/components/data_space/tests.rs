@@ -15,8 +15,16 @@ use proptest::array;
 use proptest::prop_assert_eq;
 use proptest::proptest;
 
+use super::NODE_ARITY;
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
+use crate::foldable::Unfoldable;
+use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::foldable::tests::TestFolder;
+use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_tree;
@@ -33,6 +41,29 @@ use crate::mode::utils::assert_not_found;
 use crate::serialisation::deserialise;
 use crate::serialisation::elem::Elem;
 use crate::serialisation::serialise;
+
+impl Foldable<TestFolder> for DataSpace<Normal> {
+    fn fold(&self, builder: TestFolder) -> TestTree {
+        let length = self.len();
+        let length_node = TestTree::Leaf(serialise(length).unwrap());
+
+        let generator = |idx: usize| {
+            let page_start = PAGE_SIZE.checked_mul(idx).unwrap();
+            let page_end = page_start.checked_add(PAGE_SIZE).unwrap().min(length);
+
+            let mut v = vec![];
+            v.extend_from_slice(&self.data_space[page_start..page_end]);
+            TestTree::Leaf(v)
+        };
+
+        let pages = length.div_ceil(PAGE_SIZE);
+
+        let mut builder = builder.into_node_fold();
+        builder.add(&length_node);
+        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.done()
+    }
+}
 
 /// Dummy type that helps us implement custom serialisation via [`Elem`]
 #[repr(C, packed)]
@@ -599,4 +630,30 @@ fn verify_with_gaps() {
         assert_not_found!(dyn_cells.read::<[u8; 6]>(PAGE_SIZE - 1));
         assert_not_found!(dyn_cells.read::<[u8; 4]>(PAGE_SIZE));
     }
+}
+
+#[test]
+fn fold_unfold() {
+    proptest::proptest!(|(pages in 1usize..=17)| {
+        let length = pages * PAGE_SIZE;
+        let mut space: DataSpace<Normal> = DataSpace::new(length);
+        space.fill(42);
+
+        let tree = space.fold(TestFolder);
+        let unfolded = DataSpace::unfold(tree).unwrap();
+
+        assert!(space == unfolded);
+    });
+}
+
+#[test]
+fn unfold_error_on_invalid_length() {
+    let length = 5000;
+    let mut space: DataSpace<Normal> = DataSpace::new(length);
+    space.fill(42);
+
+    let tree = space.fold(TestFolder);
+    let unfold_result = DataSpace::unfold(tree.clone());
+
+    assert!(unfold_result == Err("InvalidLength(5000)".to_string()));
 }

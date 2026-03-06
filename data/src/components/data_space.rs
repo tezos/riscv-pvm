@@ -21,6 +21,11 @@ use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
+use crate::foldable::NodeUnfold;
+use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
+use crate::foldable::Unfoldable;
+use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
@@ -265,6 +270,49 @@ where
 {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
         self.data_space.fold(builder)
+    }
+}
+
+/// DataSpace specific errors for unfolding.
+#[derive(Debug, thiserror::Error)]
+enum DataSpaceError {
+    #[error("DataSpace length is not a multiple of page size: {0}")]
+    InvalidLength(usize),
+}
+
+impl Unfoldable for DataSpace<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let length = source.next_branch_with::<u64>(|source| source.into_leaf())? as usize;
+        if length % PAGE_SIZE != 0 {
+            // If the length isn't a multiple of PAGE_SIZE then we can't unfold safely, so we
+            // error.
+            return Err(UnfoldError::custom(DataSpaceError::InvalidLength(length)));
+        }
+        let length_in_pages = length / PAGE_SIZE;
+
+        let space = source.next_branch_with(|source| {
+            let mut space = DataSpace::new(length);
+
+            let mut for_leaf = |idx, source: U| {
+                let page = source.into_leaf_raw::<PAGE_SIZE>()?;
+
+                let addr = idx * PAGE_SIZE;
+
+                // SAFETY: `idx` is at most `length_in_pages - 1`, `length` has been checked to
+                // be a multiple of `PAGE_SIZE`, and `page` is exactly `PAGE_SIZE` in length
+                unsafe { space.write(addr, *page.as_ref()) };
+
+                Ok(())
+            };
+
+            seq_tree::descend_tree(source, NODE_ARITY, length_in_pages, &mut for_leaf)?;
+
+            Ok(space)
+        })?;
+
+        source.done(space)
     }
 }
 
