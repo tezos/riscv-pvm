@@ -19,7 +19,7 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
-use octez_riscv_data::merkle_proof;
+use octez_riscv_data::foldable::seq_tree::Many;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -168,7 +168,7 @@ where
 }
 impl<const PAGES: usize> FromProof for PagePermissions<PAGES, Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = merkle_proof::Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof)?;
+        let result = Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof)?;
         let result = result.map(|pages| Self {
             pages: pages.into_boxed_array(),
         });

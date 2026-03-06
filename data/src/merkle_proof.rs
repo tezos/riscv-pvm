@@ -14,6 +14,7 @@ use std::error;
 use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::foldable::seq_tree::Many;
 use crate::hash::Hash;
 
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
@@ -214,16 +215,6 @@ impl<Item: FromProof, const LEN: usize> FromProof for [Item; LEN] {
     }
 }
 
-/// Many items in a Merkle tree with given arity and length
-pub struct Many<T, const ARITY: usize, const LEN: usize>(Box<[T; LEN]>);
-
-impl<T, const ARITY: usize, const LEN: usize> Many<T, ARITY, LEN> {
-    /// Turn this into the underlying boxed array.
-    pub fn into_boxed_array(self) -> Box<[T; LEN]> {
-        self.0
-    }
-}
-
 impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<Item, ARITY, LEN> {
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let mut leaves = Vec::with_capacity(LEN);
@@ -236,11 +227,12 @@ impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<I
             Ok(result)
         })?;
 
-        let Ok(boxed_array) = leaves.into_boxed_slice().try_into() else {
+        let Ok(boxed_array): Result<Box<[Item; LEN]>, _> = leaves.into_boxed_slice().try_into()
+        else {
             panic!("Unexpected number of leaves collected")
         };
 
-        let result = result.map(|_| Many(boxed_array));
+        let result = result.map(|_| Many::from(boxed_array));
         Ok(result)
     }
 }
