@@ -26,6 +26,10 @@ use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
+use crate::foldable::NodeUnfold;
+use crate::foldable::Unfold;
+use crate::foldable::Unfoldable;
+use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
@@ -343,6 +347,33 @@ impl Foldable<PartialHashFold<'_>> for Bytes<Verify> {
         };
 
         self.fold_generic(builder, length, length_node, get_item)
+    }
+}
+
+impl Unfoldable for Bytes<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let length: u64 = source.next_branch_with(|source| source.into_leaf())?;
+        let length_in_pages = (length as usize).div_ceil(PAGE_SIZE);
+
+        let state = source.next_branch_with(|source| {
+            let mut state = bytes::BytesMut::new();
+
+            let mut for_leaf = |_idx, source: U| {
+                let page = source.into_leaf::<Page>()?;
+
+                state.extend_from_slice(&page.data[..]);
+
+                Ok(())
+            };
+
+            seq_tree::descend_tree(source, NODE_ARITY, length_in_pages, &mut for_leaf)?;
+
+            Ok(state)
+        })?;
+
+        Ok(Bytes { bytes: state })
     }
 }
 

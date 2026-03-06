@@ -15,6 +15,11 @@ use proptest::proptest;
 
 use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
+use crate::components::bytes::ChunkedPage;
+use crate::foldable::Foldable;
+use crate::foldable::Unfoldable;
+use crate::foldable::tests::TestFolder;
+use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_binary;
@@ -25,6 +30,24 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode_test;
 use crate::serialisation::serialise;
+
+impl Foldable<TestFolder> for Bytes<Normal> {
+    fn fold(&self, builder: TestFolder) -> TestTree {
+        let length = self.len();
+        let length_node = TestTree::Leaf(serialise(length as u64).unwrap());
+
+        let get_item = |range| {
+            let page = ChunkedPage {
+                chunks: &[&self.bytes[range]],
+            };
+            let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
+
+            TestTree::Leaf(leaf_data)
+        };
+
+        self.fold_generic(builder, length, length_node, get_item)
+    }
+}
 
 // Bytes should be empty after creation
 mode_test!(new_is_empty, F, {
@@ -540,5 +563,19 @@ fn proof_round_trip() {
             let after_normal_hash = Hash::from_foldable(&bytes_normal);
             prop_assert_eq!(after_normal_hash, after_verify_hash);
         }
+    });
+}
+
+#[test]
+fn fold_unfold() {
+    // Test with lengths of up to around 25 pages, including non-multiples of page size.
+    proptest::proptest!(|(length in 0usize..=100000)| {
+        let v = [4u8, 0, 89, 251, 3].iter().copied().cycle().take(length).collect::<Vec<_>>();
+        let bytes: Bytes<Normal> = Bytes::from(&v[..]);
+
+        let tree = bytes.fold(TestFolder);
+        let unfolded = Bytes::unfold(tree).unwrap();
+
+        assert!(bytes == unfolded);
     });
 }
