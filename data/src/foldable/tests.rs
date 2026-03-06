@@ -4,6 +4,8 @@
 
 #![cfg(test)]
 
+use std::error;
+
 use bincode::Decode;
 
 use crate::foldable::Fold;
@@ -11,6 +13,7 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::serialisation::deserialise;
 
@@ -86,6 +89,12 @@ impl NodeFold for TestNodeFolder {
 
     fn done(self) -> TestTree {
         TestTree::Node(self.children)
+    }
+}
+
+impl UnfoldError for String {
+    fn custom<E: error::Error>(error: E) -> String {
+        format!("{error:?}")
     }
 }
 

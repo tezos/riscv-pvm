@@ -5,6 +5,8 @@
 
 //! Foldable data structures
 
+use std::error;
+
 use bincode::Decode;
 
 pub mod seq_tree;
@@ -101,6 +103,11 @@ pub trait Unfoldable: Sized {
     fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error>;
 }
 
+/// Error trait to allow generic unfold implementations to use their own error types.
+pub trait UnfoldError {
+    fn custom<E: error::Error>(error: E) -> Self;
+}
+
 /// Implementing types describe 'source' data structures than can be deserialised or extracted in a
 /// tree-like manner.
 pub trait Unfold {
@@ -109,7 +116,7 @@ pub trait Unfold {
     type NodeUnfold: NodeUnfold<Parent = Self>;
 
     /// Unfolding is always fallible and the type of errors may depend on the source.
-    type Error;
+    type Error: UnfoldError;
 
     /// We expect the source to contain a node.
     fn into_node(self) -> Result<Self::NodeUnfold, Self::Error>;
