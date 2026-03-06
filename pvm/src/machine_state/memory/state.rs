@@ -22,6 +22,9 @@ use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::elem::Elem;
@@ -464,6 +467,33 @@ where
         builder.add(&self.executable_pages);
         builder.add(&self.allocated_pages);
         builder.done()
+    }
+}
+
+impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M> Unfoldable
+    for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
+where
+    M: Mode,
+    B: Unfoldable,
+    DataSpace<M>: Unfoldable,
+    PagePermissions<PAGES, M>: Unfoldable,
+{
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let data = source.next_branch()?;
+        let readable_pages = source.next_branch()?;
+        let writable_pages = source.next_branch()?;
+        let executable_pages = source.next_branch()?;
+        let allocated_pages = source.next_branch()?;
+
+        source.done(Self {
+            data,
+            readable_pages,
+            writable_pages,
+            executable_pages,
+            allocated_pages,
+        })
     }
 }
 

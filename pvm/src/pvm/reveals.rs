@@ -16,6 +16,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -88,6 +91,17 @@ where
         builder.add(&self.bytes);
         builder.add(&self.size);
         builder.done()
+    }
+}
+
+impl Unfoldable for RevealRequest<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let bytes = source.next_branch()?;
+        let size = source.next_branch()?;
+
+        source.done(RevealRequest { bytes, size })
     }
 }
 

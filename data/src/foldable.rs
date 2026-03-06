@@ -103,6 +103,20 @@ pub trait Unfoldable: Sized {
     fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error>;
 }
 
+impl<T: Unfoldable, const LEN: usize> Unfoldable for [T; LEN] {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut v: Vec<T> = Vec::with_capacity(LEN);
+        let mut source = source.into_node()?;
+
+        for _ in 0..LEN {
+            v.push(source.next_branch()?);
+        }
+
+        let arr = <[T; LEN]>::try_from(v).ok().expect("Should be length LEN");
+        source.done(arr)
+    }
+}
+
 /// Error trait to allow generic unfold implementations to use their own error types.
 pub trait UnfoldError {
     fn custom<E: error::Error>(error: E) -> Self;

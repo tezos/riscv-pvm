@@ -24,6 +24,9 @@ use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashFold;
@@ -478,6 +481,42 @@ where
         builder.add(&self.level_is_set);
         builder.add(&self.status);
         builder.done()
+    }
+}
+
+impl<MC: MemoryConfig, DS: Unfoldable, PC> Unfoldable for Pvm<MC, PC, DS, Normal>
+where
+    PC: PageCache<MC, Normal>,
+    MC::State<Normal>: Unfoldable,
+{
+    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+        let mut src = src.into_node()?;
+
+        let machine_state = src.next_branch()?;
+        let durable_storage = src.next_branch()?;
+        let outbox = src.next_branch()?;
+        let reveal_request = src.next_branch()?;
+        let system_state = src.next_branch()?;
+        let version = src.next_branch()?;
+        let tick = src.next_branch()?;
+        let message_counter = src.next_branch()?;
+        let level = src.next_branch()?;
+        let level_is_set = src.next_branch()?;
+        let status = src.next_branch()?;
+
+        src.done(Self {
+            machine_state,
+            durable_storage,
+            outbox,
+            reveal_request,
+            system_state,
+            version,
+            tick,
+            message_counter,
+            level,
+            level_is_set,
+            status,
+        })
     }
 }
 

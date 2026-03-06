@@ -31,6 +31,8 @@ use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -286,6 +288,14 @@ where
 {
     fn fold(&self, builder: F) -> F::Folded {
         self.registers.fold(builder)
+    }
+}
+
+impl Unfoldable for XRegisters<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+        Ok(XRegisters {
+            registers: Atom::unfold(src)?,
+        })
     }
 }
 
@@ -683,6 +693,14 @@ impl<C> Decode<C> for FRegisters<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let registers = Decode::decode(decoder)?;
         Ok(Self { registers })
+    }
+}
+
+impl Unfoldable for FRegisters<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+        Ok(FRegisters {
+            registers: Atom::unfold(src)?,
+        })
     }
 }
 
