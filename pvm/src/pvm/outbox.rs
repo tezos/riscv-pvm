@@ -34,6 +34,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::foldable::seq_tree::Many;
 use octez_riscv_data::hash::Hash;
@@ -252,6 +255,15 @@ where
     }
 }
 
+impl Unfoldable for Outbox<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let arr = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::unfold(source)?;
+        Ok(Outbox {
+            levels: arr.into_boxed_array(),
+        })
+    }
+}
+
 impl FromProof for Outbox<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let result = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::from_proof(proof)?;
@@ -464,6 +476,25 @@ where
         builder.add(&self.next_index);
         builder.add(&self.level);
         builder.done()
+    }
+}
+
+impl Unfoldable for OutboxLevel<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+        let messages = source.next_branch_with(|source| {
+            let many = Many::<_, LEVEL_MERKLE_ARITY, MAX_LEVEL_SIZE>::unfold(source)?;
+            Ok(many.into_boxed_array())
+        })?;
+
+        let next_index = source.next_branch()?;
+        let level = source.next_branch()?;
+
+        source.done(OutboxLevel {
+            messages,
+            next_index,
+            level,
+        })
     }
 }
 

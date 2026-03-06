@@ -17,6 +17,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -112,6 +115,26 @@ where
         builder.add(&self.pc);
         builder.add(&self.reservation_set);
         builder.done()
+    }
+}
+
+impl Unfoldable for HartState<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+        let mut src = src.into_node()?;
+
+        let xregisters = src.next_branch()?;
+        let fregisters = src.next_branch()?;
+        let csregisters = src.next_branch()?;
+        let pc = src.next_branch()?;
+        let reservation_set = src.next_branch()?;
+
+        src.done(HartState {
+            xregisters,
+            fregisters,
+            csregisters,
+            pc,
+            reservation_set,
+        })
     }
 }
 

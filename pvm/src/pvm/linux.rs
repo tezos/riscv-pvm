@@ -32,6 +32,9 @@ use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -1038,6 +1041,26 @@ where
         builder.add(&self.heap);
         builder.add(&self.stack_guard);
         builder.done()
+    }
+}
+
+impl Unfoldable for SupervisorState<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+        let mut src = src.into_node()?;
+
+        let tid_address = src.next_branch()?;
+        let program = src.next_branch()?;
+        let heap = src.next_branch()?;
+        let stack_guard = src.next_branch()?;
+
+        src.done(Self {
+            tid_address,
+            exited: false,
+            exit_code: 0,
+            program,
+            heap,
+            stack_guard,
+        })
     }
 }
 

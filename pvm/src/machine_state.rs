@@ -41,6 +41,9 @@ use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -177,6 +180,26 @@ where
         builder.add(&self.main_memory);
         builder.add(&self.signal_actions);
         builder.done()
+    }
+}
+
+impl<MC> Unfoldable for MachineCoreState<MC, Normal>
+where
+    MC: MemoryConfig,
+    MC::State<Normal>: Unfoldable,
+{
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let hart = source.next_branch()?;
+        let main_memory = source.next_branch()?;
+        let signal_actions = source.next_branch()?;
+
+        source.done(Self {
+            hart,
+            main_memory,
+            signal_actions,
+        })
     }
 }
 
@@ -317,6 +340,21 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDat
             core: self.core.clone_state(),
             page_cache: PC::new(),
         }
+    }
+}
+
+impl<MC, PC> Unfoldable for MachineState<MC, PC, Normal>
+where
+    MC: MemoryConfig,
+    PC: PageCache<MC, Normal>,
+    MC::State<Normal>: Unfoldable,
+{
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let core = MachineCoreState::unfold(source)?;
+        Ok(Self {
+            core,
+            page_cache: PC::new(),
+        })
     }
 }
 
