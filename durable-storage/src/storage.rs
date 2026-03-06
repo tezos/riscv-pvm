@@ -104,7 +104,32 @@ pub trait PersistentKeyValueStore: KeyValueStore + Sized {
 cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
         pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
+        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+
+        /// Setup a [TestRepo] to work with [TestKeyValueStore].
+        ///
+        /// Returns two values. The first must be kept in-scope until the end of the test, the second
+        /// is the repo.
+        #[cfg(test)]
+        pub(crate) fn setup_repo() -> (octez_riscv_test_utils::TestableTmpdir, TestRepo) {
+            use crate::repo::DirectoryManager;
+
+            let tmpdir = octez_riscv_test_utils::TestableTmpdir::new();
+            let dir_manager = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
+
+            (tmpdir, dir_manager)
+        }
     } else {
         pub(crate) type TestKeyValueStore = crate::storage::in_memory::InMemoryKeyValueStore;
+        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+
+        /// Setup a [TestRepo] to work with [TestKeyValueStore].
+        ///
+        /// Returns two values. The first must be kept in-scope until the end of the test, the second
+        /// is the repo.
+        #[cfg(test)]
+        pub(crate) fn setup_repo() -> ((), TestRepo) {
+            ((), in_memory::InMemoryRepo)
+        }
     }
 }

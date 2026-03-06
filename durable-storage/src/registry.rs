@@ -360,39 +360,25 @@ impl<KV: KeyValueStore> NormalImpl<KV> {
 mod tests {
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_test_utils::TestableTmpdir;
 
     use super::Registry;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::Key;
     use crate::storage::TestKeyValueStore;
+    use crate::storage::TestRepo;
+    use crate::storage::setup_repo;
 
-    fn setup_registry() -> (TestableTmpdir, Registry<TestKeyValueStore, Normal>) {
-        let tmpdir = TestableTmpdir::new();
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "rocksdb")] {
-                use crate::repo::DirectoryManager;
-
-                let base_dir = tmpdir.path().join("registry");
-                let repo = DirectoryManager::new(&base_dir).expect("creating manager should succeed.");
-            } else {
-                let repo = crate::storage::in_memory::InMemoryRepo;
-            }
-        };
-
-        let registry = Registry::new(repo).expect("Registry should be created");
-
-        (tmpdir, registry)
+    fn setup_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
+        Registry::new(repo).expect("Registry should be created")
     }
 
-    fn setup_size_2_registry() -> (TestableTmpdir, Registry<TestKeyValueStore, Normal>) {
-        let (tmpdir, mut registry) = setup_registry();
+    fn setup_size_2_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
+        let mut registry = setup_registry(repo);
         registry
             .resize(2)
             .expect("Growing the registry should succeed.");
-        (tmpdir, registry)
+        registry
     }
 
     fn seed_copy_move(
@@ -463,13 +449,15 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let (_tmpdir, registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let registry = setup_registry(repo);
         assert!(registry.is_empty());
     }
 
     #[test]
     fn test_resize() {
-        let (_tmpdir, mut registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo);
 
         registry
             .resize(4)
@@ -486,7 +474,8 @@ mod tests {
 
     #[test]
     fn test_get_database() {
-        let (_tmpdir, mut registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo);
 
         registry
             .resize(3)
@@ -499,7 +488,8 @@ mod tests {
 
     #[test]
     fn test_copy_database() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let src_index = 0;
         let dst_index = 1;
@@ -522,7 +512,8 @@ mod tests {
 
     #[test]
     fn test_copy_same_index() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let src_index = 0;
         let dst_index = 0;
@@ -538,7 +529,8 @@ mod tests {
 
     #[test]
     fn test_copy_invalid_index() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let result = registry.copy_database(0, 2);
         assert!(
@@ -568,7 +560,8 @@ mod tests {
         // Test that the source database is emptied and the destination database
         // has all the data, and any data previously in the destination is lost.
 
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let src_index = 1;
         let dst_index = 0;
@@ -585,7 +578,8 @@ mod tests {
 
     #[test]
     fn test_move_invalid_index() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let result = registry.move_database(0, 2);
         assert!(
@@ -612,7 +606,8 @@ mod tests {
 
     #[test]
     fn test_move_same_index() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let src_index = 0;
         let dst_index = 0;
@@ -628,7 +623,8 @@ mod tests {
 
     #[test]
     fn test_clear_database() {
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let db_index = 0;
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -656,7 +652,8 @@ mod tests {
         use crate::commit::CommitId;
         use crate::registry::RegistryManifest;
 
-        let (_tmpdir, registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let registry = setup_registry(repo);
 
         let expected_db_hashes: Vec<CommitId> = Vec::new();
         let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
@@ -679,7 +676,8 @@ mod tests {
         use crate::commit::CommitId;
         use crate::registry::RegistryManifest;
 
-        let (_tmpdir, mut registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo);
         registry
             .resize(1)
             .expect("Growing the registry should succeed.");
@@ -710,7 +708,8 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_committing_identical_registry_succeeds() {
-        let (_tmpdir, mut registry) = setup_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo);
         registry
             .resize(1)
             .expect("Growing the registry should succeed.");
@@ -737,7 +736,8 @@ mod tests {
         use crate::commit::CommitId;
         use crate::registry::RegistryManifest;
 
-        let (_tmpdir, mut registry) = setup_size_2_registry();
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo);
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");

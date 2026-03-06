@@ -305,20 +305,10 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::storage::TestKeyValueStore;
+    use crate::storage::TestRepo;
+    use crate::storage::setup_repo;
 
-    fn new_database(handle: &Handle) -> Database<TestKeyValueStore, Normal> {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "rocksdb")] {
-                use crate::repo::DirectoryManager;
-                use octez_riscv_test_utils::TestableTmpdir;
-
-                let tmpdir = TestableTmpdir::new();
-                let repo = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
-            } else {
-                let repo = crate::storage::in_memory::InMemoryRepo;
-            }
-        };
-
+    fn new_database(handle: &Handle, repo: TestRepo) -> Database<TestKeyValueStore, Normal> {
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
     }
 
@@ -382,7 +372,9 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -408,7 +400,9 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         // Populate a database and obtain a root hash
         let keys: Vec<Key> = (1..=5)
@@ -452,7 +446,8 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             let mut seen = HashSet::new();
 
@@ -483,7 +478,8 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             let mut seen = HashSet::new();
 
@@ -517,7 +513,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
         let original_data = [1, 2, 3];
@@ -554,7 +551,8 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -626,7 +624,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let mut read_data: [u8; 100] = [42; 100];
@@ -646,7 +645,8 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -676,7 +676,8 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let mut database = new_database(handle);
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
 
             for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -704,7 +705,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[]);
@@ -718,7 +720,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::from("a long value");
@@ -743,7 +746,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[1, 2, 3]);
@@ -765,7 +769,8 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let mut database = new_database(handle);
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[]);
