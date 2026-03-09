@@ -13,8 +13,9 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use perfect_derive::perfect_derive;
 
+use super::resolver::TreeResolver;
 use super::tree::Tree;
-use crate::avl::resolver::Resolver;
+use crate::avl::resolver::AvlResolver;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
@@ -27,20 +28,20 @@ pub type Value = Bytes<Normal>;
 struct NodeHashRepresentation<'a, Value> {
     key: &'a Key,
     data: Value,
-    // The bytes of the hash of an optional left child
-    left: Option<&'a Hash>,
-    // The bytes of the hash of an optional right child
-    right: Option<&'a Hash>,
+    // The hash of the left subtree.
+    left: Hash,
+    // The hash of the right subtree.
+    right: Hash,
     balance_factor: i64,
 }
 
 /// A node that supports rebalancing and Merklisation.
 #[perfect_derive(Clone, Default, Debug)]
-pub struct Node<Id> {
+pub struct Node<TreeId> {
     key: Key,
     data: Value,
-    left: Tree<Id>,
-    right: Tree<Id>,
+    left: TreeId,
+    right: TreeId,
 
     /// A cache for the hash of this node. This uses `OnceLock` so that updating the cache is a
     /// non-mutating operation.
@@ -52,27 +53,35 @@ pub struct Node<Id> {
     balance_factor: i64,
 }
 
-impl<Id> Node<Id> {
+impl<TreeId> Node<TreeId> {
     /// Create a new leaf [`Node`] from the given key and data.
-    pub(crate) fn new(key: Key, data: impl Into<Value>) -> Self {
+    pub(crate) fn new(key: Key, data: impl Into<Value>) -> Self
+    where
+        TreeId: Default,
+    {
         Node {
             key,
             data: data.into(),
             balance_factor: 0,
-            ..Default::default()
+            left: TreeId::default(),
+            right: TreeId::default(),
+            hash: OnceLock::new(),
         }
     }
 
     /// Converts the [`Node`] to an encoded, serialisable representation,
     /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
-    pub(crate) fn to_encode<'a>(&'a self, resolver: &impl Resolver<Id, Self>) -> impl Encode + 'a {
+    pub(crate) fn to_encode<'a, NodeId>(
+        &'a self,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
+    ) -> impl Encode + 'a {
         // Recursively hashes any left child and its children. Stops when a hash was cached or a
         // node is blinded.
-        let left = self.left_ref().root().map(|node| resolver.hash(node));
+        let left = resolver.hash(&self.left);
 
         // Recursively hashes any right child and its children. Stops when a hash was cached or a
         // node is blinded.
-        let right = self.right_ref().root().map(|node| resolver.hash(node));
+        let right = resolver.hash(&self.right);
 
         NodeHashRepresentation {
             key: &self.key,
@@ -87,7 +96,7 @@ impl<Id> Node<Id> {
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
-    pub(crate) fn hash(&self, resolver: &impl Resolver<Id, Self>) -> &Hash {
+    pub(crate) fn hash<NodeId>(&self, resolver: &impl TreeResolver<NodeId, TreeId>) -> &Hash {
         self.hash.get_or_init(|| {
             let data = self.to_encode(resolver);
             Hash::hash_encodable(data).expect("The hashing should not fail")
@@ -114,15 +123,21 @@ impl<Id> Node<Id> {
 
     #[inline]
     /// A mutable reference to the left branch.
-    pub(super) fn left_mut(&mut self) -> &mut Tree<Id> {
+    pub(super) fn left_mut<NodeId>(
+        &mut self,
+        resolver: &mut impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&mut Tree<NodeId>, OperationalError> {
         self.invalidate_hash();
-        &mut self.left
+        resolver.resolve_mut(&mut self.left)
     }
 
     #[inline]
     /// An immutable reference to the left branch.
-    pub(super) fn left_ref(&self) -> &Tree<Id> {
-        &self.left
+    pub(super) fn left_ref<NodeId>(
+        &self,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&Tree<NodeId>, OperationalError> {
+        resolver.resolve(&self.left)
     }
 
     /// Rebalance the subtree of the [`Node`] so that the difference in height between child
@@ -130,18 +145,17 @@ impl<Id> Node<Id> {
     ///
     /// The subtree of the [`Node`] must already have balance factor in the range of -2..=2, else
     /// it is an invalid AVL tree.
-    pub(super) fn rebalance(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
-    ) -> Result<(), OperationalError>
-    where
-        Id: Clone,
-    {
+    pub(super) fn rebalance<NodeId: Clone>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
+    ) -> Result<(), OperationalError> {
         let resolved_node = resolver.resolve(node)?;
         let balance_factor = resolved_node.balance_factor();
         match balance_factor {
             2 => {
-                let right_balance = resolved_node.right_ref().balance_factor(resolver)?;
+                let right_balance = resolved_node
+                    .right_ref(resolver)?
+                    .balance_factor(resolver)?;
 
                 match right_balance {
                     1 | 0 => Self::rotate_left(node, resolver)?,
@@ -153,7 +167,7 @@ impl<Id> Node<Id> {
             }
             -1..=1 => (),
             -2 => {
-                let left_balance = resolved_node.left_ref().balance_factor(resolver)?;
+                let left_balance = resolved_node.left_ref(resolver)?.balance_factor(resolver)?;
 
                 match left_balance {
                     1 => Self::rotate_left_right(node, resolver)?,
@@ -177,12 +191,13 @@ impl<Id> Node<Id> {
     /// Returns a tuple of:
     ///  - The [`Node`] at the root of the new subtree.
     ///  - `true` if the [`Tree`] has shrunk in size.
-    pub(super) fn replace_with_successor(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
-    ) -> Result<(Id, bool), OperationalError>
+    pub(super) fn replace_with_successor<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
+    ) -> Result<(NodeId, bool), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
+        TreeId: Default,
     {
         let node_mut = resolver.resolve_mut(node)?;
 
@@ -190,15 +205,15 @@ impl<Id> Node<Id> {
         let (mut successor, shrank) = if resolver
             .resolve(
                 node_mut
-                    .right_ref()
+                    .right_ref(resolver)?
                     .root()
                     .expect("A node with a successor must have a right child"),
             )?
-            .left_ref()
+            .left_ref(resolver)?
             .root()
             .is_some()
         {
-            let right = node_mut.right_mut();
+            let right = node_mut.right_mut(resolver)?;
             let (mut min, _, shrank) = Tree::take_min(right, resolver)?;
             (
                 min.take()
@@ -208,13 +223,15 @@ impl<Id> Node<Id> {
         // If there is no left child of the right child, the successor is the right child.
         } else {
             let mut successor = node_mut
-                .right_mut()
+                .right_mut(resolver)?
                 .take()
                 .expect("A node with a successor must have a right child");
             let successor_mut = resolver.resolve_mut(&mut successor)?;
 
             // Bump up the (optional) right child of the right child, causing the subtree to shrink.
-            node_mut.right = successor_mut.right.take().into();
+            let target_right = node_mut.right_mut(resolver)?;
+            *target_right = Tree::from(successor_mut.right_mut(resolver)?.take());
+
             (successor, true)
         };
 
@@ -234,15 +251,21 @@ impl<Id> Node<Id> {
 
     #[inline]
     /// A mutable reference to the right branch.
-    pub(super) fn right_mut(&mut self) -> &mut Tree<Id> {
+    pub(super) fn right_mut<NodeId>(
+        &mut self,
+        resolver: &mut impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&mut Tree<NodeId>, OperationalError> {
         self.invalidate_hash();
-        &mut self.right
+        resolver.resolve_mut(&mut self.right)
     }
 
     #[inline]
     /// An immutable reference to the right branch.
-    pub(super) fn right_ref(&self) -> &Tree<Id> {
-        &self.right
+    pub(super) fn right_ref<NodeId>(
+        &self,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&Tree<NodeId>, OperationalError> {
+        resolver.resolve(&self.right)
     }
 
     /// Takes the occupied [`Tree`] with the minimum [`Key`] from this [`Node`]'s subtree and
@@ -252,21 +275,22 @@ impl<Id> Node<Id> {
     ///  - The occupied [`Tree`] with the minimum [`Key`].
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if this [`Node`]'s subtree has shrunk in size.
-    pub(super) fn take_min(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
-    ) -> Result<(Tree<Id>, Tree<Id>, bool), OperationalError>
+    pub(super) fn take_min<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
+    ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let node_mut = resolver.resolve_mut(node)?;
 
         let old_node_bf = node_mut.balance_factor();
-        let left = node_mut.left_mut();
+        let left = node_mut.left_mut(resolver)?;
         let (min, right, left_shrank) = Tree::take_min(left, resolver)?;
 
         if right.root().is_some() {
-            *node_mut.left_mut() = right;
+            let target_node_left = node_mut.left_mut(resolver)?;
+            *target_node_left = right;
             node_mut.balance_factor += 1;
         } else if left_shrank {
             node_mut.balance_factor += 1;
@@ -286,15 +310,16 @@ impl<Id> Node<Id> {
     /// `data` defines what data is upserted.
     ///
     /// Returns true if this [`Node`]s subtree has grown in size.
-    pub(super) fn upsert(
+    pub(super) fn upsert<NodeId>(
         &mut self,
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Value) -> Result<(), Error>,
-        resolver: &mut impl Resolver<Id, Self>,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
     ) -> Result<bool, Error>
     where
-        Id: Clone + From<Self>,
+        TreeId: Default,
+        NodeId: Clone + From<Node<TreeId>>,
     {
         // SAFETY: The default recursion limit in Rust is 128
         // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
@@ -321,14 +346,18 @@ impl<Id> Node<Id> {
                 Ok(false)
             }
             Ordering::Greater => {
-                let grew = self.left_mut().upsert(key, offset, data, resolver)?;
+                let grew = self
+                    .left_mut(resolver)?
+                    .upsert(key, offset, data, resolver)?;
                 if grew {
                     self.balance_factor -= 1;
                 }
                 Ok(grew)
             }
             Ordering::Less => {
-                let grew = self.right_mut().upsert(key, offset, data, resolver)?;
+                let grew = self
+                    .right_mut(resolver)?
+                    .upsert(key, offset, data, resolver)?;
                 if grew {
                     self.balance_factor += 1;
                 }
@@ -357,21 +386,22 @@ impl<Id> Node<Id> {
     ///
     /// Assumes this [`Node`]'s balance factor is 2 and the right [`Node`]'s balance factor is +1
     /// or 0.
-    fn rotate_left(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
+    fn rotate_left<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
     ) -> Result<(), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let node_mut = resolver.resolve_mut(node)?;
         let mut right = node_mut
-            .right_mut()
+            .right_mut(resolver)?
             .take()
             .expect("There should be a right node to rotate left");
         let right_mut = resolver.resolve_mut(&mut right)?;
 
-        *node_mut.right_mut() = right_mut.left_mut().take().into();
+        let target_tree = node_mut.right_mut(resolver)?;
+        *target_tree = Tree::from(right_mut.left_mut(resolver)?.take());
 
         // new_node_bf = B.height() - node.left.height()
         // old_node_bf = A.height() - node.left.height()
@@ -403,8 +433,11 @@ impl<Id> Node<Id> {
         //          = old_node_bf - 1 + std::cmp::min(new_node_bf, 0)
         right_mut.balance_factor = right_mut.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
 
-        *right_mut.left_mut() = Some(node.clone()).into();
+        let target_right_left = right_mut.left_mut(resolver)?;
+        *target_right_left = Tree::from(Some(node.clone()));
+
         *node = right;
+
         Ok(())
     }
 
@@ -424,23 +457,23 @@ impl<Id> Node<Id> {
     /// ```
     ///
     /// Assumes this [`Node`]'s balance factor is -2 and the left [Node]'s balance factor is +1.
-    fn rotate_left_right(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
+    fn rotate_left_right<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
     ) -> Result<(), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let node_mut = resolver.resolve_mut(node)?;
 
         let mut left = node_mut
-            .left_mut()
+            .left_mut(resolver)?
             .take()
             .expect("Left child must exist for the right rotation of the node");
         let left_mut = resolver.resolve_mut(&mut left)?;
 
         let mut left_right = left_mut
-            .right_mut()
+            .right_mut(resolver)?
             .take()
             .expect("Left's right child must exist for the left rotation of the left node");
         let left_right_mut = resolver.resolve_mut(&mut left_right)?;
@@ -453,20 +486,24 @@ impl<Id> Node<Id> {
         left_mut.balance_factor = std::cmp::min(-left_right_mut.balance_factor, 0);
 
         // B's right child is between B and B, it's moved to node's left
-        node_mut.left = left_right_mut.right.take().into();
+        let target_node_left = node_mut.left_mut(resolver)?;
+        *target_node_left = Tree::from(left_right_mut.right_mut(resolver)?.take());
 
         // B's left child is between A and B, it's moved to A's right
-        left_mut.right = left_right_mut.left.take().into();
+        let target_node_right = left_mut.right_mut(resolver)?;
+        *target_node_right = Tree::from(left_right_mut.left_mut(resolver)?.take());
 
         // Set A
-        left_right_mut.left = Some(left).into();
+        let target_left_right_left = left_right_mut.left_mut(resolver)?;
+        *target_left_right_left = Tree::from(Some(left));
 
         // If B is 0 or 1, the new node balance factor will be 0
         // If B is -1, the new node balance factor will be 1
         node_mut.balance_factor = std::cmp::max(0, -left_right_mut.balance_factor);
 
         // Set node
-        left_right_mut.right = Some(node.clone()).into();
+        let target_left_right_right = left_right_mut.right_mut(resolver)?;
+        *target_left_right_right = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
         left_right_mut.balance_factor = 0;
@@ -489,21 +526,22 @@ impl<Id> Node<Id> {
     ///
     /// Assumes this [`Node`]'s balance factor is -2 and the left [`Node`]'s balance factor is -1
     /// or 0.
-    fn rotate_right(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
+    fn rotate_right<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
     ) -> Result<(), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let node_mut = resolver.resolve_mut(node)?;
         let mut left = node_mut
-            .left_mut()
+            .left_mut(resolver)?
             .take()
             .expect("There should be a left node to rotate right");
         let left_mut = resolver.resolve_mut(&mut left)?;
 
-        *node_mut.left_mut() = left_mut.right_mut().take().into();
+        let target_node_left = node_mut.left_mut(resolver)?;
+        *target_node_left = Tree::from(left_mut.right_mut(resolver)?.take());
 
         // new_node_bf = node.right.height() - C.height()
         // old_node_bf = node.right.height() - A.height()
@@ -535,8 +573,11 @@ impl<Id> Node<Id> {
         // where the balance factor of A is 1
         left_mut.balance_factor = left_mut.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
 
-        *left_mut.right_mut() = Some(node.clone()).into();
+        let target_left_right = left_mut.right_mut(resolver)?;
+        *target_left_right = Tree::from(Some(node.clone()));
+
         *node = left;
+
         Ok(())
     }
 
@@ -556,22 +597,22 @@ impl<Id> Node<Id> {
     /// ```
     ///
     /// Assumes this [`Node`]'s balance factor is +2 and the left [Node]'s balance factor is -1.
-    fn rotate_right_left(
-        node: &mut Id,
-        resolver: &mut impl Resolver<Id, Self>,
+    fn rotate_right_left<NodeId>(
+        node: &mut NodeId,
+        resolver: &mut impl AvlResolver<NodeId, TreeId>,
     ) -> Result<(), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let node_mut = resolver.resolve_mut(node)?;
         let mut right = node_mut
-            .right_mut()
+            .right_mut(resolver)?
             .take()
             .expect("Right child must exist for the left rotation of the node");
         let right_mut = resolver.resolve_mut(&mut right)?;
 
         let mut right_left = right_mut
-            .left_mut()
+            .left_mut(resolver)?
             .take()
             .expect("Right's left child must exist for the right rotation of the right node");
         let right_left_mut = resolver.resolve_mut(&mut right_left)?;
@@ -584,20 +625,24 @@ impl<Id> Node<Id> {
         right_mut.balance_factor = std::cmp::max(0, -right_left_mut.balance_factor);
 
         // B's left child is between node and B, it's moved to node's right
-        node_mut.right = right_left_mut.left.take().into();
+        let target_node_right = node_mut.right_mut(resolver)?;
+        *target_node_right = Tree::from(resolver.resolve_mut(&mut right_left_mut.left)?.take());
 
         // B's right child is between B and A, it's moved to A's left
-        right_mut.left = right_left_mut.right.take().into();
+        let target_right_left = right_mut.left_mut(resolver)?;
+        *target_right_left = Tree::from(resolver.resolve_mut(&mut right_left_mut.right)?.take());
 
         // Set A
-        right_left_mut.right = Some(right).into();
+        let target_right_left_right = right_left_mut.right_mut(resolver)?;
+        *target_right_left_right = Tree::from(Some(right));
 
         // If B is 0 or -1, the new node balance factor will be 0
         // If B is 1, the new node balance factor will be -1
         node_mut.balance_factor = -std::cmp::max(0, right_left_mut.balance_factor);
 
         // Set node
-        right_left_mut.left = Some(node.clone()).into();
+        let target_right_left_left = right_left_mut.left_mut(resolver)?;
+        *target_right_left_left = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
         right_left_mut.balance_factor = 0;
@@ -607,7 +652,7 @@ impl<Id> Node<Id> {
 }
 
 #[cfg(test)]
-impl<Id> Node<Id> {
+impl<TreeId> Node<TreeId> {
     #[inline]
     /// The data stored in the [`Node`].
     pub(crate) fn data(&self) -> &Value {
@@ -615,23 +660,27 @@ impl<Id> Node<Id> {
     }
 
     /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
-    pub(super) fn get<'a>(
-        mut node: &'a Id,
+    pub(super) fn get<'a, NodeId>(
+        mut node: &'a NodeId,
         key: &Key,
-        resolver: &impl Resolver<Id, Self>,
-    ) -> Result<Option<&'a Value>, OperationalError> {
+        resolver: &impl AvlResolver<NodeId, TreeId>,
+    ) -> Result<Option<&'a Value>, OperationalError>
+    where
+        NodeId: 'a,
+        TreeId: 'a,
+    {
         loop {
             let resolved_node = resolver.resolve(node)?;
             match resolved_node.key().cmp(key) {
                 Ordering::Equal => return Ok(Some(resolved_node.data())),
                 Ordering::Greater => {
-                    let Some(left) = resolved_node.left_ref().root() else {
+                    let Some(left) = resolved_node.left_ref(resolver)?.root() else {
                         return Ok(None);
                     };
                     node = left;
                 }
                 Ordering::Less => {
-                    let Some(right) = resolved_node.right_ref().root() else {
+                    let Some(right) = resolved_node.right_ref(resolver)?.root() else {
                         return Ok(None);
                     };
                     node = right;
@@ -641,15 +690,16 @@ impl<Id> Node<Id> {
     }
 
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
-    pub(super) fn has_correct_balance_factors(
+    pub(super) fn has_correct_balance_factors<NodeId>(
         &self,
-        resolver: &impl Resolver<Id, Self>,
+        resolver: &impl AvlResolver<NodeId, TreeId>,
     ) -> Result<bool, OperationalError>
     where
-        Id: std::fmt::Debug,
+        NodeId: std::fmt::Debug,
+        TreeId: std::fmt::Debug,
     {
-        let left_height = self.left_ref().height(resolver)?;
-        let right_height = self.right_ref().height(resolver)?;
+        let left_height = self.left_ref(resolver)?.height(resolver)?;
+        let right_height = self.right_ref(resolver)?.height(resolver)?;
         let calculated_balance_factor = right_height as i64 - left_height as i64;
         if self.balance_factor() != calculated_balance_factor {
             eprintln!(
@@ -658,52 +708,64 @@ impl<Id> Node<Id> {
             );
             return Ok(false);
         }
-        let res = self.left_ref().has_correct_balance_factors(resolver)?
-            && self.right_ref().has_correct_balance_factors(resolver)?;
-        Ok(res)
+
+        let left_correct = self
+            .left_ref(resolver)?
+            .has_correct_balance_factors(resolver)?;
+
+        let right_correct = self
+            .right_ref(resolver)?
+            .has_correct_balance_factors(resolver)?;
+
+        Ok(left_correct && right_correct)
     }
 
     /// Returns the height of this [`Node`]'s subtree.
-    pub(super) fn height(
+    pub(super) fn height<NodeId>(
         &self,
-        resolver: &impl Resolver<Id, Self>,
+        resolver: &impl AvlResolver<NodeId, TreeId>,
     ) -> Result<u32, OperationalError> {
-        let left_height = self.left_ref().height(resolver)?;
-        let right_height = self.right_ref().height(resolver)?;
+        let left_height = self.left_ref(resolver)?.height(resolver)?;
+        let right_height = self.right_ref(resolver)?.height(resolver)?;
         Ok(1 + std::cmp::max(left_height, right_height))
     }
 
     /// Returns true if this [`Node`]'s subtree is balanced.
-    pub(super) fn is_balanced(
+    pub(super) fn is_balanced<NodeId>(
         &self,
-        resolver: &impl Resolver<Id, Self>,
+        resolver: &impl AvlResolver<NodeId, TreeId>,
     ) -> Result<bool, OperationalError> {
         let balance_factor = self.balance_factor();
         if balance_factor.abs() > 1 {
             eprintln!("Balance factor not in -1..=1: {balance_factor:?}");
             return Ok(false);
         }
-        let res =
-            self.left_ref().is_balanced(resolver)? && self.right_ref().is_balanced(resolver)?;
-        Ok(res)
+
+        let left_balanced = self.left_ref(resolver)?.is_balanced(resolver)?;
+        let right_balanced = self.right_ref(resolver)?.is_balanced(resolver)?;
+
+        Ok(left_balanced && right_balanced)
     }
 
     /// Returns true if this [`Node`]'s subtree is in-order.
-    pub(super) fn is_inorder(
+    pub(super) fn is_inorder<NodeId>(
         &self,
         min: &Key,
         max: &Key,
-        resolver: &impl Resolver<Id, Self>,
+        resolver: &impl AvlResolver<NodeId, TreeId>,
     ) -> Result<bool, OperationalError> {
         if self.key() < min || self.key() > max {
             return Ok(false);
         }
-        let res = self
-            .left_ref()
-            .is_inorder_inner(min, self.key(), resolver)?
-            && self
-                .right_ref()
+
+        let left_in_order = self
+            .left_ref(resolver)?
+            .is_inorder_inner(min, self.key(), resolver)?;
+
+        let right_in_order =
+            self.right_ref(resolver)?
                 .is_inorder_inner(self.key(), max, resolver)?;
-        Ok(res)
+
+        Ok(left_in_order && right_in_order)
     }
 }
