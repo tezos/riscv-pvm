@@ -124,10 +124,8 @@ fn offset_write_full_merge(
                 );
             };
 
-            // TODO RV-888 Add support for setting a more sensible limit
-            if new_data_end > isize::MAX as usize {
-                panic!("Can't allocate {new_data_end:?} bytes");
-            }
+            // The merge operator can't return an error, but new_data_end being greater than the
+            // allocation limit should be caught by `Database::write` already.
 
             let overwrite_end = std::cmp::min(result.len(), new_data_end);
 
@@ -377,12 +375,13 @@ impl KeyValueStore for PersistenceLayer {
             let len = self
                 .get(key.as_ref())
                 .map_or(0, |stored| stored.as_ref().len());
-            if offset > len || offset.checked_add(value.as_ref().len()).is_none() {
-                return Err(InvalidArgumentError::OffsetTooLarge)?;
+
+            let new_end = offset.checked_add(value.as_ref().len());
+
+            if offset > len || new_end.is_none() {
+                Err(InvalidArgumentError::OffsetTooLarge)?
             }
         }
-
-        // misuse.
 
         let payload_struct = OffsetWriteMergePayload {
             offset,

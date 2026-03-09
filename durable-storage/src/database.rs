@@ -50,7 +50,11 @@ impl<KV> Database<KV, Normal> {
         let merkle = MerkleWorker::new(handle, persistent.clone());
 
         Ok(Database {
-            inner: NormalImpl { persistent, merkle },
+            inner: NormalImpl {
+                persistent,
+                merkle,
+                alloc_limit: isize::MAX as usize,
+            },
         })
     }
 
@@ -65,8 +69,28 @@ impl<KV> Database<KV, Normal> {
         let merkle = self.inner.merkle.clone_with(handle, persistent.clone())?;
 
         Ok(Database {
-            inner: NormalImpl { persistent, merkle },
+            inner: NormalImpl {
+                persistent,
+                merkle,
+                alloc_limit: self.inner.alloc_limit,
+            },
         })
+    }
+
+    /// Set the allocation limit for this database instance.
+    ///
+    /// Values exceeding this limit will be rejected by [`Database::set`] and [`Database::write`].
+    /// The limit is persisted when the database is cloned.
+    ///
+    /// Fails if the limit is larger than the system supports
+    pub fn set_alloc_limit(&mut self, limit: usize) -> Result<(), InvalidArgumentError> {
+        if limit > isize::MAX as usize {
+            // isize::MAX is the largest possible allocation supported by LLVM. In practice this
+            // won't be reached as it's 8 exabytes on a 64-bit system.
+            return Err(InvalidArgumentError::AllocationLimitTooLarge);
+        }
+        self.inner.alloc_limit = limit;
+        Ok(())
     }
 
     /// Commit the current database state to the repository and return its root hash.
@@ -129,6 +153,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
     ///  - The offset plus the length of the data would overflow.
+    ///  - The resulting value would exceed the allocation limit.
     pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
         M::write(self, key, offset, data)
     }
@@ -251,6 +276,10 @@ impl DatabaseMode for Normal {
         key: Key,
         data: Bytes,
     ) -> Result<(), Error> {
+        if data.len() > this.inner.alloc_limit {
+            Err(InvalidArgumentError::ValueTooLarge)?
+        }
+
         this.inner.persistent.set(&key, &data)?;
         this.inner.merkle.set(key, data)?;
         Ok(())
@@ -262,6 +291,13 @@ impl DatabaseMode for Normal {
         offset: usize,
         data: Bytes,
     ) -> Result<usize, Error> {
+        let Some(new_end) = offset.checked_add(data.len()) else {
+            Err(InvalidArgumentError::OffsetTooLarge)?
+        };
+        if new_end > this.inner.alloc_limit {
+            Err(InvalidArgumentError::ValueTooLarge)?
+        }
+
         let written = data.len();
         this.inner.persistent.write(&key, offset, &data)?;
         this.inner.merkle.write(key, offset, data)?;
@@ -288,6 +324,7 @@ impl DatabaseMode for Normal {
 struct NormalImpl<KV> {
     persistent: Arc<KV>,
     merkle: MerkleWorker<KV>,
+    alloc_limit: usize,
 }
 
 #[cfg(test)]
@@ -310,6 +347,88 @@ mod tests {
 
     fn new_database(handle: &Handle, repo: TestRepo) -> Database<TestKeyValueStore, Normal> {
         Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+    }
+
+    #[test]
+    fn test_database_alloc_limit() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
+
+        let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[0u8; 100]))
+            .expect("set should succeed with default limit");
+
+        database.set_alloc_limit(10).unwrap();
+
+        let too_large = Bytes::copy_from_slice(&[0u8; 11]);
+        assert!(
+            database.set(key.clone(), too_large.clone()).is_err(),
+            "set must reject values exceeding the limit"
+        );
+        assert!(
+            database.write(key.clone(), 1, too_large).is_err(),
+            "write must reject values exceeding the limit"
+        );
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[0u8; 10]))
+            .expect("set should succeed for value equal to the limit");
+
+        database.set_alloc_limit(20).unwrap();
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[0u8; 15]))
+            .expect("set should succeed after raising the limit");
+
+        database
+            .write(key.clone(), 5, Bytes::copy_from_slice(&[0u8; 15]))
+            .expect("write should succeed after raising the limit");
+    }
+
+    #[test]
+    fn test_database_alloc_limit_clone() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let (_keepalive2, clone_repo) = setup_repo();
+
+        let mut database = Database::<TestKeyValueStore, _>::try_new(handle, &repo)
+            .expect("Creating a test database should succeed");
+
+        // Set alloc limit before cloning
+        database.set_alloc_limit(10).unwrap();
+
+        let mut cloned = database
+            .try_clone_with(handle, &clone_repo)
+            .expect("Cloning should succeed");
+
+        let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+
+        // The cloned database must respect the same limit
+        let too_large = Bytes::copy_from_slice(&[0u8; 11]);
+        assert!(
+            cloned.set(key.clone(), too_large).is_err(),
+            "Cloned database must reject values exceeding the cloned limit"
+        );
+
+        // Values within the limit must succeed
+        cloned
+            .set(key.clone(), Bytes::copy_from_slice(&[0u8; 10]))
+            .expect("Cloned database should accept values within the cloned limit");
+
+        // Changing the clone's limit must not affect the original
+        cloned.set_alloc_limit(5).unwrap();
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[0u8; 10]))
+            .expect("Original limit should be unaffected by changes to the clone");
     }
 
     #[cfg(feature = "rocksdb")]
@@ -777,5 +896,23 @@ mod tests {
 
         assert!(database.set(key.clone(), data.clone()).is_ok());
         assert!(database.write(key.clone(), data.len() + 1, data).is_err());
+    }
+
+    #[test]
+    fn test_database_write_offset_overflow() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
+
+        let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+
+        let result = database.write(key, usize::MAX, Bytes::copy_from_slice(&[0u8]));
+        assert!(
+            result.is_err(),
+            "write must fail when offset + len overflows"
+        );
     }
 }

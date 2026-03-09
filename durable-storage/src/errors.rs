@@ -99,6 +99,9 @@ pub enum OperationalError {
 /// operated on. These errors are not fatal. The state must be left in a coherent state.
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidArgumentError {
+    #[error("Attempting to set the allocation limit larger than the platform supports")]
+    AllocationLimitTooLarge,
+
     #[error("Key does not exist")]
     KeyNotFound,
 
@@ -107,6 +110,9 @@ pub enum InvalidArgumentError {
 
     #[error("Value offset too large")]
     OffsetTooLarge,
+
+    #[error("Value length too large")]
+    ValueTooLarge,
 
     #[error("Database index out of bounds")]
     DatabaseIndexOutOfBounds,
