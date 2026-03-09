@@ -22,19 +22,19 @@ use crate::key::Key;
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[perfect_derive(Clone, Default, Debug)]
 #[derive(derive_more::From)]
-pub struct Tree<Id>(Option<Id>);
+pub struct Tree<NodeId>(Option<NodeId>);
 
-impl<Id> Tree<Id> {
+impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
     pub fn delete(
         &mut self,
         key: &Key,
-        resolver: &mut impl Resolver<Id, Node<Id>>,
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let old_balance_factor = self.balance_factor(resolver)?;
         let Some(node) = self.root_mut() else {
@@ -91,10 +91,10 @@ impl<Id> Tree<Id> {
         &mut self,
         key: &Key,
         data: &[u8],
-        resolver: &mut impl Resolver<Id, Node<Id>>,
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError>
     where
-        Id: Clone + From<Node<Id>>,
+        NodeId: Clone + From<Node<NodeId>>,
     {
         let result = self.upsert(
             key,
@@ -120,7 +120,7 @@ impl<Id> Tree<Id> {
     /// [`struct@Hash`] is calculated and cached.
     pub(crate) fn hash(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<Hash, OperationalError> {
         let encodable = self
             .0
@@ -135,10 +135,10 @@ impl<Id> Tree<Id> {
     }
 
     /// Creates an in-order iterator for the [`Node`]s in the [`Tree`]
-    pub(crate) fn iter<'tree, 'res, Res: Resolver<Id, Node<Id>>>(
+    pub(crate) fn iter<'tree, 'res, Res: Resolver<NodeId, Node<NodeId>>>(
         &'tree self,
         resolver: &'res Res,
-    ) -> TreeIterator<'tree, 'res, Id, Res> {
+    ) -> TreeIterator<'tree, 'res, NodeId, Res> {
         TreeIterator {
             stack: vec![],
             current: self,
@@ -147,7 +147,7 @@ impl<Id> Tree<Id> {
     }
 
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
-    pub(crate) const fn take(&mut self) -> Option<Id> {
+    pub(crate) const fn take(&mut self) -> Option<NodeId> {
         self.0.take()
     }
 
@@ -155,7 +155,7 @@ impl<Id> Tree<Id> {
     /// The difference in heights between any child branches in the [`Tree`].
     pub(super) fn balance_factor(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<i64, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(0);
@@ -168,13 +168,13 @@ impl<Id> Tree<Id> {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&Id> {
+    pub(super) fn root(&self) -> Option<&NodeId> {
         self.0.as_ref()
     }
 
     #[inline]
     /// A mutable reference to the root [`Node`].
-    pub(super) fn root_mut(&mut self) -> Option<&mut Id> {
+    pub(super) fn root_mut(&mut self) -> Option<&mut NodeId> {
         self.0.as_mut()
     }
 
@@ -187,10 +187,10 @@ impl<Id> Tree<Id> {
     ///  - True if the [`Tree`] has shrunk in size.
     pub(super) fn take_min(
         &mut self,
-        resolver: &mut impl Resolver<Id, Node<Id>>,
-    ) -> Result<(Tree<Id>, Tree<Id>, bool), OperationalError>
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
+    ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         let Some(node_arc) = self.root_mut() else {
             return Ok((None.into(), None.into(), false));
@@ -218,10 +218,10 @@ impl<Id> Tree<Id> {
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Value) -> Result<(), Error>,
-        resolver: &mut impl Resolver<Id, Node<Id>>,
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, Error>
     where
-        Id: Clone + From<Node<Id>>,
+        NodeId: Clone + From<Node<NodeId>>,
     {
         let node = self.root_mut();
         let Some(node) = node else {
@@ -236,8 +236,8 @@ impl<Id> Tree<Id> {
             data(&mut new_data)?;
 
             // The key does not exist and a new `Node` shall be created.
-            let new_node: Node<Id> = Node::new(key.clone(), new_data);
-            let new_id = Id::from(new_node);
+            let new_node: Node<NodeId> = Node::new(key.clone(), new_data);
+            let new_id = NodeId::from(new_node);
             self.0 = Some(new_id);
 
             return Ok(true);
@@ -262,10 +262,10 @@ impl<Id> Tree<Id> {
         key: &Key,
         offset: usize,
         data: &[u8],
-        resolver: &mut impl Resolver<Id, Node<Id>>,
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, Error>
     where
-        Id: Clone + From<Node<Id>>,
+        NodeId: Clone + From<Node<NodeId>>,
     {
         self.upsert(
             key,
@@ -295,10 +295,10 @@ impl<Id> Tree<Id> {
     /// AVL tree.
     fn rebalance(
         &mut self,
-        resolver: &mut impl Resolver<Id, Node<Id>>,
+        resolver: &mut impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<(), OperationalError>
     where
-        Id: Clone,
+        NodeId: Clone,
     {
         match self.root_mut() {
             Some(node) => Node::rebalance(node, resolver),
@@ -308,14 +308,16 @@ impl<Id> Tree<Id> {
 }
 
 /// Used for iterating through the nodes of the [`Tree`] tree in order.
-pub(crate) struct TreeIterator<'tree, 'res, Id, Res> {
-    stack: Vec<&'tree Id>,
-    current: &'tree Tree<Id>,
+pub(crate) struct TreeIterator<'tree, 'res, NodeId, Res> {
+    stack: Vec<&'tree NodeId>,
+    current: &'tree Tree<NodeId>,
     resolver: &'res Res,
 }
 
-impl<'tree, 'res, Id, Res: Resolver<Id, Node<Id>>> Iterator for TreeIterator<'tree, 'res, Id, Res> {
-    type Item = &'tree Id;
+impl<'tree, 'res, NodeId, Res: Resolver<NodeId, Node<NodeId>>> Iterator
+    for TreeIterator<'tree, 'res, NodeId, Res>
+{
+    type Item = &'tree NodeId;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.current.root() {
@@ -334,13 +336,13 @@ impl<'tree, 'res, Id, Res: Resolver<Id, Node<Id>>> Iterator for TreeIterator<'tr
 }
 
 #[cfg(test)]
-impl<Id> Tree<Id> {
+impl<NodeId> Tree<NodeId> {
     #[inline]
     /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
     pub fn get(
         &self,
         key: &Key,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<Option<&Value>, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(None);
@@ -351,10 +353,10 @@ impl<Id> Tree<Id> {
     /// Asserts that the [`Tree`] is a valid AVL tree
     pub(crate) fn check(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<(), OperationalError>
     where
-        Id: std::fmt::Debug,
+        NodeId: std::fmt::Debug,
     {
         let inorder = self.is_inorder(resolver)?;
         let is_balanced = self.is_balanced(resolver)?;
@@ -374,7 +376,7 @@ impl<Id> Tree<Id> {
     /// Returns true if the [`Tree`] is in-order.
     pub(crate) fn is_inorder(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError> {
         self.is_inorder_inner(
             &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
@@ -386,10 +388,10 @@ impl<Id> Tree<Id> {
     /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError>
     where
-        Id: std::fmt::Debug,
+        NodeId: std::fmt::Debug,
     {
         match self.root() {
             None => Ok(true),
@@ -402,7 +404,7 @@ impl<Id> Tree<Id> {
     /// Returns the height of the [`Tree`].
     pub(super) fn height(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<u32, OperationalError> {
         match self.root() {
             None => Ok(0),
@@ -413,7 +415,7 @@ impl<Id> Tree<Id> {
     /// Returns true if the [`Tree`] is balanced.
     pub(super) fn is_balanced(
         &self,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError> {
         match self.root() {
             None => Ok(true),
@@ -428,7 +430,7 @@ impl<Id> Tree<Id> {
         &self,
         min: &Key,
         max: &Key,
-        resolver: &impl Resolver<Id, Node<Id>>,
+        resolver: &impl Resolver<NodeId, Node<NodeId>>,
     ) -> Result<bool, OperationalError> {
         match self.root() {
             None => Ok(true),
