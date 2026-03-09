@@ -140,7 +140,7 @@ impl MerkleLayerMode for Normal {
     }
 
     fn hash<KV>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError> {
-        this.inner.hash()
+        Ok(this.inner.hash())
     }
 
     fn delete<KV>(this: &mut MerkleLayer<KV, Self>, key: &Key) -> Result<(), OperationalError> {
@@ -202,7 +202,7 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    fn hash(&mut self) -> Result<Hash, OperationalError> {
+    fn hash(&mut self) -> Hash {
         self.tree.hash(&self.resolver)
     }
 
@@ -247,7 +247,7 @@ impl<KV> NormalImpl<KV> {
             self.persistence.blob_set(blob)?;
         }
 
-        Ok(CommitId::from(self.hash()?))
+        Ok(CommitId::from(self.hash()))
     }
 }
 
@@ -263,6 +263,7 @@ mod tests {
     use crate::avl::node::Node;
     use crate::avl::node::Value;
     use crate::avl::resolver::ArcNodeId;
+    use crate::avl::resolver::ArcTreeId;
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
@@ -332,12 +333,12 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let old_node1: Node<ArcNodeId> =
+        let old_node1: Node<ArcTreeId> =
             Node::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]));
-        let new_node1: Node<ArcNodeId> = Node::new(keys[0].clone(), cow_data.as_bytes());
+        let new_node1: Node<ArcTreeId> = Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2: Node<ArcNodeId> = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]));
-        let node3: Node<ArcNodeId> = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]));
+        let node2: Node<ArcTreeId> = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]));
+        let node3: Node<ArcTreeId> = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
             &old_node1.data(),
@@ -454,7 +455,7 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let node: Node<ArcNodeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -476,7 +477,7 @@ mod tests {
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
-        let node: Node<ArcNodeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -493,7 +494,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcNodeId> = Node::new(key.clone(), data2);
+        let node: Node<ArcTreeId> = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -989,7 +990,7 @@ mod tests {
         let old_hash = ml.hash().expect("hash operation should succeed.");
         ml.write(&key, 0, &data).expect("write should succeed.");
 
-        let node: Node<ArcNodeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1013,7 +1014,7 @@ mod tests {
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
         let data_len = data.len();
-        let node: Node<ArcNodeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1030,7 +1031,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcNodeId> = Node::new(key.clone(), Bytes::from("a good value"));
+        let node: Node<ArcTreeId> = Node::new(key.clone(), Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1139,11 +1140,7 @@ mod tests {
             assert_eq!(serialised, blob.as_ref());
         }
 
-        let root_hash = merkle_layer
-            .inner
-            .tree
-            .hash(&merkle_layer.inner.resolver)
-            .expect("Resolving the node should succeed.");
+        let root_hash = merkle_layer.inner.tree.hash(&merkle_layer.inner.resolver);
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }
