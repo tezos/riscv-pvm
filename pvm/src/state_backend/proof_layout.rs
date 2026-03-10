@@ -11,16 +11,12 @@ use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 
 use super::proof_backend::merkle::MERKLE_ARITY;
-use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 
 /// Errors occurring when parsing a Merkle proof
 #[derive(Debug, thiserror::Error)]
 pub enum ProofError {
     #[error("Error during deserialisation: {0}")]
     Deserialise(#[from] DecodeError),
-
-    #[error("Not enough bytes")]
-    NotEnoughBytes(#[from] NotEnoughBytesError),
 
     #[error("Deserialising as a stream and not all bytes were consumed")]
     RemainingBytes,

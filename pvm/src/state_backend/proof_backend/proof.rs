@@ -15,6 +15,7 @@
 //! - Convert [`octez_riscv_data::merkle_tree::MerkleTree`] to [`MerkleProof`]
 
 use bincode::Encode;
+use bincode::error::DecodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Verify;
@@ -88,18 +89,15 @@ pub fn serialise_merkle_tree(tree: &MerkleProof) -> Vec<u8> {
     serialise(tree).expect("Serialisation of Merkle tree should not fail")
 }
 
-/// When parsing, not enough bytes were provided to successfully complete the operation.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("Not enough bytes")]
-pub struct NotEnoughBytesError;
-
-fn deserialise_final_hash(
-    bytes: &mut impl Iterator<Item = u8>,
-) -> Result<Hash, NotEnoughBytesError> {
+fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, DecodeError> {
     let mut digest_bytes: [u8; Hash::DIGEST_SIZE] = [0; Hash::DIGEST_SIZE];
-    for b in digest_bytes.iter_mut() {
+    for (idx, b) in digest_bytes.iter_mut().enumerate() {
         match bytes.next() {
-            None => return Err(NotEnoughBytesError),
+            None => {
+                return Err(DecodeError::UnexpectedEnd {
+                    additional: Hash::DIGEST_SIZE - idx,
+                });
+            }
             Some(byte) => *b = byte,
         }
     }
