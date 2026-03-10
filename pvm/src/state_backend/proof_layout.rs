@@ -10,7 +10,6 @@ use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::tag::InvalidTagError;
-use perfect_derive::perfect_derive;
 
 use super::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
@@ -70,35 +69,28 @@ impl DeserialiserError for ProofError {
 }
 
 /// Part of a tree that may be absent
-#[derive(Debug, PartialEq)]
-#[perfect_derive(Clone, Copy)]
-pub enum ProofPart<'a, T: ?Sized> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProofPart<T> {
     /// This part of the tree is absent.
     Absent,
 
     /// There is a proof for this part of the tree.
-    Present(&'a T),
+    Present(T),
 }
 
 /// Part of a Merkle proof tree
-pub type ProofTree<'a> = ProofPart<'a, MerkleProof>;
+pub type ProofTree<'a> = ProofPart<&'a MerkleProof>;
 
-/// Similar to [`ProofPart`], but owns the underlying [`MerkleProof`].
-#[derive(Debug, Clone)]
-pub enum OwnedProofPart {
-    /// This part of the tree is absent.
-    Absent,
-    /// There is a proof for this part of the tree.
-    Present(MerkleProof),
-}
+/// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`]
+pub type OwnedProofTree = ProofPart<MerkleProof>;
 
-impl OwnedProofPart {
-    /// Obtain an [`OwnedProofPart`] from a [`Partial<T>`] considering it a leaf.
+impl OwnedProofTree {
+    /// Obtain an [`OwnedProofTree`] from a [`Partial<T>`] considering it a leaf.
     pub fn leaf_from_partial<T>(partial: Partial<T>, f: impl FnOnce(T) -> Vec<u8>) -> Self {
         match partial {
-            Partial::Absent => OwnedProofPart::Absent,
-            Partial::Blinded(hash) => OwnedProofPart::Present(MerkleProof::leaf_blind(hash)),
-            Partial::Present(data) => OwnedProofPart::Present(MerkleProof::leaf_read(f(data))),
+            Partial::Absent => OwnedProofTree::Absent,
+            Partial::Blinded(hash) => OwnedProofTree::Present(MerkleProof::leaf_blind(hash)),
+            Partial::Present(data) => OwnedProofTree::Present(MerkleProof::leaf_read(f(data))),
         }
     }
 
@@ -109,9 +101,9 @@ impl OwnedProofPart {
         children: impl IntoIterator<Item = Self>,
     ) -> Self {
         match parent {
-            Partial::Absent => return OwnedProofPart::Absent,
+            Partial::Absent => return OwnedProofTree::Absent,
             Partial::Blinded(hash) => {
-                return OwnedProofPart::Present(MerkleProof::leaf_blind(hash));
+                return OwnedProofTree::Present(MerkleProof::leaf_blind(hash));
             }
             Partial::Present(_) => {}
         }
@@ -120,12 +112,12 @@ impl OwnedProofPart {
 
         for item in children {
             match item {
-                OwnedProofPart::Absent => return OwnedProofPart::Absent,
-                OwnedProofPart::Present(tree) => partial_children.push(tree),
+                OwnedProofTree::Absent => return OwnedProofTree::Absent,
+                OwnedProofTree::Present(tree) => partial_children.push(tree),
             }
         }
 
-        OwnedProofPart::Present(MerkleProof::node_without_data(partial_children))
+        OwnedProofTree::Present(MerkleProof::node_without_data(partial_children))
     }
 
     /// Obtain the [`ProofTree`] reference corresponding to this owned proof part.
@@ -248,7 +240,7 @@ mod tests {
             deserialise_owned::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree))
                 .unwrap();
 
-        let OwnedProofPart::Present(out_tree) = &out_proof else {
+        let OwnedProofTree::Present(out_tree) = &out_proof else {
             panic!("Expected present proof");
         };
         assert_eq!(&proof_tree, out_tree);

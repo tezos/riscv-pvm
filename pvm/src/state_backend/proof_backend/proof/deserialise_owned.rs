@@ -16,7 +16,7 @@ use octez_riscv_data::serialisation;
 use octez_riscv_data::tree::Tree;
 
 use super::deserialiser::Result;
-use crate::state_backend::OwnedProofPart;
+use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
@@ -207,10 +207,10 @@ impl<'t, R> Suspended for OwnedParserComb<'t, R> {
 }
 
 /// Given a [`ProofTree`] deserialise it as `T`.
-pub fn deserialise<T: FromProof>(proof: ProofTree) -> deserialiser::Result<(T, OwnedProofPart)> {
+pub fn deserialise<T: FromProof>(proof: ProofTree) -> deserialiser::Result<(T, OwnedProofTree)> {
     let owned_proof = match proof {
-        ProofPart::Absent => OwnedProofPart::Absent,
-        ProofPart::Present(proof) => OwnedProofPart::Present(proof.clone()),
+        ProofPart::Absent => OwnedProofTree::Absent,
+        ProofPart::Present(proof) => OwnedProofTree::Present(proof.clone()),
     };
 
     let context = ProofTreeDeserialiser::from(proof);
