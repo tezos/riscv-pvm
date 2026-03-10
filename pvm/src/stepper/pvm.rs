@@ -54,7 +54,7 @@ use crate::pvm::outbox::Output;
 use crate::pvm::outbox::OutputInfo;
 use crate::range_utils;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::OwnedProofPart;
+use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofPart;
 use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -347,8 +347,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match merkle_tree {
-            OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
-            OwnedProofPart::Absent => ProofTree::Absent,
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::Absent,
         };
         debug_assert_eq!(
             ProofTree::Present(proof.tree()),
@@ -373,8 +373,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
-            OwnedProofPart::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
-            OwnedProofPart::Absent => ProofTree::Absent,
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::Absent,
         };
         debug_assert_eq!(
             proof_tree, deserialised_proof_tree,

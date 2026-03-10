@@ -16,7 +16,7 @@ use octez_riscv_data::merkle_proof::tag::Tag;
 use octez_riscv_data::serialisation::deserialise_from;
 
 use super::deserialiser::Result;
-use crate::state_backend::OwnedProofPart;
+use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
 use crate::state_backend::proof_backend::proof::deserialiser;
@@ -138,7 +138,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         if self.is_absent_or_blinded() {
             return Ok(StreamParserComb {
                 result: Partial::Absent,
-                proof: OwnedProofPart::leaf_from_partial(Partial::Absent, std::convert::identity),
+                proof: OwnedProofTree::leaf_from_partial(Partial::Absent, std::convert::identity),
                 deser: self,
             });
         }
@@ -169,7 +169,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             },
         };
 
-        let proof = OwnedProofPart::leaf_from_partial(proof, std::convert::identity);
+        let proof = OwnedProofTree::leaf_from_partial(proof, std::convert::identity);
 
         Ok(StreamParserComb {
             result,
@@ -182,7 +182,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         if self.is_absent_or_blinded() {
             let this = StreamParserComb {
                 result: Partial::Absent,
-                proof: OwnedProofPart::leaf_from_partial(Partial::Absent, std::convert::identity),
+                proof: OwnedProofTree::leaf_from_partial(Partial::Absent, std::convert::identity),
                 deser: self,
             };
             return Ok(this);
@@ -208,7 +208,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
             },
         };
 
-        let proof = OwnedProofPart::leaf_from_partial(proof, std::convert::identity);
+        let proof = OwnedProofTree::leaf_from_partial(proof, std::convert::identity);
 
         Ok(StreamParserComb {
             result,
@@ -257,7 +257,7 @@ pub struct StreamParserComb<'t, R> {
     result: R,
 
     /// Proof that represents the parsed parts
-    proof: OwnedProofPart,
+    proof: OwnedProofTree,
 
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
@@ -283,7 +283,7 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
 /// Branch combinator for [`StreamDeserialiser`] deserialiser.
 pub struct StreamBranchComb<'t> {
     /// Children of the node within the Merkle proof
-    proof_children: Vec<OwnedProofPart>,
+    proof_children: Vec<OwnedProofTree>,
 
     /// Parent deserialiser
     deser: StreamDeserialiser<'t>,
@@ -326,7 +326,7 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
     fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>> {
         Ok(StreamParserComb {
             result: value,
-            proof: OwnedProofPart::node_from_children(self.deser.presence(), self.proof_children),
+            proof: OwnedProofTree::node_from_children(self.deser.presence(), self.proof_children),
             deser: self.deser.exit_context(),
         })
     }
@@ -334,7 +334,7 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
 
 impl<R> StreamParserComb<'_, R> {
     /// Deserialise the input and return the result if all bytes have been consumed.
-    pub fn into_result(self) -> Result<(R, OwnedProofPart)> {
+    pub fn into_result(self) -> Result<(R, OwnedProofTree)> {
         if !self.deser.input.is_empty() {
             // Ending with left over bytes indicates that we have not parsed the proof correctly.
             // It could be that we have interpreted data as tags, or vice versa.
@@ -345,12 +345,12 @@ impl<R> StreamParserComb<'_, R> {
     }
 }
 
-/// Deserialise raw bytes as `T` and the partial state hash helper [`OwnedProofPart`].
+/// Deserialise raw bytes as `T` and the partial state hash helper [`OwnedProofTree`].
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the owned deserialisation.
 pub fn deserialise<T: FromProof>(
     proof_tree_raw_bytes: &[u8],
-) -> deserialiser::Result<(T, OwnedProofPart)> {
+) -> deserialiser::Result<(T, OwnedProofTree)> {
     let input = StreamInput::new(proof_tree_raw_bytes);
     let context = StreamDeserialiser::new_present(input);
 

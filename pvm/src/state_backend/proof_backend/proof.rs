@@ -22,7 +22,7 @@ use octez_riscv_data::serialisation::serialise;
 
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::pvm::node_pvm::NodePvm;
-use crate::state_backend::OwnedProofPart;
+use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
 
 pub mod deserialise_owned;
@@ -118,8 +118,8 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
     let (pvm, proof_tree) = deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
-        OwnedProofPart::Absent => return Err(ProofError::AbsentProof),
-        OwnedProofPart::Present(tree) => tree,
+        OwnedProofTree::Absent => return Err(ProofError::AbsentProof),
+        OwnedProofTree::Present(tree) => tree,
     };
 
     let pvm = NodePvm::wrap(pvm);
