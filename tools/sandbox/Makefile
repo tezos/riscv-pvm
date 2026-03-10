@@ -20,7 +20,6 @@ riscv-sandbox.prof: cargo-build-sandbox-profiling
 check: cargo-check cargo-clippy
 
 clean:
-	@cargo clean
 	@rm -f riscv-sandbox riscv-sandbox.prof
 
 ### We declare all the Cargo commands as targets to make sure they run with maximum parallelism.
