@@ -247,10 +247,7 @@ impl<KV> MerkleWorker<KV> {
     }
 
     /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> Result<Hash, OperationalError>
-    where
-        KV: KeyValueStore,
-    {
+    pub(crate) fn hash(&self) -> Result<Hash, OperationalError> {
         let (receive, command) = Command::new_hash();
         self.sender
             .send(command)

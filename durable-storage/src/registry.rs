@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -97,7 +97,7 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
     }
 }
 
-impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
+impl<KV: KeyValueStore, M: RegistryMode> Registry<KV, M> {
     /// Are there no databases in the registry?
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -112,7 +112,10 @@ impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
     ///
     /// Growing the registry creates new databases, while shrinking drops
     /// databases from the end.
-    pub fn resize(&mut self, new_size: usize) -> Result<(), Error> {
+    pub fn resize(&mut self, new_size: usize) -> Result<(), Error>
+    where
+        KV: BackgroundKeyValueStore,
+    {
         M::resize(self, new_size)
     }
 
@@ -127,18 +130,27 @@ impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
     }
 
     /// Copy the contents of database at `src_index` to database at `dst_index`.
-    pub fn copy_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error> {
+    pub fn copy_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error>
+    where
+        KV: BackgroundKeyValueStore,
+    {
         M::copy_database(self, src_index, dst_index)
     }
 
     /// Move the contents of database at `src_index` to database at `dst_index`. The source
     /// database is replaced with an empty database.
-    pub fn move_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error> {
+    pub fn move_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error>
+    where
+        KV: BackgroundKeyValueStore,
+    {
         M::move_database(self, src_index, dst_index)
     }
 
     /// Clear the database at the given `index`.
-    pub fn clear_database(&mut self, index: usize) -> Result<(), Error> {
+    pub fn clear_database(&mut self, index: usize) -> Result<(), Error>
+    where
+        KV: BackgroundKeyValueStore,
+    {
         M::clear_database(self, index)
     }
 }
@@ -155,20 +167,17 @@ where
     }
 }
 
-// RV-926 TODO: Ensure that implementing other modes for Registry does not require specific implementations
-// for each Fold trait.
-
-impl<KV: BackgroundKeyValueStore> Foldable<HashFold> for Registry<KV, Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
+impl<KV: KeyValueStore, F: Fold> Foldable<F> for Registry<KV, Normal>
+where
+    Database<KV, Normal>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
         let get_hash = |idx: usize| {
             self.database(idx)
-                .expect("Getting a database at a valid index should succeed.")
-                .hash()
-                .expect("Hashing the database should succeed.")
+                .expect("Getting a database at a valid index should succeed")
         };
 
-        let tree = IndexableSeqAsTree::new(self.len(), REGISTRY_ARITY, &get_hash);
-        tree.fold(builder)
+        IndexableSeqAsTree::new(self.len(), REGISTRY_ARITY, &get_hash).fold(builder)
     }
 }
 
