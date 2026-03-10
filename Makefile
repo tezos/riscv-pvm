@@ -13,7 +13,7 @@ check: riscv/check durable/check jstz/check dummy/check dummy-no-std/check page-
 
 build: sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
 
-clean: riscv/clean sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean
+clean: sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean cargo-clean
 
 ### Specific top-level targets
 
@@ -69,6 +69,9 @@ cargo-nextest-run: test-deps
 cargo-test-doc:
 	@cargo test --workspace --doc
 
+cargo-clean:
+	@cargo clean
+
 ### Target proxies
 
 riscv/%:
@@ -102,4 +105,4 @@ docs/%:
 	@make -C docs ${@:docs/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc cargo-clean

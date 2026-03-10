@@ -10,9 +10,6 @@ build:
 
 check: cargo-check cargo-clippy
 
-clean:
-	@cargo clean
-
 cargo-check:
 	@cargo check --all-targets
 
