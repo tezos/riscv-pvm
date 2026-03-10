@@ -24,8 +24,6 @@ coverage:
 
 .PHONY: check
 check:
-	@exec ../scripts/format.sh --all --check
-
 	@cargo update --workspace --locked
 	@cargo check --workspace --all-targets
 	@cargo clippy --workspace --all-targets -- --deny warnings

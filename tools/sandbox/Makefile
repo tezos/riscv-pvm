@@ -17,7 +17,7 @@ riscv-sandbox: cargo-build-sandbox-release
 riscv-sandbox.prof: cargo-build-sandbox-profiling
 	@ln -f ../../target/profiling/riscv-sandbox $@
 
-check: cargo-format cargo-check cargo-clippy
+check: cargo-check cargo-clippy
 
 clean:
 	@cargo clean
@@ -30,9 +30,6 @@ cargo-build-sandbox-release:
 
 cargo-build-sandbox-profiling:
 	@cargo build --profile profiling $(SANDBOX_ENABLE_FEATURES:%=-F%)
-
-cargo-format:
-	@exec ../../scripts/format.sh --all
 
 cargo-check:
 	@cargo check --all-targets

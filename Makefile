@@ -43,10 +43,13 @@ build-deps: build-deps-slim
 check-nix:
 	@nix fmt
 
-check-format: taplo-check-format
+check-format: taplo-check-format rustfmt-check
 
 taplo-check-format:
 	@taplo format --check
+
+rustfmt-check:
+	@exec scripts/format.sh --all --check
 
 test: jstz/test etherlink/test cargo-nextest-run cargo-test-doc
 
@@ -99,4 +102,4 @@ docs/%:
 	@make -C docs ${@:docs/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc

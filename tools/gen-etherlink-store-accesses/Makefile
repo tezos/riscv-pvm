@@ -8,13 +8,10 @@ all: check build
 build:
 	@cargo build --release
 
-check: cargo-format cargo-check cargo-clippy
+check: cargo-check cargo-clippy
 
 clean:
 	@cargo clean
-
-cargo-format:
-	@exec ../../scripts/format.sh --all
 
 cargo-check:
 	@cargo check --all-targets
