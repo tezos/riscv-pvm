@@ -112,8 +112,7 @@ fn deserialise_final_hash(
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
 ) -> deserialiser::Result<(Proof, NodePvm<Verify, EmptyPageCache>)> {
-    let final_state_hash =
-        deserialise_final_hash(&mut bytes).map_err(|e| ProofError::TagDeserialise(e.into()))?;
+    let final_state_hash = deserialise_final_hash(&mut bytes)?;
 
     let (pvm, proof_tree) = deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
 

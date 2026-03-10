@@ -9,20 +9,9 @@ use bincode::error::DecodeError;
 use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-use octez_riscv_data::merkle_proof::tag::InvalidTagError;
 
 use super::proof_backend::merkle::MERKLE_ARITY;
 use crate::state_backend::proof_backend::proof::NotEnoughBytesError;
-
-/// Errors occurring when parsing the tag structure of a Merkle proof.
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum TagError {
-    #[error("Invalid tag encountered: {0}")]
-    InvalidTag(#[from] InvalidTagError),
-
-    #[error("Not enough bytes available")]
-    NotEnoughBytes(#[from] NotEnoughBytesError),
-}
 
 /// Errors occurring when parsing a Merkle proof
 #[derive(Debug, thiserror::Error)]
@@ -35,9 +24,6 @@ pub enum ProofError {
 
     #[error("Deserialising as a stream and not all bytes were consumed")]
     RemainingBytes,
-
-    #[error("Error during tag deserialisation: {0}")]
-    TagDeserialise(#[from] TagError),
 
     #[error("Proof tree is absent")]
     AbsentProof,
