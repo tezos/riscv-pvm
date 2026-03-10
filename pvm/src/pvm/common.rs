@@ -396,8 +396,8 @@ where
         let proof: MerkleProof = merkle_tree.compress();
 
         Ok(OutboxProof {
-            proof,
             info: proof_output.info,
+            proof,
         })
     }
 }

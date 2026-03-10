@@ -42,12 +42,15 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::serialisation::deserialise_from;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
@@ -59,8 +62,12 @@ pub use self::output::Output;
 pub use self::output::OutputInfo;
 use super::Pvm;
 use super::durable_storage::DurableStorage;
+use super::durable_storage::DurableStorageDummy;
+use super::node_pvm::NodePvmMemConfig;
 use crate::machine_state::memory::MemoryConfig;
+use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
+use crate::pvm::outbox::merkle_proof::ProofError;
 
 /// Small outbox size for testing
 ///
@@ -114,11 +121,11 @@ pub enum OutboxProofError {
 /// an outbox message with the PVM state in which the outbox includes it
 #[derive(Debug, Encode)]
 pub struct OutboxProof {
+    /// The level and index of the outbox message which can be read from the proof.
+    pub info: OutputInfo,
     /// Compressed Merkle tree of the PVM state. A valid proof contains an outbox message
     /// at the level and index given by `info`.
     pub proof: MerkleProof,
-    /// The level and index of the outbox message which can be read from the proof.
-    pub info: OutputInfo,
 }
 
 impl OutboxProof {
@@ -127,9 +134,24 @@ impl OutboxProof {
         self.proof.root_hash()
     }
 
-    /// Serialise the outbox proof
+    /// Serialise an outbox proof
     pub fn serialise(&self) -> Vec<u8> {
         serialise(self).expect("Serialisation of an outbox proof should not fail")
+    }
+
+    /// Deserialise an outbox proof from raw bytes
+    pub fn deserialise(mut bytes: &[u8]) -> Result<Self, ProofError> {
+        let info: OutputInfo = deserialise_from(&mut bytes)?;
+        let (_pvm, proof_tree) = proof_binary::deserialise::<
+            Pvm<NodePvmMemConfig, EmptyPageCache, DurableStorageDummy, Verify>,
+        >(bytes)?;
+
+        let proof = match proof_tree {
+            OwnedProofTree::Absent => return Err(ProofError::AbsentProof),
+            OwnedProofTree::Present(tree) => tree,
+        };
+
+        Ok(OutboxProof { info, proof })
     }
 }
 

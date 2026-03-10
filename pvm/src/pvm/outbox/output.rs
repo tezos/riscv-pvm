@@ -16,7 +16,7 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use thiserror::Error;
 
 /// The outbox level and the index within that level for an outbox message
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Encode)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Encode, Decode)]
 pub struct OutputInfo {
     pub level: u32,
     pub index: u32,
