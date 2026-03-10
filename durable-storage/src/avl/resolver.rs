@@ -18,6 +18,7 @@ use super::node::Node;
 use super::tree::Tree;
 use crate::avl::node::NodeHashRepresentation;
 use crate::avl::node::Value;
+use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -117,11 +118,10 @@ impl<Value> From<Hash> for LazyId<Hash, Value> {
 impl<Id, Value> LazyId<Id, Value> {
     /// Create an identifier from an already loaded value.
     pub fn new(value: Value) -> Self {
-        let id = Self {
+        Self {
             inner: OnceLock::from(value),
             id: None,
-        };
-        id
+        }
     }
 
     /// Return the identifier if available.
@@ -184,7 +184,12 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
         let bytes = self
             .persistence_layer
             .blob_get(hash)
-            .map_err(|_| OperationalError::Resolver)?;
+            .map_err(|error| match error {
+                Error::InvalidArgument(error) => {
+                    OperationalError::ResolverCasLookup { hash, error }
+                }
+                Error::Operational(error) => error,
+            })?;
         let noderepr = deserialise::<NodeHashRepresentation<Value, Key, Hash>>(bytes.as_ref())?;
         Ok(Arc::new(Node::from(noderepr)))
     }
@@ -193,14 +198,19 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
         let bytes = self
             .persistence_layer
             .blob_get(hash)
-            .map_err(|_| OperationalError::Resolver)?;
+            .map_err(|error| match error {
+                Error::InvalidArgument(error) => {
+                    OperationalError::ResolverCasLookup { hash, error }
+                }
+                Error::Operational(error) => error,
+            })?;
         let tree_repr = deserialise::<Option<Hash>>(bytes.as_ref())?.map(LazyNodeId::from);
         Ok(Tree::from(tree_repr))
     }
 }
 
 impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<KV> {
-    fn get_hash<'a>(&self, id: &'a LazyNodeId) -> Hash {
+    fn get_hash(&self, id: &LazyNodeId) -> Hash {
         match id.0.inner.get() {
             Some(value) => *value.hash(self),
             None => *id.0.id().expect("Hash must be present if value is not."),
@@ -211,7 +221,9 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
-        let &hash = id.0.id().ok_or(OperationalError::Resolver)?;
+        let &hash =
+            id.0.id()
+                .ok_or(OperationalError::ResolverInvariantViolated)?;
         let node = self.load_node(hash)?;
         let _ = id.0.inner.set(node);
         Ok(id.0.inner.wait().as_ref())
@@ -232,21 +244,23 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<
             return Ok(Arc::make_mut(unsafe { &mut *temp }));
         };
 
-        let hash = id.0.id().ok_or(OperationalError::Resolver)?;
+        let hash =
+            id.0.id()
+                .ok_or(OperationalError::ResolverInvariantViolated)?;
         let _ = id.0.inner.set(self.load_node(*hash)?);
 
         id.0.id = None;
         id.0.inner
             .get_mut()
-            .ok_or(OperationalError::Resolver)
+            .ok_or(OperationalError::ResolverInvariantViolated)
             .map(Arc::make_mut)
     }
 }
 
 impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<KV> {
-    fn get_hash<'a>(&self, id: &'a LazyTreeId) -> Hash {
+    fn get_hash(&self, id: &LazyTreeId) -> Hash {
         match id.0.inner.get() {
-            Some(value) => Hash::from(*value.hash(self)),
+            Some(value) => value.hash(self),
             None => *id.0.id().expect("Hash must be present if value is not."),
         }
     }
@@ -255,7 +269,9 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
-        let &hash = id.0.id().ok_or(OperationalError::Resolver)?;
+        let &hash =
+            id.0.id()
+                .ok_or(OperationalError::ResolverInvariantViolated)?;
         let tree = self.load_tree(hash)?;
         let _ = id.0.inner.set(tree);
         Ok(id.0.inner.wait())
@@ -266,12 +282,16 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
         id: &'a mut LazyTreeId,
     ) -> Result<&'a mut Tree<LazyNodeId>, OperationalError> {
         if id.0.inner.get().is_none() {
-            let hash = id.0.id().ok_or(OperationalError::Resolver)?;
+            let hash =
+                id.0.id()
+                    .ok_or(OperationalError::ResolverInvariantViolated)?;
             let _ = id.0.inner.set(self.load_tree(*hash)?);
         }
 
         id.0.id = None;
-        id.0.inner.get_mut().ok_or(OperationalError::Resolver)
+        id.0.inner
+            .get_mut()
+            .ok_or(OperationalError::ResolverInvariantViolated)
     }
 }
 

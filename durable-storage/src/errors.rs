@@ -6,6 +6,8 @@
 
 use std::path::PathBuf;
 
+use octez_riscv_data::hash::Hash;
+
 /// Errors that are the result of an operational failure
 ///
 /// These kinds of errors are fatal. When encountering such an error, there is no guarantee that the
@@ -86,8 +88,15 @@ pub enum OperationalError {
     #[error("Error while writing to file: {error}")]
     FileWriteFailed { error: std::io::Error },
 
-    #[error("Error in identifier resolution")]
-    Resolver,
+    #[error("Resolver invariant violated. Either the hash or the value of an ID must exist.")]
+    ResolverInvariantViolated,
+
+    #[error("Resolver CAS lookup returned invalid argument for hash {hash:?}: {error}")]
+    ResolverCasLookup {
+        hash: Hash,
+        #[source]
+        error: InvalidArgumentError,
+    },
 
     #[error("Encountered a poisoned lock")]
     LockPoisoned,
