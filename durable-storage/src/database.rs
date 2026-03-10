@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::Bytes;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -139,6 +141,12 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///  - The key does not exist in the database.
     pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
         M::value_length(self, key)
+    }
+}
+
+impl<KV> Foldable<HashFold> for Database<KV, Normal> {
+    fn fold(&self, _builder: HashFold) -> Hash {
+        self.inner.merkle.hash().expect("Hashing should not fail")
     }
 }
 
