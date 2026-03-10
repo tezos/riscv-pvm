@@ -530,7 +530,7 @@ mod tests {
             let node = ArcResolver.resolve(id)?;
 
             if node.key() == &self.fail_on {
-                return Err(OperationalError::Resolver);
+                return Err(OperationalError::ResolverInvariantViolated);
             }
 
             Ok(node)
@@ -543,7 +543,7 @@ mod tests {
             let node = ArcResolver.resolve_mut(id)?;
 
             if node.key() == &self.fail_on {
-                return Err(OperationalError::Resolver);
+                return Err(OperationalError::ResolverInvariantViolated);
             }
 
             Ok(node)
@@ -593,7 +593,7 @@ mod tests {
         assert!(
             matches!(
                 tree.get(&missing, &failing_resolver),
-                Err(OperationalError::Resolver)
+                Err(OperationalError::ResolverInvariantViolated)
             ),
             "Resolver failures should be propagated as Err."
         );
