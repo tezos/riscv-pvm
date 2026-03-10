@@ -61,10 +61,11 @@ fn test_outbox_proofs(inputs: &TestConfig) {
 
     let mut mint = goldenfile::Mint::new(inputs.golden_dir);
     let mut proof_capture = mint.new_goldenfile("outbox_proof").unwrap();
-    let proof_bytes = hex::encode(proof_serialisation);
+    let proof_bytes = hex::encode(&proof_serialisation);
     writeln!(proof_capture, "{proof_bytes}").unwrap();
 
-    // Check that:
+    // For both `proof` and the proof deserialised from serialising `proof`,
+    // check that:
     // - the outbox proof is for the expected state
     // - the outbox proof verifies, yielding the message we expected the kernel wrote
     //   at that outbox position
@@ -72,6 +73,12 @@ fn test_outbox_proofs(inputs: &TestConfig) {
     assert_eq!(stepper.hash(), proof.state_hash());
     let output_from_proof = verify_outbox_proof(&proof).unwrap();
     assert_eq!(output, output_from_proof);
+
+    eprintln!("> Verifying outbox proof (serialised)...");
+    let deserialised_proof = OutboxProof::deserialise(&proof_serialisation).unwrap();
+    assert_eq!(stepper.hash(), deserialised_proof.state_hash());
+    let output_from_deserialised_proof = verify_outbox_proof(&deserialised_proof).unwrap();
+    assert_eq!(output, output_from_deserialised_proof);
 }
 
 #[test]
