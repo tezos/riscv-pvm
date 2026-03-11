@@ -54,7 +54,7 @@ fn run_x64_atomic<I: ICB>(
         let val_rs2 = read_xregister(icb, rs2);
         let res = f(val_rs1, val_rs2, icb);
 
-        // Write the value read fom the address in rs1 in rd
+        // Write the value read from the address in rs1 in rd
         write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1
@@ -90,7 +90,7 @@ fn run_x32_atomic<I: ICB>(
 
         let val_rs1 = icb.extend_signed(val_rs1);
 
-        // Write the value read fom the address in rs1 in rd
+        // Write the value read from the address in rs1 in rd
         write_xregister(icb, rd, val_rs1);
 
         // Store the resulting value to the address in rs1

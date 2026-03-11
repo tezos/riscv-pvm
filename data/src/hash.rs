@@ -74,7 +74,7 @@ impl Hash {
 
         for hash in hashes {
             let hash: &Hash = hash.borrow();
-            // Pre-image resistence is guaranteed by the constant hash digest length.
+            // Pre-image resistance is guaranteed by the constant hash digest length.
             hasher.update(hash.as_ref());
         }
 

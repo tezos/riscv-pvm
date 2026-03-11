@@ -20,7 +20,7 @@ pub struct InterpretedCompiler;
 
 /// Since [`InterpretedCompiler`] does no compilation at all, [`router_eq`] should always return
 /// false, so that the ranges in the router are kept as small as possible. This helps reduce the
-/// number of pages that could get unneccessarily dropped.
+/// number of pages that could get unnecessarily dropped.
 ///
 /// [`router_eq`]: crate::machine_state::page_cache::router::RouterEq::router_eq
 impl RouterEq for InterpretedCompiler {

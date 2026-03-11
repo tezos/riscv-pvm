@@ -40,7 +40,7 @@ fn test_dummy_no_std_determinism() {
 // This test checks that running the stepper step-by-step always
 // advances the pvm _exactly_ by one step.
 //
-// Previously - both read_inut and reveal handling in the stepper
+// Previously - both read_input and reveal handling in the stepper
 // would actually advance two steps (even if only one step was
 // requested) - if the first step put the PVM into the
 // 'WaitingForInput' state.

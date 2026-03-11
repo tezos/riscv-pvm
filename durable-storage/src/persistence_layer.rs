@@ -65,7 +65,7 @@ struct OffsetWriteMergePayload<'a> {
 /// later passed to the full merge operator instead of the full collection of operands. Both
 /// operators must be able to work with the same structured data.
 ///
-/// The advantage of this is in preventing unecessary work. For example, when the same part of the
+/// The advantage of this is in preventing unnecessary work. For example, when the same part of the
 /// associated value is written to by multiple merges, only the last would need to be fully merged.
 ///
 /// See: <https://github.com/facebook/rocksdb/wiki/merge-operator>
@@ -182,7 +182,7 @@ fn rocksdb_clone_as_checkpoint_options() -> rocksdb::Options {
 }
 
 /// RocksDB options for when we create a DB from
-/// a checkoint
+/// a checkpoint
 fn rocksdb_checkpoint_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     set_memtable_to_hash_link_list(&mut options);
