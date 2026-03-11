@@ -28,6 +28,9 @@ mod tests {
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::Partial;
     use octez_riscv_data::merkle_proof::ProofError;
+    use octez_riscv_data::merkle_proof::proof_binary::StreamDeserialiser;
+    use octez_riscv_data::merkle_proof::proof_binary::StreamInput;
+    use octez_riscv_data::merkle_proof::proof_binary::StreamParserComb;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_proof::tag::InvalidTagError;
     use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
@@ -38,9 +41,6 @@ mod tests {
     use crate::state_backend::proof_backend::proof::MerkleProof;
     use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
-    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
-    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamInput;
-    use crate::state_backend::proof_backend::proof::deserialise_stream::StreamParserComb;
 
     fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
         proof: D,
