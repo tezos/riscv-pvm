@@ -28,12 +28,11 @@
 
 mod elems;
 pub mod proof_backend;
-pub(crate) mod proof_layout;
+mod proof_layout;
 mod region;
 pub mod verify_backend;
 
 pub use elems::*;
-pub use proof_layout::*;
 
 #[cfg(test)]
 mod tests {

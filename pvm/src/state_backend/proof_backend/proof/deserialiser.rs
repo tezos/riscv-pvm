@@ -14,7 +14,7 @@
 //! [`ProofTree`]: octez_riscv_data::merkle_proof::proof_tree::ProofTree
 //! [`Suspended`]: octez_riscv_data::merkle_proof::Deserialiser::Suspended
 
-use crate::state_backend::ProofError;
+use octez_riscv_data::merkle_proof::ProofError;
 
 /// Result type used when deserialising a proof - including both the layout and contents of the
 /// proof.
@@ -27,6 +27,7 @@ mod tests {
     use octez_riscv_data::merkle_proof::Deserialiser;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::Partial;
+    use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_proof::tag::InvalidTagError;
     use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
@@ -34,7 +35,6 @@ mod tests {
     use octez_riscv_data::merkle_proof::tag::TAG_READ;
 
     use super::Result;
-    use crate::state_backend::ProofError;
     use crate::state_backend::proof_backend::proof::MerkleProof;
     use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;

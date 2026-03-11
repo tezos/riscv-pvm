@@ -40,7 +40,6 @@ perfect-derive.workspace = true
 zerocopy.workspace = true
 zerocopy-derive.workspace = true
 octez-riscv-data.workspace = true
-unty.workspace = true
 rangemap.workspace = true
 
 [dependencies.octez-riscv-durable-storage]

@@ -2467,7 +2467,6 @@ dependencies = [
  "trait-set",
  "try-blocks",
  "tuples",
- "unty",
  "vm-fdt",
  "zerocopy",
  "zerocopy-derive",
@@ -2489,6 +2488,7 @@ dependencies = [
  "range-collections",
  "thiserror 2.0.18",
  "trait-set",
+ "unty",
 ]
 
 [[package]]

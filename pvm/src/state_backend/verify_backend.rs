@@ -4,11 +4,11 @@
 // SPDX-License-Identifier: MIT
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::mode::utils::CaughtNotFoundOrPanic;
 use octez_riscv_data::mode::utils::NotFound;
 
 use crate::pvm::outbox::OutboxProofError;
-use crate::state_backend::ProofError;
 
 /// Error during proof verification
 #[derive(Debug, thiserror::Error)]
