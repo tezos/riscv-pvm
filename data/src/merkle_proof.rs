@@ -11,6 +11,7 @@ pub mod tag;
 use std::error;
 
 use bincode::Decode;
+use bincode::error::DecodeError;
 
 use crate::hash::Hash;
 
@@ -63,6 +64,44 @@ impl<T> Partial<T> {
 pub trait DeserialiserError: error::Error {
     /// Create a custom deserialiser error from any error type.
     fn custom<E: error::Error + 'static>(error: E) -> Self;
+}
+
+/// Errors occurring when parsing a Merkle proof
+#[derive(Debug, thiserror::Error)]
+pub enum ProofError {
+    #[error("Error during deserialisation: {0}")]
+    Deserialise(#[from] DecodeError),
+
+    #[error("Deserialising as a stream and not all bytes were consumed")]
+    RemainingBytes,
+
+    #[error("Proof tree is absent")]
+    AbsentProof,
+
+    #[error("Encountered a node with a bad number of branches: expected {expected}, got {got}")]
+    BadNumberOfBranches { expected: usize, got: usize },
+
+    #[error("Expected a leaf of size {expected}, got {got}")]
+    UnexpectedLeafSize { expected: usize, got: usize },
+
+    #[error("Encountered a leaf where a node was expected")]
+    UnexpectedLeaf,
+
+    #[error("Encountered a node where a leaf was expected")]
+    UnexpectedNode,
+
+    #[error("Custom error: {0}")]
+    Custom(Box<dyn std::error::Error>),
+}
+
+impl DeserialiserError for ProofError {
+    fn custom<E: error::Error + 'static>(error: E) -> Self {
+        // SAFETY: `ProofError` does not contain lifetimes, so unty-ing is safe.
+        match unsafe { unty::unty(error) } {
+            Ok(this) => this,
+            Err(error) => Self::Custom(Box::new(error)),
+        }
+    }
 }
 
 /// [`Deserialiser::Suspended<T>`] wrapped in a [`Result`].

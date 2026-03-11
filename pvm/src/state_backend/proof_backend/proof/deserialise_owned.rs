@@ -10,6 +10,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
 use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
@@ -19,7 +20,6 @@ use octez_riscv_data::serialisation;
 use octez_riscv_data::tree::Tree;
 
 use super::deserialiser::Result;
-use crate::state_backend::ProofError;
 use crate::state_backend::proof_backend::proof::deserialiser;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.

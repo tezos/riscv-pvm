@@ -18,6 +18,7 @@ trait-set.workspace = true
 memmap2.workspace = true
 range-collections.workspace = true
 bytes.workspace = true
+unty.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
