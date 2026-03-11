@@ -23,6 +23,8 @@ use crate::foldable::tests::TestFolder;
 use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
+use crate::merkle_proof::proof_tree;
+use crate::merkle_proof::proof_tree::ProofTree;
 use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Mode;
@@ -251,6 +253,44 @@ fn proof_gen() {
             _ => panic!("Expected Merkle tree to contain a single written leaf"),
         }
     });
+}
+
+#[test]
+fn proof_blinding() {
+    const ATOMS_SIZE: usize = 32;
+
+    type TestState<M> = (Atom<[u64; ATOMS_SIZE], M>, Atom<[u64; ATOMS_SIZE], M>);
+
+    proptest!(|(value_before: u64, value_after: u64, i in 0..ATOMS_SIZE)| {
+        let data_before = [value_before; ATOMS_SIZE];
+
+        // Bind `Prove` atoms and write to one index.
+        let mut proof_atoms1: Atom<[u64; ATOMS_SIZE], Prove> = Atom::new(data_before);
+        proof_atoms1[i] = value_after;
+
+        // Bind `Prove` atoms and do not access them.
+        let proof_atoms2: Atom<[u64; ATOMS_SIZE], Prove> = Atom::new(data_before);
+
+        let proof_state = (proof_atoms1, proof_atoms2);
+
+        let merkle_proof = MerkleTree::from_foldable(&proof_state).compress();
+
+        let verifier_state =
+            proof_tree::deserialise::<TestState<Verify>>(ProofTree::Present(&merkle_proof)).unwrap();
+
+        // The first component of the state was present in the proof, can be
+        // fully read, and contains the initial state.
+        prop_assert_eq!(verifier_state.0.0.read(), [value_before; ATOMS_SIZE]);
+
+        // The second component of the state is fully blinded: no values can
+        // be read from the array.
+        for i in 0..ATOMS_SIZE {
+            prop_assert!(catch_not_found(|| verifier_state.0.1[i]).is_err());
+        }
+
+        let partial_hash = PartialHash::from_foldable(Some(&merkle_proof), &verifier_state.0);
+        prop_assert!(partial_hash.to_hash().is_some());
+    })
 }
 
 /// Operations to be issued against an immutable Atom state component

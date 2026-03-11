@@ -28,7 +28,6 @@
 
 mod elems;
 pub mod proof_backend;
-mod proof_layout;
 mod region;
 pub mod verify_backend;
 
