@@ -62,8 +62,6 @@ mod tests {
     use octez_riscv_data::serialisation::elem::Elem;
     use rand::Rng;
 
-    use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
-
     /// Data structure whose [`Elem`] implementation only writes to part of the given space
     #[derive(Clone)]
     struct PartialWrite {
@@ -120,7 +118,7 @@ mod tests {
         // The Verify mode needs a proof, so we generate it from the Prove mode
         let merkle_tree = MerkleTree::from_foldable(&mem_prove);
         let proof_tree = merkle_tree.compress();
-        let proof_deser = ProofTreeDeserialiser::from(ProofTree::Present(&proof_tree));
+        let proof_deser = ProofTree::Present(&proof_tree);
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
         unsafe {
@@ -214,7 +212,7 @@ mod tests {
         let expected_hash = Hash::from_foldable(&foo_prove);
 
         let merkle_proof = merkle_tree.compress();
-        let proof_deser = ProofTreeDeserialiser::from(ProofTree::Present(&merkle_proof));
+        let proof_deser = ProofTree::Present(&merkle_proof);
 
         let mut foo_verify = Foo::<Verify>::from_proof(proof_deser)
             .unwrap()

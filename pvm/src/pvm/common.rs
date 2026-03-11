@@ -31,6 +31,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
 use octez_riscv_data::merkle_tree::MerkleTree;
@@ -65,7 +66,6 @@ use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::proof_backend::proof::deserialise_owned;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 
 /// Type of input that can be passed to the PVM
@@ -563,7 +563,7 @@ where
 impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
-        let (pvm, _) = deserialise_owned::deserialise(ProofTree::Present(proof)).ok()?;
+        let (pvm, _) = proof_tree::deserialise(ProofTree::Present(proof)).ok()?;
         Some(pvm)
     }
 
@@ -583,7 +583,7 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
         let proof_tree = ProofTree::Present(&outbox_proof.proof);
 
         catch_not_found(move || {
-            let (pvm, _): (Self, _) = deserialise_owned::deserialise(proof_tree)?;
+            let (pvm, _): (Self, _) = proof_tree::deserialise(proof_tree)?;
             pvm.get_outbox_message(outbox_proof.info)
                 .map_err(ProofVerificationFailure::from)
         })?

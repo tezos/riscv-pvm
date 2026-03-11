@@ -11,6 +11,7 @@ mod tests {
     use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::merkle_proof::proof_tree;
     use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_tree::MerkleTree;
@@ -21,8 +22,6 @@ mod tests {
     use proptest::prop_assert;
     use proptest::prop_assert_eq;
     use proptest::proptest;
-
-    use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const ATOMS_SIZE: usize = 32;
 
@@ -51,7 +50,7 @@ mod tests {
             let merkle_proof = MerkleTree::from_foldable(&proof_state).compress();
 
             let verifier_state =
-                deserialise_owned::deserialise::<TestState<Verify>>(
+                proof_tree::deserialise::<TestState<Verify>>(
                     ProofTree::Present(&merkle_proof),
                 ).unwrap();
 
@@ -114,8 +113,7 @@ mod tests {
         // Instantiating the verifier state allows us to replay the computation and verify it does
         // the right things.
         let (mut verify_cell, out_proof) =
-            deserialise_owned::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree))
-                .unwrap();
+            proof_tree::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree)).unwrap();
 
         let OwnedProofTree::Present(out_tree) = &out_proof else {
             panic!("Expected present proof");
