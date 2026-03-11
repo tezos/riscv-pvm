@@ -1,12 +1,21 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
 // SPDX-License-Identifier: MIT
 
+use std::marker::PhantomData;
+
+use bincode::Decode;
 use bincode::enc::write::Writer;
 
+use super::Deserialiser;
+use super::DeserialiserNode;
+use super::FromProof;
 use super::Partial;
+use super::ProofError;
+use super::Suspended;
 use super::tag::LeafTag;
 use super::tag::Tag;
 use crate::hash::Hash;
+use crate::serialisation;
 use crate::tree::Tree;
 
 /// Merkle proof tree structure.
@@ -216,6 +225,79 @@ impl<T> ProofPart<T> {
 /// Part of a Merkle proof tree
 pub type ProofTree<'a> = ProofPart<&'a MerkleProof>;
 
+impl<'a> ProofTree<'a> {
+    /// Deserialise the proof tree as a leaf.
+    pub fn as_leaf(self) -> Result<Partial<&'a [u8]>, ProofError> {
+        let Self::Present(tree) = self else {
+            return Ok(Partial::Absent);
+        };
+
+        let leaf = match tree {
+            Tree::Leaf(MerkleProofLeaf::Blind(hash)) => Partial::Blinded(*hash),
+            Tree::Leaf(MerkleProofLeaf::Read(items)) => Partial::Present(items.as_slice()),
+            Tree::Node(_) => return Err(ProofError::UnexpectedNode),
+        };
+
+        Ok(leaf)
+    }
+
+    /// Deserialise the proof tree as a node.
+    pub fn as_node(self) -> Result<Partial<Vec<Self>>, ProofError> {
+        let Self::Present(tree) = self else {
+            return Ok(Partial::Absent);
+        };
+
+        let node = match tree {
+            Tree::Leaf(leaf) => match leaf {
+                MerkleProofLeaf::Blind(hash) => Partial::Blinded(*hash),
+                MerkleProofLeaf::Read(_) => return Err(ProofError::UnexpectedLeaf),
+            },
+            Tree::Node(node) => {
+                Partial::Present(node.children.iter().map(ProofPart::Present).collect())
+            }
+        };
+
+        Ok(node)
+    }
+}
+
+impl<'t> Deserialiser for ProofTree<'t> {
+    type Error = ProofError;
+
+    type Suspended<R> = ProofTreeResult<'t, R>;
+
+    type DeserialiserNode = Partial<std::vec::IntoIter<Self>>;
+
+    fn into_leaf_raw<const LEN: usize>(
+        self,
+    ) -> Result<Self::Suspended<Partial<Box<[u8; LEN]>>>, Self::Error> {
+        self.as_leaf()?
+            .map_present_fallible(|data| {
+                let data_len = data.len();
+                let bytes: Box<[u8; LEN]> =
+                    data.to_vec()
+                        .try_into()
+                        .map_err(|_| ProofError::UnexpectedLeafSize {
+                            expected: LEN,
+                            got: data_len,
+                        })?;
+                Ok(bytes)
+            })
+            .map(ProofTreeResult::new)
+    }
+
+    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
+        let result = self
+            .as_leaf()?
+            .map_present_fallible(serialisation::deserialise)?;
+        Ok(ProofTreeResult::new(result))
+    }
+
+    fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error> {
+        Ok(self.as_node()?.map_present(Vec::into_iter))
+    }
+}
+
 /// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`]
 pub type OwnedProofTree = ProofPart<MerkleProof>;
 
@@ -256,6 +338,109 @@ impl OwnedProofTree {
 
         OwnedProofTree::Present(MerkleProof::node_without_data(partial_children))
     }
+}
+
+impl<'t, BS: Iterator<Item = ProofTree<'t>>> DeserialiserNode for Partial<BS> {
+    type Parent = ProofTree<'t>;
+
+    fn presence(&self) -> Partial<()> {
+        match self {
+            Partial::Absent => Partial::Absent,
+            Partial::Blinded(hash) => Partial::Blinded(*hash),
+            Partial::Present(_) => Partial::Present(()),
+        }
+    }
+
+    fn next_branch_with<T>(
+        mut self,
+        branch_deserialiser: impl FnOnce(
+            Self::Parent,
+        ) -> Result<
+            <Self::Parent as Deserialiser>::Suspended<T>,
+            ProofError,
+        >,
+    ) -> Result<(Self, T), ProofError> {
+        let next_branch = match self {
+            // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
+            Partial::Absent | Partial::Blinded(_) => ProofTree::Absent,
+            Partial::Present(ref mut branches) => {
+                branches.next().ok_or(ProofError::BadNumberOfBranches {
+                    expected: 1,
+                    got: 0,
+                })?
+            }
+        };
+
+        let result = branch_deserialiser(next_branch)?.result;
+        Ok((self, result))
+    }
+
+    fn done<T>(self, value: T) -> Result<<Self::Parent as Deserialiser>::Suspended<T>, ProofError> {
+        if let Partial::Present(branches) = self {
+            let remaining_items = branches.count();
+            if remaining_items > 0 {
+                return Err(ProofError::BadNumberOfBranches {
+                    expected: 0,
+                    got: remaining_items,
+                });
+            }
+        }
+
+        Ok(ProofTreeResult {
+            result: value,
+            _pd: PhantomData,
+        })
+    }
+}
+
+/// Result of parsing a [`ProofTree`]
+pub struct ProofTreeResult<'t, R> {
+    result: R,
+    _pd: PhantomData<fn(ProofTree<'t>)>,
+}
+
+impl<R> ProofTreeResult<'_, R> {
+    /// Construct a new result.
+    fn new(result: R) -> Self {
+        Self {
+            result,
+            _pd: PhantomData,
+        }
+    }
+
+    /// Unwrap the result type.
+    pub fn into_result(self) -> R {
+        self.result
+    }
+}
+
+impl<'t, R> Suspended for ProofTreeResult<'t, R> {
+    type Output = R;
+
+    type Parent = ProofTree<'t>;
+
+    fn map<T>(
+        self,
+        f: impl FnOnce(Self::Output) -> T,
+    ) -> <Self::Parent as Deserialiser>::Suspended<T> {
+        ProofTreeResult {
+            result: f(self.result),
+            _pd: PhantomData,
+        }
+    }
+}
+
+/// Given a [`ProofTree`] deserialise it as `T`.
+pub fn deserialise<T: FromProof>(proof: ProofTree) -> Result<(T, OwnedProofTree), ProofError> {
+    let owned_proof = match proof {
+        ProofPart::Absent => OwnedProofTree::Absent,
+        ProofPart::Present(proof) => OwnedProofTree::Present(proof.clone()),
+    };
+
+    let parser = T::from_proof(proof)?;
+    let result = parser.into_result();
+
+    Ok((result, owned_proof))
 }
 
 #[cfg(test)]

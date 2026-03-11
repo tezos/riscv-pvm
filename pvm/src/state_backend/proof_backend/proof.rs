@@ -26,8 +26,6 @@ use octez_riscv_data::serialisation::serialise;
 
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::pvm::node_pvm::NodePvm;
-
-pub mod deserialise_owned;
 pub mod deserialiser;
 
 /// Structure of a proof transitioning from state A to state B.
