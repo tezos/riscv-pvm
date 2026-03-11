@@ -18,6 +18,7 @@ use bincode::Encode;
 use bincode::error::DecodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::ProofError;
+use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::mode::Verify;
@@ -25,8 +26,6 @@ use octez_riscv_data::serialisation::serialise;
 
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::pvm::node_pvm::NodePvm;
-
-pub mod deserialise_stream;
 pub mod deserialiser;
 
 /// Structure of a proof transitioning from state A to state B.
@@ -111,7 +110,7 @@ pub fn deserialise_proof<I: Iterator<Item = u8>>(
 ) -> deserialiser::Result<(Proof, NodePvm<Verify, EmptyPageCache>)> {
     let final_state_hash = deserialise_final_hash(&mut bytes)?;
 
-    let (pvm, proof_tree) = deserialise_stream::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
+    let (pvm, proof_tree) = proof_binary::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
         OwnedProofTree::Absent => return Err(ProofError::AbsentProof),
