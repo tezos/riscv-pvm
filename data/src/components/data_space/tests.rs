@@ -18,11 +18,16 @@ use proptest::proptest;
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
 use crate::hash::Hash;
+use crate::hash::PartialHash;
+use crate::merkle_proof::proof_tree;
+use crate::merkle_proof::proof_tree::OwnedProofTree;
+use crate::merkle_proof::proof_tree::ProofTree;
 use crate::merkle_tree::MerkleTree;
 use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
+use crate::mode::Verify;
 use crate::mode::utils::assert_eq_found;
 use crate::mode::utils::assert_not_found;
 use crate::serialisation::deserialise;
@@ -293,6 +298,192 @@ fn generate_proof() {
                 }
             }
         }
+    });
+}
+
+/// Test the proof generation and verification for a computation against a data space.
+///
+/// # Safety
+///
+/// The `test_proof` and `test_verify` function must be the same function instantiated to
+/// different modes.
+///
+/// Due to Rust's limitation on higher-ranked polymorphism, we can't accept
+/// a single function and instantiate it within the function body with the respective modes
+/// `Prove<_>` and `Verify`. One could work around this restriction by using a trait to
+/// simulate the rank-2-ness, but that means you can't provide closures as the implementation
+/// any more. If any of the given `test_proof` or `test_verify` capture an environment, this
+/// would no longer work.
+unsafe fn test_data_space_with_funs(
+    len: usize,
+    test_proof: impl FnOnce(&mut DataSpace<Prove>),
+    test_verify: impl FnOnce(&mut DataSpace<Verify>),
+) {
+    let owned_cell = DataSpace::new(len);
+
+    // We require the initial hash to ensure that the generated proof, but also the
+    // instantiated state from the proof match the "before" state.
+    let init_hash = Hash::from_foldable(&owned_cell);
+
+    // The `ProofWrapper` transformer ensures the resulting data space is
+    // setup for proof generation. You can think of this as starting the recording for a proof.
+    let mut proof_cell = owned_cell.start_proof();
+
+    test_proof(&mut proof_cell);
+
+    // The post-hash is required to ensure that the verifier's final state matches the prover's
+    // final state.
+    let post_hash = Hash::from_foldable(&proof_cell);
+
+    let tree = MerkleTree::from_foldable(&proof_cell);
+    let proof_tree = tree.compress();
+    assert_eq!(proof_tree.root_hash(), init_hash);
+
+    // Instantiating the verifier state allows us to replay the computation and verify it does
+    // the right things.
+    let (mut verify_cell, out_proof) =
+        proof_tree::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree)).unwrap();
+
+    let OwnedProofTree::Present(out_tree) = &out_proof else {
+        panic!("Expected present proof");
+    };
+    assert_eq!(&proof_tree, out_tree);
+
+    // The initial verifier state must match that of the initial state against which we
+    // produced the proof.
+    let verifier_init_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+        .to_hash()
+        .unwrap();
+    assert_eq!(verifier_init_hash, init_hash);
+
+    test_verify(&mut verify_cell);
+
+    // Once we're doing replaying the computation on the verifier side, the final state must
+    // match that of the prover's. If not, that means we produced a proof that results in a
+    // transition that we did not intend to prove.
+    let verifier_post_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+        .to_hash()
+        .unwrap();
+    assert_eq!(verifier_post_hash, post_hash);
+}
+
+/// Generate a test for data spaces using a given size and closure which operates on the
+/// [`DataSpace`]. This effectively demonstrates that the actions performed by the given closure
+/// can be proven and verified correctly.
+macro_rules! test_data_space_with {
+    ($len:literal, | $param:ident | { $($body:tt)* }) => {
+        {
+            let test_proof = |$param: &mut DataSpace<Prove>| {
+                $($body)*
+            };
+
+            let test_verify = |$param: &mut DataSpace<Verify>| {
+                $($body)*
+            };
+
+            // SAFETY: This function is intended to be used only in this macro.
+            unsafe {
+                test_data_space_with_funs($len, test_proof, test_verify);
+            }
+        }
+    };
+}
+
+#[test]
+fn test_data_space_proofs_not_power_of_arity() {
+    proptest!(|(addr in 0..28664usize, val: u64)| {
+        // We use 28672 because it is 7 * 4096 (a data space with 7 pages).
+        test_data_space_with!(28672, |cell| {
+            unsafe {
+                cell.write::<u64>(addr, val);
+            }
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_nothing() {
+    test_data_space_with!(65536, |_cell| {});
+}
+
+#[test]
+fn test_data_space_proofs_read() {
+    proptest!(|(addr in 0..65528usize)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                cell.read::<u64>(addr);
+            }
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_write() {
+    proptest!(|(addr in 0..65528usize, val: u64)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                cell.write::<u64>(addr, val);
+            }
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_len() {
+    test_data_space_with!(65536, |cell| {
+        cell.len();
+    });
+}
+
+#[test]
+fn test_data_space_proofs_read_and_len() {
+    proptest!(|(addr in 0..65528usize)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                cell.read::<u64>(addr);
+            }
+
+            cell.len();
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_write_and_len() {
+    proptest!(|(addr in 0..65528usize, val: u64)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                cell.write::<u64>(addr, val);
+            }
+
+            cell.len();
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_read_and_write() {
+    proptest!(|(addr in 0..65528usize, val: u64)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                let x = cell.read::<u64>(addr);
+                cell.write(addr, x.wrapping_add(val));
+            }
+        });
+    });
+}
+
+#[test]
+fn test_data_space_proofs_read_and_write_and_len() {
+    proptest!(|(addr in 0..65528usize, val: u64)| {
+        test_data_space_with!(65536, |cell| {
+            unsafe {
+                let x = cell.read::<u64>(addr);
+                cell.write(addr, x.wrapping_add(val));
+            }
+
+            cell.len();
+        });
     });
 }
 
