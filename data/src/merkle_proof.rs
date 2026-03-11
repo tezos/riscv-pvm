@@ -376,3 +376,6 @@ enum SeqTreeProofError {
     #[error("Length node is absent but some item nodes are present")]
     LengthAbsentButItemsPresent,
 }
+
+#[cfg(test)]
+mod tests;
