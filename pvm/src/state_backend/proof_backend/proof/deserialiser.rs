@@ -14,12 +14,6 @@
 //! [`ProofTree`]: octez_riscv_data::merkle_proof::proof_tree::ProofTree
 //! [`Suspended`]: octez_riscv_data::merkle_proof::Deserialiser::Suspended
 
-use octez_riscv_data::merkle_proof::ProofError;
-
-/// Result type used when deserialising a proof - including both the layout and contents of the
-/// proof.
-pub type Result<T, E = ProofError> = std::result::Result<T, E>;
-
 #[cfg(test)]
 mod tests {
     use bincode::Decode;
@@ -38,7 +32,6 @@ mod tests {
     use octez_riscv_data::merkle_proof::tag::TAG_NODE;
     use octez_riscv_data::merkle_proof::tag::TAG_READ;
 
-    use super::Result;
     use crate::state_backend::proof_backend::proof::MerkleProof;
 
     fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
@@ -116,9 +109,9 @@ mod tests {
 
     /// Execute a deserialising computation over an owned Merkle proof.
     fn run_owned_deserialiser<'t>(
-        deser: impl FnOnce(ProofTree<'t>) -> Result<ProofTreeResult<'t, i32>>,
+        deser: impl FnOnce(ProofTree<'t>) -> Result<ProofTreeResult<'t, i32>, ProofError>,
         merkle_proof: &'t MerkleProof,
-    ) -> Result<i32> {
+    ) -> Result<i32, ProofError> {
         let proof = ProofTree::Present(merkle_proof);
         let parsed_result = deser(proof)?;
         Ok(parsed_result.into_result())
@@ -126,9 +119,9 @@ mod tests {
 
     /// Execute a deserialising computation over raw bytes.
     fn run_stream_deserialiser<'t>(
-        deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>>,
+        deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>, ProofError>,
         bytes: &'t [u8],
-    ) -> Result<i32> {
+    ) -> Result<i32, ProofError> {
         let input = StreamInput::new(bytes);
         let comp_fn = deser(StreamDeserialiser::new_present(input))?;
         comp_fn.into_result().map(|(ret, _)| ret)

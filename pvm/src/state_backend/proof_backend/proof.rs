@@ -107,7 +107,7 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
 /// Obtain a [`Proof`] and the associated [`NodePvm<Verify>`].
 pub fn deserialise_proof<I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> deserialiser::Result<(Proof, NodePvm<Verify, EmptyPageCache>)> {
+) -> Result<(Proof, NodePvm<Verify, EmptyPageCache>), ProofError> {
     let final_state_hash = deserialise_final_hash(&mut bytes)?;
 
     let (pvm, proof_tree) = proof_binary::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
