@@ -12,12 +12,12 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::merkle_proof::tag::LeafTag;
 use octez_riscv_data::merkle_proof::tag::Tag;
 use octez_riscv_data::serialisation::deserialise_from;
 
 use super::deserialiser::Result;
-use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
 use crate::state_backend::proof_backend::proof::deserialiser;
 

@@ -3,6 +3,7 @@
 
 use bincode::enc::write::Writer;
 
+use super::Partial;
 use super::tag::LeafTag;
 use super::tag::Tag;
 use crate::hash::Hash;
@@ -189,6 +190,71 @@ impl From<&MerkleProof> for Tag {
             MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
             MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
         }
+    }
+}
+
+/// Part of a tree that may be absent
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProofPart<T> {
+    /// This part of the tree is absent.
+    Absent,
+
+    /// There is a proof for this part of the tree.
+    Present(T),
+}
+
+impl<T> ProofPart<T> {
+    /// Obtain a reference to the inner value, if present. Otherwise, return `None`.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Present(inner) => Some(inner),
+            Self::Absent => None,
+        }
+    }
+}
+
+/// Part of a Merkle proof tree
+pub type ProofTree<'a> = ProofPart<&'a MerkleProof>;
+
+/// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`]
+pub type OwnedProofTree = ProofPart<MerkleProof>;
+
+impl OwnedProofTree {
+    /// Obtain an [`OwnedProofTree`] from a [`Partial<T>`] considering it a leaf.
+    pub fn leaf_from_partial<T>(partial: Partial<T>, f: impl FnOnce(T) -> Vec<u8>) -> Self {
+        match partial {
+            Partial::Absent => OwnedProofTree::Absent,
+            Partial::Blinded(hash) => OwnedProofTree::Present(MerkleProof::leaf_blind(hash)),
+            Partial::Present(data) => OwnedProofTree::Present(MerkleProof::leaf_read(f(data))),
+        }
+    }
+
+    /// Construct a node from its child proofs. The `parent` parameter allows us to reconstruct the
+    /// blinded state of the parent.
+    pub fn node_from_children<I>(parent: Partial<()>, children: I) -> Self
+    where
+        I: IntoIterator<Item = Self>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        match parent {
+            Partial::Absent => return OwnedProofTree::Absent,
+            Partial::Blinded(hash) => {
+                return OwnedProofTree::Present(MerkleProof::leaf_blind(hash));
+            }
+            Partial::Present(_) => {}
+        }
+
+        let children = children.into_iter();
+        let mut partial_children = Vec::with_capacity(children.len());
+
+        for item in children {
+            match item {
+                OwnedProofTree::Absent => return OwnedProofTree::Absent,
+                OwnedProofTree::Present(tree) => partial_children.push(tree),
+            }
+        }
+
+        OwnedProofTree::Present(MerkleProof::node_without_data(partial_children))
     }
 }
 

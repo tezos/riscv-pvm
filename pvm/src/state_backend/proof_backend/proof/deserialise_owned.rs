@@ -12,14 +12,14 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
+use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
 use octez_riscv_data::serialisation;
 use octez_riscv_data::tree::Tree;
 
 use super::deserialiser::Result;
-use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
-use crate::state_backend::ProofPart;
-use crate::state_backend::ProofTree;
 use crate::state_backend::proof_backend::proof::deserialiser;
 
 /// Deserialiser for [`Deserialiser`] which owns the data.
