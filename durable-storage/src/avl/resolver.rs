@@ -298,6 +298,9 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::OnceLock;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::HashedData;
@@ -305,20 +308,106 @@ mod tests {
 
     use super::ArcNodeId;
     use super::ArcResolver;
+    use super::LazyId;
     use super::LazyNodeId;
     use super::LazyResolver;
+    use super::LazyTreeId;
     use super::Resolver;
+    use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
+    use crate::errors::Error;
+    use crate::errors::InvalidArgumentError;
+    use crate::errors::OperationalError;
     use crate::key::Key;
     use crate::storage::KeyValueStore;
     use crate::storage::in_memory::InMemoryKeyValueStore;
+    use crate::storage::in_memory::InMemoryRepo;
 
-    fn persist_tree(tree: &Tree<ArcNodeId>, persistence_layer: &InMemoryKeyValueStore) {
-        fn persist_subtree(
-            tree: &Tree<ArcNodeId>,
-            resolver: &ArcResolver,
-            persistence_layer: &InMemoryKeyValueStore,
-        ) {
+    /// A wrapper around an in-memory key-value store that counts the number of `blob_get` calls.
+    #[derive(Debug, Default)]
+    struct CountingKeyValueStore {
+        inner: InMemoryKeyValueStore,
+        blob_get_calls: AtomicUsize,
+    }
+
+    impl CountingKeyValueStore {
+        fn blob_get_calls(&self) -> usize {
+            self.blob_get_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl KeyValueStore for CountingKeyValueStore {
+        type Repo = InMemoryRepo;
+
+        fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
+            Ok(Self::default())
+        }
+
+        fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
+            Ok(Self {
+                inner: self.inner.try_clone()?,
+                blob_get_calls: AtomicUsize::new(self.blob_get_calls()),
+            })
+        }
+
+        fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error> {
+            self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.blob_get(key)
+        }
+
+        fn blob_set<Data: AsRef<[u8]>>(
+            &self,
+            blob: HashedData<Data>,
+        ) -> Result<(), OperationalError> {
+            self.inner.blob_set(blob)
+        }
+
+        fn blob_delete(&self, key: Hash) -> Result<(), OperationalError> {
+            self.inner.blob_delete(key)
+        }
+
+        fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+            self.inner.get(key)
+        }
+
+        fn set(
+            &self,
+            key: impl AsRef<[u8]>,
+            value: impl AsRef<[u8]>,
+        ) -> Result<(), OperationalError> {
+            self.inner.set(key, value)
+        }
+
+        fn write(
+            &self,
+            key: impl AsRef<[u8]>,
+            offset: usize,
+            value: impl AsRef<[u8]>,
+        ) -> Result<(), Error> {
+            self.inner.write(key, offset, value)
+        }
+
+        fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+            self.inner.delete(key)
+        }
+    }
+
+    fn persist_tree<NodeId, TreeId, Res, KV>(
+        tree: &Tree<NodeId>,
+        resolver: &Res,
+        persistence_layer: &KV,
+    ) where
+        KV: KeyValueStore,
+        Res: AvlResolver<NodeId, TreeId>,
+    {
+        fn persist_subtree<NodeId, TreeId, Res, KV>(
+            tree: &Tree<NodeId>,
+            resolver: &Res,
+            persistence_layer: &KV,
+        ) where
+            KV: KeyValueStore,
+            Res: AvlResolver<NodeId, TreeId>,
+        {
             // LazyTreeId resolves by loading a serialised optional root hash.
             let tree_repr: Option<Hash> = tree.root().map(|node_id| resolver.get_hash(node_id));
             let tree_bytes =
@@ -355,8 +444,247 @@ mod tests {
             );
         }
 
-        let resolver = ArcResolver;
-        persist_subtree(tree, &resolver, persistence_layer);
+        persist_subtree(tree, resolver, persistence_layer);
+    }
+
+    #[test]
+    fn lazy_resolver_loads_values_only_when_accessed() {
+        let root_key = Key::new(&[2]).expect("key should be valid");
+        let left_key = Key::new(&[1]).expect("key should be valid");
+
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut eager_resolver = ArcResolver;
+        tree.set(&root_key, b"root", &mut eager_resolver)
+            .expect("set should succeed");
+        tree.set(&left_key, b"left", &mut eager_resolver)
+            .expect("set should succeed");
+
+        let tree_hash = tree.hash(&eager_resolver);
+        let root_hash = tree
+            .root()
+            .map(|root_id| eager_resolver.get_hash(root_id))
+            .expect("tree should have a root node");
+
+        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+
+        let lazy_resolver = LazyResolver::new(persistence_layer.clone());
+        let lazy_tree = LazyTreeId::from(tree_hash);
+
+        assert_eq!(persistence_layer.blob_get_calls(), 0);
+        assert_eq!(lazy_resolver.get_hash(&lazy_tree), tree_hash);
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            0,
+            "hash-only operations should not trigger loads"
+        );
+
+        let loaded_tree = lazy_resolver
+            .resolve(&lazy_tree)
+            .expect("resolving tree should succeed");
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            1,
+            "resolving tree should load only the tree payload"
+        );
+
+        let lazy_root = loaded_tree.root().expect("tree should have a root");
+        assert!(lazy_root.0.inner.get().is_none());
+        assert_eq!(lazy_resolver.get_hash(lazy_root), root_hash);
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            1,
+            "resolving tree should not eagerly load the root node payload"
+        );
+
+        let _ = lazy_resolver
+            .resolve(lazy_root)
+            .expect("resolving root node should succeed");
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            2,
+            "node payload should be loaded only when node is accessed"
+        );
+    }
+
+    #[test]
+    fn lazy_resolver_returns_invariant_error_when_hash_is_missing() {
+        let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
+        let mut lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let node_without_hash = LazyNodeId(LazyId {
+            inner: OnceLock::new(),
+            id: None,
+        });
+        let mut node_without_hash_mut = node_without_hash.clone();
+
+        assert!(matches!(
+            lazy_resolver.resolve(&node_without_hash),
+            Err(OperationalError::ResolverInvariantViolated)
+        ));
+        assert!(matches!(
+            lazy_resolver.resolve_mut(&mut node_without_hash_mut),
+            Err(OperationalError::ResolverInvariantViolated)
+        ));
+
+        let tree_without_hash = LazyTreeId(LazyId {
+            inner: OnceLock::new(),
+            id: None,
+        });
+        let mut tree_without_hash_mut = tree_without_hash.clone();
+
+        assert!(matches!(
+            lazy_resolver.resolve(&tree_without_hash),
+            Err(OperationalError::ResolverInvariantViolated)
+        ));
+        assert!(matches!(
+            lazy_resolver.resolve_mut(&mut tree_without_hash_mut),
+            Err(OperationalError::ResolverInvariantViolated)
+        ));
+    }
+
+    #[test]
+    fn lazy_resolver_maps_missing_cas_entries_to_lookup_error() {
+        let missing_hash = Hash::hash_bytes(b"missing");
+        let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let node_id = LazyNodeId::from(missing_hash);
+        assert!(matches!(
+            lazy_resolver.resolve(&node_id),
+            Err(OperationalError::ResolverCasLookup {
+                hash,
+                error: InvalidArgumentError::KeyNotFound
+            }) if hash == missing_hash
+        ));
+
+        let tree_id = LazyTreeId::from(missing_hash);
+        assert!(matches!(
+            lazy_resolver.resolve(&tree_id),
+            Err(OperationalError::ResolverCasLookup {
+                hash,
+                error: InvalidArgumentError::KeyNotFound
+            }) if hash == missing_hash
+        ));
+    }
+
+    #[test]
+    fn lazy_resolver_caches_values_after_first_load() {
+        let root_key = Key::new(&[1]).expect("key should be valid");
+
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut eager_resolver = ArcResolver;
+        tree.set(&root_key, b"root", &mut eager_resolver)
+            .expect("set should succeed");
+
+        let root_hash = tree
+            .root()
+            .map(|root_id| eager_resolver.get_hash(root_id))
+            .expect("tree should have a root node");
+
+        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+
+        let mut node_id = LazyNodeId::from(root_hash);
+        let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
+
+        let _ = lazy_resolver
+            .resolve(&node_id)
+            .expect("first resolve should succeed");
+        assert_eq!(persistence_layer.blob_get_calls(), 1);
+
+        let _ = lazy_resolver
+            .resolve(&node_id)
+            .expect("second resolve should use cache");
+        assert_eq!(persistence_layer.blob_get_calls(), 1);
+
+        let _ = lazy_resolver
+            .resolve_mut(&mut node_id)
+            .expect("resolve_mut should use cached value");
+        assert_eq!(persistence_layer.blob_get_calls(), 1);
+    }
+
+    #[test]
+    fn lazy_resolver_supports_mutation_through_resolve_mut() {
+        let root_key = Key::new(&[1]).expect("key should be valid");
+
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut eager_resolver = ArcResolver;
+        tree.set(&root_key, b"root", &mut eager_resolver)
+            .expect("set should succeed");
+
+        let root_hash = tree
+            .root()
+            .map(|root_id| eager_resolver.get_hash(root_id))
+            .expect("tree should have a root node");
+
+        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+
+        let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
+
+        {
+            let root_id = lazy_tree
+                .root_mut()
+                .expect("lazy tree should have a root node");
+
+            let node = lazy_resolver
+                .resolve_mut(root_id)
+                .expect("resolve_mut should load node");
+            assert_eq!(persistence_layer.blob_get_calls(), 1);
+
+            node.upsert(
+                &root_key,
+                0,
+                |value| {
+                    value.set(b"root-mutated");
+                    Ok(())
+                },
+                &mut lazy_resolver,
+            )
+            .expect("mutating the resolved node should succeed");
+            assert_eq!(persistence_layer.blob_get_calls(), 1);
+        }
+
+        let root_id = lazy_tree
+            .root()
+            .expect("lazy tree should still have a root");
+        let node = lazy_resolver
+            .resolve(root_id)
+            .expect("resolving mutated node should succeed");
+
+        let mut data = vec![0; node.data().len()];
+        node.data().read(0, &mut data);
+        assert_eq!(data.as_slice(), b"root-mutated");
+
+        let persisted_tree_hash = lazy_tree.hash(&lazy_resolver);
+        persist_tree(&lazy_tree, &lazy_resolver, persistence_layer.as_ref());
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            3,
+            "Re-persisting the tree should trigger two loads, one for each child of the root"
+        );
+
+        let reloaded_tree_id = LazyTreeId::from(persisted_tree_hash);
+
+        let reloaded_tree = lazy_resolver
+            .resolve(&reloaded_tree_id)
+            .expect("resolving persisted mutated tree should succeed");
+        assert_eq!(persistence_layer.blob_get_calls(), 4);
+
+        let reloaded_root = reloaded_tree
+            .root()
+            .expect("persisted mutated tree should have a root node");
+
+        let reloaded_node = lazy_resolver
+            .resolve(reloaded_root)
+            .expect("resolving persisted mutated root node should succeed");
+        assert_eq!(persistence_layer.blob_get_calls(), 5);
+
+        let mut reloaded_data = vec![0; reloaded_node.data().len()];
+        reloaded_node.data().read(0, &mut reloaded_data);
+        assert_eq!(reloaded_data.as_slice(), b"root-mutated");
     }
 
     #[test]
@@ -375,15 +703,17 @@ mod tests {
 
         let initial_tree_hash: Hash = original_tree.hash(&original_resolver);
 
-        let persisted_root_hash = Hash::from(
-            original_tree
-                .root()
-                .map(|root_id| *original_resolver.get_hash(root_id))
-                .expect("tree should have a root node"),
-        );
+        let persisted_root_hash = original_tree
+            .root()
+            .map(|root_id| original_resolver.get_hash(root_id))
+            .expect("tree should have a root node");
 
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
-        persist_tree(&original_tree, persistence_layer.as_ref());
+        persist_tree(
+            &original_tree,
+            &original_resolver,
+            persistence_layer.as_ref(),
+        );
 
         let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(persisted_root_hash)).into();
         let mut lazy_resolver = LazyResolver::new(persistence_layer);
