@@ -108,7 +108,7 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> PageEntry<D, MC> {
         }
 
         // Safety: all `INSTRUCTION_ENTRIES` entrypoints are now initialised. The compiler field is
-        // also initialised. It is therefore safe to no longer treat these as unitialised.
+        // also initialised. It is therefore safe to no longer treat these as uninitialised.
         let page = unsafe { page.assume_init() };
 
         Ok(page)

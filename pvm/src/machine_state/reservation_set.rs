@@ -40,7 +40,7 @@ use crate::state_context::projection::impl_projection;
 /// Executing a LR.x instructions registers a reservation set on the address
 /// from which data was loaded. The success of a SC.x instruction is conditional
 /// on there being a valid reservation which includes the word or doubleword
-/// being stored. Every SC.x, wether successful or not, invalidates the hart's
+/// being stored. Every SC.x, whether successful or not, invalidates the hart's
 /// reservation set.
 ///
 /// "The invalidation of a hart’s reservation when it executes an LR or SC implies
@@ -109,7 +109,7 @@ impl<M: Mode> ReservationSet<M> {
         self.write(addr.bitand(RES_SET_BITMASK));
     }
 
-    /// Check wether the `addr` is within the reservation set
+    /// Check whether the `addr` is within the reservation set
     pub fn test_and_unset(&mut self, addr: u64) -> bool
     where
         M: AtomMode,

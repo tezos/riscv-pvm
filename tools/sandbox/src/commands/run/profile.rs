@@ -51,7 +51,7 @@ pub(crate) fn profile_stepper(
     let output_path = output_path.to_path_buf();
 
     // Get a pointer to the pc, which the sampler thread can sample from. The pointer will
-    // remain vaild throughout the lifetime of the thread.
+    // remain valid throughout the lifetime of the thread.
     let pc_ptr = std::ptr::addr_of!(stepper.machine_state().hart.pc) as *const u64 as usize;
 
     // Spawn thread to run the sampler

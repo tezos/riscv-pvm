@@ -230,7 +230,7 @@ mod tests {
         );
     }
 
-    /// The compilation we send to the jit must be formed of continguous instructions in memory,
+    /// The compilation we send to the jit must be formed of contiguous instructions in memory,
     /// not contiguous instructions in the page cache entry.
     ///
     /// This is because the page cache entry contains entrypoints for _every_ half-word.

@@ -115,7 +115,7 @@ impl JIT {
         })
     }
 
-    /// Compile instructions in a page starting from an entrypoing at the given offest.
+    /// Compile instructions in a page starting from an entrypoint at the given offset.
     /// Continue compiling instructions of either `Next` or `Branch` outcomes.
     ///
     /// Not all instructions are currently supported. For blocks containing
@@ -1584,10 +1584,10 @@ mod tests {
                                      initial_pc: u64,
                                      expected_pc: u64,
                                      expected_x1: u64,
-                                     intruction_width: InstrWidth|
+                                     instruction_width: InstrWidth|
          -> Scenario {
             ScenarioBuilder::default()
-                .set_instructions(&[I::new_jump_and_link_pc(x1, offset, intruction_width)])
+                .set_instructions(&[I::new_jump_and_link_pc(x1, offset, instruction_width)])
                 .set_initial_pc(initial_pc)
                 .set_assert_hook(assert_hook!(|core| {
                     assert_eq!(core.hart.pc.read(), expected_pc);

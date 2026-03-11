@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! Module for defining traits which facilitate desserialising a tree structure.
+//! Module for defining traits which facilitate deserialising a tree structure.
 //! More precisely, our usecase if for deserialising a Merkle tree either from a [`ProofTree`] or
 //! from the raw bytes of a serialisation.
 //!

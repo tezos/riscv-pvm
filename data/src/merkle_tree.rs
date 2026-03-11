@@ -12,7 +12,7 @@ use crate::merkle_proof::proof_tree::MerkleProofLeaf;
 use crate::tree::Node;
 use crate::tree::Tree;
 
-/// Struct which holds data for the leafs of a [`MerkleTree`].
+/// Struct which holds data for the leaves of a [`MerkleTree`].
 #[derive(Debug, Clone)]
 pub struct MerkleTreeLeafData {
     /// The hash of the leaf.
