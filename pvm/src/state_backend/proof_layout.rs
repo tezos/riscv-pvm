@@ -7,10 +7,6 @@ use std::error;
 
 use bincode::error::DecodeError;
 use octez_riscv_data::merkle_proof::DeserialiserError;
-use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-
-use super::proof_backend::merkle::MERKLE_ARITY;
 
 /// Errors occurring when parsing a Merkle proof
 #[derive(Debug, thiserror::Error)]
@@ -50,73 +46,14 @@ impl DeserialiserError for ProofError {
     }
 }
 
-/// Part of a tree that may be absent
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProofPart<T> {
-    /// This part of the tree is absent.
-    Absent,
-
-    /// There is a proof for this part of the tree.
-    Present(T),
-}
-
-/// Part of a Merkle proof tree
-pub type ProofTree<'a> = ProofPart<&'a MerkleProof>;
-
-/// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`]
-pub type OwnedProofTree = ProofPart<MerkleProof>;
-
-impl OwnedProofTree {
-    /// Obtain an [`OwnedProofTree`] from a [`Partial<T>`] considering it a leaf.
-    pub fn leaf_from_partial<T>(partial: Partial<T>, f: impl FnOnce(T) -> Vec<u8>) -> Self {
-        match partial {
-            Partial::Absent => OwnedProofTree::Absent,
-            Partial::Blinded(hash) => OwnedProofTree::Present(MerkleProof::leaf_blind(hash)),
-            Partial::Present(data) => OwnedProofTree::Present(MerkleProof::leaf_read(f(data))),
-        }
-    }
-
-    /// Construct a node from its child proofs. The `parent` parameter allows us to restruct the
-    /// blinded state of the parent.
-    pub fn node_from_children(
-        parent: Partial<()>,
-        children: impl IntoIterator<Item = Self>,
-    ) -> Self {
-        match parent {
-            Partial::Absent => return OwnedProofTree::Absent,
-            Partial::Blinded(hash) => {
-                return OwnedProofTree::Present(MerkleProof::leaf_blind(hash));
-            }
-            Partial::Present(_) => {}
-        }
-
-        let mut partial_children = Vec::with_capacity(MERKLE_ARITY);
-
-        for item in children {
-            match item {
-                OwnedProofTree::Absent => return OwnedProofTree::Absent,
-                OwnedProofTree::Present(tree) => partial_children.push(tree),
-            }
-        }
-
-        OwnedProofTree::Present(MerkleProof::node_without_data(partial_children))
-    }
-
-    /// Obtain the [`ProofTree`] reference corresponding to this owned proof part.
-    pub fn as_ref(&self) -> Option<&MerkleProof> {
-        match self {
-            Self::Present(proof) => Some(proof),
-            Self::Absent => None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Provable;
     use octez_riscv_data::mode::Prove;
@@ -126,7 +63,6 @@ mod tests {
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
-    use super::*;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     const ATOMS_SIZE: usize = 32;

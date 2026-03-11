@@ -11,6 +11,7 @@ pub(crate) mod tests {
     use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
@@ -18,7 +19,6 @@ pub(crate) mod tests {
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use crate::default::ConstDefault;
-    use crate::state_backend::ProofPart;
     use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

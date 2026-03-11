@@ -18,12 +18,12 @@ use bincode::Encode;
 use bincode::error::DecodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::serialise;
 
 use crate::machine_state::page_cache::EmptyPageCache;
 use crate::pvm::node_pvm::NodePvm;
-use crate::state_backend::OwnedProofTree;
 use crate::state_backend::ProofError;
 
 pub mod deserialise_owned;

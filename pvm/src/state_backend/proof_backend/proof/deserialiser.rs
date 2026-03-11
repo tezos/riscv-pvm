@@ -11,7 +11,7 @@
 //! [`Suspended`] trait which abstracts over a computation to be obtained after parsing just enough from
 //! the serialisation to deduce the shape of the tree.
 //!
-//! [`ProofTree`]: crate::state_backend::ProofTree
+//! [`ProofTree`]: octez_riscv_data::merkle_proof::proof_tree::ProofTree
 //! [`Suspended`]: octez_riscv_data::merkle_proof::Deserialiser::Suspended
 
 use crate::state_backend::ProofError;
@@ -27,6 +27,7 @@ mod tests {
     use octez_riscv_data::merkle_proof::Deserialiser;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::Partial;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_proof::tag::InvalidTagError;
     use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
     use octez_riscv_data::merkle_proof::tag::TAG_NODE;
@@ -34,7 +35,6 @@ mod tests {
 
     use super::Result;
     use crate::state_backend::ProofError;
-    use crate::state_backend::ProofTree;
     use crate::state_backend::proof_backend::proof::MerkleProof;
     use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;

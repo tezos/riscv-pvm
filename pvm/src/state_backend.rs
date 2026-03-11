@@ -51,6 +51,7 @@ mod tests {
     use octez_riscv_data::hash::PartialHashFold;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::merkle_tree::MerkleTreeFold;
     use octez_riscv_data::mode::Mode;
@@ -62,7 +63,6 @@ mod tests {
     use octez_riscv_data::serialisation::elem::Elem;
     use rand::Rng;
 
-    use super::*;
     use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
 
     /// Data structure whose [`Elem`] implementation only writes to part of the given space
