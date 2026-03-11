@@ -29,6 +29,7 @@ mod tests {
     use octez_riscv_data::merkle_proof::Partial;
     use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTreeResult;
     use octez_riscv_data::merkle_proof::tag::InvalidTagError;
     use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
     use octez_riscv_data::merkle_proof::tag::TAG_NODE;
@@ -36,8 +37,6 @@ mod tests {
 
     use super::Result;
     use crate::state_backend::proof_backend::proof::MerkleProof;
-    use crate::state_backend::proof_backend::proof::deserialise_owned::OwnedParserComb;
-    use crate::state_backend::proof_backend::proof::deserialise_owned::ProofTreeDeserialiser;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamDeserialiser;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamInput;
     use crate::state_backend::proof_backend::proof::deserialise_stream::StreamParserComb;
@@ -117,10 +116,10 @@ mod tests {
 
     /// Execute a deserialising computation over an owned Merkle proof.
     fn run_owned_deserialiser<'t>(
-        deser: impl FnOnce(ProofTreeDeserialiser<'t>) -> Result<OwnedParserComb<'t, i32>>,
+        deser: impl FnOnce(ProofTree<'t>) -> Result<ProofTreeResult<'t, i32>>,
         merkle_proof: &'t MerkleProof,
     ) -> Result<i32> {
-        let proof: ProofTreeDeserialiser = ProofTree::Present(merkle_proof).into();
+        let proof = ProofTree::Present(merkle_proof);
         let parsed_result = deser(proof)?;
         Ok(parsed_result.into_result())
     }
@@ -138,7 +137,7 @@ mod tests {
     #[test]
     fn test_absent_computation() {
         // Root is absent already
-        let proof: ProofTreeDeserialiser = ProofTree::Absent.into();
+        let proof: ProofTree = ProofTree::Absent;
         let comp_fn = computation_i16(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0);
 
@@ -147,7 +146,7 @@ mod tests {
             MerkleProof::leaf_read(Hash::hash_bytes(&[0, 1, 2]).as_ref().to_vec()),
             MerkleProof::leaf_blind(Hash::hash_bytes(&[3, 4, 5])),
         ]);
-        let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
+        let proof: ProofTree = ProofTree::Present(&merkle_proof);
         let comp_fn = computation_i16(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0);
     }
@@ -312,15 +311,14 @@ mod tests {
                 0, 1, 2,
             ]))]),
         ]);
-        let comp_fn =
-            computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&absent_shape).into());
+        let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&absent_shape));
 
         assert_eq!(comp_fn.unwrap().into_result(), -1);
 
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
         let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
-        let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
+        let proof: ProofTree = ProofTree::Present(&merkle_proof);
         let comp_fn = computation_leaves(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
     }
@@ -347,7 +345,7 @@ mod tests {
         // For computation_2, the provided merkle proof will resolve as blinded
         // since root is blinded
         let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
-        let proof: ProofTreeDeserialiser = ProofTree::Present(&merkle_proof).into();
+        let proof: ProofTree = ProofTree::Present(&merkle_proof);
         let comp_fn = computation_leaves(proof).unwrap();
         assert_eq!(comp_fn.into_result(), -1);
     }
@@ -372,15 +370,13 @@ mod tests {
         ]);
 
         // Tree is missing branches
-        let comp_fn =
-            computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_1).into());
+        let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_1));
         assert!(comp_fn.is_err_and(|e| matches!(e, ProofError::BadNumberOfBranches { .. })));
 
         // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
-        // Ideally, we would like to have expected: 2, got: 5, but the implementation for `ProofTreeDeserialiser`
+        // Ideally, we would like to have expected: 2, got: 5, but the implementation for `ProofTree`
         // does not track this information (the original number of children)
-        let comp_fn =
-            computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_2).into());
+        let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_2));
         assert!(comp_fn.is_err_and(|e| {
             println!("{e:?}");
             matches!(
@@ -393,13 +389,11 @@ mod tests {
         }));
 
         // The first child is a node, but is expected to be a leaf
-        let comp_fn =
-            computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_3).into());
+        let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_3));
         assert!(comp_fn.is_err_and(|e| matches!(e, ProofError::UnexpectedNode)));
 
         // The second child is a leaf, but is expected to be a node
-        let comp_fn =
-            computation_i16::<ProofTreeDeserialiser>(ProofTree::Present(&bad_shape_4).into());
+        let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_4));
         assert!(comp_fn.is_err_and(|e| { matches!(e, ProofError::UnexpectedLeaf) }));
     }
 
@@ -461,7 +455,7 @@ mod tests {
             MerkleProof::leaf_blind(Hash::hash_bytes(&[9, 10, 11])),
         ]);
 
-        let proof: ProofTreeDeserialiser = ProofTree::Present(&merkleproof).into();
+        let proof: ProofTree = ProofTree::Present(&merkleproof);
         let comp_fn = computation_leaves(proof).unwrap();
         assert_eq!(comp_fn.into_result(), 0x140A_0000 + 0xC0005);
     }

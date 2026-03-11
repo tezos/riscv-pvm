@@ -11,6 +11,7 @@ pub(crate) mod tests {
     use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::merkle_proof::proof_tree;
     use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Mode;
@@ -19,7 +20,6 @@ pub(crate) mod tests {
     use octez_riscv_data::mode::utils::catch_not_found;
 
     use crate::default::ConstDefault;
-    use crate::state_backend::proof_backend::proof::deserialise_owned;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct MyFoo(u64);
@@ -99,7 +99,7 @@ pub(crate) mod tests {
             // Verify the proof and check the final hash
             catch_not_found(|| {
                 let mut verify_foo = {
-                    let (bar, qux) = deserialise_owned::deserialise(ProofPart::Present(&proof))
+                    let (bar, qux) = proof_tree::deserialise(ProofPart::Present(&proof))
                         .unwrap()
                         .0;
                     Foo { bar, qux }

@@ -19,6 +19,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
 use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
@@ -58,8 +59,7 @@ use crate::pvm::outbox::OutputInfo;
 use crate::range_utils;
 use crate::range_utils::bound_saturating_sub;
 use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::proof_backend::proof::deserialise_owned;
-use crate::state_backend::proof_backend::proof::deserialise_stream::{self};
+use crate::state_backend::proof_backend::proof::deserialise_stream;
 use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 
@@ -369,7 +369,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
         DS: FromProof + DurableStorage<Verify>,
     {
         let proof_tree = ProofTree::Present(proof.tree());
-        let (pvm, deserialised_proof_tree) = deserialise_owned::deserialise(proof_tree)
+        let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let deserialised_proof_tree = match deserialised_proof_tree {
