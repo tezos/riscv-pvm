@@ -726,7 +726,15 @@ impl BytesMode for Prove<'_> {
     }
 
     fn resize(this: &mut Bytes<Self>, new_len: usize) {
-        if new_len < this.len() {
+        let prev_len = this.len();
+
+        // Resizing can change the hash of a partially-filled boundary page even when no explicit
+        // reads/writes happened. Record a single-byte read from the old in-bounds side of the
+        // boundary so the proof includes previous page data needed by Verify mode.
+        this.bytes
+            .record_resize_boundary_dependency(prev_len, new_len);
+
+        if new_len < prev_len {
             // We need to clear out the previously written bytes that are now out of bounds.
             // Otherwise, resizing up again would restore them.
             this.bytes.writes.truncate(new_len);
@@ -837,6 +845,24 @@ impl<'normal> ProveImpl<'normal> {
     /// Get the length of the bytes without recording access.
     fn unrecorded_len(&self) -> usize {
         self.length
+    }
+
+    /// Record synthetic read dependency needed for prove-mode resize transitions.
+    ///
+    /// Resizing can change the contents of leaves in the underlying Merkle tree. This is because
+    /// the modified pages are padded with zeros, or truncated. Without this method, the proof tree
+    /// is not guaranteed to contain the data that is truncated or extended with zeros. This leads
+    /// to problems when trying to compute the state hash after the verification step. Using this
+    /// method ensures the leaf will be included in the proof and we will be able to re-hash it
+    /// thanks to all necessary data being present.
+    fn record_resize_boundary_dependency(&self, prev_len: usize, new_len: usize) {
+        let boundary_pos = new_len.min(prev_len);
+        if boundary_pos == 0 || prev_len == new_len {
+            return;
+        }
+
+        let boundary_range = RangeSet2::from((boundary_pos - 1)..boundary_pos);
+        self.reads.borrow_mut().union_with(&boundary_range);
     }
 
     /// Check if the length needs to be included in the proof.
