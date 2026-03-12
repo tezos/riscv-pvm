@@ -10,14 +10,15 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::deserialise;
 use trait_set::trait_set;
 
 use super::node::Node;
 use super::tree::Tree;
 use crate::avl::node::NodeHashRepresentation;
-use crate::avl::node::Value;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
@@ -40,19 +41,19 @@ pub trait Resolver<Id, Value> {
 
 trait_set! {
     /// Specialised [`Resolver`] for MAVL nodes
-    pub trait NodeResolver<NodeId, TreeId> = Resolver<NodeId, Node<TreeId>>;
+    pub trait NodeResolver<NodeId, TreeId, Value> = Resolver<NodeId, Node<TreeId, Value>>;
 
     /// Specialised [`Resolver`] for MAVL trees
-    pub trait TreeResolver<NodeId, TreeId> = Resolver<TreeId, Tree<NodeId>>;
+    pub trait TreeResolver<NodeId, TreeId, Value> = Resolver<TreeId, Tree<NodeId>>;
 
     /// Specialised [`Resolver`] for MAVL nodes and trees
-    pub trait AvlResolver<NodeId, TreeId> = NodeResolver<NodeId, TreeId> + TreeResolver<NodeId, TreeId>;
+    pub trait AvlResolver<NodeId, TreeId, Value> = NodeResolver<NodeId, TreeId, Value> + TreeResolver<NodeId, TreeId, Value>;
 }
 
 /// Identifier for a node that is always present.
 #[derive(Debug, Clone, derive_more::From)]
-#[from(Node<ArcTreeId>)]
-pub struct ArcNodeId(Arc<Node<ArcTreeId>>);
+#[from(Node<ArcTreeId, Bytes<Normal>>)]
+pub struct ArcNodeId(Arc<Node<ArcTreeId, Bytes<Normal>>>);
 
 /// ID for a tree that is always present
 #[derive(Debug, Clone, derive_more::From, Default)]
@@ -62,19 +63,22 @@ pub struct ArcTreeId(Tree<ArcNodeId>);
 #[derive(Clone, Debug)]
 pub struct ArcResolver;
 
-impl Resolver<ArcNodeId, Node<ArcTreeId>> for ArcResolver {
+impl Resolver<ArcNodeId, Node<ArcTreeId, Bytes<Normal>>> for ArcResolver {
     fn get_hash(&self, id: &ArcNodeId) -> Hash {
         *id.0.hash(self)
     }
 
-    fn resolve<'a>(&self, id: &'a ArcNodeId) -> Result<&'a Node<ArcTreeId>, OperationalError> {
+    fn resolve<'a>(
+        &self,
+        id: &'a ArcNodeId,
+    ) -> Result<&'a Node<ArcTreeId, Bytes<Normal>>, OperationalError> {
         Ok(id.0.as_ref())
     }
 
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut ArcNodeId,
-    ) -> Result<&'a mut Node<ArcTreeId>, OperationalError> {
+    ) -> Result<&'a mut Node<ArcTreeId, Bytes<Normal>>, OperationalError> {
         Ok(Arc::make_mut(&mut id.0))
     }
 }
@@ -132,10 +136,10 @@ impl<Id, Value> LazyId<Id, Value> {
 
 /// Identifier for an AVL node.
 #[derive(Debug, Clone)]
-pub struct LazyNodeId(LazyId<Hash, Arc<Node<LazyTreeId>>>);
+pub struct LazyNodeId(LazyId<Hash, Arc<Node<LazyTreeId, Bytes<Normal>>>>);
 
-impl From<Node<LazyTreeId>> for LazyNodeId {
-    fn from(value: Node<LazyTreeId>) -> Self {
+impl From<Node<LazyTreeId, Bytes<Normal>>> for LazyNodeId {
+    fn from(value: Node<LazyTreeId, Bytes<Normal>>) -> Self {
         let value = Arc::new(value);
         Self(LazyId::new(value))
     }
@@ -180,7 +184,10 @@ impl<KV> LazyResolver<KV> {
 }
 
 impl<KV: KeyValueStore> LazyResolver<KV> {
-    fn load_node(&self, hash: Hash) -> Result<Arc<Node<LazyTreeId>>, OperationalError> {
+    fn load_node(
+        &self,
+        hash: Hash,
+    ) -> Result<Arc<Node<LazyTreeId, Bytes<Normal>>>, OperationalError> {
         let bytes = self
             .persistence_layer
             .blob_get(hash)
@@ -190,7 +197,8 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
                 }
                 Error::Operational(error) => error,
             })?;
-        let noderepr = deserialise::<NodeHashRepresentation<Value, Key, Hash>>(bytes.as_ref())?;
+        let noderepr =
+            deserialise::<NodeHashRepresentation<Bytes<Normal>, Key, Hash>>(bytes.as_ref())?;
         Ok(Arc::new(Node::from(noderepr)))
     }
 
@@ -209,7 +217,7 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
     }
 }
 
-impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<KV> {
+impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>>> for LazyResolver<KV> {
     fn get_hash(&self, id: &LazyNodeId) -> Hash {
         match id.0.inner.get() {
             Some(value) => *value.hash(self),
@@ -217,7 +225,10 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<
         }
     }
 
-    fn resolve<'a>(&self, id: &'a LazyNodeId) -> Result<&'a Node<LazyTreeId>, OperationalError> {
+    fn resolve<'a>(
+        &self,
+        id: &'a LazyNodeId,
+    ) -> Result<&'a Node<LazyTreeId, Bytes<Normal>>, OperationalError> {
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
@@ -232,7 +243,7 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId>> for LazyResolver<
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut LazyNodeId,
-    ) -> Result<&'a mut Node<LazyTreeId>, OperationalError> {
+    ) -> Result<&'a mut Node<LazyTreeId, Bytes<Normal>>, OperationalError> {
         if let Some(value) = id.0.inner.get_mut() {
             let temp = value as *mut Arc<_>;
             // This unsafe workaround is required because the rust borrow-checker
@@ -302,8 +313,10 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::HashedData;
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_data::serialisation;
 
     use super::ArcNodeId;
@@ -398,7 +411,7 @@ mod tests {
         persistence_layer: &KV,
     ) where
         KV: KeyValueStore,
-        Res: AvlResolver<NodeId, TreeId>,
+        Res: AvlResolver<NodeId, TreeId, Bytes<Normal>>,
     {
         fn persist_subtree<NodeId, TreeId, Res, KV>(
             tree: &Tree<NodeId>,
@@ -406,7 +419,7 @@ mod tests {
             persistence_layer: &KV,
         ) where
             KV: KeyValueStore,
-            Res: AvlResolver<NodeId, TreeId>,
+            Res: AvlResolver<NodeId, TreeId, Bytes<Normal>>,
         {
             // LazyTreeId resolves by loading a serialised optional root hash.
             let tree_repr: Option<Hash> = tree.root().map(|node_id| resolver.get_hash(node_id));
@@ -469,7 +482,7 @@ mod tests {
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
 
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
-        let lazy_tree = LazyTreeId::from(tree_hash);
+        let lazy_tree: LazyTreeId = LazyTreeId::from(tree_hash);
 
         assert_eq!(persistence_layer.blob_get_calls(), 0);
         assert_eq!(lazy_resolver.get_hash(&lazy_tree), tree_hash);
@@ -585,7 +598,7 @@ mod tests {
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
 
-        let mut node_id = LazyNodeId::from(root_hash);
+        let mut node_id: LazyNodeId = LazyNodeId::from(root_hash);
         let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
         let _ = lazy_resolver
