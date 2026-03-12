@@ -16,6 +16,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 
 use super::bytes::Bytes;
+use super::bytes::ChunkedPage;
 use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
@@ -233,7 +234,11 @@ impl Foldable<HashFold> for DataSpace<Normal> {
             let address_end = address.checked_add(PAGE_SIZE).expect("Address overflow");
 
             let data = &self.data_space[address..address_end];
-            Hash::hash_bytes(data)
+            let page = ChunkedPage { chunks: &[data] };
+
+            // The data needs to be encoded before hashing to match the Merkle scheme which includes
+            // the length of the page data in each leaf.
+            Hash::hash_encodable(page).expect("Hashing page data should not fail")
         };
 
         let pages = length.div_ceil(PAGE_SIZE);

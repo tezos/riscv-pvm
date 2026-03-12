@@ -16,6 +16,7 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::de::BorrowDecoder;
 use bincode::de::Decoder;
+use bincode::de::read::Reader;
 use bincode::enc::write::Writer;
 use bincode::error::DecodeError;
 use perfect_derive::perfect_derive;
@@ -28,7 +29,6 @@ use crate::foldable::NodeFold;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
-use crate::hash::Hasher;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -162,7 +162,10 @@ impl<M: BytesMode> Bytes<M> {
 
         let get_item = |range| {
             let data = get_data(range);
-            Hash::hash_bytes(data.borrow())
+            let page = ChunkedPage {
+                chunks: &[data.borrow()],
+            };
+            Hash::hash_encodable(page).expect("Hashing should not fail for bytes data")
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -285,8 +288,15 @@ impl Foldable<MerkleTreeFold> for Bytes<Prove<'_>> {
 
         let get_item = |range: Range<usize>| {
             let accessed = self.bytes.was_accessed(range.clone());
-            let data = self.bytes.previous[range].to_vec();
-            MerkleTree::make_merkle_leaf(data, accessed)
+
+            let data = &self.bytes.previous[range];
+            let page = ChunkedPage { chunks: &[data] };
+
+            // We need to serialise the data to be able to recover it later, given that it is
+            // variably sized.
+            let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
+
+            MerkleTree::make_merkle_leaf(leaf_data, accessed)
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -322,13 +332,12 @@ impl Foldable<PartialHashFold<'_>> for Bytes<Verify> {
                 }
 
                 Some(chunks) => {
-                    let mut hasher = Hasher::default();
-
-                    for chunk in chunks {
-                        hasher.update(chunk);
-                    }
-
-                    PartialHash::Present(hasher.to_hash())
+                    let page = ChunkedPage {
+                        chunks: chunks.as_slice(),
+                    };
+                    let hash =
+                        Hash::hash_encodable(page).expect("Hashing encoded bytes should not fail");
+                    PartialHash::Present(hash)
                 }
             }
         };
@@ -362,11 +371,11 @@ impl FromProof for Bytes<Verify> {
                     .checked_mul(idx)
                     .expect("This should not overflow");
 
-                let result = proof.into_leaf_raw::<PAGE_SIZE>()?;
-                let result = result.map(|data| {
-                    if let Partial::Present(data) = data {
-                        let data = Vec::from(data as Box<[u8]>);
-                        state.bytes.data.define(address, data);
+                let result = proof.into_leaf::<Page>()?;
+
+                let result = result.map(|page| {
+                    if let Partial::Present(page) = page {
+                        state.bytes.data.define(address, page.data);
                     }
                 });
 
@@ -865,6 +874,68 @@ impl VerifyImpl {
         }
 
         self.data.is_all_undefined()
+    }
+}
+
+/// Byte array capped at [`PAGE_SIZE`] bytes
+///
+/// This type serves primarily as a validator when decoding. We don't want to decode data for a page
+/// that exceeds the maximum page size, as that could lead to memory attacks. So we decode the
+/// length first, check it, and then decode the data.
+///
+/// The encoding dual is [`ChunkedPage`].
+struct Page {
+    data: Vec<u8>,
+}
+
+impl<C> Decode<C> for Page {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let length = u64::decode(decoder)?;
+
+        if length > PAGE_SIZE as u64 {
+            return Err(DecodeError::OtherString(format!(
+                "Page length {length} exceeds maximum page size {PAGE_SIZE}"
+            )));
+        }
+
+        let mut data = vec![0u8; length as usize];
+        decoder.reader().read(&mut data)?;
+
+        Ok(Page { data })
+    }
+}
+
+/// Chunked page capped at [`PAGE_SIZE`] bytes
+///
+/// This type is useful for hashing and serialising pages from byte slices, or even slices of byte
+/// slices.
+///
+/// The decoding dual is [`Page`].
+pub(super) struct ChunkedPage<'a> {
+    pub(super) chunks: &'a [&'a [u8]],
+}
+
+impl Encode for ChunkedPage<'_> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        let length: u64 = self.chunks.iter().map(|chunk| chunk.len() as u64).sum();
+
+        if length > PAGE_SIZE as u64 {
+            return Err(bincode::error::EncodeError::OtherString(format!(
+                "Total chunk length {length} exceeds maximum page size {PAGE_SIZE}"
+            )));
+        }
+
+        length.encode(encoder)?;
+
+        let writer = encoder.writer();
+        for chunk in self.chunks {
+            writer.write(chunk)?;
+        }
+
+        Ok(())
     }
 }
 
