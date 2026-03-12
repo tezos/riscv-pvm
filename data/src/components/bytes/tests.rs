@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2025 TriliTech <contact@tril.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -17,11 +17,14 @@ use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
+use crate::merkle_proof::proof_binary;
 use crate::merkle_tree::MerkleTree;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode_test;
+use crate::serialisation::serialise;
 
 // Bytes should be empty after creation
 mode_test!(new_is_empty, F, {
@@ -485,5 +488,56 @@ fn bytes_are_same_across_modes() {
                 .to_hash()
                 .unwrap();
         prop_assert_eq!(hash_normal, hash_verify);
+    });
+}
+
+#[test]
+fn proof_round_trip() {
+    proptest!(|(ops in vec(BytesMutOp::any(), 1..20))| {
+        let mut bytes_normal = Bytes::<Normal>::default();
+
+        for op in ops {
+            let mut bytes_prove = bytes_normal.start_proof();
+
+            // The initial hash of the Prove mode should match the Normal mode hash.
+            let init_normal_hash = Hash::from_foldable(&bytes_normal);
+            let init_prove_hash = Hash::from_foldable(&bytes_prove);
+            prop_assert_eq!(init_normal_hash, init_prove_hash);
+
+            // Run the operation which we would like to prove.
+            op.run(&mut bytes_prove);
+
+            // The post-operation hash is later used to compare against the Normal mode hash.
+            let after_proof_hash = Hash::from_foldable(&bytes_prove);
+
+            // The Merkle proof tree should match the state hash before the operation was applied.
+            let proof_tree = MerkleTree::from_foldable(&bytes_prove).compress();
+            prop_assert_eq!(init_prove_hash, proof_tree.root_hash());
+
+            // We want to serialise the proof to its binary format to make this test more realistic.
+             let proof_bytes = serialise(proof_tree).unwrap();
+
+            // Parsing the proof so we can see if the proof generation worked.
+            // ALT: let (mut bytes_verify, parsed_proof_tree) = proof_tree::deserialise(ProofPart::Present(&proof_tree)).unwrap();
+            let (mut bytes_verify, parsed_proof_tree) = proof_binary::deserialise(&proof_bytes).unwrap();
+
+            // The parsed state should have a state hash equal to that of the initial Normal/Prove state
+            let init_verify_hash = PartialHash::from_foldable(parsed_proof_tree.as_ref(), &bytes_verify).to_hash().unwrap();
+            prop_assert_eq!(init_verify_hash, init_prove_hash);
+
+            // Run the operation which we would like to verify.
+            op.run(&mut bytes_verify);
+
+            // The post-operation hash should match the Normal mode hash.
+            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree.as_ref(), &bytes_verify).to_hash().unwrap();
+            prop_assert_eq!(after_verify_hash, after_proof_hash);
+
+            // Finally advance the Normal mode state as well
+            op.run(&mut bytes_normal);
+
+            // The Normal mode hash should match the post-operation hash that we proved and verified.
+            let after_normal_hash = Hash::from_foldable(&bytes_normal);
+            prop_assert_eq!(after_normal_hash, after_verify_hash);
+        }
     });
 }
