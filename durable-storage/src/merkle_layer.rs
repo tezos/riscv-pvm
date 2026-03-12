@@ -253,7 +253,7 @@ impl<KV> NormalImpl<KV> {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
@@ -261,7 +261,6 @@ mod tests {
 
     use super::MerkleLayer;
     use crate::avl::node::Node;
-    use crate::avl::node::Value;
     use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::tree::Tree;
@@ -283,7 +282,7 @@ mod tests {
         }
 
         /// Returns an immutable reference to the data stored for a given [Key].
-        pub fn get(&mut self, key: &Key) -> Result<Option<&Value>, OperationalError> {
+        pub fn get(&mut self, key: &Key) -> Result<Option<&Bytes<Normal>>, OperationalError> {
             self.inner.tree.get(key, &self.inner.resolver)
         }
     }
@@ -333,12 +332,15 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let old_node1: Node<ArcTreeId> =
-            Node::new(keys[0].clone(), Bytes::copy_from_slice(&data[0]));
-        let new_node1: Node<ArcTreeId> = Node::new(keys[0].clone(), cow_data.as_bytes());
+        let old_node1: Node<ArcTreeId, Bytes<Normal>> =
+            Node::new(keys[0].clone(), bytes::Bytes::copy_from_slice(&data[0]));
+        let new_node1: Node<ArcTreeId, Bytes<Normal>> =
+            Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2: Node<ArcTreeId> = Node::new(keys[1].clone(), Bytes::copy_from_slice(&data[1]));
-        let node3: Node<ArcTreeId> = Node::new(keys[2].clone(), Bytes::copy_from_slice(&data[2]));
+        let node2: Node<ArcTreeId, Bytes<Normal>> =
+            Node::new(keys[1].clone(), bytes::Bytes::copy_from_slice(&data[1]));
+        let node3: Node<ArcTreeId, Bytes<Normal>> =
+            Node::new(keys[2].clone(), bytes::Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
             &old_node1.data(),
@@ -390,8 +392,8 @@ mod tests {
     proptest! {
         #[test]
         fn test_mavl_cow_prop(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
-            let data1 = Bytes::from("property");
-            let data2 = Bytes::from("cow");
+            let data1 = bytes::Bytes::from("property");
+            let data2 = bytes::Bytes::from("cow");
 
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
@@ -445,7 +447,7 @@ mod tests {
     #[test]
     fn test_mavl_create() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let data = Bytes::from("create");
+        let data = bytes::Bytes::from("create");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
@@ -455,7 +457,7 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -470,14 +472,14 @@ mod tests {
     #[test]
     fn test_mavl_create_existing() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let data = Bytes::from("old");
-        let data2 = Bytes::from("new");
+        let data = bytes::Bytes::from("old");
+        let data2 = bytes::Bytes::from("new");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
-        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -494,7 +496,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcTreeId> = Node::new(key.clone(), data2);
+        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -517,10 +519,10 @@ mod tests {
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
         let data = [
-            Bytes::from("255, 0"),
-            Bytes::from("0"),
-            Bytes::from("0, 0"),
-            Bytes::from("0, 0, 0"),
+            bytes::Bytes::from("255, 0"),
+            bytes::Bytes::from("0"),
+            bytes::Bytes::from("0, 0"),
+            bytes::Bytes::from("0, 0, 0"),
         ];
 
         let (_keepalive, repo) = setup_repo();
@@ -560,7 +562,7 @@ mod tests {
         let empty_hash = ml.hash().expect("hash operation should succeed.");
 
         // Left imbalance
-        let data = Bytes::from("imbalanced left");
+        let data = bytes::Bytes::from("imbalanced left");
         for key in keys.iter() {
             let old_hash = ml.hash().expect("hash operation should succeed.");
             ml.set(key, &data).expect("setting node should succeed");
@@ -583,7 +585,7 @@ mod tests {
         };
 
         // Right imbalance
-        let data = Bytes::from("imbalanced right");
+        let data = bytes::Bytes::from("imbalanced right");
         for key in keys.iter() {
             let old_hash = ml.hash().expect("hash operation should succeed.");
             ml.set(key, &data).expect("setting node should succeed");
@@ -599,7 +601,7 @@ mod tests {
         let keys = [Key::new(&[2]), Key::new(&[0]), Key::new(&[1])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let data = Bytes::from("left_right");
+        let data = bytes::Bytes::from("left_right");
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
@@ -625,7 +627,7 @@ mod tests {
         let keys = [Key::new(&[0]), Key::new(&[2]), Key::new(&[1])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let data = Bytes::from("right_left");
+        let data = bytes::Bytes::from("right_left");
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
@@ -662,7 +664,7 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let data = Bytes::from("right_left");
+        let data = bytes::Bytes::from("right_left");
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
@@ -699,7 +701,7 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let data = Bytes::from("right_left");
+        let data = bytes::Bytes::from("right_left");
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
@@ -723,7 +725,7 @@ mod tests {
     proptest! {
         #[test]
         fn test_mavl_create_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
-            let data = Bytes::from("property");
+            let data = bytes::Bytes::from("property");
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
             let old_hash = ml.hash().expect("hash operation should succeed.");
@@ -749,7 +751,7 @@ mod tests {
     #[test]
     fn test_mavl_delete() {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
-        let data = Bytes::from("delete");
+        let data = bytes::Bytes::from("delete");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
@@ -779,7 +781,7 @@ mod tests {
     proptest! {
         #[test]
         fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
-            let data = Bytes::from("delete_prop");
+            let data = bytes::Bytes::from("delete_prop");
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
             let empty_hash = ml.hash().expect("hash operation should succeed.");
@@ -806,7 +808,7 @@ mod tests {
     }
 
     fn test_mavl_delete_keys(keys: &[Key]) {
-        let data = Bytes::from("delete");
+        let data = bytes::Bytes::from("delete");
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
@@ -984,13 +986,13 @@ mod tests {
     #[test]
     fn test_mavl_write_new_value() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let data = Bytes::from("write_new_value");
+        let data = bytes::Bytes::from("write_new_value");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let old_hash = ml.hash().expect("hash operation should succeed.");
         ml.write(&key, 0, &data).expect("write should succeed.");
 
-        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1006,15 +1008,15 @@ mod tests {
     #[test]
     fn test_mavl_write_no_truncation() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let data = Bytes::from("a long value");
-        let data2 = Bytes::from("good");
+        let data = bytes::Bytes::from("a long value");
+        let data2 = bytes::Bytes::from("good");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
         let data_len = data.len();
-        let node: Node<ArcTreeId> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1031,7 +1033,8 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<ArcTreeId> = Node::new(key.clone(), Bytes::from("a good value"));
+        let node: Node<ArcTreeId, Bytes<Normal>> =
+            Node::new(key.clone(), bytes::Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1047,8 +1050,8 @@ mod tests {
     proptest! {
         #[test]
         fn test_mavl_write_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..10)) {
-            let data = Bytes::from(vec![0; 500]);
-            let alternating = Bytes::from([1, 0]
+            let data = bytes::Bytes::from(vec![0; 500]);
+            let alternating = bytes::Bytes::from([1, 0]
                 .iter()
                 .cycle()
                 .take(500)
@@ -1107,13 +1110,13 @@ mod tests {
         ];
 
         let data = [
-            Bytes::from_static(b"aasd"),
-            Bytes::from_static(b"aksdja"),
-            Bytes::from_static(b"agfgd"),
-            Bytes::from_static(b"45gfgdf"),
-            Bytes::from_static(b"sfdsdfsd"),
-            Bytes::from_static(b"asdfsfd"),
-            Bytes::from_static(b"asdfsdf"),
+            bytes::Bytes::from_static(b"aasd"),
+            bytes::Bytes::from_static(b"aksdja"),
+            bytes::Bytes::from_static(b"agfgd"),
+            bytes::Bytes::from_static(b"45gfgdf"),
+            bytes::Bytes::from_static(b"sfdsdfsd"),
+            bytes::Bytes::from_static(b"asdfsfd"),
+            bytes::Bytes::from_static(b"asdfsdf"),
         ];
 
         for (key, data_elem) in keys.iter().zip(data.iter()) {
@@ -1127,7 +1130,8 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
-            let node = merkle_layer.inner.resolver.resolve(node).unwrap();
+            let node: &Node<ArcTreeId, Bytes<Normal>> =
+                merkle_layer.inner.resolver.resolve(node).unwrap();
             let encoded = node.to_encode(&merkle_layer.inner.resolver);
             let serialised = octez_riscv_data::serialisation::serialise(encoded)
                 .expect("We should be able to serialise the node");
