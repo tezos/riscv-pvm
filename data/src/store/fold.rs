@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use derive_more::From;
+
 use super::BlobStore;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -15,6 +17,7 @@ use crate::hash::Hash;
 use crate::hash::HashedData;
 
 /// A builder type for saving the Merkle tree structure of any `Foldable` type into any `BlobStore`.
+#[derive(From)]
 pub struct BlobStoreFold<BS> {
     store: Arc<BS>,
 }

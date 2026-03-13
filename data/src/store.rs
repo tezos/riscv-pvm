@@ -5,6 +5,7 @@
 //! Content addressable 'blob' store trait and in-memory implementation.
 
 pub mod fold;
+pub mod unfold;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -16,7 +17,7 @@ use crate::hash::HashedData;
 
 /// Content addressable store that can contain arbitrary blobs of data indexed by their hashes.
 pub trait BlobStore {
-    type Error: std::error::Error;
+    type Error: std::error::Error + 'static;
 
     /// Retrieve a blob from its hash. If a hash is not found that must be somehow represented with
     /// the `Error` return type.

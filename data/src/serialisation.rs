@@ -32,6 +32,19 @@ pub fn deserialise<T: Decode<()>>(data: &[u8]) -> Result<T, DecodeError> {
     Ok(value)
 }
 
+/// Deserialise a slice of bytes, returning an error if there were leftover bytes.
+pub fn deserialise_checked<T: Decode<()>>(data: &[u8]) -> Result<T, DecodeError> {
+    let (value, length) = bincode::decode_from_slice(data, bincode_default_config())?;
+
+    if length != data.len() {
+        return Err(DecodeError::OtherString(
+            format!("Slice was length {}, expected {}", data.len(), length).to_string(),
+        ));
+    }
+
+    Ok(value)
+}
+
 /// Deserialises a slice into `T`, which may contain data borrowed from the slice.
 pub fn deserialise_borrowed<'a, T: BorrowDecode<'a, ()>>(
     slice: &'a [u8],
@@ -52,4 +65,29 @@ pub fn serialise<T: Encode>(value: T) -> Result<Vec<u8>, EncodeError> {
 /// Serialize `T` into a sink.
 pub fn serialise_into<T: Encode, W: Write>(value: T, sink: &mut W) -> Result<usize, EncodeError> {
     bincode::encode_into_std_write(value, sink, bincode_default_config())
+}
+
+#[cfg(test)]
+mod tests {
+    use bincode::error::DecodeError;
+
+    use super::deserialise_checked;
+
+    #[test]
+    fn deserialise_checked_errors() {
+        let r = deserialise_checked::<u32>(&[2, 1, 0, 0]);
+        assert!(matches!(r, Ok(258)));
+
+        let r = deserialise_checked::<u32>(&[2, 1, 0, 0, 3]);
+        assert!(matches!(
+            r,
+            Err(DecodeError::OtherString(string))
+            if string == "Slice was length 5, expected 4"));
+
+        let r = deserialise_checked::<u32>(&[2, 1]);
+        assert!(matches!(
+            r,
+            Err(DecodeError::UnexpectedEnd { additional: 2 }),
+        ));
+    }
 }
