@@ -16,7 +16,9 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
+use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation;
+use octez_riscv_data::store::BlobStore;
 use thiserror::Error;
 
 const CHUNK_SIZE: usize = 4096;
@@ -117,6 +119,29 @@ impl Store {
     }
 }
 
+impl BlobStore for Store {
+    type Error = StorageError;
+
+    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Self::Error> {
+        self.load(&key)
+    }
+
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), Self::Error> {
+        let file_name = self.path_of_hash(&blob.hash());
+        self.write_data_if_new(file_name, blob.data())?;
+        Ok(())
+    }
+
+    fn blob_delete(&self, key: Hash) -> Result<(), Self::Error> {
+        let file_name = self.path_of_hash(&key);
+        match std::fs::remove_file(file_name) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(StorageError::IoError(e)),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Repo {
     backend: Store,
@@ -199,5 +224,46 @@ impl Repo {
         }
         self.backend.copy(id, path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::HashedData;
+    use octez_riscv_data::store::BlobStore;
+
+    use super::StorageError;
+    use super::Store;
+
+    #[test]
+    fn blob_store_test() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let store = Store::init(tmp_dir.path()).unwrap();
+
+        let data1: &[u8] = &[3, 4, 5, 6, 8];
+        let data2: &[u8] = b"Hi";
+
+        let hash1 = Hash::hash_bytes(data1);
+        let hash2 = Hash::hash_bytes(data2);
+
+        store.blob_set(HashedData::from_data(data1)).unwrap();
+        store.blob_set(HashedData::from_data(data2)).unwrap();
+
+        assert_eq!(store.blob_get(hash1).unwrap().as_ref(), &[3, 4, 5, 6, 8]);
+        assert_eq!(store.blob_get(hash2).unwrap().as_ref(), &[72, 105]);
+
+        store.blob_delete(hash1).unwrap();
+
+        match store.blob_get(hash1) {
+            Err(StorageError::NotFound(hash)) => assert_eq!(hash, hash1.to_string()),
+            _ => panic!("Expected `NotFound` error"),
+        };
+
+        // Both no-ops
+        store.blob_set(HashedData::from_data(data2)).unwrap();
+        store.blob_delete(hash1).unwrap();
+
+        assert_eq!(store.blob_get(hash2).unwrap().as_ref(), &[72, 105]);
     }
 }
