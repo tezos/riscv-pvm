@@ -17,6 +17,9 @@ pub enum OperationalError {
     #[error("Unable to locate commitment on disk")]
     CommitNotFound,
 
+    #[error("Commit metadata is missing for root hash {root:?}")]
+    CommitDataMissing { root: Hash },
+
     #[cfg(feature = "rocksdb")]
     #[error("Unable to create checkpoint: {error}")]
     CheckpointCreationFailed { error: rocksdb::Error },

@@ -507,6 +507,7 @@ mod tests {
 
     use super::*;
     use crate::commit::CommitId;
+    use crate::storage::setup_repo;
 
     fn checkpoint_db_path(db: &PersistenceLayer) -> PathBuf {
         db.db_instance.path().to_path_buf()
@@ -523,12 +524,30 @@ mod tests {
         std::fs::create_dir_all(path).expect("Should be able to create dir");
     }
 
+    fn assert_blob_value<Data: AsRef<[u8]>>(db: &PersistenceLayer, blob: &HashedData<Data>) {
+        let retrieved = db
+            .blob_get(blob.hash())
+            .expect("Expected blob to exist in persistence layer");
+        assert_eq!(retrieved.as_ref(), blob.data());
+    }
+
+    fn assert_blob_missing(db: &PersistenceLayer, hash: Hash) {
+        assert!(matches!(
+            db.blob_get(hash),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+    }
+
+    fn assert_key_missing(db: &PersistenceLayer, key: impl AsRef<[u8]>) {
+        assert!(matches!(
+            db.get(key),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+    }
+
     #[test]
     fn test_new_persistence_layer() {
-        let tmpdir = TestableTmpdir::new();
-
-        let repo =
-            DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+        let (_keepalive, repo) = setup_repo();
         let db_a =
             PersistenceLayer::new(&repo).expect("Should be able to create new persistence layer");
 
@@ -564,11 +583,8 @@ mod tests {
 
     #[test]
     fn test_basic_ops() {
-        let tmpdir = TestableTmpdir::new();
-
         let test = |value_a: String, value_b: String| {
-            let repo =
-                DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
+            let (_keepalive, repo) = setup_repo();
             let db = PersistenceLayer::new(&repo)
                 .expect("Should be able to create new persistence layer");
 
@@ -576,35 +592,20 @@ mod tests {
             let key = blob.hash();
 
             // Initially the key should not be found
-            assert!(matches!(
-                db.blob_get(key),
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
+            assert_blob_missing(&db, key);
 
             db.blob_set(blob.clone())
                 .expect("Should be able to set a value");
 
-            {
-                // Now the key should be found
-                let retrieved = db.blob_get(key).expect("Should be able to get the value");
-                assert_eq!(retrieved.as_ref(), value_a.as_bytes());
-            }
+            assert_blob_value(&db, &blob);
 
             let blob2 = HashedData::from_data(value_b.as_bytes());
             let key2 = blob2.hash();
             db.blob_set(blob2.clone())
                 .expect("Should be able to set another value");
 
-            {
-                // Now the second key should be found
-                let retrieved = db.blob_get(key2).expect("Should be able to get the value");
-                assert_eq!(retrieved.as_ref(), value_b.as_bytes());
-
-                let retrieved = db
-                    .blob_get(key)
-                    .expect("Should be able to get the first value");
-                assert_eq!(retrieved.as_ref(), value_a.as_bytes());
-            }
+            assert_blob_value(&db, &blob2);
+            assert_blob_value(&db, &blob);
 
             assert_eq!(
                 db.db_instance
@@ -614,10 +615,7 @@ mod tests {
 
             db.blob_delete(key)
                 .expect("Should be able to delete the value");
-            assert!(matches!(
-                db.blob_get(key),
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
+            assert_blob_missing(&db, key);
 
             assert_eq!(
                 db.db_instance
@@ -625,26 +623,13 @@ mod tests {
                 Ok(Some("1".to_string()))
             );
 
-            {
-                // These operations shouldn't affect the data column family
-                let data_a = db.get(blob.hash());
-                let data_b = db.get(blob2.hash());
-                assert!(matches!(
-                    data_a,
-                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-                ));
-                assert!(matches!(
-                    data_b,
-                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-                ));
-            }
+            // These operations shouldn't affect the data column family
+            assert_key_missing(&db, blob.hash());
+            assert_key_missing(&db, blob2.hash());
 
             db.blob_delete(key2)
                 .expect("Should be able to delete the second value");
-            assert!(matches!(
-                db.blob_get(key2),
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
+            assert_blob_missing(&db, key2);
 
             let nonexistent_blob = HashedData::from_data(b"non_existent");
             assert!(matches!(db.blob_delete(nonexistent_blob.hash()), Ok(())));
@@ -674,9 +659,7 @@ mod tests {
         // Ensure B's state is unchanged.
 
         // We delete and recreate the directory to flush the metadb
-        let tempdir = TestableTmpdir::new();
-        let repo =
-            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let (_keepalive, repo) = setup_repo();
 
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let initial_blob = HashedData::from_data(b"initial_value");
@@ -691,30 +674,15 @@ mod tests {
             .expect("Failed to set another blob in B");
 
         // get methods borrow the db so we have to drop the borrow to mutate the db in the next scope
-        {
-            let retrieved_a = db_a
-                .blob_get(initial_blob.hash())
-                .expect("Failed to get initial blob from A");
-            assert_eq!(retrieved_a.as_ref(), b"initial_value");
-        }
+        assert_blob_value(&db_a, &initial_blob);
 
         // Wrap in a scope so we can drop the db's later
         {
-            let retrieved_b = db_b
-                .blob_get(initial_blob.hash())
-                .expect("Failed to get initial blob from B");
-            assert_eq!(retrieved_b.as_ref(), b"initial_value");
+            assert_blob_value(&db_b, &initial_blob);
 
             db_a.blob_set(third_blob.clone())
                 .expect("Failed to set third blob in A");
-            let retrieved_third_from_b = db_b.blob_get(third_blob.hash());
-            assert!(
-                retrieved_third_from_b.is_err()
-                    && matches!(
-                        retrieved_third_from_b.err(),
-                        Some(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-                    )
-            );
+            assert_blob_missing(&db_b, third_blob.hash());
         }
 
         let path_a = checkpoint_db_path(&db_a);
@@ -732,9 +700,7 @@ mod tests {
 
     #[test]
     fn test_multiple_checkpoints() {
-        let tempdir = TestableTmpdir::new();
-        let repo =
-            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let (_keepalive, repo) = setup_repo();
 
         let blob = HashedData::from_data(b"some_value");
 
@@ -750,17 +716,8 @@ mod tests {
         drop(db_a);
         assert!(!checkpoint_path.exists());
 
-        {
-            let retrieved_b = db_b
-                .blob_get(blob.hash())
-                .expect("Failed to get blob from B");
-            assert_eq!(retrieved_b.as_ref(), b"some_value");
-
-            let retrieved_c = db_c
-                .blob_get(blob.hash())
-                .expect("Failed to get blob from C");
-            assert_eq!(retrieved_c.as_ref(), b"some_value");
-        }
+        assert_blob_value(&db_b, &blob);
+        assert_blob_value(&db_c, &blob);
 
         let checkpoint_path = checkpoint_db_path(&db_b);
         drop(db_b);
@@ -773,16 +730,14 @@ mod tests {
 
     #[test]
     fn test_commit_and_checkout() {
-        let tempdir = TestableTmpdir::new();
-        let repo =
-            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let (_keepalive, repo) = setup_repo();
 
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let blob = HashedData::from_data(b"some_value");
         db_a.blob_set(blob.clone())
             .expect("Failed to set blob in A");
 
-        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
+        let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
         let path_a = checkpoint_db_path(&db_a);
@@ -793,24 +748,11 @@ mod tests {
         let db_b = PersistenceLayer::checkout(&repo, &commit_id)
             .expect("Failed to checkout commit into DB B");
 
-        {
-            let retrieved_b = db_b
-                .blob_get(blob.hash())
-                .expect("Failed to get blob from B");
-            assert_eq!(retrieved_b.as_ref(), blob.data());
-            let zero_digest: [u8; Hash::DIGEST_SIZE] = [0u8; 32];
-            let hash_zero_digest: Hash = zero_digest.into();
-            let retrieved_nonexistent = db_b.blob_get(hash_zero_digest);
-            assert!(matches!(
-                retrieved_nonexistent,
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
-            let retrieved_nonexistent = db_b.get(&[1u8; 32]);
-            assert!(matches!(
-                retrieved_nonexistent,
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
-        }
+        assert_blob_value(&db_b, &blob);
+        let zero_digest: [u8; Hash::DIGEST_SIZE] = [0u8; 32];
+        let hash_zero_digest = Hash::from(zero_digest);
+        assert_blob_missing(&db_b, hash_zero_digest);
+        assert_key_missing(&db_b, [1u8; 32]);
 
         let path_b = repo.database_commit_dir(&commit_id);
         drop(db_b);
@@ -819,12 +761,9 @@ mod tests {
 
     #[test]
     fn test_nonexistent_checkout() {
-        let tempdir = TestableTmpdir::new();
+        let (_keepalive, repo) = setup_repo();
 
-        let repo =
-            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
-
-        let commit_id: CommitId = Hash::hash_bytes(b"nonexistent_commit").into();
+        let commit_id = CommitId::from(Hash::hash_bytes(b"nonexistent_commit"));
         let db_result = PersistenceLayer::checkout(&repo, &commit_id);
         assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
     }
@@ -851,7 +790,7 @@ mod tests {
         db_b.blob_set(blob_b.clone())
             .expect("Failed to set blob in B");
 
-        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
+        let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
         db_b.commit(&repo, &commit_id)
             .expect("Failed to commit DB B");
 
@@ -864,21 +803,9 @@ mod tests {
         // We should observe blob a & b after checking out the commit, but not c.
         let db_c = PersistenceLayer::checkout(&repo, &commit_id)
             .expect("Failed to checkout commit into DB C");
-        {
-            let retrieved_a = db_c
-                .blob_get(blob_a.hash())
-                .expect("Failed to get blob a from C");
-            assert_eq!(retrieved_a.as_ref(), blob_a.data());
-            let retrieved_b = db_c
-                .blob_get(blob_b.hash())
-                .expect("Failed to get blob b from C");
-            assert_eq!(retrieved_b.as_ref(), blob_b.data());
-            let retrieved_c = db_c.blob_get(blob_c.hash());
-            assert!(matches!(
-                retrieved_c,
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
-        }
+        assert_blob_value(&db_c, &blob_a);
+        assert_blob_value(&db_c, &blob_b);
+        assert_blob_missing(&db_c, blob_c.hash());
 
         let path_c = repo.database_commit_dir(&commit_id);
         drop(db_c);
@@ -891,14 +818,12 @@ mod tests {
         // C (load "commit_1") -> (mutate C) -> commit C (commit: "commit_2") -> (mutate C)
         // Check commit_1 && commit_2
 
-        let tempdir = TestableTmpdir::new();
-        let repo =
-            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let (_keepalive, repo) = setup_repo();
 
         let blob_a = HashedData::from_data(b"some_value");
         let blob_b = HashedData::from_data(b"another_value");
-        let commit_id_1: CommitId = Hash::hash_bytes(b"commit_1").into();
-        let commit_id_2: CommitId = Hash::hash_bytes(b"commit_2").into();
+        let commit_id_1 = CommitId::from(Hash::hash_bytes(b"commit_1"));
+        let commit_id_2 = CommitId::from(Hash::hash_bytes(b"commit_2"));
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         db_a.blob_set(blob_a.clone())
             .expect("Failed to set blob in A");
@@ -920,31 +845,14 @@ mod tests {
         // check commit 1
         let db_check_1 =
             PersistenceLayer::checkout(&repo, &commit_id_1).expect("Failed to checkout commit 1");
-        {
-            let retrieved_a = db_check_1
-                .blob_get(blob_a.hash())
-                .expect("Failed to get blob a from check 1");
-            assert_eq!(retrieved_a.as_ref(), blob_a.data());
-            let retrieved_b = db_check_1.blob_get(blob_b.hash());
-            assert!(matches!(
-                retrieved_b,
-                Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-            ));
-        }
+        assert_blob_value(&db_check_1, &blob_a);
+        assert_blob_missing(&db_check_1, blob_b.hash());
 
         // check commit 2
         let db_check_2 =
             PersistenceLayer::checkout(&repo, &commit_id_2).expect("Failed to checkout commit 2");
-        {
-            let retrieved_a = db_check_2
-                .blob_get(blob_a.hash())
-                .expect("Failed to get blob a from check 2");
-            assert_eq!(retrieved_a.as_ref(), blob_a.data());
-            let retrieved_b = db_check_2
-                .blob_get(blob_b.hash())
-                .expect("Failed to get blob b from check 2");
-            assert_eq!(retrieved_b.as_ref(), blob_b.data());
-        }
+        assert_blob_value(&db_check_2, &blob_a);
+        assert_blob_value(&db_check_2, &blob_b);
     }
 
     #[test]
@@ -959,7 +867,7 @@ mod tests {
         db_a.blob_set(blob.clone())
             .expect("Failed to set blob in A");
 
-        let commit_id: CommitId = Hash::hash_bytes(b"commit_1").into();
+        let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
 

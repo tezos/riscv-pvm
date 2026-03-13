@@ -266,10 +266,6 @@ impl<KV> MerkleWorker<KV> {
     /// Checkout a Merkle worker from an existing commit.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    #[expect(
-        dead_code,
-        reason = "Checkout functionality is currently not hooked up upstream"
-    )]
     pub(crate) fn checkout(
         async_handle: &Handle,
         store: Arc<KV>,
