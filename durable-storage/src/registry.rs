@@ -20,6 +20,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use tokio::runtime::Runtime;
 
@@ -53,11 +54,7 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
     /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
     /// `base_dir`.
     pub fn new(repo: KV::Repo) -> Result<Self, OperationalError> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .build()
-            .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
-        let runtime = Arc::new(runtime);
+        let runtime = Self::build_runtime()?;
 
         Ok(Registry {
             inner: NormalImpl {
@@ -67,9 +64,71 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
             },
         })
     }
+
+    fn build_runtime() -> Result<Arc<Runtime>, OperationalError> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
+        Ok(Arc::new(runtime))
+    }
 }
 
 impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV, Normal> {
+    /// Restore a registry from a previously committed manifest.
+    ///
+    /// The restored databases are checked out from the database commits referenced by the
+    /// manifest, then the reconstructed registry root is verified against the requested
+    /// `commit_id`.
+    pub fn checkout(repo: DirectoryManager, commit_id: CommitId) -> Result<Self, Error> {
+        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
+        let runtime = Self::build_runtime()?;
+        let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
+
+        let registry = Registry {
+            inner: NormalImpl {
+                repo,
+                databases,
+                runtime,
+            },
+        };
+
+        let actual_commit = CommitId::from(Hash::from_foldable(&registry));
+        if actual_commit != commit_id {
+            return Err(Error::Operational(OperationalError::RegistryCommitMismatch));
+        }
+
+        Ok(registry)
+    }
+
+    fn read_checkout_manifest(
+        repo: &DirectoryManager,
+        commit_id: &CommitId,
+    ) -> Result<RegistryManifest, OperationalError> {
+        let commit_path = repo.registry_commit_file(commit_id);
+        let commit_bytes = std::fs::read(&commit_path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                OperationalError::CommitNotFound
+            } else {
+                OperationalError::FileReadFailed { error }
+            }
+        })?;
+
+        deserialise(&commit_bytes).map_err(OperationalError::from)
+    }
+
+    fn checkout_databases(
+        runtime: &Arc<Runtime>,
+        repo: &DirectoryManager,
+        database_hashes: &[CommitId],
+    ) -> Result<Vec<Database<KV, Normal>>, Error> {
+        // TODO RV-946: Investigate parallelising the checkouts of individual databases.
+        database_hashes
+            .iter()
+            .map(|&db_hash| Database::checkout(runtime.handle(), repo, db_hash))
+            .collect()
+    }
+
     /// Commit the registry state and return its commit ID.
     ///
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
@@ -397,7 +456,7 @@ impl<KV: KeyValueStore> NormalImpl<KV> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
 
@@ -409,11 +468,11 @@ mod tests {
     use crate::storage::TestRepo;
     use crate::storage::setup_repo;
 
-    fn setup_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
+    pub(super) fn setup_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
         Registry::new(repo).expect("Registry should be created")
     }
 
-    fn setup_size_2_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
+    pub(super) fn setup_size_2_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
         let mut registry = setup_registry(repo);
         registry
             .resize_tick(1)
@@ -492,6 +551,18 @@ mod tests {
         }
     }
 
+    pub(super) fn populate_database_with_key_value(
+        registry: &mut Registry<TestKeyValueStore, Normal>,
+        db_index: usize,
+        key_bytes: &[u8],
+        value: &[u8],
+    ) {
+        let key = Key::new(key_bytes).expect("Key should be valid");
+        registry.inner.databases[db_index]
+            .set(key, Bytes::copy_from_slice(value))
+            .expect("Writing to database should succeed");
+    }
+
     #[test]
     fn test_new() {
         let (_keepalive, repo) = setup_repo();
@@ -562,48 +633,38 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_same_index() {
+    fn test_database_operations_invalid_index() {
+        macro_rules! assert_invalid_index_error {
+            ($result:expr, $operation:expr, $direction:expr) => {
+                assert!(
+                    matches!(
+                        $result,
+                        Err(Error::InvalidArgument(
+                            InvalidArgumentError::DatabaseIndexOutOfBounds
+                        ))
+                    ),
+                    "{} {} invalid index should return DatabaseIndexOutOfBounds error",
+                    $operation,
+                    $direction,
+                );
+            };
+        }
+
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_size_2_registry(repo);
 
-        let src_index = 0;
-        let dst_index = 0;
+        // Test copy operations with invalid indices
+        assert_invalid_index_error!(registry.copy_database(0, 2), "copy", "to");
 
-        let (src_pairs, _key_c) = seed_copy_move(&mut registry, src_index, 1);
+        assert_invalid_index_error!(registry.copy_database(2, 0), "copy", "from");
 
-        registry
-            .copy_database(src_index, dst_index)
-            .expect("Copying should succeed");
+        // Test move operations with invalid indices
+        assert_invalid_index_error!(registry.move_database(0, 2), "move", "to");
 
-        assert_pairs_present(&registry, dst_index, &src_pairs);
-    }
+        assert_invalid_index_error!(registry.move_database(2, 0), "move", "from");
 
-    #[test]
-    fn test_copy_invalid_index() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
-
-        let result = registry.copy_database(0, 2);
-        assert!(
-            matches!(
-                result,
-                Err(Error::InvalidArgument(
-                    InvalidArgumentError::DatabaseIndexOutOfBounds
-                ))
-            ),
-            "Copying to invalid index should return InvalidDatabaseIndex error."
-        );
-
-        let result = registry.copy_database(2, 0);
-        assert!(
-            matches!(
-                result,
-                Err(Error::InvalidArgument(
-                    InvalidArgumentError::DatabaseIndexOutOfBounds
-                ))
-            ),
-            "Copying from invalid index should return InvalidDatabaseIndex error."
-        );
+        // Test clear operation with invalid index
+        assert_invalid_index_error!(registry.clear_database(2), "clear", "");
     }
 
     #[test]
@@ -628,48 +689,23 @@ mod tests {
     }
 
     #[test]
-    fn test_move_invalid_index() {
+    fn test_database_operations_same_index() {
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_size_2_registry(repo);
 
-        let result = registry.move_database(0, 2);
-        assert!(
-            matches!(
-                result,
-                Err(Error::InvalidArgument(
-                    InvalidArgumentError::DatabaseIndexOutOfBounds
-                ))
-            ),
-            "Moving to invalid index should return InvalidDatabaseIndex error."
-        );
+        let (src_pairs, _key_c) = seed_copy_move(&mut registry, 0, 1);
 
-        let result = registry.move_database(2, 0);
-        assert!(
-            matches!(
-                result,
-                Err(Error::InvalidArgument(
-                    InvalidArgumentError::DatabaseIndexOutOfBounds
-                ))
-            ),
-            "Moving from invalid index should return InvalidDatabaseIndex error."
-        );
-    }
-
-    #[test]
-    fn test_move_same_index() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
-
-        let src_index = 0;
-        let dst_index = 0;
-
-        let (src_pairs, _key_c) = seed_copy_move(&mut registry, src_index, 1);
-
+        // Test copy with same index
         registry
-            .move_database(src_index, dst_index)
-            .expect("Moving should succeed");
+            .copy_database(0, 0)
+            .expect("Copying to same index should succeed");
+        assert_pairs_present(&registry, 0, &src_pairs);
 
-        assert_pairs_present(&registry, dst_index, &src_pairs);
+        // Test move with same index
+        registry
+            .move_database(0, 0)
+            .expect("Moving to same index should succeed");
+        assert_pairs_present(&registry, 0, &src_pairs);
     }
 
     #[test]
@@ -678,10 +714,8 @@ mod tests {
         let mut registry = setup_size_2_registry(repo);
 
         let db_index = 0;
+        populate_database_with_key_value(&mut registry, db_index, &[1], b"some_value");
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.inner.databases[db_index]
-            .write(key.clone(), 0, Bytes::copy_from_slice(b"some_value"))
-            .expect("Writing to database should succeed");
 
         registry
             .clear_database(db_index)
@@ -694,16 +728,45 @@ mod tests {
             "Key should not exist after clearing the database."
         );
     }
+}
 
-    #[cfg(feature = "rocksdb")]
+#[cfg(feature = "rocksdb")]
+#[cfg(test)]
+mod rocksdb_tests {
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::serialise;
+
+    use super::Registry;
+    use super::RegistryManifest;
+    use super::tests::populate_database_with_key_value;
+    use super::tests::setup_registry;
+    use super::tests::setup_size_2_registry;
+    use crate::commit::CommitId;
+    use crate::errors::Error;
+    use crate::errors::OperationalError;
+    use crate::key::Key;
+    use crate::storage::TestKeyValueStore;
+    use crate::storage::setup_repo;
+
+    impl Registry<TestKeyValueStore, Normal> {
+        /// Assert that the manifest written for `commit_id` contains the expected database commit IDs.
+        fn verify_manifest(
+            &self,
+            commit_id: &super::CommitId,
+            expected_db_hashes: &[super::CommitId],
+        ) {
+            let commit_path = self.inner.repo.registry_commit_file(commit_id);
+            let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
+            let commit: RegistryManifest =
+                deserialise(&commit_bytes).expect("Manifest should be deserialisable");
+            assert_eq!(commit.database_hashes, expected_db_hashes);
+        }
+    }
+
     #[test]
     fn test_registry_commit_empty() {
-        use octez_riscv_data::hash::Hash;
-        use octez_riscv_data::serialisation;
-
-        use crate::commit::CommitId;
-        use crate::registry::RegistryManifest;
-
         let (_keepalive, repo) = setup_repo();
         let registry = setup_registry(repo);
 
@@ -713,30 +776,18 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
-        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
-        let commit: RegistryManifest =
-            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
-        assert_eq!(commit.database_hashes, expected_db_hashes);
+        registry.verify_manifest(&root_commit, &expected_db_hashes);
     }
 
-    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_size_1() {
-        use octez_riscv_data::serialisation;
-
-        use crate::registry::RegistryManifest;
-
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_registry(repo);
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.inner.databases[0]
-            .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
-            .expect("Writing to database should succeed");
+        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
             .inner
@@ -749,14 +800,9 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
-        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
-        let commit: RegistryManifest =
-            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
-        assert_eq!(commit.database_hashes, expected_db_hashes);
+        registry.verify_manifest(&root_commit, &expected_db_hashes);
     }
 
-    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_committing_identical_registry_succeeds() {
         let (_keepalive, repo) = setup_repo();
@@ -765,10 +811,7 @@ mod tests {
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        registry.inner.databases[0]
-            .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
-            .expect("Writing to database should succeed");
+        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
 
         let first_commit = registry.commit().expect("First commit should succeed");
         let second_commit = registry.commit().expect("Second commit should succeed");
@@ -779,26 +822,13 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_writes_manifest() {
-        use octez_riscv_data::hash::Hash;
-        use octez_riscv_data::serialisation;
-
-        use crate::commit::CommitId;
-        use crate::registry::RegistryManifest;
-
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_size_2_registry(repo);
 
-        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
-        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
-        registry.inner.databases[0]
-            .write(key_a.clone(), 0, Bytes::copy_from_slice(b"alpha"))
-            .expect("Writing to database 0 should succeed");
-        registry.inner.databases[1]
-            .write(key_b.clone(), 0, Bytes::copy_from_slice(b"beta"))
-            .expect("Writing to database 1 should succeed");
+        populate_database_with_key_value(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value(&mut registry, 1, &[2], b"beta");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
             .inner
@@ -813,10 +843,109 @@ mod tests {
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
 
-        let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
-        let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
-        let commit: RegistryManifest =
-            serialisation::deserialise(&commit_bytes).expect("Manifest should be deserialisable");
-        assert_eq!(commit.database_hashes, expected_db_hashes);
+        registry.verify_manifest(&root_commit, &expected_db_hashes);
+    }
+
+    #[test]
+    fn test_registry_checkout_roundtrip_empty() {
+        let (_keepalive, repo) = setup_repo();
+        let registry = setup_registry(repo.clone());
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let checked_out = Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit)
+            .expect("Checkout should succeed");
+
+        assert!(checked_out.is_empty());
+        assert_eq!(
+            CommitId::from(Hash::from_foldable(&checked_out)),
+            root_commit
+        );
+    }
+
+    #[test]
+    fn test_registry_checkout_roundtrip_populated() {
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_size_2_registry(repo.clone());
+
+        populate_database_with_key_value(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value(&mut registry, 1, &[2], b"beta");
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let checked_out = Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit)
+            .expect("Checkout should succeed");
+
+        assert_eq!(checked_out.len(), 2);
+        checked_out.inner.databases[0].assert_database_value(&key_a, b"alpha");
+        checked_out.inner.databases[1].assert_database_value(&key_b, b"beta");
+        assert_eq!(
+            CommitId::from(Hash::from_foldable(&checked_out)),
+            root_commit
+        );
+    }
+
+    #[test]
+    fn test_registry_checkout_missing_commit_fails() {
+        let (_keepalive, repo) = setup_repo();
+        let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-registry-commit"));
+
+        assert!(matches!(
+            Registry::<TestKeyValueStore, Normal>::checkout(repo, missing_commit),
+            Err(Error::Operational(OperationalError::CommitNotFound))
+        ));
+    }
+
+    #[test]
+    fn test_registry_checkout_missing_database_commit_fails() {
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo.clone());
+        registry
+            .resize_tick(1)
+            .expect("Growing the registry should succeed.");
+
+        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let manifest_path = repo.registry_commit_file(&root_commit);
+        let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
+        let manifest: RegistryManifest =
+            deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
+        std::fs::remove_dir_all(repo.database_commit_dir(&manifest.database_hashes[0]))
+            .expect("Database commit should be removable");
+
+        assert!(matches!(
+            Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit),
+            Err(Error::Operational(OperationalError::CommitNotFound))
+        ));
+    }
+
+    #[test]
+    fn test_registry_checkout_detects_manifest_root_mismatch() {
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo.clone());
+        registry
+            .resize_tick(1)
+            .expect("Growing the registry should succeed.");
+
+        populate_database_with_key_value(&mut registry, 0, &[1], b"value");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let manifest_path = repo.registry_commit_file(&root_commit);
+        let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
+        let manifest: RegistryManifest =
+            deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
+
+        let fake_commit = CommitId::from(Hash::hash_bytes(b"fake-registry-commit"));
+        let fake_manifest_path = repo.registry_commit_file(&fake_commit);
+        let fake_manifest_bytes = serialise(&manifest).expect("Manifest should be serialisable");
+        std::fs::write(&fake_manifest_path, fake_manifest_bytes)
+            .expect("Writing the fake manifest should succeed");
+
+        assert!(matches!(
+            Registry::<TestKeyValueStore, Normal>::checkout(repo, fake_commit),
+            Err(Error::Operational(OperationalError::RegistryCommitMismatch))
+        ));
     }
 }
