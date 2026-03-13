@@ -14,7 +14,6 @@ use proptest::prop_oneof;
 use proptest::proptest;
 use proptest::test_runner::TestCaseResult;
 
-use super::NODE_ARITY;
 use super::Vector;
 use crate::components::atom::Atom;
 use crate::components::atom::tests::AtomMutOp;
@@ -24,13 +23,9 @@ use crate::components::bytes::BytesMode;
 use crate::components::bytes::tests::BytesMutOp;
 use crate::components::bytes::tests::BytesOp;
 use crate::components::vector::VectorMode;
-use crate::foldable::Fold;
 use crate::foldable::Foldable;
-use crate::foldable::NodeFold;
 use crate::foldable::Unfoldable;
-use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::foldable::tests::TestFolder;
-use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::HashFold;
 use crate::hash::PartialHash;
@@ -45,21 +40,6 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode_test;
 use crate::serialisation::serialise;
-
-impl<T: Foldable<TestFolder>> Foldable<TestFolder> for Vector<T, Normal> {
-    fn fold(&self, builder: TestFolder) -> TestTree {
-        let length = self.len();
-        let length_node = TestTree::Leaf(serialise(length as u64).unwrap());
-
-        let get_item = |idx: usize| &self[idx];
-        let seq_as_tree = IndexableSeqAsTree::new(length, NODE_ARITY, &get_item);
-
-        let mut node = builder.into_node_fold();
-        node.add(&length_node);
-        node.add(&seq_as_tree);
-        node.done()
-    }
-}
 
 // Test that the Vector doesn't drop any values on construction.
 mode_test!(len_and_is_empty_match_initial_values, F, {

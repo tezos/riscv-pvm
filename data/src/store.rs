@@ -4,6 +4,8 @@
 
 //! Content addressable 'blob' store trait and in-memory implementation.
 
+pub mod fold;
+
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -21,7 +23,7 @@ pub trait BlobStore {
     fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Self::Error>;
 
     /// Store a blob under its hash; should be a no-op if it is already present.
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), Self::Error>;
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), Self::Error>;
 
     /// Remove an item from the store; should be a no-op if it is already absent.
     fn blob_delete(&self, key: Hash) -> Result<(), Self::Error>;
@@ -40,10 +42,7 @@ pub enum InMemoryError {
     LockPoisoned,
 }
 
-#[expect(
-    dead_code,
-    reason = "Will be used in future PR, see TZX-105 and TZX-106"
-)]
+#[cfg(test)]
 impl InMemoryBlobStore {
     fn new() -> Self {
         Self(RwLock::new(HashMap::new()))
@@ -61,7 +60,7 @@ impl BlobStore for InMemoryBlobStore {
         }
     }
 
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), Self::Error> {
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), Self::Error> {
         let mut store = self.0.write().map_err(|_| InMemoryError::LockPoisoned)?;
         store.insert(blob.hash(), Bytes::copy_from_slice(blob.data()));
         Ok(())

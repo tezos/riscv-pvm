@@ -22,7 +22,9 @@ use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
@@ -33,7 +35,6 @@ use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
-use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -147,13 +148,12 @@ impl<T, M: VectorMode> Default for Vector<T, M> {
     }
 }
 
-impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
+impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Normal> {
+    fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
 
         let length = self.vector.len();
-        let length_node =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail");
         node.add(&length_node);
 
         let get_item = |idx: usize| &self.vector[idx];
@@ -164,13 +164,12 @@ impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Normal> {
     }
 }
 
-impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Prove<'_>> {
-    fn fold(&self, builder: HashFold) -> Hash {
+impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Prove<'_>> {
+    fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
 
         let length = self.vector.unrecorded_len();
-        let length_node =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail");
         node.add(&length_node);
 
         let get_item = |idx: usize| self.vector.unrecorded_index(idx);
