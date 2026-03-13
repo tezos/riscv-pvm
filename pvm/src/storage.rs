@@ -126,7 +126,7 @@ impl BlobStore for Store {
         self.load(&key)
     }
 
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), Self::Error> {
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), Self::Error> {
         let file_name = self.path_of_hash(&blob.hash());
         self.write_data_if_new(file_name, blob.data())?;
         Ok(())
@@ -247,8 +247,8 @@ mod tests {
         let hash1 = Hash::hash_bytes(data1);
         let hash2 = Hash::hash_bytes(data2);
 
-        store.blob_set(HashedData::from_data(data1)).unwrap();
-        store.blob_set(HashedData::from_data(data2)).unwrap();
+        store.blob_set(&HashedData::from_data(data1)).unwrap();
+        store.blob_set(&HashedData::from_data(data2)).unwrap();
 
         assert_eq!(store.blob_get(hash1).unwrap().as_ref(), &[3, 4, 5, 6, 8]);
         assert_eq!(store.blob_get(hash2).unwrap().as_ref(), &[72, 105]);
@@ -261,7 +261,7 @@ mod tests {
         };
 
         // Both no-ops
-        store.blob_set(HashedData::from_data(data2)).unwrap();
+        store.blob_set(&HashedData::from_data(data2)).unwrap();
         store.blob_delete(hash1).unwrap();
 
         assert_eq!(store.blob_get(hash2).unwrap().as_ref(), &[72, 105]);
