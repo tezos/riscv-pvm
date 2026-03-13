@@ -21,6 +21,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
@@ -341,7 +342,7 @@ impl<B> Unfoldable for BuddyBranch2<B, Normal>
 where
     B: Unfoldable,
 {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let free_info = source.next_branch()?;

@@ -17,6 +17,7 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -226,7 +227,7 @@ where
 }
 
 impl<const PAGES: u64> Unfoldable for BuddyLeaf<PAGES, Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let set = Atom::unfold(source)?;
         Ok(Self { set })
     }

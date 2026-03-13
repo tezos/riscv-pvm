@@ -26,6 +26,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashError;
@@ -476,7 +477,7 @@ where
     PC: PageCache<MC, Normal>,
     MC::State<Normal>: Unfoldable,
 {
-    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
         let mut src = src.into_node()?;
 
         let machine_state = src.next_branch()?;

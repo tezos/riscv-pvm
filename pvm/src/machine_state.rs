@@ -43,6 +43,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -188,7 +189,7 @@ where
     MC: MemoryConfig,
     MC::State<Normal>: Unfoldable,
 {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let hart = source.next_branch()?;
@@ -349,7 +350,7 @@ where
     PC: PageCache<MC, Normal>,
     MC::State<Normal>: Unfoldable,
 {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let core = MachineCoreState::unfold(source)?;
         Ok(Self {
             core,

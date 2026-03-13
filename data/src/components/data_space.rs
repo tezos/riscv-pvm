@@ -287,14 +287,16 @@ enum DataSpaceError {
 }
 
 impl Unfoldable for DataSpace<Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let length = source.next_branch_with::<u64>(|source| source.into_leaf())? as usize;
         if length % PAGE_SIZE != 0 {
             // If the length isn't a multiple of PAGE_SIZE then we can't unfold safely, so we
             // error.
-            return Err(UnfoldError::custom(DataSpaceError::InvalidLength(length)));
+            return Err(UnfoldError::OfComponent(Box::new(
+                DataSpaceError::InvalidLength(length),
+            )));
         }
         let length_in_pages = length / PAGE_SIZE;
 

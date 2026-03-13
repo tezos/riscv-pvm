@@ -27,6 +27,7 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
@@ -295,7 +296,7 @@ impl<T: FromProof> FromProof for Vector<T, Verify> {
 }
 
 impl<T: Unfoldable> Unfoldable for Vector<T, Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let length: u64 = source.next_branch_with(|source| source.into_leaf())?;

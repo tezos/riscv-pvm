@@ -25,6 +25,7 @@ use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
 use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
@@ -223,7 +224,7 @@ impl<T: Encode + 'static> Foldable<PartialHashFold> for Atom<T, Verify> {
 }
 
 impl<T: Decode<()>> Unfoldable for Atom<T, Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let atom = source.into_leaf()?;
         Ok(Atom { atom })
     }

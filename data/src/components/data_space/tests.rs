@@ -16,10 +16,12 @@ use proptest::prop_assert;
 use proptest::prop_assert_eq;
 use proptest::proptest;
 
+use super::DataSpaceError;
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
 use crate::components::data_space::NODE_ARITY;
 use crate::foldable::Foldable;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
 use crate::hash::Hash;
@@ -648,5 +650,12 @@ fn unfold_error_on_invalid_length() {
     let tree = space.fold(TestFolder);
     let unfold_result = DataSpace::unfold(tree.clone());
 
-    assert!(unfold_result == Err("InvalidLength(5000)".to_string()));
+    assert!(unfold_result.is_err());
+    assert!(
+        matches!(unfold_result.err().unwrap(), UnfoldError::OfComponent(boxed_err)
+            if boxed_err.is::<DataSpaceError>()
+            && matches!(
+                boxed_err.downcast_ref::<DataSpaceError>(),
+                Some(DataSpaceError::InvalidLength(5000))))
+    );
 }

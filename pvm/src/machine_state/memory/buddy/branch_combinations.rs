@@ -19,6 +19,7 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -188,7 +189,7 @@ macro_rules! combined_buddy_branch {
         where
             $buddy1<$buddy2<B, Normal>, Normal>: Unfoldable,
         {
-            fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+            fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
                 let b = $buddy1::<$buddy2<B, Normal>, Normal>::unfold(source)?;
                 Ok(Self(b))
             }

@@ -23,6 +23,7 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -154,7 +155,7 @@ where
 }
 
 impl Unfoldable for ReservationSet<Normal> {
-    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
         Ok(Self {
             start_addr: Atom::unfold(src)?,
         })

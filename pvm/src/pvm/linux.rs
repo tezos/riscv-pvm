@@ -34,6 +34,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
@@ -1045,7 +1046,7 @@ where
 }
 
 impl Unfoldable for SupervisorState<Normal> {
-    fn unfold<U: Unfold>(src: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
         let mut src = src.into_node()?;
 
         let tid_address = src.next_branch()?;
