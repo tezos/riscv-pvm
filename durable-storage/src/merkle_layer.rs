@@ -34,6 +34,7 @@ use crate::avl::resolver::LazyResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -277,7 +278,17 @@ impl<KV> NormalImpl<KV> {
         let tree = if *root.as_hash() == empty_tree_hash() {
             Tree::default()
         } else {
-            let tree_data = persistence.blob_get(*root.as_hash())?;
+            let tree_data = persistence
+                .blob_get(*root.as_hash())
+                .map_err(|error| match error {
+                    Error::InvalidArgument(InvalidArgumentError::KeyNotFound) => {
+                        OperationalError::CommitDataMissing {
+                            root: *root.as_hash(),
+                        }
+                        .into()
+                    }
+                    other => other,
+                })?;
             deserialise(tree_data.as_ref()).map_err(OperationalError::from)?
         };
 

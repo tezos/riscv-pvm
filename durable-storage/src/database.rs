@@ -21,11 +21,13 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 
+use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_worker::BackgroundKeyValueStore;
+use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::merkle_worker::MerkleWorker;
 pub use crate::repo::DirectoryManager;
 use crate::storage::KeyValueStore;
@@ -42,7 +44,11 @@ pub struct Database<KV, M: Mode> {
 }
 
 impl<KV> Database<KV, Normal> {
-    /// Try to construct a new Database
+    /// Construct a new, empty database backed by `repo`.
+    ///
+    /// The returned database owns an isolated working state. Mutations are applied immediately to
+    /// that working state and are not persisted as a named snapshot until [`Database::commit`] is
+    /// called.
     pub fn try_new(handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
         KV: BackgroundKeyValueStore,
@@ -57,7 +63,29 @@ impl<KV> Database<KV, Normal> {
         })
     }
 
-    /// Try to create a cheap clone of the Database.
+    /// Restore a database from a previously committed snapshot.
+    ///
+    /// The checked-out database is isolated from the committed snapshot: subsequent mutations are
+    /// applied to a working copy, not to the committed state on disk.
+    pub fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error>
+    where
+        KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>,
+    {
+        let persistent = KV::checkout(repo, &commit_id)?;
+        let persistent = Arc::new(persistent);
+
+        let merkle = MerkleWorker::checkout(handle, persistent.clone(), commit_id)?;
+
+        Ok(Database {
+            inner: NormalImpl { persistent, merkle },
+        })
+    }
+
+    /// Create a cheap clone of the current working state.
+    ///
+    /// The clone shares existing state efficiently with the original database and diverges on
+    /// subsequent mutation. Neither database persists its state to a repository commit until
+    /// [`Database::commit`] is called.
     pub fn try_clone_with(&self, handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
         KV: BackgroundKeyValueStore,
@@ -72,7 +100,10 @@ impl<KV> Database<KV, Normal> {
         })
     }
 
-    /// Commit the current database state to the repository and return its root hash.
+    /// Commit the current database state to the repository and return its commit identifier.
+    ///
+    /// The returned [`CommitId`] is derived from the Merkle root hash of the current working
+    /// state. The commit can later be restored with [`Database::checkout`].
     pub fn commit(
         &self,
         repo: &DirectoryManager,
@@ -89,6 +120,9 @@ impl<KV> Database<KV, Normal> {
 
 impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Remove a key from the database.
+    ///
+    /// Deleting a missing key succeeds and leaves the database unchanged.
+    /// TODO RV-943: Fix behaviour to returning an operational error when deleting a missing key.
     pub fn delete(&mut self, key: Key) -> Result<(), Error> {
         M::delete(self, key)
     }
@@ -180,7 +214,7 @@ impl<KV> Modal for DatabaseTemplate<KV> {
     type Verify = Infallible;
 }
 
-/// Modes that implement this support operations on [`Database`]
+/// Modes that support the operational API exposed by [`Database`].
 pub trait DatabaseMode: Mode {
     /// See [`Database::exists`]
     fn exists<KV: BackgroundKeyValueStore>(
@@ -381,53 +415,92 @@ mod tests {
     }
 
     #[cfg(feature = "rocksdb")]
+    type PersistentDatabase = Database<crate::persistence_layer::PersistenceLayer, Normal>;
+
+    #[cfg(feature = "rocksdb")]
+    fn new_persistent_database() -> (
+        tokio::runtime::Runtime,
+        octez_riscv_test_utils::TestableTmpdir,
+        TestRepo,
+        PersistentDatabase,
+    ) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (keepalive, repo) = setup_repo();
+        let database =
+            Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+
+        (runtime, keepalive, repo, database)
+    }
+
+    #[cfg(feature = "rocksdb")]
+    fn insert_entries(
+        database: &mut PersistentDatabase,
+        entries: Vec<(Vec<u8>, Vec<u8>)>,
+    ) -> std::collections::HashMap<Key, Bytes> {
+        let mut expected = std::collections::HashMap::new();
+        for (key, value) in entries {
+            let key = Key::new(&key).expect("Size less than KEY_MAX_SIZE");
+            let value = Bytes::copy_from_slice(&value);
+            database
+                .set(key.clone(), value.clone())
+                .expect("Writing should succeed");
+            expected.insert(key, value);
+        }
+
+        expected
+    }
+
+    #[cfg(feature = "rocksdb")]
+    fn assert_database_value(database: &PersistentDatabase, key: &Key, expected: &[u8]) {
+        let mut stored = vec![0; expected.len()];
+        let read = database
+            .read(key, 0, stored.as_mut_slice())
+            .expect("Persisted value should exist");
+        assert_eq!(read, stored.len());
+        assert_eq!(stored.as_slice(), expected);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    fn assert_database_missing(database: &PersistentDatabase, key: &Key) {
+        use crate::errors::Error;
+        use crate::errors::InvalidArgumentError;
+
+        assert!(matches!(
+            database.read(key, 0, Vec::new()),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+    }
+
+    #[cfg(feature = "rocksdb")]
     proptest! {
         #[test]
-        fn test_database_commit_persists_state(
+        fn test_database_commit_and_checkout(
             entries in prop::collection::vec(
                 (prop::collection::vec(any::<u8>(), 1..=KEY_MAX_SIZE),
                  prop::collection::vec(any::<u8>(), 0..200)),
                 1..50,
             ),
         ) {
-            use octez_riscv_test_utils::TestableTmpdir;
-
             use crate::persistence_layer::PersistenceLayer;
-            use crate::repo::DirectoryManager;
-            use crate::storage::KeyValueStore;
-            use crate::storage::PersistentKeyValueStore;
 
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
+            let (runtime, _keepalive, repo, mut database) = new_persistent_database();
             let handle = runtime.handle();
-            let tmpdir = TestableTmpdir::new();
-            let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-            let mut database: Database<PersistenceLayer, _> = Database::try_new(handle, &repo).expect("Creating a test database should succeed");
-
-            let mut expected = std::collections::HashMap::new();
-            for (key, value) in entries {
-                let key = Key::new(&key).expect("Size less than KEY_MAX_SIZE");
-                let value = Bytes::copy_from_slice(&value);
-                database
-                    .set(key.clone(), value.clone())
-                    .expect("Writing should succeed");
-                expected.insert(key, value);
-            }
+            let expected = insert_entries(&mut database, entries);
 
             let expected_hash = database.hash().expect("Hash should be calculated");
             let commit_id = database.commit(&repo).expect("Commit should succeed");
 
-            prop_assert_eq!(&expected_hash, commit_id.as_hash());
+            let checked_out = Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id)
+                .expect("Checkout should succeed");
 
-            let committed =
-                PersistenceLayer::checkout(&repo, &commit_id).expect("Checkout should succeed");
+            prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
+
             for (key, value) in expected {
-                let stored = committed
-                    .get(key.as_ref())
-                    .expect("Committed value should exist");
-                prop_assert_eq!(stored.as_ref(), value.as_ref());
+                assert_database_value(&checked_out, &key, value.as_ref());
             }
         }
 
@@ -472,23 +545,13 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut database = new_database(handle, repo);
 
-        // Populate a database and obtain a root hash
-        let keys: Vec<Key> = (1..=5)
-            .map(|k| Key::new(&[k]).expect("Size less than KEY_MAX_SIZE"))
-            .collect();
+        database
+            .set(
+                Key::new(&[1]).expect("Size less than KEY_MAX_SIZE"),
+                Bytes::copy_from_slice(&[2, 3]),
+            )
+            .expect("Writing should succeed");
 
-        let data: Vec<[u8; 1]> = (1..=5).map(|i| [i * 42]).collect();
-
-        for (key, data) in keys.iter().zip(data.iter()) {
-            database
-                .set(key.clone(), Bytes::copy_from_slice(data))
-                .expect("Writing should succeed");
-            assert!(
-                database
-                    .exists(key)
-                    .expect("There should be no other `PersistenceLayerError`s")
-            );
-        }
         let before = database.hash().expect("Hash should be calculated");
 
         // Delete a nonexistent key
@@ -503,6 +566,114 @@ mod tests {
         // Ensure the root hash is unchanged
         let after = database.hash().expect("Hash should be calculated");
         assert_eq!(before, after);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn test_database_checkout_commit_creates_new_snapshot() {
+        use crate::persistence_layer::PersistenceLayer;
+
+        let (runtime, _keepalive, repo, mut original) = new_persistent_database();
+        let handle = runtime.handle();
+
+        let persisted_key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let derived_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        original
+            .set(persisted_key.clone(), Bytes::from_static(b"before"))
+            .expect("Writing should succeed");
+
+        let original_commit = original.commit(&repo).expect("Commit should succeed");
+
+        let mut checked_out =
+            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+                .expect("Checkout should succeed");
+        checked_out
+            .set(persisted_key.clone(), Bytes::from_static(b"after"))
+            .expect("Writing should succeed");
+        checked_out
+            .set(derived_key.clone(), Bytes::from_static(b"new"))
+            .expect("Writing should succeed");
+
+        let derived_commit = checked_out.commit(&repo).expect("Commit should succeed");
+        assert_ne!(derived_commit, original_commit);
+
+        let original_reloaded =
+            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+                .expect("Checkout should succeed");
+        assert_database_value(&original_reloaded, &persisted_key, b"before");
+        assert_database_missing(&original_reloaded, &derived_key);
+
+        let derived_reloaded =
+            Database::<PersistenceLayer, _>::checkout(handle, &repo, derived_commit)
+                .expect("Checkout should succeed");
+        assert_database_value(&derived_reloaded, &persisted_key, b"after");
+        assert_database_value(&derived_reloaded, &derived_key, b"new");
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn test_database_checkout_missing_root_blob_fails_operationally() {
+        use rocksdb::ColumnFamilyDescriptor;
+
+        use crate::errors::Error;
+        use crate::errors::OperationalError;
+        use crate::persistence_layer::PersistenceLayer;
+
+        let (runtime, _keepalive, repo, mut database) = new_persistent_database();
+        let handle = runtime.handle();
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key, Bytes::from_static(b"value"))
+            .expect("Writing should succeed");
+
+        let commit_id = database.commit(&repo).expect("Commit should succeed");
+        let commit_path = repo.database_commit_dir(&commit_id);
+
+        let commit_db = rocksdb::DB::open_cf_descriptors(
+            &rocksdb::Options::default(),
+            &commit_path,
+            [
+                ColumnFamilyDescriptor::new("blob", rocksdb::Options::default()),
+                ColumnFamilyDescriptor::new("default", rocksdb::Options::default()),
+            ],
+        )
+        .expect("Opening committed RocksDB should succeed");
+
+        let blob_cf = commit_db
+            .cf_handle("blob")
+            .expect("Committed RocksDB should contain the blob column family");
+        commit_db
+            .delete_cf(blob_cf, commit_id.as_hash().as_ref())
+            .expect("Deleting the root blob should succeed");
+        drop(commit_db);
+
+        assert!(matches!(
+            Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id),
+            Err(Error::Operational(OperationalError::CommitDataMissing { root }))
+                if root == *commit_id.as_hash()
+        ));
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn test_database_checkout_unknown_commit_fails() {
+        use octez_riscv_data::hash::Hash;
+
+        use crate::commit::CommitId;
+        use crate::errors::Error;
+        use crate::errors::OperationalError;
+        use crate::persistence_layer::PersistenceLayer;
+
+        let (runtime, _keepalive, repo, _database) = new_persistent_database();
+        let handle = runtime.handle();
+
+        let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-commit"));
+
+        assert!(matches!(
+            Database::<PersistenceLayer, _>::checkout(handle, &repo, missing_commit),
+            Err(Error::Operational(OperationalError::CommitNotFound))
+        ));
     }
 
     proptest! {
@@ -533,9 +704,7 @@ mod tests {
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
             }
         }
-    }
 
-    proptest! {
         #[test]
         fn test_database_hash(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
                               data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
