@@ -5,11 +5,11 @@
 
 //! Foldable data structures
 
-use std::error;
 use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 
 use crate::serialisation::serialise;
@@ -156,11 +156,11 @@ impl<F: FoldLeaf, G: Fn(F) -> F::Folded> Foldable<F> for FoldableClosure<G> {
 /// each leaf needs to contain a valid serialisation of the expected type.
 pub trait Unfoldable: Sized {
     /// Unfold the data into a state type.
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error>;
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError>;
 }
 
 impl<T: Unfoldable, const LEN: usize> Unfoldable for [T; LEN] {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut v: Vec<T> = Vec::with_capacity(LEN);
         let mut source = source.into_node()?;
 
@@ -173,9 +173,33 @@ impl<T: Unfoldable, const LEN: usize> Unfoldable for [T; LEN] {
     }
 }
 
-/// Error trait to allow generic unfold implementations to use their own error types.
-pub trait UnfoldError {
-    fn custom<E: error::Error>(error: E) -> Self;
+/// Error type for the common ways all unfolds can fail. Includes two 'custom' variants to allow
+/// for component specific and `Unfold` (source type) specific error types.
+#[derive(Debug, thiserror::Error)]
+pub enum UnfoldError {
+    #[error("Error during deserialisation: {0}")]
+    Deserialise(#[from] DecodeError),
+
+    #[error("Encountered a node with fewer children than expected")]
+    TooFewChildren,
+
+    #[error("Encountered a node with {0} more children than expected")]
+    TooManyChildren(usize),
+
+    #[error("Expected a leaf of size {expected}, got {got}")]
+    UnexpectedLeafSize { expected: usize, got: usize },
+
+    #[error("Encountered a leaf where a node was expected")]
+    UnexpectedLeaf,
+
+    #[error("Encountered a node where a leaf was expected")]
+    UnexpectedNode,
+
+    #[error("Component specific error: {0}")]
+    OfComponent(Box<dyn std::error::Error>),
+
+    #[error("Source specific error: {0}")]
+    OfSource(Box<dyn std::error::Error>),
 }
 
 /// Implementing types describe 'source' data structures than can be deserialised or extracted in a
@@ -185,17 +209,14 @@ pub trait Unfold {
     /// extract child nodes one after another, the `NodeUnfold` trait gives methods to do this.
     type NodeUnfold: NodeUnfold<Parent = Self>;
 
-    /// Unfolding is always fallible and the type of errors may depend on the source.
-    type Error: UnfoldError;
-
     /// We expect the source to contain a node.
-    fn into_node(self) -> Result<Self::NodeUnfold, Self::Error>;
+    fn into_node(self) -> Result<Self::NodeUnfold, UnfoldError>;
 
     /// We expect the source to contain a leaf, which we attempt to deserialise into type `T`.
-    fn into_leaf<T: Decode<()>>(self) -> Result<T, Self::Error>;
+    fn into_leaf<T: Decode<()>>(self) -> Result<T, UnfoldError>;
 
     /// We expect the source to contain a leaf, which we extract as raw bytes.
-    fn into_leaf_raw<const LEN: usize>(self) -> Result<Box<[u8; LEN]>, Self::Error>;
+    fn into_leaf_raw<const LEN: usize>(self) -> Result<Box<[u8; LEN]>, UnfoldError>;
 }
 
 /// When we are unfolding a node, we need a separate type with methods to extract a series of child
@@ -207,16 +228,16 @@ pub trait NodeUnfold {
     /// Handle the next child node using a specified `unfolder` function.
     fn next_branch_with<T>(
         &mut self,
-        unfolder: impl FnOnce(Self::Parent) -> Result<T, <Self::Parent as Unfold>::Error>,
-    ) -> Result<T, <Self::Parent as Unfold>::Error>;
+        unfolder: impl FnOnce(Self::Parent) -> Result<T, UnfoldError>,
+    ) -> Result<T, UnfoldError>;
 
     /// Default handler for next child which uses the `Unfoldable` implementation.
-    fn next_branch<T: Unfoldable>(&mut self) -> Result<T, <Self::Parent as Unfold>::Error> {
+    fn next_branch<T: Unfoldable>(&mut self) -> Result<T, UnfoldError> {
         self.next_branch_with(T::unfold)
     }
 
     /// Complete the deserialisation of this node.
-    fn done<T>(self, value: T) -> Result<T, <Self::Parent as Unfold>::Error>;
+    fn done<T>(self, value: T) -> Result<T, UnfoldError>;
 }
 
 pub(crate) mod tests;

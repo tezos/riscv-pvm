@@ -27,6 +27,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -481,7 +482,7 @@ where
     DataSpace<M>: Unfoldable,
     PagePermissions<M>: Unfoldable,
 {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let data = source.next_branch()?;

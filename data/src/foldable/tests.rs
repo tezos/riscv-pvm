@@ -4,8 +4,6 @@
 
 #![cfg(test)]
 
-use std::error;
-
 use bincode::Decode;
 
 use crate::foldable::Fold;
@@ -19,7 +17,7 @@ use crate::foldable::Unfoldable;
 use crate::serialisation::deserialise;
 
 impl<A: Unfoldable, B: Unfoldable> Unfoldable for (A, B) {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut u = source.into_node()?;
 
         let a = u.next_branch()?;
@@ -30,7 +28,7 @@ impl<A: Unfoldable, B: Unfoldable> Unfoldable for (A, B) {
 }
 
 impl<A: Unfoldable, B: Unfoldable, C: Unfoldable> Unfoldable for (A, B, C) {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut u = source.into_node()?;
 
         let a = u.next_branch()?;
@@ -101,25 +99,17 @@ impl NodeFold for TestNodeFolder {
     }
 }
 
-impl UnfoldError for String {
-    fn custom<E: error::Error>(error: E) -> String {
-        format!("{error:?}")
-    }
-}
-
 impl Unfold for TestTree {
     type NodeUnfold = Vec<TestTree>;
 
-    type Error = String;
-
-    fn into_node(self) -> Result<Vec<TestTree>, String> {
+    fn into_node(self) -> Result<Vec<TestTree>, UnfoldError> {
         match self {
-            TestTree::Leaf(_) => Err("Unexpected leaf".to_string()),
+            TestTree::Leaf(_) => Err(UnfoldError::UnexpectedLeaf),
             TestTree::Node(children) => Ok(children),
         }
     }
 
-    fn into_leaf_raw<const LEN: usize>(self) -> Result<Box<[u8; LEN]>, String> {
+    fn into_leaf_raw<const LEN: usize>(self) -> Result<Box<[u8; LEN]>, UnfoldError> {
         match self {
             TestTree::Leaf(bytes) => {
                 if bytes.len() == LEN {
@@ -127,19 +117,23 @@ impl Unfold for TestTree {
                     arr.copy_from_slice(&bytes[0..LEN]);
                     Ok(arr)
                 } else {
-                    Err("Incorrect length in leaf".to_string())
+                    Err(UnfoldError::UnexpectedLeafSize {
+                        expected: LEN,
+                        got: bytes.len(),
+                    })
                 }
             }
-            TestTree::Node(_) => Err("Unexpected node".to_string()),
+            TestTree::Node(_) => Err(UnfoldError::UnexpectedNode),
         }
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> Result<T, String> {
+    fn into_leaf<T: Decode<()>>(self) -> Result<T, UnfoldError> {
         match self {
             TestTree::Leaf(bytes) => {
-                deserialise(&bytes[..]).map_err(|_| "Deserialisation error".to_string())
+                let t = deserialise(&bytes[..])?;
+                Ok(t)
             }
-            TestTree::Node(_) => Err("Unexpected node".to_string()),
+            TestTree::Node(_) => Err(UnfoldError::UnexpectedNode),
         }
     }
 }
@@ -149,27 +143,27 @@ impl NodeUnfold for Vec<TestTree> {
 
     fn next_branch_with<T>(
         &mut self,
-        unfolder: impl FnOnce(TestTree) -> Result<T, String>,
-    ) -> Result<T, String> {
+        unfolder: impl FnOnce(TestTree) -> Result<T, UnfoldError>,
+    ) -> Result<T, UnfoldError> {
         if self.is_empty() {
-            Err("Too few children".to_string())
+            Err(UnfoldError::TooFewChildren)
         } else {
             let tree = self.remove(0);
             unfolder(tree)
         }
     }
 
-    fn done<T>(self, t: T) -> Result<T, String> {
+    fn done<T>(self, t: T) -> Result<T, UnfoldError> {
         if self.is_empty() {
             Ok(t)
         } else {
-            Err("Too many children".to_string())
+            Err(UnfoldError::TooManyChildren(self.len()))
         }
     }
 }
 
 impl Unfoldable for u8 {
-    fn unfold<U: Unfold>(source: U) -> Result<u8, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<u8, UnfoldError> {
         source.into_leaf()
     }
 }
@@ -188,23 +182,26 @@ fn test_unfold() {
     let bad_data = (1, (2, 3, (4, 5, 6)), (7, 8, 9));
     let tree = bad_data.fold(TestFolder);
     let result = Data::unfold(tree);
-    assert_eq!(result.unwrap_err().as_str(), "Too many children");
+    assert!(matches!(
+        result.unwrap_err(),
+        UnfoldError::TooManyChildren(1)
+    ));
 
     // Incorrect shape: too few children
     let bad_data = (1, (2, 3, (4, 6)), (7, 8));
     let tree = bad_data.fold(TestFolder);
     let result = Data::unfold(tree);
-    assert_eq!(result.unwrap_err().as_str(), "Too few children");
+    assert!(matches!(result.unwrap_err(), UnfoldError::TooFewChildren));
 
     // Incorrect shape: unexpected leaf
     let bad_data = (1, (2, 3, 4), (7, 8));
     let tree = bad_data.fold(TestFolder);
     let result = Data::unfold(tree);
-    assert_eq!(result.unwrap_err().as_str(), "Unexpected leaf");
+    assert!(matches!(result.unwrap_err(), UnfoldError::UnexpectedLeaf));
 
     // Incorrect shape: unexpected node
     let bad_data = (1, ((2, 2), 3, (4, 5, 6)), (7, 8));
     let tree = bad_data.fold(TestFolder);
     let result = Data::unfold(tree);
-    assert_eq!(result.unwrap_err().as_str(), "Unexpected node");
+    assert!(matches!(result.unwrap_err(), UnfoldError::UnexpectedNode));
 }

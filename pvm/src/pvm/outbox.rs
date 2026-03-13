@@ -39,6 +39,7 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::foldable::seq_tree::Many;
@@ -254,7 +255,7 @@ where
 }
 
 impl Unfoldable for Outbox<Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let arr = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::unfold(source)?;
         Ok(Outbox {
             levels: arr.into_boxed_array(),
@@ -462,7 +463,7 @@ where
 }
 
 impl Unfoldable for OutboxLevel<Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
         let messages = source.next_branch()?;
         let level = source.next_branch()?;

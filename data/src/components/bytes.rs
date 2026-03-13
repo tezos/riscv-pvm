@@ -31,6 +31,7 @@ use crate::foldable::FoldableClosure;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
@@ -385,7 +386,7 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
 }
 
 impl Unfoldable for Bytes<Normal> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut source = source.into_node()?;
 
         let length: u64 = source.next_branch_with(|source| source.into_leaf())?;

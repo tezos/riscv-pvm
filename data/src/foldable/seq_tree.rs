@@ -11,6 +11,7 @@ use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
@@ -134,7 +135,7 @@ impl<T, const ARITY: usize, const LEN: usize> Many<T, ARITY, LEN> {
 }
 
 impl<T: Unfoldable, const ARITY: usize, const LEN: usize> Unfoldable for Many<T, ARITY, LEN> {
-    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
         let mut leaves = Vec::with_capacity(LEN);
 
         descend_tree(source, ARITY, LEN, &mut |_, source| {
@@ -158,10 +159,10 @@ fn descend_helper<U, LeafHandler>(
     current_start: usize,
     arity: usize,
     for_leaf: &mut LeafHandler,
-) -> Result<(), U::Error>
+) -> Result<(), UnfoldError>
 where
     U: Unfold,
-    LeafHandler: FnMut(usize, U) -> Result<(), U::Error>,
+    LeafHandler: FnMut(usize, U) -> Result<(), UnfoldError>,
 {
     if total_len == 1 {
         return for_leaf(current_start, source);
@@ -215,10 +216,10 @@ pub fn descend_tree<U, LeafHandler>(
     arity: usize,
     length: usize,
     for_leaf: &mut LeafHandler,
-) -> Result<(), U::Error>
+) -> Result<(), UnfoldError>
 where
     U: Unfold,
-    LeafHandler: FnMut(usize, U) -> Result<(), U::Error>,
+    LeafHandler: FnMut(usize, U) -> Result<(), UnfoldError>,
 {
     let depth = length.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
 
