@@ -20,6 +20,7 @@ use crate::errors::OperationalError;
 /// Repository used by [`InMemoryKeyValueStore`].
 ///
 /// Will never write to disk.
+#[derive(Debug, Copy, Clone)]
 pub struct InMemoryRepo;
 
 /// In-memory key-value store
