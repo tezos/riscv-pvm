@@ -88,8 +88,14 @@ pub enum OperationalError {
     #[error("Background worker thread died")]
     WorkerThreadDied,
 
+    #[error("Error while reading from file: {error}")]
+    FileReadFailed { error: std::io::Error },
+
     #[error("Error while writing to file: {error}")]
     FileWriteFailed { error: std::io::Error },
+
+    #[error("The root hash of restored registry does not match the commit id.")]
+    RegistryCommitMismatch,
 
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///

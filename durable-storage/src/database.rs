@@ -393,6 +393,20 @@ struct NormalImpl<KV> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "rocksdb")]
+impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
+    /// Assert that a database contains the expected value for a given key.
+    pub(crate) fn assert_database_value(&self, key: &Key, expected: &[u8]) {
+        let mut stored = vec![0; expected.len()];
+        let read = self
+            .read(key, 0, stored.as_mut_slice())
+            .expect("Persisted value should exist");
+        assert_eq!(read, stored.len());
+        assert_eq!(stored.as_slice(), expected);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
@@ -455,16 +469,6 @@ mod tests {
     }
 
     #[cfg(feature = "rocksdb")]
-    fn assert_database_value(database: &PersistentDatabase, key: &Key, expected: &[u8]) {
-        let mut stored = vec![0; expected.len()];
-        let read = database
-            .read(key, 0, stored.as_mut_slice())
-            .expect("Persisted value should exist");
-        assert_eq!(read, stored.len());
-        assert_eq!(stored.as_slice(), expected);
-    }
-
-    #[cfg(feature = "rocksdb")]
     fn assert_database_missing(database: &PersistentDatabase, key: &Key) {
         use crate::errors::Error;
         use crate::errors::InvalidArgumentError;
@@ -500,7 +504,7 @@ mod tests {
             prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
 
             for (key, value) in expected {
-                assert_database_value(&checked_out, &key, value.as_ref());
+                checked_out.assert_database_value(&key, value.as_ref());
             }
         }
 
@@ -600,14 +604,14 @@ mod tests {
         let original_reloaded =
             Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
                 .expect("Checkout should succeed");
-        assert_database_value(&original_reloaded, &persisted_key, b"before");
+        original_reloaded.assert_database_value(&persisted_key, b"before");
         assert_database_missing(&original_reloaded, &derived_key);
 
         let derived_reloaded =
             Database::<PersistenceLayer, _>::checkout(handle, &repo, derived_commit)
                 .expect("Checkout should succeed");
-        assert_database_value(&derived_reloaded, &persisted_key, b"after");
-        assert_database_value(&derived_reloaded, &derived_key, b"new");
+        derived_reloaded.assert_database_value(&persisted_key, b"after");
+        derived_reloaded.assert_database_value(&derived_key, b"new");
     }
 
     #[cfg(feature = "rocksdb")]
