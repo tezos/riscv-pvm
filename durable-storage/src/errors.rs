@@ -120,6 +120,9 @@ pub enum InvalidArgumentError {
     #[error("Value offset too large")]
     OffsetTooLarge,
 
+    #[error("Registry resize can only change size by one")]
+    RegistryResizeTooLarge,
+
     #[error("Database index out of bounds")]
     DatabaseIndexOutOfBounds,
 }

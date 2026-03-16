@@ -212,7 +212,7 @@ fn grow_registry(registry: &mut Registry<TestKv, Normal>, golden: &mut Vec<Golde
     let new = registry.len();
 
     registry
-        .resize(new.saturating_add(1))
+        .resize_tick(new.saturating_add(1))
         .expect("Resizing the registry should succeed");
 
     if let Some(previous) = new.checked_sub(1) {
@@ -432,7 +432,7 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
 
                 let new_size = registry.len().saturating_sub(1);
                 registry
-                    .resize(new_size)
+                    .resize_tick(new_size)
                     .expect("Resizing the registry should succeed");
 
                 golden.truncate(new_size);
