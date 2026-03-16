@@ -146,7 +146,16 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
     pub fn read(&self, key: &Key, offset: usize, output: impl BufMut) -> Result<usize, Error> {
-        M::read(self, key, offset, output)
+        let value_length = self.value_length(key)?;
+        if offset > value_length {
+            Err(InvalidArgumentError::OffsetTooLarge)?
+        }
+
+        let end = offset
+            .saturating_add(output.remaining_mut())
+            .min(value_length);
+
+        M::read(self, key, offset, end, output)
     }
 
     /// Read a portion of the value associated with the provided key. The read data will be copied
@@ -162,7 +171,14 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         offset: usize,
         max_bytes: usize,
     ) -> Result<impl AsRef<[u8]>, Error> {
-        M::read_bytes(self, key, offset, max_bytes)
+        let value_length = self.value_length(key)?;
+        if offset > value_length {
+            Err(InvalidArgumentError::OffsetTooLarge)?;
+        }
+
+        let end = offset.saturating_add(max_bytes).min(value_length);
+
+        M::read_bytes(self, key, offset, end)
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
@@ -229,10 +245,13 @@ pub trait DatabaseMode: Mode {
     ) -> Result<usize, Error>;
 
     /// See [`Database::read`]
+    ///
+    /// `end` is calculated in [`Database::read`]
     fn read<KV: BackgroundKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
         offset: usize,
+        end: usize,
         buffer: impl BufMut,
     ) -> Result<usize, Error>;
 
@@ -295,18 +314,12 @@ impl DatabaseMode for Normal {
         this: &Database<KV, Self>,
         key: &Key,
         offset: usize,
+        end: usize,
         mut output: impl BufMut,
     ) -> Result<usize, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
+
         let value_ref = value.as_ref();
-
-        if offset > value_ref.len() {
-            return Err(InvalidArgumentError::OffsetTooLarge)?;
-        }
-
-        let end = offset
-            .saturating_add(output.remaining_mut())
-            .min(value_ref.len());
 
         let source_slice = &value_ref[offset..end];
         output.put_slice(source_slice);
@@ -317,17 +330,9 @@ impl DatabaseMode for Normal {
         this: &Database<KV, Self>,
         key: &Key,
         offset: usize,
-        max_bytes: usize,
+        end: usize,
     ) -> Result<impl AsRef<[u8]>, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
-
-        let value_ref = value.as_ref();
-
-        if offset > value_ref.len() {
-            Err(InvalidArgumentError::OffsetTooLarge)?
-        }
-
-        let end = offset.saturating_add(max_bytes).min(value_ref.len());
 
         struct Wrapper<T> {
             offset: usize,
