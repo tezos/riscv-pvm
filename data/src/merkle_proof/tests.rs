@@ -11,6 +11,7 @@ use proptest::proptest;
 use proptest::test_runner::TestCaseResult;
 
 use super::proof_tree::MerkleProofFold;
+use super::proof_tree::MinimumPresence;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
@@ -479,7 +480,7 @@ struct TestLeaf<T>(T);
 impl<T: Encode> Foldable<MerkleProofFold> for TestLeaf<T> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         let data = serialise(&self.0).expect("Serialising u8 should not fail");
-        builder.into_leaf(true, data)
+        builder.into_leaf(MinimumPresence::Present, data)
     }
 }
 
