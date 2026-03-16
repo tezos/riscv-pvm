@@ -27,12 +27,16 @@ use crate::hash::Hash;
 use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
+use crate::merkle_proof::FromProof;
+use crate::merkle_proof::proof_binary;
 use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode_test;
+use crate::serialisation::serialise;
 
 // Test that the Vector doesn't drop any values on construction.
 mode_test!(len_and_is_empty_match_initial_values, F, {
@@ -363,6 +367,166 @@ fn vector_of_atom_u64_is_same_across_modes() {
                     |inner_op, atom| inner_op.run(atom),
                 )
             },
+        )?;
+    });
+}
+
+fn proof_round_trip<Res, Op, OpMut, InnerNormal, InnerVerify>(
+    mut vector_normal: Vector<InnerNormal, Normal>,
+    ops: Vec<VectorMutOp<Op, OpMut>>,
+    run_normal: impl Fn(
+        &VectorMutOp<Op, OpMut>,
+        &mut Vector<InnerNormal, Normal>,
+    ) -> VectorOpResult<Res>,
+    run_prove: impl for<'normal> Fn(
+        &VectorMutOp<Op, OpMut>,
+        &mut Vector<<InnerNormal as Provable<'normal>>::Prover, Prove<'normal>>,
+    ) -> VectorOpResult<Res>,
+    run_verify: impl Fn(
+        &VectorMutOp<Op, OpMut>,
+        &mut Vector<InnerVerify, Verify>,
+    ) -> VectorOpResult<Res>,
+) -> TestCaseResult
+where
+    Res: std::fmt::Debug + Eq,
+    InnerNormal: Foldable<HashFold> + for<'normal> Provable<'normal>,
+    for<'normal> <InnerNormal as Provable<'normal>>::Prover:
+        Foldable<HashFold> + Foldable<MerkleProofFold>,
+    InnerVerify: FromProof + Foldable<PartialHashFold>,
+{
+    for op in ops {
+        // We use a block expression to clearly delimit the lifetimes. Otherwise, the compiler will
+        // freak out over using the `vector_normal` while `vector_prove` is still alive.
+        let (verify_result, after_verify_hash) = {
+            let mut vector_prove = vector_normal.start_proof();
+
+            // The initial hash of the Prove mode should match the Normal mode hash.
+            let init_normal_hash = Hash::from_foldable(&vector_normal);
+            let init_prove_hash = Hash::from_foldable(&vector_prove);
+            prop_assert_eq!(init_normal_hash, init_prove_hash);
+
+            // Run the operation which we would like to prove.
+            let prove_result = run_prove(&op, &mut vector_prove);
+
+            // The post-operation hash is later used to compare against the Normal mode hash.
+            let after_proof_hash = Hash::from_foldable(&vector_prove);
+
+            // The Merkle proof tree should match the state hash before the operation was applied.
+            let proof_tree = MerkleProof::from_foldable(&vector_prove);
+            prop_assert_eq!(init_prove_hash, proof_tree.root_hash());
+
+            // We want to serialise the proof to its binary format to make this test more realistic.
+            let proof_bytes = serialise(proof_tree).unwrap();
+
+            // Parsing the proof so we can see if the proof generation worked.
+            let (mut vector_verify, parsed_proof_tree) =
+                proof_binary::deserialise::<Vector<InnerVerify, Verify>>(&proof_bytes).unwrap();
+            let parsed_proof_tree = parsed_proof_tree.into_present();
+
+            // The parsed state should have a state hash equal to that of the initial Normal/Prove state.
+            let init_verify_hash =
+                PartialHash::from_foldable(parsed_proof_tree.clone(), &vector_verify)
+                    .to_hash()
+                    .unwrap();
+            prop_assert_eq!(init_verify_hash, init_prove_hash);
+
+            // Run the operation which we would like to verify.
+            let verify_result = run_verify(&op, &mut vector_verify);
+            prop_assert_eq!(&verify_result, &prove_result);
+
+            // The post-operation hash should match the Normal mode hash.
+            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree, &vector_verify)
+                .to_hash()
+                .unwrap();
+            prop_assert_eq!(after_verify_hash, after_proof_hash);
+
+            (verify_result, after_verify_hash)
+        };
+
+        // Finally advance the Normal mode state as well.
+        let normal_result = run_normal(&op, &mut vector_normal);
+        prop_assert_eq!(&normal_result, &verify_result);
+
+        // The Normal mode hash should match the post-operation hash that we proved and verified.
+        let after_normal_hash = Hash::from_foldable(&vector_normal);
+        prop_assert_eq!(after_normal_hash, after_verify_hash);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn proof_round_trip_atom_u64() {
+    proptest!(|(case in vector_atom_u64_case())| {
+        let vector_normal = Vector::<Atom<u64, Normal>, Normal>::new(
+            case.initial_values
+                .into_iter()
+                .map(Atom::<u64, Normal>::new)
+                .collect(),
+        );
+
+        proof_round_trip(
+            vector_normal,
+            case.ops,
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, atom| inner_op.run(atom),
+                    |inner_op, atom| inner_op.run(atom),
+                )
+            },
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, atom| inner_op.run(atom),
+                    |inner_op, atom| inner_op.run(atom),
+                )
+            },
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, atom| inner_op.run(atom),
+                    |inner_op, atom| inner_op.run(atom),
+                )
+            }
+        )?;
+    });
+}
+
+#[test]
+fn proof_round_trip_bytes() {
+    proptest!(|(case in vector_bytes_case())| {
+        let vector_normal = Vector::<Bytes<Normal>, Normal>::new(
+            case.initial_values
+                .into_iter()
+                .map(|vec| bytes_from_data(&vec))
+                .collect(),
+        );
+
+        proof_round_trip(
+            vector_normal,
+            case.ops,
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, bytes| inner_op.run(bytes),
+                    |inner_op, bytes| inner_op.run(bytes),
+                )
+            },
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, bytes| inner_op.run(bytes),
+                    |inner_op, bytes| inner_op.run(bytes),
+                )
+            },
+            |op, vector| {
+                op.run(
+                    vector,
+                    |inner_op, bytes| inner_op.run(bytes),
+                    |inner_op, bytes| inner_op.run(bytes),
+                )
+            }
         )?;
     });
 }
