@@ -145,8 +145,9 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Fails if:
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
-    pub fn read(&self, key: &Key, offset: usize, output: impl BufMut) -> Result<usize, Error> {
-        let value_length = self.value_length(key)?;
+    pub fn read(&self, key: &Key, offset: usize, mut output: impl BufMut) -> Result<usize, Error> {
+        let value = self.get(key)?;
+        let value_length = value.as_ref().len();
         if offset > value_length {
             Err(InvalidArgumentError::OffsetTooLarge)?
         }
@@ -155,7 +156,9 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
             .saturating_add(output.remaining_mut())
             .min(value_length);
 
-        M::read(self, key, offset, end, output)
+        let source_slice = &value.as_ref()[offset..end];
+        output.put_slice(source_slice);
+        Ok(source_slice.len())
     }
 
     /// Read a portion of the value associated with the provided key. The read data will be copied
@@ -171,14 +174,31 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         offset: usize,
         max_bytes: usize,
     ) -> Result<impl AsRef<[u8]>, Error> {
-        let value_length = self.value_length(key)?;
+        let value = self.get(key)?;
+        let value_length = value.as_ref().len();
         if offset > value_length {
             Err(InvalidArgumentError::OffsetTooLarge)?;
         }
 
         let end = offset.saturating_add(max_bytes).min(value_length);
 
-        M::read_bytes(self, key, offset, end)
+        struct Wrapper<T> {
+            offset: usize,
+            end: usize,
+            inner: T,
+        }
+
+        impl<T: AsRef<[u8]>> AsRef<[u8]> for Wrapper<T> {
+            fn as_ref(&self) -> &[u8] {
+                &self.inner.as_ref()[self.offset..self.end]
+            }
+        }
+
+        Ok(Wrapper {
+            offset,
+            end,
+            inner: value,
+        })
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
@@ -208,6 +228,14 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///  - The key does not exist in the database.
     pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
         M::value_length(self, key)
+    }
+
+    /// Retrieve the value associated with the provided key.
+    ///
+    /// Fails if:
+    ///  - The key does not exist in the database.
+    fn get(&self, key: &Key) -> Result<impl AsRef<[u8]>, Error> {
+        M::get(self, key)
     }
 }
 
@@ -244,25 +272,6 @@ pub trait DatabaseMode: Mode {
         key: &Key,
     ) -> Result<usize, Error>;
 
-    /// See [`Database::read`]
-    ///
-    /// `end` is calculated in [`Database::read`]
-    fn read<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-        offset: usize,
-        end: usize,
-        buffer: impl BufMut,
-    ) -> Result<usize, Error>;
-
-    /// See [`Database::read_bytes`]
-    fn read_bytes<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-        offset: usize,
-        max_bytes: usize,
-    ) -> Result<impl AsRef<[u8]>, Error>;
-
     /// See [`Database::set`]
     fn set<KV: BackgroundKeyValueStore>(
         this: &mut Database<KV, Self>,
@@ -288,9 +297,22 @@ pub trait DatabaseMode: Mode {
     fn hash<KV: BackgroundKeyValueStore>(
         this: &Database<KV, Self>,
     ) -> Result<Hash, OperationalError>;
+
+    /// See [`Database::get`]
+    fn get<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<impl AsRef<[u8]>, Error>;
 }
 
 impl DatabaseMode for Normal {
+    fn get<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<impl AsRef<[u8]>, Error> {
+        this.inner.persistent.get(key.as_ref())
+    }
+
     fn exists<KV: BackgroundKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
@@ -308,49 +330,6 @@ impl DatabaseMode for Normal {
     ) -> Result<usize, Error> {
         let value = this.inner.persistent.get(key.as_ref())?;
         Ok(value.as_ref().len())
-    }
-
-    fn read<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-        offset: usize,
-        end: usize,
-        mut output: impl BufMut,
-    ) -> Result<usize, Error> {
-        let value = this.inner.persistent.get(key.as_ref())?;
-
-        let value_ref = value.as_ref();
-
-        let source_slice = &value_ref[offset..end];
-        output.put_slice(source_slice);
-        Ok(source_slice.len())
-    }
-
-    fn read_bytes<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-        offset: usize,
-        end: usize,
-    ) -> Result<impl AsRef<[u8]>, Error> {
-        let value = this.inner.persistent.get(key.as_ref())?;
-
-        struct Wrapper<T> {
-            offset: usize,
-            end: usize,
-            inner: T,
-        }
-
-        impl<T: AsRef<[u8]>> AsRef<[u8]> for Wrapper<T> {
-            fn as_ref(&self) -> &[u8] {
-                &self.inner.as_ref()[self.offset..self.end]
-            }
-        }
-
-        Ok(Wrapper {
-            offset,
-            end,
-            inner: value,
-        })
     }
 
     fn set<KV: BackgroundKeyValueStore>(
