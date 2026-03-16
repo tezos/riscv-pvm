@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
 // SPDX-License-Identifier: MIT
 
+use std::borrow::Borrow;
 use std::marker::PhantomData;
 
 use bincode::Decode;
@@ -158,6 +159,44 @@ pub enum MerkleProofLeaf {
     Read(Vec<u8>),
 }
 
+/// Whether a part of the tree must be present, may be blinded or may be omitted
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MinimumPresence {
+    /// The tree may be omitted.
+    MayOmit,
+
+    /// The tree may be blinded, but cannot be omitted.
+    MayBlind,
+
+    /// The tree must be present and cannot be blinded or omitted.
+    Present,
+}
+
+impl MinimumPresence {
+    /// Infer the minimum presence requirement for a node based on the minimum presence requirements
+    /// of its children.
+    pub fn for_node<MP, CS>(children: CS) -> Self
+    where
+        MP: Borrow<Self>,
+        CS: IntoIterator<Item = MP>,
+    {
+        let may_omit_all = children
+            .into_iter()
+            .all(|child| *child.borrow() <= MinimumPresence::MayOmit);
+
+        // When there is at least one child that is either `Present` or `MayBlind`, then the node
+        // must be `Present`. It is important to remember, that this node must not be compressed
+        // into a blinded tree when the child trees requested not to be omitted. The compression is
+        // prevented by marking this node as `Present`.
+
+        if may_omit_all {
+            MinimumPresence::MayOmit
+        } else {
+            MinimumPresence::Present
+        }
+    }
+}
+
 /// Merkle tree compression information
 ///
 /// This structure should not be constructible by itself, it must always be paired with a
@@ -168,8 +207,8 @@ pub enum MerkleProofLeaf {
 /// - [`MerkleProofFold::new_leaf`] to create a leaf that needs to be folded into a node
 #[derive(Clone)]
 pub struct CompressibleMerkleProof {
-    /// Whether this subtree must be kept and cannot be blinded by its parent node
-    keep: bool,
+    /// Constraints on the presence of this subtree within the full Merkle proof tree
+    constraint: MinimumPresence,
 
     /// Merkle proof tree that may be compressed
     tree: MerkleProof,
@@ -179,29 +218,33 @@ impl CompressibleMerkleProof {
     /// Create a new compressible Merkle tree proof leaf.
     ///
     /// This method must be private! See note on [`MerkleProofFold::new_leaf`] for details.
-    fn new_leaf(keep: bool, data: Vec<u8>) -> Self {
+    fn new_leaf(constraint: MinimumPresence, data: Vec<u8>) -> Self {
         let mut tree = MerkleProof::leaf_read(data);
 
-        if !keep {
+        // If the leaf does not need to be present, we can compress it into a blinded tree already.
+        if constraint < MinimumPresence::Present {
             let hash = tree.root_hash();
             tree = MerkleProof::leaf_blind(hash);
         }
 
-        CompressibleMerkleProof { keep, tree }
+        CompressibleMerkleProof { constraint, tree }
     }
 }
 
 impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
     fn fold(&self, _builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        if self.keep || self.tree.is_blind() {
+        if self.constraint == MinimumPresence::Present || self.tree.is_blind() {
             return self.clone();
         }
+
+        // Here we know the presence constraint is not `Present`, so the tree can be compressed
+        // into a blinded tree if it is not already.
 
         let hash = self.tree.root_hash();
         let tree = MerkleProof::leaf_blind(hash);
 
         CompressibleMerkleProof {
-            keep: self.keep,
+            constraint: self.constraint,
             tree,
         }
     }
@@ -221,8 +264,8 @@ impl MerkleProofFold {
     }
 
     /// Fold into a Merkle tree proof leaf.
-    pub fn into_leaf(self, keep: bool, data: Vec<u8>) -> CompressibleMerkleProof {
-        CompressibleMerkleProof::new_leaf(keep, data)
+    pub fn into_leaf(self, constraint: MinimumPresence, data: Vec<u8>) -> CompressibleMerkleProof {
+        CompressibleMerkleProof::new_leaf(constraint, data)
     }
 
     /// Create a new compressible Merkle tree proof from a leaf.
@@ -238,8 +281,8 @@ impl MerkleProofFold {
     /// a node folder such as [`MerkleProofNodeFold`]. Returning [`CompressibleMerkleProof`]
     /// directly would allow implementations of [`Foldable::fold`] to bypass that step and skip
     /// compression.
-    pub fn new_leaf(keep: bool, data: Vec<u8>) -> impl Foldable<Self> {
-        CompressibleMerkleProof::new_leaf(keep, data)
+    pub fn new_leaf(constraint: MinimumPresence, data: Vec<u8>) -> impl Foldable<Self> {
+        CompressibleMerkleProof::new_leaf(constraint, data)
     }
 }
 
@@ -270,17 +313,22 @@ impl NodeFold for MerkleProofNodeFold {
     }
 
     fn done(self) -> <Self::Parent as Fold>::Folded {
-        let keep = self.children.iter().any(|child| child.keep);
+        let presence_constraint =
+            MinimumPresence::for_node(self.children.iter().map(|child| &child.constraint));
+
         let mut tree = MerkleProof::node_without_data(
             self.children.into_iter().map(|child| child.tree).collect(),
         );
 
-        if !keep {
+        if let MinimumPresence::MayOmit | MinimumPresence::MayBlind = presence_constraint {
             let hash = tree.root_hash();
             tree = MerkleProof::leaf_blind(hash);
         }
 
-        CompressibleMerkleProof { keep, tree }
+        CompressibleMerkleProof {
+            constraint: presence_constraint,
+            tree,
+        }
     }
 }
 
@@ -646,13 +694,13 @@ mod tests {
     }
 
     struct Leaf {
-        keep: bool,
+        constraint: MinimumPresence,
         data: &'static [u8],
     }
 
     impl Foldable<MerkleProofFold> for Leaf {
         fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-            builder.into_leaf(self.keep, self.data.to_vec())
+            builder.into_leaf(self.constraint, self.data.to_vec())
         }
     }
 
@@ -662,10 +710,24 @@ mod tests {
 
         assert_eq!(
             MerkleProof::from_foldable(&Leaf {
-                keep: true,
+                constraint: MinimumPresence::Present,
                 data: DATA,
             }),
             MerkleProof::leaf_read(DATA.to_vec())
+        );
+    }
+
+    #[test]
+    fn proof_tree_leaf_blindable() {
+        static DATA: &[u8] = b"hello";
+        let hash = Hash::hash_bytes(DATA);
+
+        assert_eq!(
+            MerkleProof::from_foldable(&Leaf {
+                constraint: MinimumPresence::MayBlind,
+                data: DATA
+            }),
+            MerkleProof::leaf_blind(hash)
         );
     }
 
@@ -676,7 +738,7 @@ mod tests {
 
         assert_eq!(
             MerkleProof::from_foldable(&Leaf {
-                keep: false,
+                constraint: MinimumPresence::MayOmit,
                 data: DATA
             }),
             MerkleProof::leaf_blind(hash)
@@ -704,11 +766,11 @@ mod tests {
         let node = Node {
             children: vec![
                 Leaf {
-                    keep: true,
+                    constraint: MinimumPresence::Present,
                     data: b"hello",
                 },
                 Leaf {
-                    keep: true,
+                    constraint: MinimumPresence::Present,
                     data: b"world",
                 },
             ],
@@ -723,15 +785,15 @@ mod tests {
     }
 
     #[test]
-    fn proof_tree_node_mixed_children() {
+    fn proof_tree_node_present_child_omittable_child() {
         let node = Node {
             children: vec![
                 Leaf {
-                    keep: true,
+                    constraint: MinimumPresence::Present,
                     data: b"hello",
                 },
                 Leaf {
-                    keep: false,
+                    constraint: MinimumPresence::MayOmit,
                     data: b"world",
                 },
             ],
@@ -746,15 +808,84 @@ mod tests {
     }
 
     #[test]
+    fn proof_tree_node_present_child_blindable_child() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::Present,
+                    data: b"hello",
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_blindable_children() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
+                    data: b"hello",
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"hello")),
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_blindable_child_omittable_child() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
+                    data: b"hello",
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayOmit,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"hello")),
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
     fn proof_tree_node_omittable_children() {
         let node = Node {
             children: vec![
                 Leaf {
-                    keep: false,
+                    constraint: MinimumPresence::MayOmit,
                     data: b"hello",
                 },
                 Leaf {
-                    keep: false,
+                    constraint: MinimumPresence::MayOmit,
                     data: b"world",
                 },
             ],

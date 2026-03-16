@@ -35,6 +35,7 @@ use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
 use crate::merkle_proof::SuspendedResult;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
+use crate::merkle_proof::proof_tree::MinimumPresence;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -180,9 +181,13 @@ impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
 
         // Determine whether the value has been read or written during proof generation. If so, we
         // must keep it in the Merkle tree (not blind it).
-        let access = self.was_accessed();
+        let constraint = if self.was_accessed() {
+            MinimumPresence::Present
+        } else {
+            MinimumPresence::MayOmit
+        };
 
-        builder.into_leaf(access, data)
+        builder.into_leaf(constraint, data)
     }
 }
 

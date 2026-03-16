@@ -40,6 +40,7 @@ use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
+use crate::merkle_proof::proof_tree::MinimumPresence;
 use crate::merkle_proof::sequence_as_tree_from_proof;
 use crate::mode::Modal;
 use crate::mode::Mode;
@@ -287,10 +288,20 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
         let length = self.bytes.previous.len();
         let length_data = serialise(length as u64).expect("Serialising length should not fail");
         let is_length_needed = self.bytes.need_length_in_proof();
-        let length_node = MerkleProofFold::new_leaf(is_length_needed, length_data);
+        let length_constraint = if is_length_needed {
+            MinimumPresence::Present
+        } else {
+            MinimumPresence::MayOmit
+        };
+        let length_node = MerkleProofFold::new_leaf(length_constraint, length_data);
 
         let get_item = |range: Range<usize>| {
             let accessed = self.bytes.was_accessed(range.clone());
+            let constraint = if accessed {
+                MinimumPresence::Present
+            } else {
+                MinimumPresence::MayOmit
+            };
 
             let data = &self.bytes.previous[range];
             let page = ChunkedPage { chunks: &[data] };
@@ -299,7 +310,7 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
             // variably sized.
             let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
 
-            MerkleProofFold::new_leaf(accessed, leaf_data)
+            MerkleProofFold::new_leaf(constraint, leaf_data)
         };
 
         self.fold_generic(builder, length, length_node, get_item)
