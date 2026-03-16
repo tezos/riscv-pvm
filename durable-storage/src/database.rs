@@ -115,6 +115,22 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         M::read(self, key, offset, output)
     }
 
+    /// Read a portion of the value associated with the provided key. The read data will be copied
+    /// into the return value. `offset` specifies from where in the associated value to start
+    /// reading.
+    ///
+    /// Fails if:
+    ///  - The key does not exist.
+    ///  - The offset is larger than the length of the associated value.
+    pub fn read_bytes(
+        &self,
+        key: &Key,
+        offset: usize,
+        max_bytes: usize,
+    ) -> Result<impl AsRef<[u8]>, Error> {
+        M::read_bytes(self, key, offset, max_bytes)
+    }
+
     /// Inserts the value associated with the provided key, replacing any data already associated
     /// with the key.
     pub fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
@@ -186,6 +202,14 @@ pub trait DatabaseMode: Mode {
         buffer: impl BufMut,
     ) -> Result<usize, Error>;
 
+    /// See [`Database::read_bytes`]
+    fn read_bytes<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+        offset: usize,
+        max_bytes: usize,
+    ) -> Result<impl AsRef<[u8]>, Error>;
+
     /// See [`Database::set`]
     fn set<KV: BackgroundKeyValueStore>(
         this: &mut Database<KV, Self>,
@@ -253,6 +277,41 @@ impl DatabaseMode for Normal {
         let source_slice = &value_ref[offset..end];
         output.put_slice(source_slice);
         Ok(source_slice.len())
+    }
+
+    fn read_bytes<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+        offset: usize,
+        max_bytes: usize,
+    ) -> Result<impl AsRef<[u8]>, Error> {
+        let value = this.inner.persistent.get(key.as_ref())?;
+
+        let value_ref = value.as_ref();
+
+        if offset > value_ref.len() {
+            Err(InvalidArgumentError::OffsetTooLarge)?
+        }
+
+        let end = offset.saturating_add(max_bytes).min(value_ref.len());
+
+        struct Wrapper<T> {
+            offset: usize,
+            end: usize,
+            inner: T,
+        }
+
+        impl<T: AsRef<[u8]>> AsRef<[u8]> for Wrapper<T> {
+            fn as_ref(&self) -> &[u8] {
+                &self.inner.as_ref()[self.offset..self.end]
+            }
+        }
+
+        Ok(Wrapper {
+            offset,
+            end,
+            inner: value,
+        })
     }
 
     fn set<KV: BackgroundKeyValueStore>(
@@ -625,6 +684,64 @@ mod tests {
                 prop_assert_eq!(&small_buffer, &data[0..3]);
             }
         }
+    }
+
+    proptest! {
+        #[test]
+        fn test_database_read_bytes(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+                                    data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100), ) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle();
+            let (_keepalive, repo) = setup_repo();
+            let mut database = new_database(handle, repo);
+
+            for (key, data) in keys.iter().zip(data.iter()) {
+                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+
+                // Set the data
+                database
+                    .set(key.clone(), Bytes::copy_from_slice(data))
+                    .expect("Setting should succeed");
+
+                // The offset is bigger than the value
+                prop_assert!(database.read_bytes(&key, data.len() + 1, 1).is_err());
+
+                // Whole value read
+                let result = database
+                    .read_bytes(&key, 0, data.len())
+                    .expect("Reading from offset 0 should succeed");
+                prop_assert_eq!(result.as_ref(), data.as_slice());
+
+                // Zero-sized read at end of value
+                let result = database
+                    .read_bytes(&key, 0, 0)
+                    .expect("A zero-sized read should succeed");
+                prop_assert_eq!(result.as_ref(), &[] as &[u8]);
+
+                // Partial read from last byte
+                let result = database
+                    .read_bytes(&key, data.len() - 1, 1)
+                    .expect("A partial read should succeed");
+                prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_database_read_bytes_no_key() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let database = new_database(handle, repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+
+        // The key doesn't exist
+        assert!(database.read_bytes(&key, 0, 1).is_err());
     }
 
     #[test]
