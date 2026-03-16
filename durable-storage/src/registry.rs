@@ -110,12 +110,21 @@ impl<KV: KeyValueStore, M: RegistryMode> Registry<KV, M> {
 
     /// Resize the registry to the given `new_size`.
     ///
+    /// Returns an error if the new size differs from the current size by more than 1. This
+    /// function can be called in a loop.
+    ///
     /// Growing the registry creates new databases, while shrinking drops
     /// databases from the end.
-    pub fn resize(&mut self, new_size: usize) -> Result<(), Error>
+    pub fn resize_tick(&mut self, new_size: usize) -> Result<(), Error>
     where
         KV: BackgroundKeyValueStore,
     {
+        match self.len().abs_diff(new_size) {
+            1 => (),
+            0 => return Ok(()),
+            _ => return Err(Error::from(InvalidArgumentError::RegistryResizeTooLarge)),
+        }
+
         M::resize(self, new_size)
     }
 
@@ -407,8 +416,13 @@ mod tests {
     fn setup_size_2_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
         let mut registry = setup_registry(repo);
         registry
-            .resize(2)
+            .resize_tick(1)
             .expect("Growing the registry should succeed.");
+
+        registry
+            .resize_tick(2)
+            .expect("Growing the registry should succeed.");
+
         registry
     }
 
@@ -490,17 +504,21 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_registry(repo);
 
-        registry
-            .resize(4)
-            .expect("Growing the registry should succeed.");
-
+        while registry.len() < 4 {
+            registry
+                .resize_tick(registry.len() + 1)
+                .expect("Growing the registry should succeed.");
+        }
         assert_eq!(registry.len(), 4);
 
-        registry
-            .resize(1)
-            .expect("Shrinking the registry should succeed.");
-
+        while registry.len() > 1 {
+            registry
+                .resize_tick(registry.len() - 1)
+                .expect("Shrinking the registry should succeed.");
+        }
         assert_eq!(registry.len(), 1);
+
+        assert!(registry.resize_tick(5).is_err());
     }
 
     #[test]
@@ -508,9 +526,11 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_registry(repo);
 
-        registry
-            .resize(3)
-            .expect("Growing the registry should succeed.");
+        while registry.len() < 3 {
+            registry
+                .resize_tick(registry.len() + 1)
+                .expect("Growing the registry should succeed.");
+        }
 
         for i in 0..3 {
             registry.database(i).expect("Database should exist.");
@@ -710,7 +730,7 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_registry(repo);
         registry
-            .resize(1)
+            .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -742,7 +762,7 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut registry = setup_registry(repo);
         registry
-            .resize(1)
+            .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
