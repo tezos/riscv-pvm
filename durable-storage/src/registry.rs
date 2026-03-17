@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -78,7 +79,8 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
             let hash = database.commit(&self.inner.repo)?;
             database_hashes.push(hash);
         }
-        let registry_commit = CommitId::compute_root_hash(&database_hashes);
+
+        let registry_commit = CommitId::compute_root_hash(database_hashes.as_slice());
 
         let manifest = RegistryManifest { database_hashes };
         let encoded =
@@ -135,6 +137,11 @@ impl<KV: BackgroundKeyValueStore, M: RegistryMode> Registry<KV, M> {
     /// Clear the database at the given `index`.
     pub fn clear_database(&mut self, index: usize) -> Result<(), Error> {
         M::clear_database(self, index)
+    }
+
+    /// Calculate the Registry's current root hash.
+    pub fn hash(&self) -> Result<Hash, OperationalError> {
+        M::hash(self)
     }
 }
 
@@ -205,6 +212,11 @@ pub trait RegistryMode: Mode {
         this: &mut Registry<KV, Self>,
         index: usize,
     ) -> Result<(), Error>;
+
+    /// See [`Registry::hash`]
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Registry<KV, Self>,
+    ) -> Result<Hash, OperationalError>;
 }
 
 impl RegistryMode for Normal {
@@ -298,6 +310,21 @@ impl RegistryMode for Normal {
         this.inner.databases[index] =
             Database::try_new(this.inner.runtime.handle(), &this.inner.repo)?;
         Ok(())
+    }
+
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Registry<KV, Self>,
+    ) -> Result<Hash, OperationalError> {
+        let mut database_hashes = Vec::with_capacity(this.inner.databases.len());
+
+        for database in &this.inner.databases {
+            let hash = database.hash()?;
+            database_hashes.push(CommitId::from(hash));
+        }
+
+        let hash = *CommitId::compute_root_hash(database_hashes.as_slice()).as_hash();
+
+        Ok(hash)
     }
 }
 
@@ -644,6 +671,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_registry_root_hash_empty() {
+        use crate::commit::CommitId;
+
+        let (_keepalive, repo) = setup_repo();
+        let registry = setup_registry(repo);
+
+        let expected_db_hashes: Vec<CommitId> = Vec::new();
+        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+
+        let root_hash = registry.hash().expect("Root hash should succeed");
+
+        assert_eq!(root_hash, *expected_root.as_hash());
+    }
+
+    #[test]
+    fn test_registry_root_hash_size_1() {
+        use crate::commit::CommitId;
+
+        let (_keepalive, repo) = setup_repo();
+        let mut registry = setup_registry(repo);
+        registry
+            .resize(1)
+            .expect("Growing the registry should succeed.");
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry.inner.databases[0]
+            .write(key.clone(), 0, Bytes::copy_from_slice(b"singleton"))
+            .expect("Writing to database should succeed");
+
+        let expected_db_hashes: Vec<super::CommitId> = registry
+            .inner
+            .databases
+            .iter()
+            .map(|db| db.hash().unwrap().into())
+            .collect();
+        let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
+
+        let root_hash = registry.hash().expect("Root hash should succeed");
+        assert_eq!(root_hash, *expected_root.as_hash());
+    }
+
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_registry_commit_empty() {
@@ -655,11 +724,19 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let registry = setup_registry(repo);
 
-        let expected_db_hashes: Vec<CommitId> = Vec::new();
+        let expected_db_hashes: Vec<super::CommitId> = registry
+            .inner
+            .databases
+            .iter()
+            .map(|db| db.hash().unwrap().into())
+            .collect();
         let expected_root = CommitId::compute_root_hash(&expected_db_hashes);
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
+
+        let root_hash = CommitId::from(registry.hash().expect("Root hash should succeed"));
+        assert_eq!(root_hash, expected_root);
 
         let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
@@ -697,6 +774,9 @@ mod tests {
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
+
+        let root_hash = CommitId::from(registry.hash().expect("Root hash should succeed"));
+        assert_eq!(root_hash, expected_root);
 
         let commit_path = registry.inner.repo.registry_commit_file(&root_commit);
         let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
