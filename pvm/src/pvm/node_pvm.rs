@@ -16,7 +16,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-use octez_riscv_data::merkle_tree::MerkleTreeFold;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
@@ -211,7 +211,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
     ) -> Option<Proof>
     where
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
     {
         let mut proof_state = self.state.start_proof();
 
@@ -236,7 +236,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
     ) -> Result<OutboxProof, OutboxProofError>
     where
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
     {
         let proof_state = self.state.start_proof();
         proof_state.produce_outbox_proof(output_info)

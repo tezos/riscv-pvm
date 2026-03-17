@@ -8,7 +8,6 @@ pub mod components;
 pub mod foldable;
 pub mod hash;
 pub mod merkle_proof;
-pub mod merkle_tree;
 pub mod mode;
 pub mod partial_vec;
 pub mod serialisation;

@@ -21,10 +21,10 @@ use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
 use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
-use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
@@ -174,9 +174,9 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
     /// The given stepper takes one step.
     pub fn produce_proof<'normal>(&'normal mut self) -> Option<Proof>
     where
-        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
     {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
@@ -194,9 +194,9 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
         output_info: OutputInfo,
     ) -> Result<OutboxProof, OutboxProofError>
     where
-        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleTreeFold>,
+        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
     {
         let proof_stepper = self.start_proof_mode();
         proof_stepper.pvm.produce_outbox_proof(output_info)

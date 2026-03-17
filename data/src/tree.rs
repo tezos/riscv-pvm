@@ -20,9 +20,7 @@ impl<Tree> Node<(), Tree> {
 
 /// Generic tree structure used to model tree-like data structures
 ///
-/// See:
-/// - [`crate::merkle_proof::proof_tree::MerkleProof`]
-/// - [`crate::merkle_tree::MerkleTree`]
+/// See [`crate::merkle_proof::proof_tree::MerkleProof`]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tree<LeafData, NodeData = ()> {
     Node(Node<NodeData, Self>),

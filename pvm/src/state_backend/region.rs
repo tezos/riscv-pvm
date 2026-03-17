@@ -12,8 +12,8 @@ pub(crate) mod tests {
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::proof_tree;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
-    use octez_riscv_data::merkle_tree::MerkleTree;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Provable;
@@ -72,7 +72,7 @@ pub(crate) mod tests {
                 qux: foo.qux.start_proof(),
             };
 
-            let tree = MerkleTree::from_foldable(&proof_foo);
+            let tree = MerkleProof::from_foldable(&proof_foo);
             let tree_root_hash = tree.root_hash();
             assert_eq!(hash, tree_root_hash);
 
@@ -81,14 +81,8 @@ pub(crate) mod tests {
             proof_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
             // Obtain the Merkle tree, again, to make sure the root hash has not changed
-            let tree = MerkleTree::from_foldable(&proof_foo);
-            let tree_root_hash = tree.root_hash();
-            assert_eq!(hash, tree_root_hash);
-
-            // Produce a proof
-            let proof = tree.compress();
-            let proof_hash = proof.root_hash();
-            assert_eq!(hash, proof_hash);
+            let proof = MerkleProof::from_foldable(&proof_foo);
+            assert_eq!(hash, proof.root_hash());
 
             // Apply the same modification on the `Normal` state in order to obtain
             // the final state hash
