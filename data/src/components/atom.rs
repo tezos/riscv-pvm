@@ -21,6 +21,7 @@ use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
+use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::Unfold;
 use crate::foldable::Unfoldable;
@@ -33,8 +34,7 @@ use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
 use crate::merkle_proof::SuspendedResult;
-use crate::merkle_tree::MerkleTree;
-use crate::merkle_tree::MerkleTreeFold;
+use crate::merkle_proof::proof_tree::MerkleProofFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -174,15 +174,15 @@ impl<'normal, T: Encode + 'static> Foldable<HashFold> for Atom<T, Prove<'normal>
     }
 }
 
-impl<T: Encode + 'static> Foldable<MerkleTreeFold> for Atom<T, Prove<'_>> {
-    fn fold(&self, _builder: MerkleTreeFold) -> MerkleTree {
+impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         let data = serialise(self.atom.previous.deref()).expect("Serialisation should not fail");
 
         // Determine whether the value has been read or written during proof generation. If so, we
-        // must mark it as not blinded in the Merkle tree.
+        // must keep it in the Merkle tree (not blind it).
         let access = self.was_accessed();
 
-        MerkleTree::make_merkle_leaf(data, access)
+        builder.into_leaf(access, data)
     }
 }
 

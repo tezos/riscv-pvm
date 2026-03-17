@@ -23,7 +23,7 @@ use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_binary;
-use crate::merkle_tree::MerkleTree;
+use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
@@ -499,8 +499,7 @@ fn bytes_are_same_across_modes() {
         let hash_prove = Hash::from_foldable(&bytes_prove);
         prop_assert_eq!(hash_normal, hash_prove);
 
-        let merkle_tree = MerkleTree::from_foldable(&bytes_prove);
-        let merkle_proof = merkle_tree.compress();
+        let merkle_proof = MerkleProof::from_foldable(&bytes_prove);
 
         let mut bytes_verify = Bytes::<Verify>::default();
         let results_verify = ops.iter().map(|op| op.run(&mut bytes_verify)).collect::<Vec<_>>();
@@ -534,7 +533,7 @@ fn proof_round_trip() {
             let after_proof_hash = Hash::from_foldable(&bytes_prove);
 
             // The Merkle proof tree should match the state hash before the operation was applied.
-            let proof_tree = MerkleTree::from_foldable(&bytes_prove).compress();
+            let proof_tree = MerkleProof::from_foldable(&bytes_prove);
             prop_assert_eq!(init_prove_hash, proof_tree.root_hash());
 
             // We want to serialise the proof to its binary format to make this test more realistic.

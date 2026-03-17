@@ -12,12 +12,13 @@ use bincode::Encode;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use proptest::array;
+use proptest::prop_assert;
 use proptest::prop_assert_eq;
 use proptest::proptest;
 
-use super::NODE_ARITY;
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
+use crate::components::data_space::NODE_ARITY;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
@@ -28,10 +29,10 @@ use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_tree;
+use crate::merkle_proof::proof_tree::MerkleProof;
+use crate::merkle_proof::proof_tree::MerkleProofLeaf;
 use crate::merkle_proof::proof_tree::OwnedProofTree;
 use crate::merkle_proof::proof_tree::ProofTree;
-use crate::merkle_tree::MerkleTree;
-use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
@@ -283,8 +284,7 @@ fn generate_proof() {
 
         // Build the Merkle tree and check that it has the root hash of the
         // initial data space.
-        let merkle_tree = MerkleTree::from_foldable(&proof_space);
-        merkle_tree.check_root_hash();
+        let merkle_tree = MerkleProof::from_foldable(&proof_space);
         prop_assert_eq!(merkle_tree.root_hash(), initial_root_hash);
 
         // Compute expected access info for each leaf, assuming that an access
@@ -304,28 +304,49 @@ fn generate_proof() {
         let mut queue = VecDeque::with_capacity(LEAVES + 1);
 
         let pages_tree = match merkle_tree {
-            MerkleTree::Leaf(_) => panic!("Did not expect leaf"),
-            MerkleTree::Node(mut node) => {
+            MerkleProof::Leaf(_) => panic!("Did not expect leaf"),
+            MerkleProof::Node(mut node) => {
                 // The node for the pages is the second child.
                 node.children.remove(1)
             },
         };
-        queue.push_back(pages_tree);
+        queue.push_back((0usize, 0usize, pages_tree));
 
-        let mut leaf: usize = 0;
-        while let Some(node) = queue.pop_front() {
+        let max_depth = LEAVES.saturating_sub(1).checked_ilog(NODE_ARITY).unwrap_or(0) as usize + 1;
+        while let Some((depth, pos, node)) = queue.pop_front() {
             match node {
-                MerkleTree::Node(node) => queue.extend(node.children),
-                MerkleTree::Leaf(MerkleTreeLeafData {
-                    access_info,
-                    ..
-                }) => {
-                    prop_assert_eq!(
-                        access_info,
-                        read_leaves.contains(&leaf) ||
-                            written_leaves.contains(&leaf)
-                    );
-                    leaf += 1;
+                MerkleProof::Node(node) => queue.extend(
+                    node.children
+                        .into_iter()
+                        .enumerate()
+                        .map(|(id, child)| (depth + 1, pos * NODE_ARITY + id, child))
+                ),
+                MerkleProof::Leaf(leaf) => {
+                    let width = NODE_ARITY.pow((max_depth - depth) as u32);
+                    let start = pos * width;
+
+                    // The tree might not be perfectly balanced, so the right-most leaf might have
+                    // a smaller width. Capping the theoretical end of the leaf to the total number
+                    // of leaves ensures we don't go out of bounds.
+                    let end = LEAVES.min(start + width);
+
+                    // Each leaf represents a contiguous range of pages in the data space. This is
+                    // because as the Merkle proof tree gets compressed, multiple leaves might get
+                    // compressed into one blinded leaf.
+                    let range = start..end;
+
+                    match leaf {
+                        MerkleProofLeaf::Blind(_) => {
+                            for idx in range {
+                                prop_assert!(!read_leaves.contains(&idx) && !written_leaves.contains(&idx));
+                            }
+                        },
+                        MerkleProofLeaf::Read(_) => {
+                            for idx in range {
+                                prop_assert!(read_leaves.contains(&idx) || written_leaves.contains(&idx));
+                            }
+                        },
+                    }
                 }
             }
         }
@@ -366,8 +387,7 @@ unsafe fn test_data_space_with_funs(
     // final state.
     let post_hash = Hash::from_foldable(&proof_cell);
 
-    let tree = MerkleTree::from_foldable(&proof_cell);
-    let proof_tree = tree.compress();
+    let proof_tree = MerkleProof::from_foldable(&proof_cell);
     assert_eq!(proof_tree.root_hash(), init_hash);
 
     // Instantiating the verifier state allows us to replay the computation and verify it does

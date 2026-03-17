@@ -33,9 +33,8 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
-use octez_riscv_data::merkle_tree::MerkleTree;
-use octez_riscv_data::merkle_tree::MerkleTreeFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
@@ -367,16 +366,15 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
 impl<'a, MC, DS> Pvm<MC, EmptyPageCache, DS, Prove<'a>>
 where
     MC: MemoryConfig,
-    MC::State<Prove<'a>>: Foldable<MerkleTreeFold> + Foldable<HashFold>,
-    DS: DurableStorage<Prove<'a>> + Foldable<MerkleTreeFold> + Foldable<HashFold>,
+    MC::State<Prove<'a>>: Foldable<MerkleProofFold> + Foldable<HashFold>,
+    DS: DurableStorage<Prove<'a>> + Foldable<MerkleProofFold> + Foldable<HashFold>,
 {
     /// Produce a proof.
     pub(crate) fn produce_proof(&self) -> Result<Proof, HashError> {
         // This read guarantees that the input request can be recovered from the proof.
         let _ = self.input_request();
 
-        let merkle_tree = MerkleTree::from_foldable(self);
-        let merkle_proof: MerkleProof = merkle_tree.compress();
+        let merkle_proof = MerkleProof::from_foldable(self);
 
         let final_hash = Hash::from_foldable(self);
         let proof = Proof::new(merkle_proof, final_hash);
@@ -391,9 +389,7 @@ where
         output_info: OutputInfo,
     ) -> Result<OutboxProof, OutboxProofError> {
         let proof_output = self.get_outbox_message(output_info)?;
-
-        let merkle_tree = MerkleTree::from_foldable(self);
-        let proof: MerkleProof = merkle_tree.compress();
+        let proof = MerkleProof::from_foldable(self);
 
         Ok(OutboxProof {
             info: proof_output.info,

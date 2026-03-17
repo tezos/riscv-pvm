@@ -22,7 +22,7 @@ pub mod seq_tree;
 ///
 /// Implementing types can also pick concrete `F` types to provide specific folding behaviours.
 /// Such concrete types could be [`crate::hash::Hash`] for leaves in a state data structure, or
-/// [`crate::merkle_tree::MerkleTree`] for things in [`crate::mode::Prove`] mode.
+/// [`crate::merkle_proof::proof_tree::MerkleProof`] for things in [`crate::mode::Prove`] mode.
 pub trait Foldable<F: Fold> {
     /// Fold the state data structure.
     fn fold(&self, builder: F) -> F::Folded;

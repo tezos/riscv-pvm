@@ -24,9 +24,9 @@ use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_tree;
+use crate::merkle_proof::proof_tree::MerkleProof;
+use crate::merkle_proof::proof_tree::MerkleProofLeaf;
 use crate::merkle_proof::proof_tree::ProofTree;
-use crate::merkle_tree::MerkleTree;
-use crate::merkle_tree::MerkleTreeLeafData;
 use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Provable;
@@ -239,19 +239,9 @@ fn proof_gen() {
         let mut proof_atoms: Atom<[u64; CELLS_SIZE], Prove> = atoms.start_proof();
         proof_atoms[i] = value_after;
 
-        let merkle_tree = MerkleTree::from_foldable(&proof_atoms);
-        merkle_tree.check_root_hash();
-        match merkle_tree {
-            MerkleTree::Leaf(MerkleTreeLeafData {
-                hash,
-                access_info,
-                ..
-            }) => {
-                prop_assert_eq!(hash, initial_root_hash);
-                prop_assert!(access_info);
-            }
-            _ => panic!("Expected Merkle tree to contain a single written leaf"),
-        }
+        let merkle_tree = MerkleProof::from_foldable(&proof_atoms);
+        prop_assert_eq!(merkle_tree.root_hash(), initial_root_hash);
+        prop_assert!(matches!(merkle_tree, MerkleProof::Leaf(MerkleProofLeaf::Read(_))));
     });
 }
 
@@ -273,7 +263,7 @@ fn proof_blinding() {
 
         let proof_state = (proof_atoms1, proof_atoms2);
 
-        let merkle_proof = MerkleTree::from_foldable(&proof_state).compress();
+        let merkle_proof = MerkleProof::from_foldable(&proof_state);
 
         let verifier_state =
             proof_tree::deserialise::<TestState<Verify>>(ProofTree::Present(&merkle_proof)).unwrap();
@@ -366,8 +356,7 @@ fn atom_is_same_across_modes() {
         let hash_prove = Hash::from_foldable(&atom_prove);
         prop_assert_eq!(hash_normal, hash_prove);
 
-        let merkle_tree = MerkleTree::from_foldable(&atom_prove);
-        let merkle_proof = merkle_tree.compress();
+        let merkle_proof = MerkleProof::from_foldable(&atom_prove);
 
         let mut atom_verify = Atom::<u64, Verify>::new(initial);
         let results_verify = ops.iter().map(|op| op.run(&mut atom_verify)).collect::<Vec<_>>();

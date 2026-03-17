@@ -14,6 +14,9 @@ use super::ProofError;
 use super::Suspended;
 use super::tag::LeafTag;
 use super::tag::Tag;
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::NodeFold;
 use crate::hash::Hash;
 use crate::serialisation;
 use crate::tree::Tree;
@@ -25,13 +28,83 @@ use crate::tree::Tree;
 /// If a write was done, the written content is not necessary since the semantics of running the step will
 /// deduce the written contents.
 ///
-/// A proof will have the shape of a subtree of a [`MerkleTree`].
-/// The structure of the full [`MerkleTree`] is known statically (since it represents the whole state of the PVM)
-/// so the number of children of a node and the sizes of the leaves
-/// do not need to be stored in either the proof or its encoding.
-///
-/// [`MerkleTree`]: crate::merkle_tree::MerkleTree
+/// A proof has the shape of a subtree of the full PVM state.
+/// The full state layout is fixed by the state's [`Foldable`] implementation,
+/// so node arity and leaf sizes are known statically.
+/// Therefore, neither the proof nor its encoding needs to store that metadata.
 pub type MerkleProof = Tree<MerkleProofLeaf>;
+
+impl MerkleProof {
+    /// Create a new Merkle proof as a read leaf.
+    pub fn leaf_read(data: Vec<u8>) -> Self {
+        MerkleProof::Leaf(MerkleProofLeaf::Read(data))
+    }
+
+    /// Create a new Merkle proof as a blind leaf.
+    pub fn leaf_blind(hash: Hash) -> Self {
+        MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
+    }
+
+    /// Compute the root hash of the Merkle proof.
+    pub fn root_hash(&self) -> Hash {
+        // Child nodes are stored in normal order in `nodes`.
+        let mut nodes: Vec<(&MerkleProof, usize)> = vec![(self, 0)];
+        // Child nodes are stored in reverse order in `hash_states`.
+        let mut hash_states: Vec<HashState> = vec![];
+
+        while let Some((node, parent_index)) = nodes.pop() {
+            match node {
+                Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
+                    hash_states.push(HashState::new_leaf(parent_index, *hash));
+                }
+                Tree::Leaf(MerkleProofLeaf::Read(data)) => {
+                    hash_states.push(HashState::new_leaf(
+                        parent_index,
+                        Hash::hash_bytes(data.as_slice()),
+                    ));
+                }
+                Tree::Node(node) => {
+                    hash_states.push(HashState::new_node(parent_index));
+                    let new_parent_index = hash_states.len() - 1;
+                    for child in node.children.iter() {
+                        nodes.push((child, new_parent_index));
+                    }
+                }
+            }
+        }
+
+        while hash_states.len() > 1 {
+            let hash_state = hash_states
+                .pop()
+                .expect("hash_states can't be empty at this point");
+            // Note that child hashes are added in normal order to `hash_states`.
+            hash_states[hash_state.parent_index()].push(hash_state.hash());
+        }
+
+        // Hash states is not empty at this point.
+        hash_states[0].hash()
+    }
+
+    /// Is this proof a blind leaf?
+    pub(crate) fn is_blind(&self) -> bool {
+        matches!(self, MerkleProof::Leaf(MerkleProofLeaf::Blind(_)))
+    }
+
+    /// Fold the given data structure into a compressed Merkle proof tree.
+    pub fn from_foldable(foldable: &impl Foldable<MerkleProofFold>) -> Self {
+        foldable.fold(MerkleProofFold::new()).tree
+    }
+}
+
+impl From<&MerkleProof> for Tag {
+    fn from(value: &MerkleProof) -> Self {
+        match value {
+            MerkleProof::Node(_) => Tag::Node,
+            MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
+            MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
+        }
+    }
+}
 
 impl bincode::Encode for MerkleProof {
     fn encode<E: bincode::enc::Encoder>(
@@ -76,13 +149,139 @@ pub enum MerkleProofLeaf {
     /// A leaf that is not read. It may be written.
     /// Contains the hash of the contents from initial state.
     ///
-    /// Note: a blinded leaf can correspond to a blinded subtree
-    /// in a [`crate::merkle_tree::MerkleTree`] due to compression.
+    /// Note: a blinded leaf can correspond to a blinded subtree in a
+    /// [`crate::merkle_proof::proof_tree::MerkleProof`] due to compression.
     Blind(Hash),
     /// A leaf that is read. It may also be written.
     /// Contains the read data from the initial state.
     /// The initial hash can be deduced based on the read data.
     Read(Vec<u8>),
+}
+
+/// Merkle tree compression information
+///
+/// This structure should not be constructible by itself, it must always be paired with a
+/// [`MerkleProofFold`] via the [`Foldable`] implementation. Consider using these functions
+/// instead:
+///
+/// - [`MerkleProofFold::into_leaf`] to create a leaf proof using the builder
+/// - [`MerkleProofFold::new_leaf`] to create a leaf that needs to be folded into a node
+#[derive(Clone)]
+pub struct CompressibleMerkleProof {
+    /// Whether this subtree must be kept and cannot be blinded by its parent node
+    keep: bool,
+
+    /// Merkle proof tree that may be compressed
+    tree: MerkleProof,
+}
+
+impl CompressibleMerkleProof {
+    /// Create a new compressible Merkle tree proof leaf.
+    ///
+    /// This method must be private! See note on [`MerkleProofFold::new_leaf`] for details.
+    fn new_leaf(keep: bool, data: Vec<u8>) -> Self {
+        let mut tree = MerkleProof::leaf_read(data);
+
+        if !keep {
+            let hash = tree.root_hash();
+            tree = MerkleProof::leaf_blind(hash);
+        }
+
+        CompressibleMerkleProof { keep, tree }
+    }
+}
+
+impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
+    fn fold(&self, _builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        if self.keep || self.tree.is_blind() {
+            return self.clone();
+        }
+
+        let hash = self.tree.root_hash();
+        let tree = MerkleProof::leaf_blind(hash);
+
+        CompressibleMerkleProof {
+            keep: self.keep,
+            tree,
+        }
+    }
+}
+
+/// [`Fold`] for creating a [`MerkleProof`] tree from a foldable structure
+pub struct MerkleProofFold {
+    _private: (),
+}
+
+impl MerkleProofFold {
+    /// Create a new fold builder for Merkle proofs.
+    ///
+    /// NOTE: This should be private! We don't want users to create this directly.
+    fn new() -> Self {
+        MerkleProofFold { _private: () }
+    }
+
+    /// Fold into a Merkle tree proof leaf.
+    pub fn into_leaf(self, keep: bool, data: Vec<u8>) -> CompressibleMerkleProof {
+        CompressibleMerkleProof::new_leaf(keep, data)
+    }
+
+    /// Create a new compressible Merkle tree proof from a leaf.
+    ///
+    /// # Return type
+    ///
+    /// This is intentionally not a constructor for [`CompressibleMerkleProof`].
+    ///
+    /// We want every leaf to pass through [`CompressibleMerkleProof::fold`], where compression can
+    /// convert it into a blind leaf.
+    ///
+    /// To enforce that, this function returns an opaque [`Foldable`] value that must be consumed by
+    /// a node folder such as [`MerkleProofNodeFold`]. Returning [`CompressibleMerkleProof`]
+    /// directly would allow implementations of [`Foldable::fold`] to bypass that step and skip
+    /// compression.
+    pub fn new_leaf(keep: bool, data: Vec<u8>) -> impl Foldable<Self> {
+        CompressibleMerkleProof::new_leaf(keep, data)
+    }
+}
+
+impl Fold for MerkleProofFold {
+    type Folded = CompressibleMerkleProof;
+
+    type NodeFold = MerkleProofNodeFold;
+
+    fn into_node_fold(self) -> Self::NodeFold {
+        MerkleProofNodeFold {
+            children: Vec::new(),
+        }
+    }
+}
+
+/// [`NodeFold`] for creating a [`MerkleProof`] node from a foldable structure
+pub struct MerkleProofNodeFold {
+    /// Children of the node that is being folded
+    children: Vec<CompressibleMerkleProof>,
+}
+
+impl NodeFold for MerkleProofNodeFold {
+    type Parent = MerkleProofFold;
+
+    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+        let child_info = child.fold(MerkleProofFold::new());
+        self.children.push(child_info);
+    }
+
+    fn done(self) -> <Self::Parent as Fold>::Folded {
+        let keep = self.children.iter().any(|child| child.keep);
+        let mut tree = MerkleProof::node_without_data(
+            self.children.into_iter().map(|child| child.tree).collect(),
+        );
+
+        if !keep {
+            let hash = tree.root_hash();
+            tree = MerkleProof::leaf_blind(hash);
+        }
+
+        CompressibleMerkleProof { keep, tree }
+    }
 }
 
 /// [`enum@HashState`] is associated with the state of hashing a [`MerkleProof`].
@@ -136,68 +335,6 @@ impl HashState {
             HashState::Node { parent_index, .. } | HashState::Leaf { parent_index, .. } => {
                 *parent_index
             }
-        }
-    }
-}
-
-impl MerkleProof {
-    /// Create a new Merkle proof as a read leaf.
-    pub fn leaf_read(data: Vec<u8>) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Read(data))
-    }
-
-    /// Create a new Merkle proof as a blind leaf.
-    pub fn leaf_blind(hash: Hash) -> Self {
-        MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
-    }
-
-    /// Compute the root hash of the Merkle proof.
-    pub fn root_hash(&self) -> Hash {
-        // Child nodes are stored in normal order in `nodes`.
-        let mut nodes: Vec<(&MerkleProof, usize)> = vec![(self, 0)];
-        // Child nodes are stored in reverse order in `hash_states`.
-        let mut hash_states: Vec<HashState> = vec![];
-
-        while let Some((node, parent_index)) = nodes.pop() {
-            match node {
-                Tree::Leaf(MerkleProofLeaf::Blind(hash)) => {
-                    hash_states.push(HashState::new_leaf(parent_index, *hash));
-                }
-                Tree::Leaf(MerkleProofLeaf::Read(data)) => {
-                    hash_states.push(HashState::new_leaf(
-                        parent_index,
-                        Hash::hash_bytes(data.as_slice()),
-                    ));
-                }
-                Tree::Node(node) => {
-                    hash_states.push(HashState::new_node(parent_index));
-                    let new_parent_index = hash_states.len() - 1;
-                    for child in node.children.iter() {
-                        nodes.push((child, new_parent_index));
-                    }
-                }
-            }
-        }
-
-        while hash_states.len() > 1 {
-            let hash_state = hash_states
-                .pop()
-                .expect("hash_states can't be empty at this point");
-            // Note that child hashes are added in normal order to `hash_states`.
-            hash_states[hash_state.parent_index()].push(hash_state.hash());
-        }
-
-        // Hash states is not empty at this point.
-        hash_states[0].hash()
-    }
-}
-
-impl From<&MerkleProof> for Tag {
-    fn from(value: &MerkleProof) -> Self {
-        match value {
-            MerkleProof::Node(_) => Tag::Node,
-            MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
-            MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
         }
     }
 }
@@ -506,5 +643,128 @@ mod tests {
         root_node.push(Hash::hash_bytes(&[7, 8, 9]));
 
         assert_eq!(root_node.hash(), calculated_root_hash);
+    }
+
+    struct Leaf {
+        keep: bool,
+        data: &'static [u8],
+    }
+
+    impl Foldable<MerkleProofFold> for Leaf {
+        fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+            builder.into_leaf(self.keep, self.data.to_vec())
+        }
+    }
+
+    #[test]
+    fn proof_tree_leaf_present() {
+        static DATA: &[u8] = b"hello";
+
+        assert_eq!(
+            MerkleProof::from_foldable(&Leaf {
+                keep: true,
+                data: DATA,
+            }),
+            MerkleProof::leaf_read(DATA.to_vec())
+        );
+    }
+
+    #[test]
+    fn proof_tree_leaf_omittable() {
+        static DATA: &[u8] = b"hello";
+        let hash = Hash::hash_bytes(DATA);
+
+        assert_eq!(
+            MerkleProof::from_foldable(&Leaf {
+                keep: false,
+                data: DATA
+            }),
+            MerkleProof::leaf_blind(hash)
+        );
+    }
+
+    struct Node<T> {
+        children: Vec<T>,
+    }
+
+    impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Node<T> {
+        fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+            let mut node = builder.into_node_fold();
+
+            for child in self.children.iter() {
+                node.add(child);
+            }
+
+            node.done()
+        }
+    }
+
+    #[test]
+    fn proof_tree_node_present_children() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    keep: true,
+                    data: b"hello",
+                },
+                Leaf {
+                    keep: true,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_read(b"world".to_vec()),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_mixed_children() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    keep: true,
+                    data: b"hello",
+                },
+                Leaf {
+                    keep: false,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_omittable_children() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    keep: false,
+                    data: b"hello",
+                },
+                Leaf {
+                    keep: false,
+                    data: b"world",
+                },
+            ],
+        };
+
+        let expected = MerkleProof::leaf_blind(Hash::combine_hashes([
+            Hash::hash_bytes(b"hello"),
+            Hash::hash_bytes(b"world"),
+        ]));
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
     }
 }

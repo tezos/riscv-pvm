@@ -11,8 +11,6 @@
 //!   * Final hash state
 //!   * Tags which dictate the shape of the proof (a partial Merkle tree)
 //!   * Leaf contents
-//!
-//! - Convert [`octez_riscv_data::merkle_tree::MerkleTree`] to [`MerkleProof`]
 
 use bincode::Encode;
 use bincode::error::DecodeError;

@@ -22,7 +22,7 @@ use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash;
 use octez_riscv_data::hash::HashFold;
-use octez_riscv_data::merkle_tree::MerkleTreeFold;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::utils::NotFound;
@@ -107,7 +107,7 @@ fn test_proofs<MC>(full: bool, verify_fn: StepperVerifyFn<MC>, inputs: TestConfi
 where
     MC: MemoryConfig,
     MC::State<Normal>: Foldable<HashFold>,
-    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
 {
     let make_stepper = make_stepper_factory::<MC>(&inputs, None);
 
@@ -139,7 +139,7 @@ fn run_steps_ladder<MC, F>(
 ) where
     MC: MemoryConfig,
     MC::State<Normal>: Foldable<HashFold>,
-    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleTreeFold>,
+    for<'a> MC::State<Prove<'a>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
     F: Fn() -> PvmStepper<NoHooks, MC>,
 {
     let expected_steps = ladder.iter().sum::<usize>();

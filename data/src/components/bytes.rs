@@ -39,9 +39,8 @@ use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::Suspended;
+use crate::merkle_proof::proof_tree::MerkleProofFold;
 use crate::merkle_proof::sequence_as_tree_from_proof;
-use crate::merkle_tree::MerkleTree;
-use crate::merkle_tree::MerkleTreeFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -280,15 +279,15 @@ impl Foldable<HashFold> for Bytes<Prove<'_>> {
     }
 }
 
-impl Foldable<MerkleTreeFold> for Bytes<Prove<'_>> {
-    fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
+impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
         // generation. This means we need to use `previous` state for the length and data.
 
         let length = self.bytes.previous.len();
         let length_data = serialise(length as u64).expect("Serialising length should not fail");
         let is_length_needed = self.bytes.need_length_in_proof();
-        let length_node = MerkleTree::make_merkle_leaf(length_data, is_length_needed);
+        let length_node = MerkleProofFold::new_leaf(is_length_needed, length_data);
 
         let get_item = |range: Range<usize>| {
             let accessed = self.bytes.was_accessed(range.clone());
@@ -300,7 +299,7 @@ impl Foldable<MerkleTreeFold> for Bytes<Prove<'_>> {
             // variably sized.
             let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
 
-            MerkleTree::make_merkle_leaf(leaf_data, accessed)
+            MerkleProofFold::new_leaf(accessed, leaf_data)
         };
 
         self.fold_generic(builder, length, length_node, get_item)

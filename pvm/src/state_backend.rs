@@ -49,9 +49,9 @@ mod tests {
     use octez_riscv_data::hash::PartialHashFold;
     use octez_riscv_data::merkle_proof::DeserialiserNode;
     use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
-    use octez_riscv_data::merkle_tree::MerkleTree;
-    use octez_riscv_data::merkle_tree::MerkleTreeFold;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Provable;
@@ -115,8 +115,7 @@ mod tests {
         }
 
         // The Verify mode needs a proof, so we generate it from the Prove mode
-        let merkle_tree = MerkleTree::from_foldable(&mem_prove);
-        let proof_tree = merkle_tree.compress();
+        let proof_tree = MerkleProof::from_foldable(&mem_prove);
         let proof_deser = ProofTree::Present(&proof_tree);
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
@@ -170,8 +169,8 @@ mod tests {
             }
         }
 
-        impl Foldable<MerkleTreeFold> for Foo<Prove<'_>> {
-            fn fold(&self, builder: MerkleTreeFold) -> MerkleTree {
+        impl Foldable<MerkleProofFold> for Foo<Prove<'_>> {
+            fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
                 let mut node = builder.into_node_fold();
                 node.add(&self.bar);
                 node.done()
@@ -207,11 +206,10 @@ mod tests {
 
         operation(&mut foo_prove);
 
-        let merkle_tree = MerkleTree::from_foldable(&foo_prove);
-        let expected_hash = Hash::from_foldable(&foo_prove);
-
-        let merkle_proof = merkle_tree.compress();
+        let merkle_proof = MerkleProof::from_foldable(&foo_prove);
         let proof_deser = ProofTree::Present(&merkle_proof);
+
+        let expected_hash = Hash::from_foldable(&foo_prove);
 
         let mut foo_verify = Foo::<Verify>::from_proof(proof_deser)
             .unwrap()
