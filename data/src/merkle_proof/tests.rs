@@ -4,12 +4,19 @@
 //! Tests for Merkle proofs
 
 use bincode::Decode;
+use bincode::Encode;
 
+use super::proof_tree::MerkleProofFold;
+use crate::foldable::Fold;
+use crate::foldable::Foldable;
+use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::DeserialiserNode;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::ProofError;
+use crate::merkle_proof::Suspended;
+use crate::merkle_proof::descend_tree;
 use crate::merkle_proof::proof_binary::StreamDeserialiser;
 use crate::merkle_proof::proof_binary::StreamInput;
 use crate::merkle_proof::proof_binary::StreamParserComb;
@@ -20,6 +27,7 @@ use crate::merkle_proof::tag::InvalidTagError;
 use crate::merkle_proof::tag::TAG_BLIND;
 use crate::merkle_proof::tag::TAG_NODE;
 use crate::merkle_proof::tag::TAG_READ;
+use crate::serialisation::serialise;
 
 fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
     proof: D,
@@ -460,4 +468,55 @@ fn test_valid_computation_stream() {
         .concat(),
     );
     assert_eq!(res.unwrap(), 0x140A_0000 + 0xC0005);
+}
+
+struct TestLeaf<T>(T);
+
+impl<T: Encode> Foldable<MerkleProofFold> for TestLeaf<T> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        let data = serialise(&self.0).expect("Serialising u8 should not fail");
+        builder.into_leaf(true, data)
+    }
+}
+
+#[test]
+fn test_descend_tree_trailing_remainder() {
+    let arity = 4;
+    let leaves = 17;
+    let generator = |idx: usize| TestLeaf(idx);
+    let seq_as_tree = IndexableSeqAsTree::new(leaves, arity, &generator);
+    let proof = MerkleProof::from_foldable(&seq_as_tree);
+
+    let MerkleProof::Node(root) = &proof else {
+        panic!("The sequence proof root should be a node")
+    };
+    assert_eq!(root.children.len(), 2);
+    let MerkleProof::Node(right_depth_one) = &root.children[1] else {
+        panic!("The right subtree should start with a node")
+    };
+    assert_eq!(right_depth_one.children.len(), 1);
+    assert!(matches!(right_depth_one.children[0], MerkleProof::Node(_)));
+
+    let mut visited = Vec::new();
+
+    descend_tree(
+        ProofTree::Present(&proof),
+        arity,
+        0,
+        leaves,
+        &mut |idx, proof| {
+            let leaf = proof.into_leaf::<usize>()?;
+            Ok(leaf.map(|leaf| {
+                let Partial::Present(value) = leaf else {
+                    panic!("Expected a present leaf in this proof")
+                };
+                visited.push((idx, value));
+            }))
+        },
+    )
+    .map(ProofTreeResult::into_result)
+    .expect("descend_tree should parse a 17-leaf arity-4 tree with trailing remainder");
+
+    let expected: Vec<_> = (0..leaves).map(|idx| (idx, idx)).collect();
+    assert_eq!(visited, expected);
 }
