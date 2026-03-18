@@ -12,6 +12,9 @@ use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
 use crate::foldable::Unfoldable;
+use crate::hash::PartialHash;
+use crate::hash::PartialHashFold;
+use crate::tree::Tree;
 
 /// Driver for `Foldable` that lets you turn an indexable sequence into a tree-like structure where
 /// the leaves are the items of the sequence
@@ -220,6 +223,65 @@ where
     let depth = length.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
 
     descend_helper(source, length, depth, 0, arity, for_leaf)
+}
+
+/// Helper structure that can be used to adjust the depth of a proof tree for growable sequences
+///
+/// Use this when folding a `IndexableSeqAsTree` subtree that has changed in depth.
+///
+/// ```ignore
+/// builder.add(&DepthAdjustedSeqAsTree {
+///    inner: IndexableSeqAsTree::new(new_len, ...),
+///    original_depth: old_depth,
+///    current_depth: new_depth,
+/// });
+/// ```
+pub struct DepthAdjustedSeqAsTree<T> {
+    pub inner: T,
+    pub original_depth: u32,
+    pub current_depth: u32,
+}
+
+impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for DepthAdjustedSeqAsTree<T> {
+    fn fold(&self, mut builder: PartialHashFold) -> PartialHash {
+        // If the original depth is larger than the current depth, then we need to scope the proof
+        // that underlies the `PartialHash::Blinded` to not exceed that depth. We can do that by
+        // picking the first child of any node until we reach the original depth - thereby
+        // discarding the remaining child trees.
+        if self.original_depth > self.current_depth {
+            builder = builder.map_reference_proof(|mut proof| {
+                for _ in self.current_depth..self.original_depth {
+                    proof = match proof {
+                        Tree::Node(mut node) => {
+                            if node.children.is_empty() {
+                                return None;
+                            }
+
+                            node.children.remove(0)
+                        }
+
+                        Tree::Leaf(_) => return None,
+                    };
+                }
+
+                Some(proof)
+            });
+        }
+
+        // If the original depth is smaller than the current depth, then we need to add dummy layers
+        // onto the proof internal to the `PartialHashFold`.
+        if self.original_depth < self.current_depth {
+            builder = builder.map_reference_proof(|mut proof| {
+                for _ in self.original_depth..self.current_depth {
+                    proof = Tree::node_without_data(vec![proof]);
+                }
+
+                Some(proof)
+            });
+        }
+
+        self.inner.fold(builder)
+    }
 }
 
 #[cfg(test)]
