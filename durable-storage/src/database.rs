@@ -146,17 +146,8 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
     pub fn read(&self, key: &Key, offset: usize, mut output: impl BufMut) -> Result<usize, Error> {
-        let value = self.get(key)?;
-        let value_length = value.as_ref().len();
-        if offset > value_length {
-            Err(InvalidArgumentError::OffsetTooLarge)?
-        }
-
-        let end = offset
-            .saturating_add(output.remaining_mut())
-            .min(value_length);
-
-        let source_slice = &value.as_ref()[offset..end];
+        let slice = self.read_bytes(key, offset, output.remaining_mut())?;
+        let source_slice = slice.as_ref();
         output.put_slice(source_slice);
         Ok(source_slice.len())
     }
@@ -227,7 +218,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Fails if:
     ///  - The key does not exist in the database.
     pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
-        M::value_length(self, key)
+        Ok(self.get(key)?.as_ref().len())
     }
 
     /// Retrieve the value associated with the provided key.
@@ -265,12 +256,6 @@ pub trait DatabaseMode: Mode {
         this: &Database<KV, Self>,
         key: &Key,
     ) -> Result<bool, Error>;
-
-    /// See [`Database::value_length`]
-    fn value_length<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-    ) -> Result<usize, Error>;
 
     /// See [`Database::set`]
     fn set<KV: BackgroundKeyValueStore>(
@@ -322,14 +307,6 @@ impl DatabaseMode for Normal {
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => Ok(false),
             Err(other_error) => Err(other_error),
         }
-    }
-
-    fn value_length<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-    ) -> Result<usize, Error> {
-        let value = this.inner.persistent.get(key.as_ref())?;
-        Ok(value.as_ref().len())
     }
 
     fn set<KV: BackgroundKeyValueStore>(
