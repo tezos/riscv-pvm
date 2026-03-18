@@ -506,7 +506,6 @@ fn test_descend_tree_trailing_remainder() {
     descend_tree(
         ProofTree::Present(&proof),
         arity,
-        0,
         leaves,
         &mut |idx, proof| {
             let leaf = proof.into_leaf::<usize>()?;
@@ -535,7 +534,6 @@ fn round_trip_descend_tree_indexable_seq_as_tree() {
         descend_tree(
             ProofTree::Present(&proof),
             arity.get(),
-            0,
             data.len(),
             &mut |idx, proof| {
                 let leaf = proof.into_leaf::<usize>()?;

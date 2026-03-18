@@ -219,7 +219,7 @@ impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<I
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let mut leaves = Vec::with_capacity(LEN);
 
-        let result = descend_tree(proof, ARITY, 0, LEN, &mut |_idx, proof| {
+        let result = descend_tree(proof, ARITY, LEN, &mut |_idx, proof| {
             let result = Item::from_proof(proof)?;
             let result = result.map(|leaf| {
                 leaves.push(leaf);
@@ -237,55 +237,86 @@ impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<I
     }
 }
 
-/// Descend a Merkle proof tree, calling `for_leaf` on each leaf encountered. The tree is described
-/// to have a number of leaves equal to the given `leaves`. The node arity is given by `arity`.
-/// Leaves are encountered in depth-first order left-to-right.
-pub fn descend_tree<Proof, LeafHandler>(
+// Internal helper that mirrors `IndexableSeqAsTree::fold`: it keeps a fixed total length and
+// decrements depth on each recursive step.
+fn descend_tree_helper<Proof, LeafHandler>(
     proof: Proof,
     arity: usize,
-    start_leaf: usize,
-    leaves: usize,
+    total_leaves: usize,
+    current_depth: u32,
+    current_start: usize,
     for_leaf: &mut LeafHandler,
 ) -> SuspendedResult<Proof, ()>
 where
     LeafHandler: FnMut(usize, Proof) -> SuspendedResult<Proof, ()>,
     Proof: Deserialiser,
 {
-    // This is a special case for when the entire tree has only a single leaf. We check
-    // `start_leaf` here to ensure this case isn't used on subsequence recursive calls of the
-    // function, if there is a single element left over at the right hand side of the tree.
-    if leaves == 1 && start_leaf == 0 {
-        return for_leaf(start_leaf, proof);
-    }
+    let mut ctx = proof.into_node()?;
 
-    let ctx = proof.into_node()?;
+    // Time to add leaves.
+    if current_depth == 0 {
+        for idx in current_start..current_start + arity {
+            if idx >= total_leaves {
+                break;
+            }
 
-    if leaves <= arity {
-        let ctx = (0..leaves).try_fold(ctx, |ctx, idx| {
-            let (ctx, ()) = ctx.next_branch_with(|ctx| for_leaf(idx + start_leaf, ctx))?;
-
-            Ok(ctx)
-        })?;
+            let (new_ctx, ()) = ctx.next_branch_with(|ctx| for_leaf(idx, ctx))?;
+            ctx = new_ctx;
+        }
 
         return ctx.done(());
     }
 
-    let chunk_len = arity.pow(leaves.saturating_sub(1).checked_ilog(arity).unwrap_or(0));
-    let chunks = leaves.div_ceil(chunk_len);
+    let next_chunk_len = arity.pow(current_depth);
 
-    let ctx = (0..chunks).try_fold(ctx, |ctx, chunk_idx| {
-        let child_start = start_leaf + chunk_idx * chunk_len;
+    for child_no in 0..arity {
+        let next_start = current_start + child_no * next_chunk_len;
 
-        let child_leaves = chunk_len.min(leaves - chunk_idx * chunk_len);
+        if next_start >= total_leaves {
+            break;
+        }
 
-        let (ctx, ()) = ctx.next_branch_with(|ctx| {
-            descend_tree(ctx, arity, child_start, child_leaves, for_leaf)
+        let (new_ctx, ()) = ctx.next_branch_with(|ctx| {
+            descend_tree_helper(
+                ctx,
+                arity,
+                total_leaves,
+                current_depth - 1,
+                next_start,
+                for_leaf,
+            )
         })?;
-
-        Ok(ctx)
-    })?;
+        ctx = new_ctx;
+    }
 
     ctx.done(())
+}
+
+/// Descend a Merkle proof tree, calling `for_leaf` on each leaf encountered. The tree is described
+/// to have a number of leaves equal to the given `total_leaves`. The node arity is given by
+/// `arity`. Leaves are encountered in depth-first order left-to-right.
+pub fn descend_tree<Proof, LeafHandler>(
+    proof: Proof,
+    arity: usize,
+    total_leaves: usize,
+    for_leaf: &mut LeafHandler,
+) -> SuspendedResult<Proof, ()>
+where
+    LeafHandler: FnMut(usize, Proof) -> SuspendedResult<Proof, ()>,
+    Proof: Deserialiser,
+{
+    // For compatibility with the previous Merklisation scheme, a single-leaf root is represented
+    // as a leaf rather than a node.
+    if total_leaves == 1 {
+        return for_leaf(0, proof);
+    }
+
+    let depth = total_leaves
+        .saturating_sub(1)
+        .checked_ilog(arity)
+        .unwrap_or(0);
+
+    descend_tree_helper(proof, arity, total_leaves, depth, 0, for_leaf)
 }
 
 /// Parse proof as a sequence with length represented as a Merkle tree.
@@ -355,7 +386,7 @@ where
 
         let mut for_leaf = |idx, proof: Proof| with_item(&mut state, idx, proof);
 
-        let result = descend_tree(proof, arity, 0, len, &mut for_leaf)?;
+        let result = descend_tree(proof, arity, len, &mut for_leaf)?;
         Ok(result.map(|()| state))
     })?;
 
