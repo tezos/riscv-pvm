@@ -19,8 +19,8 @@ pub struct IndexableSeqAsTree<'a, L, G> {
     /// Total length of the sequence (i.e. not just the number of items in the current chunk)
     total_len: usize,
 
-    /// Depth of the current chunk
-    current_depth: u32,
+    /// Number of items in the current chunk
+    current_len: usize,
 
     /// Index where the current chunk starts
     current_start: usize,
@@ -52,13 +52,9 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
     /// [A, B, C] --> ((A B) (C))
     /// ```
     pub fn new(len: usize, arity: usize, generator: &'a G) -> Self {
-        // This is the tree depth needed to cover `len` items with nodes of `arity` children each.
-        // We will gradually traverse down to depth 0, where the leaves are placed.
-        let depth = len.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
-
         Self {
             total_len: len,
-            current_depth: depth,
+            current_len: len,
             current_start: 0,
             arity,
             generator,
@@ -82,13 +78,8 @@ where
 
         let mut builder = builder.into_node_fold();
 
-        // Time to add leaves.
-        if self.current_depth == 0 {
-            for idx in self.current_start..self.current_start + self.arity {
-                if idx >= self.total_len {
-                    break;
-                }
-
+        if self.current_len <= self.arity {
+            for idx in self.current_start..self.current_start + self.current_len {
                 let item = (self.generator)(idx);
                 builder.add(&item);
             }
@@ -96,18 +87,22 @@ where
             return builder.done();
         }
 
-        let next_chunk_len = self.arity.pow(self.current_depth);
+        let next_chunk_len = self.arity.pow(
+            self.current_len
+                .saturating_sub(1)
+                .checked_ilog(self.arity)
+                .unwrap_or(0),
+        );
+        let chunks = self.current_len.div_ceil(next_chunk_len);
 
-        for child_no in 0..self.arity {
-            let next_start = self.current_start + child_no * next_chunk_len;
-
-            if next_start >= self.total_len {
-                break;
-            }
+        for chunk_idx in 0..chunks {
+            let chunk_offset = chunk_idx * next_chunk_len;
+            let next_start = self.current_start + chunk_offset;
+            let next_len = next_chunk_len.min(self.current_len - chunk_offset);
 
             builder.add(&IndexableSeqAsTree {
                 total_len: self.total_len,
-                current_depth: self.current_depth - 1,
+                current_len: next_len,
                 current_start: next_start,
                 arity: self.arity,
                 generator: self.generator,
@@ -151,8 +146,8 @@ impl<T: Unfoldable, const ARITY: usize, const LEN: usize> Unfoldable for Many<T,
 fn descend_helper<U, LeafHandler>(
     source: U,
     total_len: usize,
-    current_depth: u32,
     current_start: usize,
+    current_len: usize,
     arity: usize,
     for_leaf: &mut LeafHandler,
 ) -> Result<(), U::Error>
@@ -166,36 +161,29 @@ where
 
     let mut source = source.into_node()?;
 
-    if current_depth == 0 {
-        for idx in current_start..current_start + arity {
-            if idx >= total_len {
-                break;
-            }
-
+    if current_len <= arity {
+        for idx in current_start..current_start + current_len {
             source.next_branch_with(|ctx| for_leaf(idx, ctx))?;
         }
 
         return source.done(());
     }
 
-    let next_chunk_len = arity.pow(current_depth);
+    let next_chunk_len = arity.pow(
+        current_len
+            .saturating_sub(1)
+            .checked_ilog(arity)
+            .unwrap_or(0),
+    );
+    let chunks = current_len.div_ceil(next_chunk_len);
 
-    for child_no in 0..arity {
-        let next_start = current_start + child_no * next_chunk_len;
-
-        if next_start >= total_len {
-            break;
-        }
+    for chunk_idx in 0..chunks {
+        let chunk_offset = chunk_idx * next_chunk_len;
+        let next_start = current_start + chunk_offset;
+        let next_len = next_chunk_len.min(current_len - chunk_offset);
 
         source.next_branch_with(|ctx| {
-            descend_helper(
-                ctx,
-                total_len,
-                current_depth - 1,
-                next_start,
-                arity,
-                for_leaf,
-            )
+            descend_helper(ctx, total_len, next_start, next_len, arity, for_leaf)
         })?
     }
 
@@ -217,9 +205,7 @@ where
     U: Unfold,
     LeafHandler: FnMut(usize, U) -> Result<(), U::Error>,
 {
-    let depth = length.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
-
-    descend_helper(source, length, depth, 0, arity, for_leaf)
+    descend_helper(source, length, 0, length, arity, for_leaf)
 }
 
 #[cfg(test)]
@@ -234,47 +220,9 @@ mod tests {
     use crate::foldable::tests::TestTree;
     use crate::serialisation::serialise;
 
-    /// Build a Merkle tree with the given arity from the provided leaves.
-    ///
-    /// This function emulates the Merkle tree layout which was previously used for sequences.
-    fn build_custom_merkle_tree(arity: usize, mut nodes: Vec<TestTree>) -> TestTree {
-        assert!(!nodes.is_empty(), "Cannot build a tree with no leaves");
-
-        let mut next_level = Vec::with_capacity(nodes.len().div_ceil(arity));
-
-        while nodes.len() > 1 {
-            for chunk in nodes.chunks(arity) {
-                next_level.push(TestTree::Node(chunk.to_vec()));
-            }
-
-            std::mem::swap(&mut nodes, &mut next_level);
-            next_level.truncate(0);
-        }
-
-        nodes.pop().unwrap_or_else(|| unreachable!())
-    }
-
     fn generator(i: usize) -> TestTree {
         let bytes: Vec<u8> = serialise(i).unwrap();
         TestTree::Leaf(bytes)
-    }
-
-    /// This test ensures that the Merkle tree layout produced by [`IndexableSeqAsTree`] is
-    /// consistent with the previous Merkle tree layout used for sequences.
-    #[test]
-    fn consistency_with_previous_merkle_tree_layout() {
-        proptest::proptest!(|(arity in 2usize..=32, max_len in 1..=1024usize)| {
-            let driver = IndexableSeqAsTree::new(max_len, arity, &generator);
-            let tree = driver.fold(TestFolder);
-
-            let custom_tree =
-                build_custom_merkle_tree(arity, (0..max_len).map(generator).collect());
-
-            assert_eq!(
-                tree, custom_tree,
-                "arity = {arity}, max_len = {max_len}\nleft = {tree:#?}\nright = {custom_tree:#?}"
-            );
-        });
     }
 
     /// Test length zero case.
