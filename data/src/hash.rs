@@ -302,6 +302,21 @@ impl PartialHashFold {
             }
         }
     }
+
+    /// Modify the reference proof that `PartialHashFold` uses when traversing the described
+    /// foldable structure.
+    ///
+    /// It is necessary to amend the reference proof when it doesn't align with the structure that
+    /// is described to the `PartialHashFold`. E.g. when the state tree has changed compared to the
+    /// original proof tree.
+    pub fn map_reference_proof(
+        self,
+        proj: impl FnOnce(MerkleProof) -> Option<MerkleProof>,
+    ) -> PartialHashFold {
+        PartialHashFold {
+            proof: self.proof.and_then(proj),
+        }
+    }
 }
 
 impl Fold for PartialHashFold {
