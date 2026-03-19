@@ -3,8 +3,12 @@
 
 //! Tests for Merkle proofs
 
+use std::num::NonZeroUsize;
+
 use bincode::Decode;
 use bincode::Encode;
+use proptest::proptest;
+use proptest::test_runner::TestCaseResult;
 
 use super::proof_tree::MerkleProofFold;
 use crate::foldable::Fold;
@@ -519,4 +523,37 @@ fn test_descend_tree_trailing_remainder() {
 
     let expected: Vec<_> = (0..leaves).map(|idx| (idx, idx)).collect();
     assert_eq!(visited, expected);
+}
+
+#[test]
+fn round_trip_descend_tree_indexable_seq_as_tree() {
+    fn test(data: Vec<usize>, arity: NonZeroUsize) -> TestCaseResult {
+        let get_item = |idx: usize| TestLeaf(data[idx]);
+        let seq_as_tree = IndexableSeqAsTree::new(data.len(), arity.get(), &get_item);
+        let proof = MerkleProof::from_foldable(&seq_as_tree);
+
+        descend_tree(
+            ProofTree::Present(&proof),
+            arity.get(),
+            0,
+            data.len(),
+            &mut |idx, proof| {
+                let leaf = proof.into_leaf::<usize>()?;
+                Ok(leaf.map(|leaf| {
+                    let Partial::Present(value) = leaf else {
+                        panic!("Expected a present leaf in this proof")
+                    };
+                    assert_eq!(value, data[idx]);
+                }))
+            },
+        )
+        .unwrap()
+        .into_result();
+
+        Ok(())
+    }
+
+    proptest!(|(data: Vec<usize>, arity in 1..17usize)| {
+        test(data, NonZeroUsize::new(arity).unwrap())?;
+    });
 }
