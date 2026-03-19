@@ -306,8 +306,8 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
     }
 }
 
-impl Foldable<PartialHashFold<'_>> for Bytes<Verify> {
-    fn fold(&self, builder: PartialHashFold<'_>) -> PartialHash {
+impl Foldable<PartialHashFold> for Bytes<Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
         if self.bytes.is_completely_absent() {
             return builder.previous();
         }

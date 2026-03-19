@@ -278,7 +278,7 @@ fn proof_blinding() {
             prop_assert!(catch_not_found(|| verifier_state.0.1[i]).is_err());
         }
 
-        let partial_hash = PartialHash::from_foldable(Some(&merkle_proof), &verifier_state.0);
+        let partial_hash = PartialHash::from_foldable(Some(merkle_proof), &verifier_state.0);
         prop_assert!(partial_hash.to_hash().is_some());
     })
 }
@@ -363,7 +363,7 @@ fn atom_is_same_across_modes() {
         prop_assert_eq!(results_normal, results_verify);
 
         let hash_verify =
-            PartialHash::from_foldable(Some(&merkle_proof), &atom_verify)
+            PartialHash::from_foldable(Some(merkle_proof), &atom_verify)
                 .to_hash()
                 .unwrap();
         prop_assert_eq!(hash_normal, hash_verify);

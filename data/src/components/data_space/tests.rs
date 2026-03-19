@@ -395,14 +395,14 @@ unsafe fn test_data_space_with_funs(
     let (mut verify_cell, out_proof) =
         proof_tree::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree)).unwrap();
 
-    let OwnedProofTree::Present(out_tree) = &out_proof else {
+    let OwnedProofTree::Present(out_proof) = out_proof else {
         panic!("Expected present proof");
     };
-    assert_eq!(&proof_tree, out_tree);
+    assert_eq!(&proof_tree, &out_proof);
 
     // The initial verifier state must match that of the initial state against which we
     // produced the proof.
-    let verifier_init_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+    let verifier_init_hash = PartialHash::from_foldable(Some(out_proof.clone()), &verify_cell)
         .to_hash()
         .unwrap();
     assert_eq!(verifier_init_hash, init_hash);
@@ -412,7 +412,7 @@ unsafe fn test_data_space_with_funs(
     // Once we're doing replaying the computation on the verifier side, the final state must
     // match that of the prover's. If not, that means we produced a proof that results in a
     // transition that we did not intend to prove.
-    let verifier_post_hash = PartialHash::from_foldable(out_proof.as_ref(), &verify_cell)
+    let verifier_post_hash = PartialHash::from_foldable(Some(out_proof), &verify_cell)
         .to_hash()
         .unwrap();
     assert_eq!(verifier_post_hash, post_hash);

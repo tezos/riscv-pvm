@@ -107,7 +107,7 @@ pub(crate) mod tests {
                 verify_foo.bar.write(bar.wrapping_add(1));
                 verify_foo.qux.write(qux.map(|x| x.wrapping_add(1)));
 
-                let verify_hash = PartialHash::from_foldable(Some(&proof), &verify_foo)
+                let verify_hash = PartialHash::from_foldable(Some(proof), &verify_foo)
                     .to_hash()
                     .unwrap();
                 assert_eq!(verify_hash, final_hash)
