@@ -350,8 +350,8 @@ pub enum ProofPart<T> {
 }
 
 impl<T> ProofPart<T> {
-    /// Obtain a reference to the inner value, if present. Otherwise, return `None`.
-    pub fn as_ref(&self) -> Option<&T> {
+    /// Obtain the inner value, if present. Otherwise, return `None`.
+    pub fn into_present(self) -> Option<T> {
         match self {
             Self::Present(inner) => Some(inner),
             Self::Absent => None,

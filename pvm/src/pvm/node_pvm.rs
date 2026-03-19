@@ -253,13 +253,13 @@ impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
     /// Upon success, return the input request which corresponds to the initial state of the proof.
     pub fn verify_proof(
         &mut self,
-        merkle_proof_tree: &MerkleProof,
+        merkle_proof_tree: MerkleProof,
         final_state_hash: &Hash,
         input: Option<PvmInput>,
         pvm_hooks: impl PvmHooks,
     ) -> Option<InputRequest>
     where
-        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        DS: Foldable<PartialHashFold>,
     {
         self.with_backend_mut(|pvm| {
             match input {

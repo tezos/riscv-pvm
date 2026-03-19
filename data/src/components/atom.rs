@@ -186,7 +186,7 @@ impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
     }
 }
 
-impl<T: Encode + 'static> Foldable<PartialHashFold<'_>> for Atom<T, Verify> {
+impl<T: Encode + 'static> Foldable<PartialHashFold> for Atom<T, Verify> {
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
         let hash = match &self.atom {
             Partial::Absent => return builder.previous(),

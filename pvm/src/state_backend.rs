@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(hash_normal, hash_prove);
 
         // Normal and Verify mode should be identical
-        let hash_verify = PartialHash::from_foldable(Some(&proof_tree), &mem_verify)
+        let hash_verify = PartialHash::from_foldable(Some(proof_tree), &mem_verify)
             .to_hash()
             .unwrap();
         assert_eq!(hash_normal, hash_verify);
@@ -177,7 +177,7 @@ mod tests {
             }
         }
 
-        impl Foldable<PartialHashFold<'_>> for Foo<Verify> {
+        impl Foldable<PartialHashFold> for Foo<Verify> {
             fn fold(&self, builder: PartialHashFold) -> PartialHash {
                 let mut node = builder.into_node_fold();
                 node.add(&self.bar);
@@ -217,7 +217,7 @@ mod tests {
 
         let final_hash = catch_not_found(move || {
             operation(&mut foo_verify);
-            PartialHash::from_foldable(Some(&merkle_proof), &foo_verify)
+            PartialHash::from_foldable(Some(merkle_proof), &foo_verify)
                 .to_hash()
                 .unwrap()
         })

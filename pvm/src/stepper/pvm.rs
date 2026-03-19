@@ -23,7 +23,6 @@ use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
-use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
 use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -338,8 +337,8 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
     /// Useful for testing the stream deserialisation.
     pub fn verify_proof_using_raw_bytes(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
-        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
-        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        MC::State<Verify>: Foldable<PartialHashFold>,
+        DS: Foldable<PartialHashFold>,
         DS: FromProof + DurableStorage<Verify>,
     {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
@@ -358,31 +357,33 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
 
         let stepper = self.to_verify_stepper(pvm)?;
 
-        stepper.verify_proof_internal(ProofPart::Present(proof.tree()), proof.final_state_hash())
+        let expected_final_hash = proof.final_state_hash();
+        let proof_tree = OwnedProofTree::Present(proof.into_tree());
+        stepper.verify_proof_internal(proof_tree, expected_final_hash)
     }
 
     /// Verify a Merkle proof. The [`PvmStepper`] is used for inbox information.
     pub fn verify_proof(&self, proof: Proof) -> Result<(), ProofVerificationFailure>
     where
-        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
-        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        MC::State<Verify>: Foldable<PartialHashFold>,
+        DS: Foldable<PartialHashFold>,
         DS: FromProof + DurableStorage<Verify>,
     {
         let proof_tree = ProofTree::Present(proof.tree());
         let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
-        let deserialised_proof_tree = match deserialised_proof_tree {
+        let gotten_proof_tree = match deserialised_proof_tree {
             OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
             OwnedProofTree::Absent => ProofTree::Absent,
         };
         debug_assert_eq!(
-            proof_tree, deserialised_proof_tree,
+            proof_tree, gotten_proof_tree,
             "The Merkle proof tree obtained through deserialisation should match the original proof tree"
         );
 
         let stepper = self.to_verify_stepper(pvm)?;
-        stepper.verify_proof_internal(proof_tree, proof.final_state_hash())
+        stepper.verify_proof_internal(deserialised_proof_tree, proof.final_state_hash())
     }
 
     fn to_verify_stepper(
@@ -457,19 +458,16 @@ impl<H: PvmHooks, MC: MemoryConfig, DS: DurableStorage<Verify>>
 
     fn verify_proof_internal(
         self,
-        proof_tree: ProofTree,
+        proof_tree: OwnedProofTree,
         expected_final_hash: Hash,
     ) -> Result<(), ProofVerificationFailure>
     where
-        for<'a> MC::State<Verify>: Foldable<PartialHashFold<'a>>,
-        for<'a> DS: Foldable<PartialHashFold<'a>>,
+        MC::State<Verify>: Foldable<PartialHashFold>,
+        DS: Foldable<PartialHashFold>,
     {
         let stepper = self.try_step_partial()?;
 
-        let proof_tree = match proof_tree {
-            ProofTree::Present(tree) => Some(tree),
-            ProofTree::Absent => None,
-        };
+        let proof_tree = proof_tree.into_present();
         let final_hash = PartialHash::from_foldable(proof_tree, &stepper.pvm)
             .to_hash()
             .ok_or(ProofVerificationFailure::BadProofForHashing)?;

@@ -506,7 +506,7 @@ fn bytes_are_same_across_modes() {
         prop_assert_eq!(results_normal, results_verify);
 
         let hash_verify =
-            PartialHash::from_foldable(Some(&merkle_proof), &bytes_verify)
+            PartialHash::from_foldable(Some(merkle_proof), &bytes_verify)
                 .to_hash()
                 .unwrap();
         prop_assert_eq!(hash_normal, hash_verify);
@@ -541,9 +541,10 @@ fn proof_round_trip() {
 
             // Parsing the proof so we can see if the proof generation worked.
             let (mut bytes_verify, parsed_proof_tree) = proof_binary::deserialise(&proof_bytes).unwrap();
+            let parsed_proof_tree = parsed_proof_tree.into_present();
 
             // The parsed state should have a state hash equal to that of the initial Normal/Prove state
-            let init_verify_hash = PartialHash::from_foldable(parsed_proof_tree.as_ref(), &bytes_verify).to_hash().unwrap();
+            let init_verify_hash = PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash().unwrap();
             prop_assert_eq!(init_verify_hash, init_prove_hash);
 
             // Run the operation which we would like to verify.
@@ -551,7 +552,7 @@ fn proof_round_trip() {
             prop_assert_eq!(&verify_result, &prove_result);
 
             // The post-operation hash should match the Normal mode hash.
-            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree.as_ref(), &bytes_verify).to_hash().unwrap();
+            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree, &bytes_verify).to_hash().unwrap();
             prop_assert_eq!(after_verify_hash, after_proof_hash);
 
             // Finally advance the Normal mode state as well

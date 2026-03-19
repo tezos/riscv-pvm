@@ -262,15 +262,15 @@ impl PartialHash {
     }
 
     /// Compute a [`PartialHash`] from a foldable structure.
-    pub fn from_foldable<'tree>(
-        proof: Option<&'tree MerkleProof>,
-        foldable: &impl Foldable<PartialHashFold<'tree>>,
+    pub fn from_foldable(
+        proof: Option<MerkleProof>,
+        foldable: &impl Foldable<PartialHashFold>,
     ) -> PartialHash {
         foldable.fold(PartialHashFold { proof })
     }
 }
 
-impl Foldable<PartialHashFold<'_>> for PartialHash {
+impl Foldable<PartialHashFold> for PartialHash {
     fn fold(&self, builder: PartialHashFold) -> Self {
         match self {
             PartialHash::Previous => builder.previous(),
@@ -281,12 +281,12 @@ impl Foldable<PartialHashFold<'_>> for PartialHash {
 }
 
 /// [`Fold`] implementation for computing the [`PartialHash`] of a state
-pub struct PartialHashFold<'tree> {
+pub struct PartialHashFold {
     /// Original proof which is the source of previous hashes
-    proof: Option<&'tree MerkleProof>,
+    proof: Option<MerkleProof>,
 }
 
-impl<'tree> PartialHashFold<'tree> {
+impl PartialHashFold {
     /// Mark the state as present with the given hash.
     pub fn present(self, hash: Hash) -> PartialHash {
         PartialHash::Present(hash)
@@ -304,10 +304,10 @@ impl<'tree> PartialHashFold<'tree> {
     }
 }
 
-impl<'tree> Fold for PartialHashFold<'tree> {
+impl Fold for PartialHashFold {
     type Folded = PartialHash;
 
-    type NodeFold = PartialHashNodeFold<'tree>;
+    type NodeFold = PartialHashNodeFold;
 
     fn into_node_fold(self) -> Self::NodeFold {
         let Some(tree) = self.proof else {
@@ -321,7 +321,7 @@ impl<'tree> Fold for PartialHashFold<'tree> {
         match tree {
             Tree::Node(node) => PartialHashNodeFold {
                 node_hash: None,
-                children: VecDeque::from_iter(&node.children),
+                children: VecDeque::from_iter(node.children),
                 child_hashes: VecDeque::new(),
             },
 
@@ -341,19 +341,19 @@ impl<'tree> Fold for PartialHashFold<'tree> {
 }
 
 /// [`NodeFold`] implementation for computing the [`PartialHash`] of a state
-pub struct PartialHashNodeFold<'tree> {
+pub struct PartialHashNodeFold {
     /// Previous hash for this node, if available
-    node_hash: Option<&'tree Hash>,
+    node_hash: Option<Hash>,
 
     /// Proof for each remaining child of the node
-    children: VecDeque<&'tree MerkleProof>,
+    children: VecDeque<MerkleProof>,
 
     /// Hash of each child seen so far
     child_hashes: VecDeque<PartialHash>,
 }
 
-impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
-    type Parent = PartialHashFold<'tree>;
+impl NodeFold for PartialHashNodeFold {
+    type Parent = PartialHashFold;
 
     fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
         let hash = match self.children.pop_front() {
@@ -411,7 +411,6 @@ impl<'tree> NodeFold for PartialHashNodeFold<'tree> {
         if saw_absent_child {
             return self
                 .node_hash
-                .cloned()
                 .map(PartialHash::Present)
                 .unwrap_or(PartialHash::Previous);
         }
