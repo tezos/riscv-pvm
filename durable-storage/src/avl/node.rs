@@ -20,22 +20,37 @@ use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
 
+/// Metadata of a [`Node`] needed for accesses.
+#[derive(Clone, Default, Debug, Encode, Decode)]
+pub(super) struct Meta {
+    key: Key,
+
+    /// The difference in heights between child branches (right - left).
+    balance_factor: i64,
+}
+
+/// A serialisable representation of [`Meta`].
+#[derive(Encode, Decode)]
+pub(super) struct MetaHashRepresentation<K: Borrow<self::Key>> {
+    key: K,
+    balance_factor: i64,
+}
+
 /// A serialisable representation of [`Node`].
 #[derive(Encode, Decode)]
 pub(super) struct NodeHashRepresentation<Data, K: Borrow<self::Key>, H: Borrow<self::Hash>> {
-    key: K,
+    meta: MetaHashRepresentation<K>,
     data: Data,
     // The hash of the left subtree.
     left: H,
     // The hash of the right subtree.
     right: H,
-    balance_factor: i64,
 }
 
 /// A node that supports rebalancing and Merklisation.
 #[perfect_derive(Clone, Default, Debug)]
 pub struct Node<TreeId, Data> {
-    key: Key,
+    meta: Meta,
     data: Data,
     left: TreeId,
     right: TreeId,
@@ -45,9 +60,6 @@ pub struct Node<TreeId, Data> {
     ///
     /// An uninitialised hash is a hash that has not been set or has been dirtied.
     hash: OnceLock<Hash>,
-
-    /// The difference in heights between child branches (right - left).
-    balance_factor: i64,
 }
 
 impl<TreeId, Data> From<NodeHashRepresentation<Data, Key, Hash>> for Node<TreeId, Data>
@@ -56,12 +68,14 @@ where
 {
     fn from(node_repr: NodeHashRepresentation<Data, Key, Hash>) -> Self {
         Node {
-            key: node_repr.key,
+            meta: Meta {
+                key: node_repr.meta.key,
+                balance_factor: node_repr.meta.balance_factor,
+            },
             data: node_repr.data,
             left: TreeId::from(node_repr.left),
             right: TreeId::from(node_repr.right),
             hash: OnceLock::new(),
-            balance_factor: node_repr.balance_factor,
         }
     }
 }
@@ -73,9 +87,11 @@ impl<TreeId, Data> Node<TreeId, Data> {
         TreeId: Default,
     {
         Node {
-            key,
+            meta: Meta {
+                key,
+                balance_factor: 0,
+            },
             data: data.into(),
-            balance_factor: 0,
             left: TreeId::default(),
             right: TreeId::default(),
             hash: OnceLock::new(),
@@ -100,11 +116,13 @@ impl<TreeId, Data> Node<TreeId, Data> {
         let right = resolver.get_hash(&self.right);
 
         NodeHashRepresentation {
-            key: &self.key,
+            meta: MetaHashRepresentation {
+                key: &self.meta.key,
+                balance_factor: self.meta.balance_factor,
+            },
             data: &self.data,
             left,
             right,
-            balance_factor: self.balance_factor,
         }
     }
 
@@ -125,19 +143,19 @@ impl<TreeId, Data> Node<TreeId, Data> {
     #[inline]
     /// The difference in heights between child branches.
     pub(super) fn balance_factor(&self) -> i64 {
-        self.balance_factor
+        self.meta.balance_factor
     }
 
     #[inline]
     /// A mutable reference to the difference in heights between child branches.
     pub(super) fn balance_factor_mut(&mut self) -> &mut i64 {
-        &mut self.balance_factor
+        &mut self.meta.balance_factor
     }
 
     #[inline]
     /// The [`Key`] used for determining the [`Node`].
     pub(super) fn key(&self) -> &Key {
-        &self.key
+        &self.meta.key
     }
 
     #[inline]
@@ -256,7 +274,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
 
         let successor_mut = resolver.resolve_mut(&mut successor)?;
 
-        successor_mut.balance_factor = node_mut.balance_factor() - if shrank { 1 } else { 0 };
+        successor_mut.meta.balance_factor = node_mut.balance_factor() - if shrank { 1 } else { 0 };
         successor_mut.left = std::mem::take(&mut node_mut.left);
         successor_mut.right = std::mem::take(&mut node_mut.right);
 
@@ -310,9 +328,9 @@ impl<TreeId, Data> Node<TreeId, Data> {
         if right.root().is_some() {
             let target_node_left = node_mut.left_mut(resolver)?;
             *target_node_left = right;
-            node_mut.balance_factor += 1;
+            node_mut.meta.balance_factor += 1;
         } else if left_shrank {
-            node_mut.balance_factor += 1;
+            node_mut.meta.balance_factor += 1;
         };
 
         Node::rebalance(node, resolver)?;
@@ -358,7 +376,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
         //  - more nodes than 64-bit systems can address.
         //  - more disk space than has ever been produced.
         //  - inserting 2 billion nodes every second since the dawn of the universe.
-        match self.key.cmp(key) {
+        match self.meta.key.cmp(key) {
             // The key already exists and should be updated.
             Ordering::Equal => {
                 data(&mut self.data)?;
@@ -370,7 +388,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
                     .left_mut(resolver)?
                     .upsert(key, offset, data, resolver)?;
                 if grew {
-                    self.balance_factor -= 1;
+                    self.meta.balance_factor -= 1;
                 }
                 Ok(grew)
             }
@@ -379,7 +397,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
                     .right_mut(resolver)?
                     .upsert(key, offset, data, resolver)?;
                 if grew {
-                    self.balance_factor += 1;
+                    self.meta.balance_factor += 1;
                 }
                 Ok(grew)
             }
@@ -437,8 +455,9 @@ impl<TreeId, Data> Node<TreeId, Data> {
         //
         // For inserting a node, this will always be zero, however deletion allows for rotation cases
         // where the balance factor of A is -1
-        let new_node_bf = node_mut.balance_factor - 1 + std::cmp::min(-right_mut.balance_factor, 0);
-        node_mut.balance_factor = new_node_bf;
+        let new_node_bf =
+            node_mut.meta.balance_factor - 1 + std::cmp::min(-right_mut.meta.balance_factor, 0);
+        node_mut.meta.balance_factor = new_node_bf;
 
         // new_A_bf = C.height() - node.height()
         //          = C.height - (1 + std::cmp::max(node.left.height(), A.height()))
@@ -451,7 +470,8 @@ impl<TreeId, Data> Node<TreeId, Data> {
         //                                            B.height() - B.height())
         //
         //          = old_node_bf - 1 + std::cmp::min(new_node_bf, 0)
-        right_mut.balance_factor = right_mut.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
+        right_mut.meta.balance_factor =
+            right_mut.meta.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
 
         let target_right_left = right_mut.left_mut(resolver)?;
         *target_right_left = Tree::from(Some(node.clone()));
@@ -503,7 +523,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
         // As this function assumes old_A_bf is +1:
         //   new_A_bf_1 = std::cmp::min(-A.right.balance_factor, 0)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        left_mut.balance_factor = std::cmp::min(-left_right_mut.balance_factor, 0);
+        left_mut.meta.balance_factor = std::cmp::min(-left_right_mut.meta.balance_factor, 0);
 
         // B's right child is between B and B, it's moved to node's left
         let target_node_left = node_mut.left_mut(resolver)?;
@@ -519,14 +539,14 @@ impl<TreeId, Data> Node<TreeId, Data> {
 
         // If B is 0 or 1, the new node balance factor will be 0
         // If B is -1, the new node balance factor will be 1
-        node_mut.balance_factor = std::cmp::max(0, -left_right_mut.balance_factor);
+        node_mut.meta.balance_factor = std::cmp::max(0, -left_right_mut.meta.balance_factor);
 
         // Set node
         let target_left_right_right = left_right_mut.right_mut(resolver)?;
         *target_left_right_right = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
-        left_right_mut.balance_factor = 0;
+        left_right_mut.meta.balance_factor = 0;
         *node = left_right;
         Ok(())
     }
@@ -574,8 +594,9 @@ impl<TreeId, Data> Node<TreeId, Data> {
         //                                               B.height() - C.height())
         //
         //             = old_node_bf + 1 + std::cmp::max(0, -A.balance_factor)
-        let new_node_bf = node_mut.balance_factor + 1 + std::cmp::max(0, -left_mut.balance_factor);
-        node_mut.balance_factor = new_node_bf;
+        let new_node_bf =
+            node_mut.meta.balance_factor + 1 + std::cmp::max(0, -left_mut.meta.balance_factor);
+        node_mut.meta.balance_factor = new_node_bf;
 
         // new_A_bf = node.height() - B.height()
         //          = (1 + std::cmp::max(node.right.height(), C.height())) - B.height()
@@ -591,7 +612,8 @@ impl<TreeId, Data> Node<TreeId, Data> {
         //
         // For inserting a node, this will always be zero, however deletion allows for rotation cases
         // where the balance factor of A is 1
-        left_mut.balance_factor = left_mut.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
+        left_mut.meta.balance_factor =
+            left_mut.meta.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
 
         let target_left_right = left_mut.right_mut(resolver)?;
         *target_left_right = Tree::from(Some(node.clone()));
@@ -642,7 +664,7 @@ impl<TreeId, Data> Node<TreeId, Data> {
         // As this function assumes old_A_bf is -1:
         //   new_A_bf_1 = std::cmp::max(0, -A.left.balance_factor)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        right_mut.balance_factor = std::cmp::max(0, -right_left_mut.balance_factor);
+        right_mut.meta.balance_factor = std::cmp::max(0, -right_left_mut.meta.balance_factor);
 
         // B's left child is between node and B, it's moved to node's right
         let target_node_right = node_mut.right_mut(resolver)?;
@@ -658,14 +680,14 @@ impl<TreeId, Data> Node<TreeId, Data> {
 
         // If B is 0 or -1, the new node balance factor will be 0
         // If B is 1, the new node balance factor will be -1
-        node_mut.balance_factor = -std::cmp::max(0, right_left_mut.balance_factor);
+        node_mut.meta.balance_factor = -std::cmp::max(0, right_left_mut.meta.balance_factor);
 
         // Set node
         let target_right_left_left = right_left_mut.left_mut(resolver)?;
         *target_right_left_left = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
-        right_left_mut.balance_factor = 0;
+        right_left_mut.meta.balance_factor = 0;
         *node = right_left;
         Ok(())
     }
