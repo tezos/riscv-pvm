@@ -405,14 +405,13 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let old_node1: Node<LazyTreeId, Bytes<Normal>> =
+        let old_node1: Node<LazyTreeId, Normal> =
             Node::new(keys[0].clone(), bytes::Bytes::copy_from_slice(&data[0]));
-        let new_node1: Node<LazyTreeId, Bytes<Normal>> =
-            Node::new(keys[0].clone(), cow_data.as_bytes());
+        let new_node1: Node<LazyTreeId, Normal> = Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2: Node<LazyTreeId, Bytes<Normal>> =
+        let node2: Node<LazyTreeId, Normal> =
             Node::new(keys[1].clone(), bytes::Bytes::copy_from_slice(&data[1]));
-        let node3: Node<LazyTreeId, Bytes<Normal>> =
+        let node3: Node<LazyTreeId, Normal> =
             Node::new(keys[2].clone(), bytes::Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
@@ -530,7 +529,7 @@ mod tests {
             ml.hash().expect("hash operation should succeed.")
         );
 
-        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -552,7 +551,7 @@ mod tests {
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
-        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -569,7 +568,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data2);
+        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1065,7 +1064,7 @@ mod tests {
         let old_hash = ml.hash().expect("hash operation should succeed.");
         ml.write(&key, 0, &data).expect("write should succeed.");
 
-        let node: Node<ArcTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1089,7 +1088,7 @@ mod tests {
         let old_hash = ml.hash().expect("hash operation should succeed.");
 
         let data_len = data.len();
-        let node: Node<LazyTreeId, Bytes<Normal>> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1106,7 +1105,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<LazyTreeId, Bytes<Normal>> =
+        let node: Node<LazyTreeId, Normal> =
             Node::new(key.clone(), bytes::Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
@@ -1341,7 +1340,7 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
-            let node: &Node<LazyTreeId, Bytes<Normal>> =
+            let node: &Node<LazyTreeId, Normal> =
                 node.expect("The node should be retrieved successfully");
             let encoded = node.to_encode(&merkle_layer.inner.resolver);
             let serialised = octez_riscv_data::serialisation::serialise(encoded)
