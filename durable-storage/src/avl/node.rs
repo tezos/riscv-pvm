@@ -10,9 +10,12 @@ use std::sync::OnceLock;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
 use super::resolver::TreeResolver;
@@ -24,7 +27,7 @@ use crate::key::Key;
 
 /// Metadata of a [`Node`] needed for accesses.
 #[derive(Clone, Default, Debug, Encode, Decode)]
-pub(super) struct Meta {
+pub(crate) struct Meta {
     key: Key,
 
     /// The difference in heights between child branches (right - left).
@@ -51,8 +54,8 @@ pub(super) struct NodeHashRepresentation<Data, K: Borrow<self::Key>, H: Borrow<s
 
 /// A node that supports rebalancing and Merklisation.
 #[perfect_derive(Clone, Default, Debug)]
-pub struct Node<TreeId, M: BytesMode> {
-    meta: Meta,
+pub struct Node<TreeId, M: Mode> {
+    meta: Atom<Meta, M>,
     data: Bytes<M>,
     left: TreeId,
     right: TreeId,
@@ -64,16 +67,17 @@ pub struct Node<TreeId, M: BytesMode> {
     hash: OnceLock<Hash>,
 }
 
-impl<TreeId, M: BytesMode> From<NodeHashRepresentation<Bytes<M>, Key, Hash>> for Node<TreeId, M>
+impl<TreeId, M: BytesMode + AtomMode> From<NodeHashRepresentation<Bytes<M>, Key, Hash>>
+    for Node<TreeId, M>
 where
     TreeId: From<Hash>,
 {
     fn from(node_repr: NodeHashRepresentation<Bytes<M>, Key, Hash>) -> Self {
         Node {
-            meta: Meta {
+            meta: Atom::new(Meta {
                 key: node_repr.meta.key,
                 balance_factor: node_repr.meta.balance_factor,
-            },
+            }),
             data: node_repr.data,
             left: TreeId::from(node_repr.left),
             right: TreeId::from(node_repr.right),
@@ -82,17 +86,62 @@ where
     }
 }
 
-impl<TreeId, M: BytesMode> Node<TreeId, M> {
+impl<TreeId, M: Mode> Node<TreeId, M> {
+    /// Mark the hash of this node as dirty.
+    fn invalidate_hash(&mut self) {
+        self.hash = OnceLock::new();
+    }
+
+    #[inline]
+    /// A mutable reference to the left branch.
+    pub(super) fn left_mut<NodeId>(
+        &mut self,
+        resolver: &mut impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&mut Tree<NodeId>, OperationalError> {
+        self.invalidate_hash();
+        resolver.resolve_mut(&mut self.left)
+    }
+
+    #[inline]
+    /// An immutable reference to the left branch.
+    pub(super) fn left_ref<NodeId>(
+        &self,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&Tree<NodeId>, OperationalError> {
+        resolver.resolve(&self.left)
+    }
+
+    #[inline]
+    /// A mutable reference to the right branch.
+    pub(super) fn right_mut<NodeId>(
+        &mut self,
+        resolver: &mut impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&mut Tree<NodeId>, OperationalError> {
+        self.invalidate_hash();
+        resolver.resolve_mut(&mut self.right)
+    }
+
+    #[inline]
+    /// An immutable reference to the right branch.
+    pub(super) fn right_ref<NodeId>(
+        &self,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
+    ) -> Result<&Tree<NodeId>, OperationalError> {
+        resolver.resolve(&self.right)
+    }
+}
+
+impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// Create a new leaf [`Node`] from the given key and data.
     pub(crate) fn new(key: Key, data: impl Into<Bytes<M>>) -> Self
     where
         TreeId: Default,
     {
         Node {
-            meta: Meta {
+            meta: Atom::new(Meta {
                 key,
                 balance_factor: 0,
-            },
+            }),
             data: data.into(),
             left: TreeId::default(),
             right: TreeId::default(),
@@ -104,7 +153,7 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
     /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
     pub(crate) fn to_encode<'a, NodeId>(
         &'a self,
-        resolver: &impl TreeResolver<NodeId, TreeId, M>,
+        resolver: &impl TreeResolver<NodeId, TreeId>,
     ) -> impl Encode + 'a
     where
         Bytes<M>: Encode,
@@ -132,7 +181,7 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
-    pub(crate) fn hash<NodeId>(&self, resolver: &impl TreeResolver<NodeId, TreeId, M>) -> &Hash
+    pub(crate) fn hash<NodeId>(&self, resolver: &impl TreeResolver<NodeId, TreeId>) -> &Hash
     where
         Bytes<M>: Encode,
     {
@@ -158,25 +207,6 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
     /// The [`Key`] used for determining the [`Node`].
     pub(super) fn key(&self) -> &Key {
         &self.meta.key
-    }
-
-    #[inline]
-    /// A mutable reference to the left branch.
-    pub(super) fn left_mut<NodeId>(
-        &mut self,
-        resolver: &mut impl TreeResolver<NodeId, TreeId, M>,
-    ) -> Result<&mut Tree<NodeId>, OperationalError> {
-        self.invalidate_hash();
-        resolver.resolve_mut(&mut self.left)
-    }
-
-    #[inline]
-    /// An immutable reference to the left branch.
-    pub(super) fn left_ref<NodeId>(
-        &self,
-        resolver: &impl TreeResolver<NodeId, TreeId, M>,
-    ) -> Result<&Tree<NodeId>, OperationalError> {
-        resolver.resolve(&self.left)
     }
 
     /// Rebalance the subtree of the [`Node`] so that the difference in height between child
@@ -288,25 +318,6 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
         Ok((successor, shrank))
     }
 
-    #[inline]
-    /// A mutable reference to the right branch.
-    pub(super) fn right_mut<NodeId>(
-        &mut self,
-        resolver: &mut impl TreeResolver<NodeId, TreeId, M>,
-    ) -> Result<&mut Tree<NodeId>, OperationalError> {
-        self.invalidate_hash();
-        resolver.resolve_mut(&mut self.right)
-    }
-
-    #[inline]
-    /// An immutable reference to the right branch.
-    pub(super) fn right_ref<NodeId>(
-        &self,
-        resolver: &impl TreeResolver<NodeId, TreeId, M>,
-    ) -> Result<&Tree<NodeId>, OperationalError> {
-        resolver.resolve(&self.right)
-    }
-
     /// Takes the occupied [`Tree`] with the minimum [`Key`] from this [`Node`]'s subtree and
     /// replaces it with an empty [`Tree`].
     ///
@@ -403,11 +414,6 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
                 Ok(grew)
             }
         }
-    }
-
-    /// Mark the hash of this node as dirty.
-    fn invalidate_hash(&mut self) {
-        self.hash = OnceLock::new();
     }
 
     /// Rotate this [`Node`]'s subtree left.
@@ -695,7 +701,7 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
 }
 
 #[cfg(test)]
-impl<TreeId, M: BytesMode> Node<TreeId, M> {
+impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     #[inline]
     /// The data stored in the [`Node`].
     pub(crate) fn data(&self) -> &Bytes<M> {
@@ -741,6 +747,7 @@ impl<TreeId, M: BytesMode> Node<TreeId, M> {
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
         Bytes<M>: std::fmt::Debug,
+        Atom<Meta, M>: std::fmt::Debug,
     {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
         let right_height = self.right_ref(resolver)?.height(resolver)?;

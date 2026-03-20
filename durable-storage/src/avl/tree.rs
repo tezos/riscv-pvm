@@ -10,12 +10,18 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
+#[cfg(test)]
+use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+#[cfg(test)]
+use crate::avl::node::Meta;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
@@ -35,7 +41,7 @@ impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
-    pub fn delete<TreeId, M: BytesMode>(
+    pub fn delete<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
@@ -95,7 +101,7 @@ impl<NodeId> Tree<NodeId> {
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub fn set<TreeId, M: BytesMode>(
+    pub fn set<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         data: &[u8],
@@ -127,7 +133,7 @@ impl<NodeId> Tree<NodeId> {
     /// [`Node`]s.
     ///
     /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
-    pub(crate) fn to_encode<TreeId, M: BytesMode>(
+    pub(crate) fn to_encode<TreeId, M: Mode>(
         &self,
         resolver: &impl NodeResolver<NodeId, TreeId, M>,
     ) -> impl Encode + '_ {
@@ -135,7 +141,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns the hash of this tree.
-    pub(crate) fn hash<TreeId, M: BytesMode>(
+    pub(crate) fn hash<TreeId, M: Mode>(
         &self,
         resolver: &impl NodeResolver<NodeId, TreeId, M>,
     ) -> Hash {
@@ -151,7 +157,7 @@ impl<NodeId> Tree<NodeId> {
     /// node's right subtree on the next call.
     ///
     /// The iterator yields an error if resolving any intermediate node or subtree fails.
-    pub(crate) fn iter<'tree, 'res, TreeId, M: BytesMode, Res: AvlResolver<NodeId, TreeId, M>>(
+    pub(crate) fn iter<'tree, 'res, TreeId, M: Mode, Res: AvlResolver<NodeId, TreeId, M>>(
         &'tree self,
         resolver: &'res Res,
     ) -> TreeIterator<'tree, 'res, NodeId, TreeId, M, Res> {
@@ -170,7 +176,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// The difference in heights between any child branches in the [`Tree`].
-    pub(super) fn balance_factor<TreeId, M: BytesMode>(
+    pub(super) fn balance_factor<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl NodeResolver<NodeId, TreeId, M>,
     ) -> Result<i64, OperationalError> {
@@ -202,7 +208,7 @@ impl<NodeId> Tree<NodeId> {
     ///  - The occupied [`Tree`] with the minimum [`Key`].
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if the [`Tree`] has shrunk in size.
-    pub(super) fn take_min<TreeId, M: BytesMode>(
+    pub(super) fn take_min<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
@@ -230,7 +236,7 @@ impl<NodeId> Tree<NodeId> {
     /// `data` defines what data is upserted.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn upsert<TreeId, M: BytesMode>(
+    pub(crate) fn upsert<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         offset: usize,
@@ -275,7 +281,7 @@ impl<NodeId> Tree<NodeId> {
     /// given offset, overwriting existing data if the node already exists.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn write<TreeId, M: BytesMode>(
+    pub(crate) fn write<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         offset: usize,
@@ -312,7 +318,7 @@ impl<NodeId> Tree<NodeId> {
     ///
     /// The [`Tree`] must already have balance factor in the range of -2..=2, else it is an invalid
     /// AVL tree.
-    fn rebalance<TreeId, M: BytesMode>(
+    fn rebalance<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<(), OperationalError>
@@ -347,14 +353,8 @@ pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver> {
     _marker: std::marker::PhantomData<fn() -> (TreeId, M)>,
 }
 
-impl<
-    'tree,
-    'res,
-    NodeId,
-    TreeId: 'tree,
-    M: BytesMode + 'tree,
-    Resolver: AvlResolver<NodeId, TreeId, M>,
-> Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+impl<'tree, 'res, NodeId, TreeId: 'tree, M: Mode + 'tree, Resolver: AvlResolver<NodeId, TreeId, M>>
+    Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
 {
     type Item = Result<&'tree Node<TreeId, M>, OperationalError>;
 
@@ -373,14 +373,8 @@ impl<
     }
 }
 
-impl<
-    'tree,
-    'res,
-    NodeId,
-    TreeId: 'tree,
-    M: BytesMode + 'tree,
-    Resolver: AvlResolver<NodeId, TreeId, M>,
-> TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+impl<'tree, 'res, NodeId, TreeId: 'tree, M: Mode + 'tree, Resolver: AvlResolver<NodeId, TreeId, M>>
+    TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
 {
     /// Helper to descend to the leftmost node in the current subtree, pushing nodes onto the stack.
     fn advance_to_leftmost_in_subtree(
@@ -421,7 +415,7 @@ impl<
 impl<NodeId> Tree<NodeId> {
     #[inline]
     /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub fn get<'a, TreeId: 'a, M: BytesMode>(
+    pub fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
         &'a self,
         key: &Key,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
@@ -433,7 +427,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Asserts that the [`Tree`] is a valid AVL tree
-    pub(crate) fn check<TreeId, M: BytesMode>(
+    pub(crate) fn check<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<(), OperationalError>
@@ -441,6 +435,7 @@ impl<NodeId> Tree<NodeId> {
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
         Bytes<M>: std::fmt::Debug,
+        Atom<Meta, M>: std::fmt::Debug,
     {
         let inorder = self.is_inorder(resolver)?;
         let is_balanced = self.is_balanced(resolver)?;
@@ -458,7 +453,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns true if the [`Tree`] is in-order.
-    pub(crate) fn is_inorder<TreeId, M: BytesMode>(
+    pub(crate) fn is_inorder<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<bool, OperationalError> {
@@ -470,7 +465,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
-    pub(super) fn has_correct_balance_factors<TreeId, M: BytesMode>(
+    pub(super) fn has_correct_balance_factors<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<bool, OperationalError>
@@ -478,6 +473,7 @@ impl<NodeId> Tree<NodeId> {
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
         Bytes<M>: std::fmt::Debug,
+        Atom<Meta, M>: std::fmt::Debug,
     {
         match self.root() {
             None => Ok(true),
@@ -488,7 +484,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns the height of the [`Tree`].
-    pub(super) fn height<TreeId, M: BytesMode>(
+    pub(super) fn height<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<u32, OperationalError> {
@@ -499,7 +495,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns true if the [`Tree`] is balanced.
-    pub(super) fn is_balanced<TreeId, M: BytesMode>(
+    pub(super) fn is_balanced<TreeId, M: BytesMode + AtomMode>(
         &self,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
     ) -> Result<bool, OperationalError> {
@@ -512,7 +508,7 @@ impl<NodeId> Tree<NodeId> {
     }
 
     /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
-    pub(super) fn is_inorder_inner<TreeId, M: BytesMode>(
+    pub(super) fn is_inorder_inner<TreeId, M: BytesMode + AtomMode>(
         &self,
         min: &Key,
         max: &Key,
