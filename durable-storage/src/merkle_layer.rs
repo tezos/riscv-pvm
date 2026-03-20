@@ -342,6 +342,7 @@ mod tests {
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
     use crate::storage::TestRepo;
+    use crate::storage::TestRepoTrait;
     use crate::storage::setup_repo;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
@@ -361,7 +362,7 @@ mod tests {
     }
 
     fn new_merkle_layer(repo: TestRepo) -> MerkleLayer<TestKeyValueStore, Normal> {
-        let persistence_layer = TestKeyValueStore::new(&repo)
+        let persistence_layer = TestKeyValueStore::new(repo.as_repo())
             .expect("Creating a persistence layer should succeed")
             .into();
 
@@ -375,7 +376,7 @@ mod tests {
 
         let data = [vec![0; 0], vec![13; 5], vec![42; 129]];
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for i in 0..keys.len() {
@@ -468,7 +469,7 @@ mod tests {
             let data1 = bytes::Bytes::from("property");
             let data2 = bytes::Bytes::from("cow");
 
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut ml = new_merkle_layer(repo);
 
             // Set all the keys in the tree
@@ -521,7 +522,7 @@ mod tests {
     fn test_mavl_create() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("create");
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
         ml.set(&key, &data).expect("setting node should succeed");
@@ -547,7 +548,7 @@ mod tests {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("old");
         let data2 = bytes::Bytes::from("new");
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
@@ -598,7 +599,7 @@ mod tests {
             bytes::Bytes::from("0, 0, 0"),
         ];
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for (key, data) in keys.iter().zip(data.iter()) {
@@ -630,7 +631,7 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
 
@@ -676,7 +677,7 @@ mod tests {
 
         let data = bytes::Bytes::from("left_right");
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
@@ -702,7 +703,7 @@ mod tests {
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
@@ -739,7 +740,7 @@ mod tests {
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
@@ -776,7 +777,7 @@ mod tests {
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
@@ -799,7 +800,7 @@ mod tests {
         #[test]
         fn test_mavl_create_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = bytes::Bytes::from("property");
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut ml = new_merkle_layer(repo);
             let old_hash = ml.hash().expect("hash operation should succeed.");
 
@@ -825,7 +826,7 @@ mod tests {
     fn test_mavl_delete() {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("delete");
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
         ml.set(&key, &data).expect("setting node should succeed");
@@ -855,7 +856,7 @@ mod tests {
         #[test]
         fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
             let data = bytes::Bytes::from("delete_prop");
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut ml = new_merkle_layer(repo);
             let empty_hash = ml.hash().expect("hash operation should succeed.");
 
@@ -883,7 +884,7 @@ mod tests {
     fn test_mavl_delete_keys(keys: &[Key]) {
         let data = bytes::Bytes::from("delete");
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let empty_hash = ml.hash().expect("hash operation should succeed.");
 
@@ -1060,7 +1061,7 @@ mod tests {
     fn test_mavl_write_new_value() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("write_new_value");
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         let old_hash = ml.hash().expect("hash operation should succeed.");
         ml.write(&key, 0, &data).expect("write should succeed.");
@@ -1083,7 +1084,7 @@ mod tests {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("a long value");
         let data2 = bytes::Bytes::from("good");
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash().expect("hash operation should succeed.");
@@ -1131,7 +1132,7 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>());
 
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut ml = new_merkle_layer(repo);
             let old_hash = ml.hash().expect("hash operation should succeed.");
 
@@ -1307,7 +1308,7 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut merkle_layer = new_merkle_layer(repo);
 
         let keys = [

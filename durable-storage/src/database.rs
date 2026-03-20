@@ -408,32 +408,28 @@ mod tests {
     use crate::key::Key;
     use crate::storage::TestKeyValueStore;
     use crate::storage::TestRepo;
+    use crate::storage::TestRepoTrait;
     use crate::storage::setup_repo;
 
     fn new_database(handle: &Handle, repo: TestRepo) -> Database<TestKeyValueStore, Normal> {
-        Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+        Database::try_new(handle, repo.as_repo()).expect("Creating a test database should succeed")
     }
 
     #[cfg(feature = "rocksdb")]
     type PersistentDatabase = Database<crate::persistence_layer::PersistenceLayer, Normal>;
 
     #[cfg(feature = "rocksdb")]
-    fn new_persistent_database() -> (
-        tokio::runtime::Runtime,
-        octez_riscv_test_utils::TestableTmpdir,
-        TestRepo,
-        PersistentDatabase,
-    ) {
+    fn new_persistent_database() -> (tokio::runtime::Runtime, TestRepo, PersistentDatabase) {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (keepalive, repo) = setup_repo();
-        let database =
-            Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+        let repo = setup_repo();
+        let database = Database::try_new(handle, repo.as_repo())
+            .expect("Creating a test database should succeed");
 
-        (runtime, keepalive, repo, database)
+        (runtime, repo, database)
     }
 
     #[cfg(feature = "rocksdb")]
@@ -487,14 +483,14 @@ mod tests {
         ) {
             use crate::persistence_layer::PersistenceLayer;
 
-            let (runtime, _keepalive, repo, mut database) = new_persistent_database();
+            let (runtime, repo, mut database) = new_persistent_database();
             let handle = runtime.handle();
             let expected = insert_entries(&mut database, entries);
 
             let expected_hash = database.hash().expect("Hash should be calculated");
-            let commit_id = database.commit(&repo).expect("Commit should succeed");
+            let commit_id = database.commit(repo.as_repo()).expect("Commit should succeed");
 
-            let checked_out = Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id)
+            let checked_out = Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), commit_id)
                 .expect("Checkout should succeed");
 
             prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
@@ -514,7 +510,7 @@ mod tests {
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
 
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
@@ -542,7 +538,7 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         database
@@ -573,7 +569,7 @@ mod tests {
     fn test_database_checkout_commit_creates_new_snapshot() {
         use crate::persistence_layer::PersistenceLayer;
 
-        let (runtime, _keepalive, repo, mut original) = new_persistent_database();
+        let (runtime, repo, mut original) = new_persistent_database();
         let handle = runtime.handle();
 
         let persisted_key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -582,10 +578,12 @@ mod tests {
             .set(persisted_key.clone(), Bytes::from_static(b"before"))
             .expect("Writing should succeed");
 
-        let original_commit = original.commit(&repo).expect("Commit should succeed");
+        let original_commit = original
+            .commit(repo.as_repo())
+            .expect("Commit should succeed");
 
         let mut checked_out =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+            Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), original_commit)
                 .expect("Checkout should succeed");
         checked_out
             .set(persisted_key.clone(), Bytes::from_static(b"after"))
@@ -594,17 +592,19 @@ mod tests {
             .set(derived_key.clone(), Bytes::from_static(b"new"))
             .expect("Writing should succeed");
 
-        let derived_commit = checked_out.commit(&repo).expect("Commit should succeed");
+        let derived_commit = checked_out
+            .commit(repo.as_repo())
+            .expect("Commit should succeed");
         assert_ne!(derived_commit, original_commit);
 
         let original_reloaded =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+            Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), original_commit)
                 .expect("Checkout should succeed");
         assert_database_value(&original_reloaded, &persisted_key, b"before");
         assert_database_missing(&original_reloaded, &derived_key);
 
         let derived_reloaded =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, derived_commit)
+            Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), derived_commit)
                 .expect("Checkout should succeed");
         assert_database_value(&derived_reloaded, &persisted_key, b"after");
         assert_database_value(&derived_reloaded, &derived_key, b"new");
@@ -619,7 +619,7 @@ mod tests {
         use crate::errors::OperationalError;
         use crate::persistence_layer::PersistenceLayer;
 
-        let (runtime, _keepalive, repo, mut database) = new_persistent_database();
+        let (runtime, repo, mut database) = new_persistent_database();
         let handle = runtime.handle();
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -627,8 +627,10 @@ mod tests {
             .set(key, Bytes::from_static(b"value"))
             .expect("Writing should succeed");
 
-        let commit_id = database.commit(&repo).expect("Commit should succeed");
-        let commit_path = repo.database_commit_dir(&commit_id);
+        let commit_id = database
+            .commit(repo.as_repo())
+            .expect("Commit should succeed");
+        let commit_path = repo.as_repo().database_commit_dir(&commit_id);
 
         let commit_db = rocksdb::DB::open_cf_descriptors(
             &rocksdb::Options::default(),
@@ -649,7 +651,7 @@ mod tests {
         drop(commit_db);
 
         assert!(matches!(
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id),
+            Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), commit_id),
             Err(Error::Operational(OperationalError::CommitDataMissing { root }))
                 if root == *commit_id.as_hash()
         ));
@@ -665,13 +667,13 @@ mod tests {
         use crate::errors::OperationalError;
         use crate::persistence_layer::PersistenceLayer;
 
-        let (runtime, _keepalive, repo, _database) = new_persistent_database();
+        let (runtime, repo, _database) = new_persistent_database();
         let handle = runtime.handle();
 
         let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-commit"));
 
         assert!(matches!(
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, missing_commit),
+            Database::<PersistenceLayer, _>::checkout(handle, repo.as_repo(), missing_commit),
             Err(Error::Operational(OperationalError::CommitNotFound))
         ));
     }
@@ -685,7 +687,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             let mut seen = HashSet::new();
@@ -715,7 +717,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             let mut seen = HashSet::new();
@@ -750,7 +752,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
@@ -788,7 +790,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
@@ -863,7 +865,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
@@ -904,7 +906,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
@@ -919,7 +921,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
@@ -940,7 +942,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
@@ -971,7 +973,7 @@ mod tests {
                 .build()
                 .expect("Creating a Tokio runtime should succeed");
             let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
+            let repo = setup_repo();
             let mut database = new_database(handle, repo);
 
             for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
@@ -1000,7 +1002,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
@@ -1015,7 +1017,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
@@ -1041,7 +1043,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
@@ -1064,7 +1066,7 @@ mod tests {
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
         let mut database = new_database(handle, repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");

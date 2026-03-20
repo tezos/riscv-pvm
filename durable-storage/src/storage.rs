@@ -101,43 +101,85 @@ pub trait PersistentKeyValueStore: KeyValueStore + Sized {
 }
 
 #[cfg(test)]
+pub(crate) trait TestRepoTrait {
+    /// The actual repository type expected by the KeyValueStore
+    type Repo;
+
+    /// Get a reference to the underlying repository
+    fn as_repo(&self) -> &Self::Repo;
+
+    /// Convert this test repo into the underlying repository type
+    fn into_repo(self) -> Self::Repo;
+}
+
+#[cfg(test)]
 cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
+        use crate::persistence_layer::PersistenceLayer;
+        use octez_riscv_test_utils::TestableTmpdir;
+
         /// Key-value store backend used when the `rocksdb` feature is enabled.
-        pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
+        pub(crate) type TestKeyValueStore = PersistenceLayer;
+
+        /// Self-contained test repository that owns its temporary directory.
+        /// This eliminates the need for callers to manage the temporary directory lifetime.
+        pub(crate) struct TestDirectoryManager {
+            _tmpdir: TestableTmpdir,
+            /// The actual directory manager that interacts with the filesystem.
+            manager: DirectoryManager,
+        }
+
+        impl TestDirectoryManager {
+            fn new() -> Result<Self, crate::errors::OperationalError> {
+                let tmpdir = TestableTmpdir::new();
+                let manager = DirectoryManager::new(tmpdir.path())?;
+                Ok(Self { _tmpdir: tmpdir, manager })
+            }
+        }
+
+        impl TestRepoTrait for TestDirectoryManager {
+            type Repo = DirectoryManager;
+
+            fn as_repo(&self) -> &Self::Repo {
+                &self.manager
+            }
+
+            fn into_repo(self) -> Self::Repo {
+                self.manager
+            }
+        }
 
         /// Repository type required to initialise [`TestKeyValueStore`].
-        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        pub(crate) type TestRepo = TestDirectoryManager;
 
         /// Create a test repository for [`TestKeyValueStore`].
-        ///
-        /// Returns `(keepalive, repo)`:
-        /// - `keepalive` is a temporary directory handle that must stay in scope for the lifetime
-        ///   of `repo`.
-        /// - `repo` is the backend repository value to pass into
-        ///   [`KeyValueStore::new`] / [`KeyValueStore::try_clone`].
-        ///
-        /// TODO RV-942: Refactor the function to avoid the need for `keepalive` return value.
-        pub(crate) fn setup_repo() -> (octez_riscv_test_utils::TestableTmpdir, TestRepo) {
-            use crate::repo::DirectoryManager;
-
-            let tmpdir = octez_riscv_test_utils::TestableTmpdir::new();
-            let dir_manager = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
-
-            (tmpdir, dir_manager)
+        pub(crate) fn setup_repo() -> TestRepo {
+            TestDirectoryManager::new().expect("creating test repository should succeed")
         }
     } else {
+        use crate::storage::in_memory::InMemoryRepo;
+
         /// Test key-value store backend used when the `rocksdb` feature is disabled.
         pub(crate) type TestKeyValueStore = crate::storage::in_memory::InMemoryKeyValueStore;
 
+        impl TestRepoTrait for InMemoryRepo {
+            type Repo = InMemoryRepo;
+
+            fn as_repo(&self) -> &Self::Repo {
+                self
+            }
+
+            fn into_repo(self) -> Self::Repo {
+                self
+            }
+        }
+
         /// Repository type required to initialise [`TestKeyValueStore`].
-        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        pub(crate) type TestRepo = InMemoryRepo;
 
         /// Create a test repository for [`TestKeyValueStore`].
-        ///
-        /// Returns `((), repo)` for signature compatibility with the `rocksdb` branch.
-        pub(crate) fn setup_repo() -> ((), TestRepo) {
-            ((), in_memory::InMemoryRepo)
+        pub(crate) fn setup_repo() -> TestRepo {
+            in_memory::InMemoryRepo
         }
     }
 }

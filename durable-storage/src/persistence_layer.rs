@@ -507,6 +507,7 @@ mod tests {
 
     use super::*;
     use crate::commit::CommitId;
+    use crate::storage::TestRepoTrait;
     use crate::storage::setup_repo;
 
     fn checkpoint_db_path(db: &PersistenceLayer) -> PathBuf {
@@ -547,11 +548,11 @@ mod tests {
 
     #[test]
     fn test_new_persistence_layer() {
-        let (_keepalive, repo) = setup_repo();
-        let db_a =
-            PersistenceLayer::new(&repo).expect("Should be able to create new persistence layer");
+        let repo = setup_repo();
+        let db_a = PersistenceLayer::new(repo.as_repo())
+            .expect("Should be able to create new persistence layer");
 
-        let db_b = PersistenceLayer::new(&repo)
+        let db_b = PersistenceLayer::new(repo.as_repo())
             .expect("Should be able to create another persistence layer");
 
         let path_a = checkpoint_db_path(&db_a);
@@ -584,8 +585,8 @@ mod tests {
     #[test]
     fn test_basic_ops() {
         let test = |value_a: String, value_b: String| {
-            let (_keepalive, repo) = setup_repo();
-            let db = PersistenceLayer::new(&repo)
+            let repo = setup_repo();
+            let db = PersistenceLayer::new(repo.as_repo())
                 .expect("Should be able to create new persistence layer");
 
             let blob = HashedData::from_data(value_a.as_bytes());
@@ -659,16 +660,18 @@ mod tests {
         // Ensure B's state is unchanged.
 
         // We delete and recreate the directory to flush the metadb
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
 
-        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(repo.as_repo()).expect("Failed to create DB A");
         let initial_blob = HashedData::from_data(b"initial_value");
         let another_blob = HashedData::from_data(b"another_value");
         let third_blob = HashedData::from_data(b"third_value");
 
         db_a.blob_set(initial_blob.clone())
             .expect("Failed to set initial blob in A");
-        let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
+        let db_b = db_a
+            .try_clone(repo.as_repo())
+            .expect("Failed to clone DB A to B");
 
         db_b.blob_set(another_blob)
             .expect("Failed to set another blob in B");
@@ -700,17 +703,21 @@ mod tests {
 
     #[test]
     fn test_multiple_checkpoints() {
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
 
         let blob = HashedData::from_data(b"some_value");
 
         // A -> (B, C)
-        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(repo.as_repo()).expect("Failed to create DB A");
         db_a.blob_set(blob.clone())
             .expect("Failed to set blob in A");
 
-        let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
-        let db_c = db_a.try_clone(&repo).expect("Failed to clone DB A to C");
+        let db_b = db_a
+            .try_clone(repo.as_repo())
+            .expect("Failed to clone DB A to B");
+        let db_c = db_a
+            .try_clone(repo.as_repo())
+            .expect("Failed to clone DB A to C");
 
         let checkpoint_path = checkpoint_db_path(&db_a);
         drop(db_a);
@@ -730,22 +737,22 @@ mod tests {
 
     #[test]
     fn test_commit_and_checkout() {
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
 
-        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(repo.as_repo()).expect("Failed to create DB A");
         let blob = HashedData::from_data(b"some_value");
         db_a.blob_set(blob.clone())
             .expect("Failed to set blob in A");
 
         let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
-        db_a.commit(&repo, &commit_id)
+        db_a.commit(repo.as_repo(), &commit_id)
             .expect("Failed to commit DB A");
         let path_a = checkpoint_db_path(&db_a);
         drop(db_a);
         eprintln!("Path A: {path_a:?}");
         assert!(!path_a.exists());
 
-        let db_b = PersistenceLayer::checkout(&repo, &commit_id)
+        let db_b = PersistenceLayer::checkout(repo.as_repo(), &commit_id)
             .expect("Failed to checkout commit into DB B");
 
         assert_blob_value(&db_b, &blob);
@@ -754,17 +761,17 @@ mod tests {
         assert_blob_missing(&db_b, hash_zero_digest);
         assert_key_missing(&db_b, [1u8; 32]);
 
-        let path_b = repo.database_commit_dir(&commit_id);
+        let path_b = repo.as_repo().database_commit_dir(&commit_id);
         drop(db_b);
         assert!(path_b.exists(), "Checked out DB should persist on disk");
     }
 
     #[test]
     fn test_nonexistent_checkout() {
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
 
         let commit_id = CommitId::from(Hash::hash_bytes(b"nonexistent_commit"));
-        let db_result = PersistenceLayer::checkout(&repo, &commit_id);
+        let db_result = PersistenceLayer::checkout(repo.as_repo(), &commit_id);
         assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
     }
 
@@ -818,23 +825,23 @@ mod tests {
         // C (load "commit_1") -> (mutate C) -> commit C (commit: "commit_2") -> (mutate C)
         // Check commit_1 && commit_2
 
-        let (_keepalive, repo) = setup_repo();
+        let repo = setup_repo();
 
         let blob_a = HashedData::from_data(b"some_value");
         let blob_b = HashedData::from_data(b"another_value");
         let commit_id_1 = CommitId::from(Hash::hash_bytes(b"commit_1"));
         let commit_id_2 = CommitId::from(Hash::hash_bytes(b"commit_2"));
-        let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
+        let db_a = PersistenceLayer::new(repo.as_repo()).expect("Failed to create DB A");
         db_a.blob_set(blob_a.clone())
             .expect("Failed to set blob in A");
-        db_a.commit(&repo, &commit_id_1)
+        db_a.commit(repo.as_repo(), &commit_id_1)
             .expect("Failed to commit DB A");
 
-        let db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
+        let db_c = PersistenceLayer::checkout(repo.as_repo(), &commit_id_1)
             .expect("Failed to checkout commit into DB C");
         db_c.blob_set(blob_b.clone())
             .expect("Failed to set blob in C");
-        db_c.commit(&repo, &commit_id_2)
+        db_c.commit(repo.as_repo(), &commit_id_2)
             .expect("Failed to commit DB C");
         db_c.blob_delete(blob_a.hash())
             // db_c.blob_delete(blob_a.hash())
@@ -843,14 +850,14 @@ mod tests {
         drop(db_c);
 
         // check commit 1
-        let db_check_1 =
-            PersistenceLayer::checkout(&repo, &commit_id_1).expect("Failed to checkout commit 1");
+        let db_check_1 = PersistenceLayer::checkout(repo.as_repo(), &commit_id_1)
+            .expect("Failed to checkout commit 1");
         assert_blob_value(&db_check_1, &blob_a);
         assert_blob_missing(&db_check_1, blob_b.hash());
 
         // check commit 2
-        let db_check_2 =
-            PersistenceLayer::checkout(&repo, &commit_id_2).expect("Failed to checkout commit 2");
+        let db_check_2 = PersistenceLayer::checkout(repo.as_repo(), &commit_id_2)
+            .expect("Failed to checkout commit 2");
         assert_blob_value(&db_check_2, &blob_a);
         assert_blob_value(&db_check_2, &blob_b);
     }

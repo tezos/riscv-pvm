@@ -310,6 +310,7 @@ mod tests {
     use crate::merkle_worker::MerkleWorker;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
+    use crate::storage::TestRepoTrait;
 
     fn key_strategy() -> impl Strategy<Value = Key> {
         proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..KEY_MAX_SIZE).prop_map(
@@ -455,19 +456,19 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        let (_keepalive, repo) = crate::storage::setup_repo();
+        let repo = crate::storage::setup_repo();
 
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
-            let persistence_layer = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
+            let persistence_layer = TestKeyValueStore::new(repo.as_repo()).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
             let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
-            let persistence_worker = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
+            let persistence_worker = TestKeyValueStore::new(repo.as_repo()).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
             let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
             for command in commands {
-                command.run(handle, &repo, &mut merkle_worker, &mut merkle_layer);
+                command.run(handle, repo.as_repo(), &mut merkle_worker, &mut merkle_layer);
             }
 
             let layer_hash = merkle_layer.hash().expect("Resolving the tree should succeed.");

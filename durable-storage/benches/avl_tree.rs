@@ -46,18 +46,16 @@ fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize)
 cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
         use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+
+        use octez_riscv_durable_storage::repo::DirectoryManager;
         use octez_riscv_test_utils::TestableTmpdir;
 
         type TestKeyValueStore = PersistenceLayer;
-        type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        type TestRepo = DirectoryManager;
 
-        fn setup_repo() -> (TestableTmpdir, TestRepo) {
-            use octez_riscv_durable_storage::repo::DirectoryManager;
-
+        fn setup_repo() -> TestRepo {
             let tmpdir = TestableTmpdir::new();
-            let dir_manager = DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
-
-            (tmpdir, dir_manager)
+            DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed")
         }
     } else {
         use  octez_riscv_durable_storage::storage::in_memory::InMemoryKeyValueStore;
@@ -66,8 +64,8 @@ cfg_if::cfg_if! {
         type TestKeyValueStore = InMemoryKeyValueStore;
         type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
 
-        fn setup_repo() -> ((), TestRepo) {
-            ((), InMemoryRepo)
+        fn setup_repo() -> TestRepo {
+            InMemoryRepo
         }
     }
 }
@@ -80,7 +78,7 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
     let mut rng = rand::rng();
     let keys = generate_keys(&mut rng, KEY_COUNT);
 
-    let (_tmpdir, repo) = setup_repo();
+    let repo = setup_repo();
     let persistence_layer =
         TestKeyValueStore::new(&repo).expect("persistence layer should succeed in being created.");
     let mut resolver = LazyResolver::new(Arc::new(persistence_layer));
