@@ -28,8 +28,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use octez_riscv_data::components::bytes::Bytes;
-use octez_riscv_data::components::bytes::BytesMode;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::deserialise;
 use trait_set::trait_set;
@@ -58,13 +58,13 @@ pub trait Resolver<Id, Value> {
 
 trait_set! {
     /// Specialised [`Resolver`] for MAVL nodes
-    pub trait NodeResolver<NodeId, TreeId, M: BytesMode> = Resolver<NodeId, Node<TreeId, M>>;
+    pub trait NodeResolver<NodeId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, M>>;
 
     /// Specialised [`Resolver`] for MAVL trees
-    pub trait TreeResolver<NodeId, TreeId, M: BytesMode> = Resolver<TreeId, Tree<NodeId>>;
+    pub trait TreeResolver<NodeId, TreeId> = Resolver<TreeId, Tree<NodeId>>;
 
     /// Specialised [`Resolver`] for MAVL nodes and trees
-    pub trait AvlResolver<NodeId, TreeId, M: BytesMode> = NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId, M>;
+    pub trait AvlResolver<NodeId, TreeId, M: Mode> = NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId>;
 }
 
 /// Identifier for a node that is always present.
