@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::key::KEY_MAX_SIZE;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::registry::Registry;
@@ -16,9 +17,14 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
         use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
         type TestKv = PersistenceLayer;
+
+        const PROPTEST_CASES: u32 = 128;
+
     } else {
         use octez_riscv_durable_storage::storage::in_memory::InMemoryKeyValueStore;
         type TestKv = InMemoryKeyValueStore;
+
+        const PROPTEST_CASES: u32 = 256;
     }
 }
 
@@ -33,6 +39,7 @@ enum Operation {
     ValueLength(Key),
     Hash,
     Commit,
+    Checkout,
 
     // Registry operations
     GrowRegistry,
@@ -51,6 +58,8 @@ fn test_durable_storage_manual() {
         Operation::Write(Key::new(&[0]).unwrap(), 5, Bytes::copy_from_slice(&[0; 4])),
         Operation::GrowRegistry,
         Operation::Set(Key::new(&[1]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
+        Operation::Commit,
+        Operation::Checkout,
         Operation::ShrinkRegistry,
         Operation::Set(Key::new(&[2]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
         Operation::Exists(Key::new(&[1]).unwrap()),
@@ -76,6 +85,7 @@ enum OperationView {
     ValueLength(Index),
     Hash,
     Commit,
+    Checkout,
 
     // Registry operations
     GrowRegistry,
@@ -86,6 +96,7 @@ enum OperationView {
 }
 
 proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(PROPTEST_CASES))]
     #[test]
     fn test_durable_storage_prop((keys, values, ops) in operations_strategy(1usize..100)) {
         // Auto formatting doesn't work within the proptest macro, so this passes off to a
@@ -119,6 +130,7 @@ fn test_durable_storage(keys: Vec<Key>, values: Vec<Bytes>, ops: Vec<OperationVi
             }
             OperationView::Hash => Operation::Hash,
             OperationView::Commit => Operation::Commit,
+            OperationView::Checkout => Operation::Checkout,
             OperationView::GrowRegistry => Operation::GrowRegistry,
             OperationView::ShrinkRegistry => Operation::ShrinkRegistry,
             OperationView::CopyDatabase => Operation::CopyDatabase,
@@ -187,6 +199,7 @@ fn operations_strategy(
                     5 => any::<Index>().prop_map(OperationView::ValueLength),
                     10 => Just(OperationView::Hash),
                     3 => Just(OperationView::Commit),
+                    3 => Just(OperationView::Checkout),
 
                     // Registry operations
                     3 => Just(OperationView::GrowRegistry),
@@ -253,10 +266,12 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
         if #[cfg(feature = "rocksdb")] {
             use octez_riscv_durable_storage::repo::DirectoryManager;
             use octez_riscv_test_utils::TestableTmpdir;
+            use rand::random_range;
 
             let tmpdir = TestableTmpdir::new();
             let base_dir = tmpdir.path().join("registry");
             let repo = DirectoryManager::new(&base_dir).expect("Failed to create manager");
+            let checkout_repo = repo.clone();
         } else {
             use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
             let repo = InMemoryRepo;
@@ -267,6 +282,7 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
         Registry::new(repo).expect("Creating the registry should succeed");
 
     let mut golden: Vec<GoldenData> = vec![];
+    let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
 
     for operation in operations {
         match operation {
@@ -416,10 +432,38 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
                 }
 
                 golden[index].last = Some((new_digest, golden[index].seen.clone()));
+
+                #[cfg(feature = "rocksdb")]
+                checkout_candidates
+                    .entry(Hash::from_foldable(&registry))
+                    .or_insert(false);
             }
             Operation::Commit => {
                 #[cfg(feature = "rocksdb")]
-                registry.commit().expect("Committing should succeed");
+                {
+                    let commit_id = registry.commit().expect("Committing should succeed");
+                    checkout_candidates.insert(*commit_id.as_hash(), true);
+                }
+            }
+            Operation::Checkout => {
+                #[cfg(feature = "rocksdb")]
+                {
+                    if !checkout_candidates.is_empty() {
+                        let index = random_range(0..checkout_candidates.len());
+                        let (&commit_hash, &committed) =
+                            checkout_candidates.iter().nth(index).unwrap();
+                        let checkout_result = Registry::<TestKv, Normal>::checkout(
+                            checkout_repo.clone(),
+                            CommitId::from(commit_hash),
+                        );
+
+                        assert_eq!(
+                            checkout_result.is_ok(),
+                            committed,
+                            "Checkout result did not match whether the commit id was committed"
+                        );
+                    }
+                }
             }
 
             // Registry operations
