@@ -570,6 +570,7 @@ mod tests {
         use crate::errors::Error;
         use crate::errors::OperationalError;
         use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::rocksdb_checkpoint_options;
 
         let (runtime, _keepalive, repo, mut database) = new_persistent_database();
         let handle = runtime.handle();
@@ -583,11 +584,11 @@ mod tests {
         let commit_path = repo.database_commit_dir(&commit_id);
 
         let commit_db = rocksdb::DB::open_cf_descriptors(
-            &rocksdb::Options::default(),
+            &rocksdb_checkpoint_options(),
             &commit_path,
             [
-                ColumnFamilyDescriptor::new("blob", rocksdb::Options::default()),
-                ColumnFamilyDescriptor::new("default", rocksdb::Options::default()),
+                ColumnFamilyDescriptor::new("blob", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
             ],
         )
         .expect("Opening committed RocksDB should succeed");
