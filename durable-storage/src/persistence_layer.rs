@@ -156,6 +156,26 @@ fn set_memtable_to_hash_link_list(options: &mut rocksdb::Options) {
     options.set_memtable_factory(factory);
 }
 
+fn add_merge_operator(options: &mut rocksdb::Options) {
+    options.set_merge_operator(
+        "offset_write",
+        offset_write_full_merge,
+        offset_write_partial_merge,
+    );
+}
+
+fn add_creation_options(options: &mut rocksdb::Options) {
+    options.create_if_missing(true);
+    // This is used to avoid accidentally overwriting an existing database.
+    options.set_error_if_exists(true);
+}
+
+fn rocksdb_default_options() -> rocksdb::Options {
+    let mut options = rocksdb::Options::default();
+    set_memtable_to_hash_link_list(&mut options);
+    options
+}
+
 /// These options are used for opening and closing a newly created rocksdb instance.
 ///
 /// Although different fields are used for opening vs. destroying a rocksdb instance, you need to
@@ -165,32 +185,22 @@ fn set_memtable_to_hash_link_list(options: &mut rocksdb::Options) {
 /// <https://github.com/facebook/rocksdb/blob/a1dad12c8c9a7a65fa19d3bc78a5f7687ce6c1bd/db/db_impl/db_impl.cc#L5185>
 /// (look for the function destroying a rocksdb instance)
 fn rocksdb_creation_options() -> rocksdb::Options {
-    let mut options = rocksdb::Options::default();
-    options.create_if_missing(true);
-    options.set_error_if_exists(true);
-    set_memtable_to_hash_link_list(&mut options);
+    let mut options = rocksdb_default_options();
+    add_creation_options(&mut options);
+    add_merge_operator(&mut options);
     options
 }
 
-/// RocksDB options for when we clone as a checkpoint
-fn rocksdb_clone_as_checkpoint_options() -> rocksdb::Options {
-    let mut options = rocksdb::Options::default();
-    set_memtable_to_hash_link_list(&mut options);
-    options
-}
-
-/// RocksDB options for when we create a DB from
-/// a checkpoint
-fn rocksdb_checkpoint_options() -> rocksdb::Options {
-    let mut options = rocksdb::Options::default();
-    set_memtable_to_hash_link_list(&mut options);
-    options
-}
-
-/// RocksDB options for the blob column family creation
 fn rocksdb_blob_cf_creation_options() -> rocksdb::Options {
-    let mut options = rocksdb::Options::default();
-    set_memtable_to_hash_link_list(&mut options);
+    let mut options = rocksdb_default_options();
+    add_creation_options(&mut options);
+    options
+}
+
+/// These options are used for opening a rocksdb instance from a checkpoint.
+pub(crate) fn rocksdb_checkpoint_options() -> rocksdb::Options {
+    let mut options = rocksdb_default_options();
+    add_merge_operator(&mut options);
     options
 }
 
@@ -230,19 +240,12 @@ impl PersistenceLayer {
             .create_checkpoint(&checkpoint_path)
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })?;
 
-        let mut default_cf_opts = rocksdb_clone_as_checkpoint_options();
-        default_cf_opts.set_merge_operator(
-            "offset_write",
-            offset_write_full_merge,
-            offset_write_partial_merge,
-        );
-
         let temp_db = rocksdb::DB::open_cf_descriptors(
-            &rocksdb_clone_as_checkpoint_options(),
+            &rocksdb_checkpoint_options(),
             &checkpoint_path,
             [
-                ColumnFamilyDescriptor::new("default", default_cf_opts),
-                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
+                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
             ],
         )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
@@ -267,14 +270,7 @@ impl KeyValueStore for PersistenceLayer {
         let tempdir = repo.temp_database_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
 
-        // To avoid accidentally overwriting an existing database, `error_if_exists` is set.
-        let mut default_cf_opts = rocksdb_creation_options();
-        default_cf_opts.set_merge_operator(
-            "offset_write",
-            offset_write_full_merge,
-            offset_write_partial_merge,
-        );
-        let mut db = rocksdb::DB::open(&default_cf_opts, &new_db_path)
+        let mut db = rocksdb::DB::open(&rocksdb_creation_options(), &new_db_path)
             .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
         db.create_cf(BLOB_CF, &rocksdb_blob_cf_creation_options())
             .map_err(|error| OperationalError::ColumnFamilyCreationFailed {
@@ -436,13 +432,12 @@ impl PersistentKeyValueStore for PersistenceLayer {
         };
 
         // Open the previous commitment from the given source path
-        let mut options = rocksdb_clone_as_checkpoint_options();
         let read_only_database = rocksdb::DB::open_cf_descriptors(
-            &options,
+            &rocksdb_checkpoint_options(),
             commit_path,
             [
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-                ColumnFamilyDescriptor::new("default", options.clone()),
+                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
             ],
         )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
@@ -455,18 +450,12 @@ impl PersistentKeyValueStore for PersistenceLayer {
             .create_checkpoint(&checkpoint_path)
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })?;
 
-        options.set_merge_operator(
-            "offset_write",
-            offset_write_full_merge,
-            offset_write_partial_merge,
-        );
-
         let database = rocksdb::DB::open_cf_descriptors(
-            &options,
+            &rocksdb_checkpoint_options(),
             &checkpoint_path,
             [
-                ColumnFamilyDescriptor::new("default", options.clone()),
-                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_clone_as_checkpoint_options()),
+                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
             ],
         )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
