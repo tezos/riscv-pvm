@@ -11,4 +11,5 @@ pub mod merkle_proof;
 pub mod mode;
 pub mod partial_vec;
 pub mod serialisation;
+pub mod store;
 pub mod tree;
