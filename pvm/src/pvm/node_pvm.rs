@@ -10,6 +10,8 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
@@ -76,7 +78,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
     /// Attempt to clone the PVM state.
     pub fn try_clone(&self) -> Result<Self, super::errors::OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
     {
         let cloned_pvm = self.state.try_clone()?;
         Ok(Self::wrap(cloned_pvm))
@@ -134,7 +136,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
 
     pub fn install_boot_sector(&mut self, kernel: &[u8])
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.with_backend_mut(|pvm| {
             let program = Program::from_elf(kernel).expect("Failed to parse boot sector ELF");
@@ -145,21 +147,21 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
 
     pub fn compute_step(&mut self, pvm_hooks: impl PvmHooks)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_one(pvm_hooks))
     }
 
     pub fn compute_step_many(&mut self, pvm_hooks: impl PvmHooks, max_steps: usize) -> i64
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_max(pvm_hooks, Bound::Included(max_steps))) as i64
     }
 
     pub fn set_input(&mut self, input: PvmInput) -> bool
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.with_backend_mut(|pvm| pvm.provide_input(input))
     }

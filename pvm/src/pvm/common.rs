@@ -21,6 +21,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -148,7 +151,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Perform one evaluation step.
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.eval_max(hooks, Bound::Included(1));
     }
@@ -169,7 +172,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// but a page fault is not)
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // Do nothing if step_bounds is less than 1
         if !less_than_bound(0, step_bounds) {
@@ -324,7 +327,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Attempt to clone the PVM state.
     pub fn try_clone(&self) -> Result<Self, OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
     {
         Ok(Self {
             system_state: self.system_state.clone(),
@@ -343,7 +346,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Attempt to clone the persistent state of the PVM.
     pub fn try_clone_state(&self) -> Result<Self, OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
     {
         Ok(Self {
             system_state: self.system_state.clone_state(),
@@ -401,7 +404,7 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: Default,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     fn default() -> Self {
         Self {
@@ -540,7 +543,7 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: Encode,
-    M: EncodeAtomMode + EncodeDataSpaceMode,
+    M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.machine_state.encode(encoder)?;
@@ -637,7 +640,7 @@ pub(crate) fn handle_system_call<MC, PC, M>(
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, outbox, status, reveal_request, level);
@@ -686,7 +689,7 @@ mod tests {
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
         where
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + DataSpaceMode + VectorMode,
         {
             handle_system_call(
                 &mut self.machine_state,

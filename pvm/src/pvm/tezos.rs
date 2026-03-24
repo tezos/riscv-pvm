@@ -36,6 +36,7 @@ pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 
 use super::PvmStatus;
 use super::outbox::Outbox;
@@ -192,7 +193,7 @@ fn handle_tezos_write_output<MC, M>(
     level: &Atom<Option<u32>, M>,
 ) where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     sbi_wrap(machine, |machine| {
         // The outbox can't accept messages before the first inbox message is received
@@ -391,7 +392,7 @@ pub(super) fn handle_tezos<MC, M>(
     level: &Atom<Option<u32>, M>,
 ) where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
     let pc = machine.hart.pc.read().wrapping_add(4);
