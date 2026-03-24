@@ -391,19 +391,20 @@ mod tests {
             })
         }
 
-        fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error> {
+        fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
             self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
             self.inner.blob_get(key)
         }
 
-        fn blob_set<Data: AsRef<[u8]>>(
+        fn blob_set(
             &self,
-            blob: HashedData<Data>,
+            key: impl AsRef<[u8]>,
+            data: impl AsRef<[u8]>,
         ) -> Result<(), OperationalError> {
-            self.inner.blob_set(blob)
+            self.inner.blob_set(key, data)
         }
 
-        fn blob_delete(&self, key: Hash) -> Result<(), OperationalError> {
+        fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
             self.inner.blob_delete(key)
         }
 
@@ -453,8 +454,9 @@ mod tests {
             let tree_repr: Option<Hash> = tree.root().map(|node_id| resolver.get_hash(node_id));
             let tree_bytes =
                 serialisation::serialise(tree_repr).expect("tree serialisation should succeed");
+            let tree_blob = HashedData::from_data(tree_bytes);
             persistence_layer
-                .blob_set(HashedData::from_data(tree_bytes))
+                .blob_set(tree_blob.hash(), tree_blob.data())
                 .expect("persisting trees should succeed");
 
             let Some(node_id) = tree.root() else {
@@ -467,8 +469,9 @@ mod tests {
             let encoded = node.to_encode(resolver);
             let node_bytes =
                 serialisation::serialise(encoded).expect("node serialisation should succeed");
+            let node_blob = HashedData::from_data(node_bytes);
             persistence_layer
-                .blob_set(HashedData::from_data(node_bytes))
+                .blob_set(node_blob.hash(), node_blob.data())
                 .expect("persisting nodes should succeed");
 
             persist_subtree(

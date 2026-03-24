@@ -8,8 +8,6 @@ pub mod in_memory;
 
 use std::path::Path;
 
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashedData;
 use tempfile::TempDir;
 
 use crate::commit::CommitId;
@@ -30,14 +28,18 @@ pub trait KeyValueStore: Sized {
     /// Attempt to make a copy of the key-value store.
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
 
-    /// Retrieves the data associated with the given hash.
-    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error>;
+    /// Retrieves the data associated with the given blob key.
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
-    /// Register some already-hashed data.
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), OperationalError>;
+    /// Register data under a blob key.
+    fn blob_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
 
-    /// Deletes a value associated with the given hash.
-    fn blob_delete(&self, key: Hash) -> Result<(), OperationalError>;
+    /// Deletes a value associated with the given blob key.
+    fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
 
     /// Retrieves a value associated with the given key.
     fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;

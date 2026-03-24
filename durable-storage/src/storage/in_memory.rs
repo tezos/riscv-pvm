@@ -9,8 +9,6 @@ use std::sync::RwLock;
 
 use bytes::Bytes;
 use bytes::BytesMut;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashedData;
 
 use super::KeyValueStore;
 use crate::errors::Error;
@@ -26,8 +24,8 @@ pub struct InMemoryRepo;
 /// In-memory key-value store
 #[derive(Debug, Default)]
 pub struct InMemoryKeyValueStore {
-    /// Holds values where the key is the value's hash
-    content_addressable: RwLock<HashMap<Hash, Bytes>>,
+    /// Holds blobs.
+    blobs: RwLock<HashMap<Bytes, Bytes>>,
 
     /// Holds the underlying key-value pairs
     values: RwLock<HashMap<Bytes, BytesMut>>,
@@ -35,8 +33,8 @@ pub struct InMemoryKeyValueStore {
 
 impl InMemoryKeyValueStore {
     pub fn try_clone(&self) -> Result<Self, OperationalError> {
-        let content_addressable = self
-            .content_addressable
+        let blobs = self
+            .blobs
             .read()
             .map_err(|_| OperationalError::LockPoisoned)?
             .clone();
@@ -48,7 +46,7 @@ impl InMemoryKeyValueStore {
             .clone();
 
         Ok(Self {
-            content_addressable: RwLock::new(content_addressable),
+            blobs: RwLock::new(blobs),
             values: RwLock::new(values),
         })
     }
@@ -65,37 +63,44 @@ impl KeyValueStore for InMemoryKeyValueStore {
         self.try_clone()
     }
 
-    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error> {
-        let content_addressable_store = self
-            .content_addressable
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        let blob_store = self
+            .blobs
             .read()
             .map_err(|_| OperationalError::LockPoisoned)?;
 
-        let data = content_addressable_store
-            .get(&key)
+        let data = blob_store
+            .get(key.as_ref())
             .ok_or(InvalidArgumentError::KeyNotFound)?;
 
         Ok(data.clone())
     }
 
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), OperationalError> {
-        let mut content_addressable_store = self
-            .content_addressable
+    fn blob_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        let mut blob_store = self
+            .blobs
             .write()
             .map_err(|_| OperationalError::LockPoisoned)?;
 
-        content_addressable_store.insert(blob.hash(), Bytes::copy_from_slice(blob.data()));
+        blob_store.insert(
+            Bytes::copy_from_slice(key.as_ref()),
+            Bytes::copy_from_slice(data.as_ref()),
+        );
 
         Ok(())
     }
 
-    fn blob_delete(&self, key: Hash) -> Result<(), OperationalError> {
-        let mut content_addressable_store = self
-            .content_addressable
+    fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        let mut blob_store = self
+            .blobs
             .write()
             .map_err(|_| OperationalError::LockPoisoned)?;
 
-        content_addressable_store.remove(&key);
+        blob_store.remove(key.as_ref());
 
         Ok(())
     }

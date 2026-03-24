@@ -312,11 +312,12 @@ impl<KV> NormalImpl<KV> {
             let value = serialise(encoded).expect("Serialisation of node data should not fail");
             let blob = HashedData::from_data(value);
             let node_hash = blob.hash();
-            self.persistence.blob_set(blob)?;
+            self.persistence.blob_set(node_hash, blob.data())?;
 
             let serialised_tree_repr = serialise(Some(node_hash))?;
             let tree_blob = HashedData::from_data(serialised_tree_repr);
-            self.persistence.blob_set(tree_blob)?;
+            self.persistence
+                .blob_set(tree_blob.hash(), tree_blob.data())?;
         }
 
         Ok(CommitId::from(self.hash()))
