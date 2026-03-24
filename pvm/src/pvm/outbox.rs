@@ -41,14 +41,11 @@ use octez_riscv_data::foldable::NodeUnfold;
 use octez_riscv_data::foldable::Unfold;
 use octez_riscv_data::foldable::UnfoldError;
 use octez_riscv_data::foldable::Unfoldable;
-use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
-use octez_riscv_data::foldable::seq_tree::Many;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::ProofError;
-use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -77,15 +74,10 @@ use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 
 /// Small outbox size for testing
-///
-/// Currently, this is the length of the fixed-size array which holds all the outbox levels.
 pub const TEST_OUTBOX_SIZE: usize = 16;
 
 /// The maximum number of messages an outbox level can hold
 const MAX_LEVEL_SIZE: usize = 100;
-
-/// The arity used to Merkleise the levels of the outbox
-const OUTBOX_MERKLE_ARITY: usize = 2;
 
 /// Errors which can be raised when writing a message to the outbox
 #[derive(Error, Debug)]
@@ -160,7 +152,7 @@ impl OutboxProof {
 /// Outbox state
 #[perfect_derive(Clone, PartialEq, Eq)]
 pub struct Outbox<M: Mode> {
-    levels: Box<[OutboxLevel<M>]>,
+    levels: Vector<OutboxLevel<M>, M>,
 }
 
 impl<M: AtomMode + VectorMode> Outbox<M> {
@@ -214,13 +206,9 @@ impl<'normal> Provable<'normal> for Outbox<Normal> {
     type Prover = Outbox<Prove<'normal>>;
 
     fn start_proof(&'normal self) -> Self::Prover {
-        let levels = self
-            .levels
-            .iter()
-            .map(OutboxLevel::start_proof)
-            .collect::<Box<[_]>>();
-
-        Outbox { levels }
+        Outbox {
+            levels: self.levels.start_proof(),
+        }
     }
 }
 
@@ -228,7 +216,7 @@ impl<M: AtomMode + VectorMode> Default for Outbox<M> {
     fn default() -> Self {
         let mut levels = Vec::with_capacity(TEST_OUTBOX_SIZE);
         levels.resize_with(TEST_OUTBOX_SIZE, OutboxLevel::<M>::default);
-        let levels = levels.into_boxed_slice();
+        let levels = Vector::new(levels);
         Self { levels }
     }
 }
@@ -245,30 +233,28 @@ impl<M, F> Foldable<F> for Outbox<M>
 where
     M: Mode,
     F: Fold,
-    OutboxLevel<M>: Foldable<F>,
+    Vector<OutboxLevel<M>, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
-        let level_generator = |idx| &self.levels[idx];
-        IndexableSeqAsTree::new(TEST_OUTBOX_SIZE, OUTBOX_MERKLE_ARITY, &level_generator)
-            .fold(builder)
+        let mut builder = builder.into_node_fold();
+        builder.add(&self.levels);
+        builder.done()
     }
 }
 
 impl Unfoldable for Outbox<Normal> {
     fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
-        let arr = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::unfold(source)?;
-        Ok(Outbox {
-            levels: arr.into_boxed_array(),
-        })
+        let mut source = source.into_node()?;
+        let levels = source.next_branch()?;
+        source.done(Outbox { levels })
     }
 }
 
 impl FromProof for Outbox<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = Many::<_, OUTBOX_MERKLE_ARITY, TEST_OUTBOX_SIZE>::from_proof(proof)?;
-        Ok(result.map(|arr| Outbox {
-            levels: arr.into_boxed_array(),
-        }))
+        let proof = proof.into_node()?;
+        let (proof, levels) = proof.next_branch()?;
+        proof.done(Outbox { levels })
     }
 }
 
