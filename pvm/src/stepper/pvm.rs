@@ -13,6 +13,8 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
@@ -208,7 +210,7 @@ impl<
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M>,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
@@ -332,7 +334,7 @@ impl<
     /// Re-bind the PVM type by cloning the underlying regions.
     pub fn rebind_via_clone(&mut self) -> Result<(), OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
         DS: CloneState,
     {
         self.pvm = self.pvm.try_clone_state()?;
@@ -340,7 +342,7 @@ impl<
     }
 }
 
-impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
+impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCache<MC, M>, DS>
     PvmStepper<H, MC, DS, PC, M>
 {
     /// Similar to [`PvmStepper::verify_proof`] but constructs the allocated space by using the raw deserialisation.
@@ -455,7 +457,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
 impl<
     H: PvmHooks,
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M>,
 > PvmStepper<H, MC, DS, PC, M>

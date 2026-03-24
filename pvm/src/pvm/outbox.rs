@@ -18,7 +18,6 @@
 mod output;
 
 use std::ops::Deref;
-use std::ops::Index;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -31,6 +30,10 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::Vector;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -78,15 +81,10 @@ use crate::machine_state::page_cache::PageCache;
 pub const TEST_OUTBOX_SIZE: usize = 16;
 
 /// The maximum number of messages an outbox level can hold
-///
-/// Currently, this is the length of the fixed-size array which holds a level.
 const MAX_LEVEL_SIZE: usize = 100;
 
 /// The arity used to Merkleise the levels of the outbox
 const OUTBOX_MERKLE_ARITY: usize = 2;
-
-/// The arity used to Merkleise arrays in each level
-const LEVEL_MERKLE_ARITY: usize = 2;
 
 /// Errors which can be raised when writing a message to the outbox
 #[derive(Error, Debug)]
@@ -164,7 +162,7 @@ pub struct Outbox<M: Mode> {
     levels: Box<[OutboxLevel<M>]>,
 }
 
-impl<M: AtomMode> Outbox<M> {
+impl<M: AtomMode + VectorMode> Outbox<M> {
     /// Write `message` to the outbox at the current level
     ///
     /// Returns `OutboxWriteError::FullOutbox` if the outbox is full.
@@ -225,7 +223,7 @@ impl<'normal> Provable<'normal> for Outbox<Normal> {
     }
 }
 
-impl<M: AtomMode> Default for Outbox<M> {
+impl<M: AtomMode + VectorMode> Default for Outbox<M> {
     fn default() -> Self {
         let mut levels = Vec::with_capacity(TEST_OUTBOX_SIZE);
         levels.resize_with(TEST_OUTBOX_SIZE, OutboxLevel::<M>::default);
@@ -234,7 +232,7 @@ impl<M: AtomMode> Default for Outbox<M> {
     }
 }
 
-impl<M: CloneAtomMode> CloneState for Outbox<M> {
+impl<M: CloneAtomMode + CloneVectorMode> CloneState for Outbox<M> {
     fn clone_state(&self) -> Self {
         Self {
             levels: self.levels.clone_state(),
@@ -273,7 +271,7 @@ impl FromProof for Outbox<Verify> {
     }
 }
 
-impl<M: EncodeAtomMode> Encode for Outbox<M> {
+impl<M: EncodeAtomMode + EncodeVectorMode> Encode for Outbox<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.levels.encode(encoder)
     }
@@ -291,7 +289,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// captured in outbox proofs.
     pub fn get_outbox_message(&self, info: OutputInfo) -> Result<Output, OutboxProofError>
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         // This check reads the current level which ensures it is also included in the
         // proof when running in `Prove` mode.
@@ -302,7 +300,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
 
     fn check_level_in_outbox(&self, level: u32) -> Result<(), OutboxProofError>
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         // An uninitialised outbox contains no levels
         let Some(current_level) = self.level.read() else {
@@ -352,14 +350,13 @@ impl<MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
 
 #[perfect_derive(Clone, PartialEq, Eq)]
 struct OutboxLevel<M: Mode> {
-    messages: Box<[Atom<OutboxMessage, M>]>,
-    /// Next available message slot
-    next_index: Atom<u32, M>,
+    /// Messages written by the kernel at this outbox level
+    messages: Vector<Atom<OutboxMessage, M>, M>,
     /// The level associated with this OutboxLevel
     level: Atom<u32, M>,
 }
 
-impl<M: AtomMode> OutboxLevel<M> {
+impl<M: AtomMode + VectorMode> OutboxLevel<M> {
     fn write_message(
         &mut self,
         message: OutboxMessage,
@@ -371,24 +368,30 @@ impl<M: AtomMode> OutboxLevel<M> {
             "current_level {current_level} must be gte to any level already stored in the outbox. Found {last_written_level}"
         );
 
+        // This slot holds messages for a level that has fallen outside the validity window.
+        // Resize it down to length 1, then write the given message at index 0.
         if current_level > last_written_level {
-            self.next_index.write(0);
+            self.messages.resize_with(1, Atom::default);
+            self.messages[0].write(message);
             self.level.write(current_level);
+            return Ok(());
         }
 
-        let next_index = self.next_index.read() as usize;
+        // This level is full, no more outbox messages can be written.
+        let next_index = self.messages.len();
         if next_index >= MAX_LEVEL_SIZE {
             return Err(OutboxWriteError::FullOutbox);
         }
 
+        // Extend the messages vector by one and write the message
+        self.messages.resize_with(next_index + 1, Atom::default);
         self.messages[next_index].write(message);
-        self.next_index.write(next_index as u32 + 1);
 
         Ok(())
     }
 
     fn read_message(&self, info: OutputInfo) -> Result<OutboxMessage, OutboxProofError> {
-        if self.level.read() != info.level || info.index >= self.next_index.read() {
+        if self.level.read() != info.level || info.index as usize >= self.messages.len() {
             return Err(OutboxProofError::MessageNotFound { info });
         }
         Ok(self.messages[info.index as usize].clone())
@@ -403,13 +406,11 @@ impl OutboxLevel<Normal> {
             "level {level} must be gte to the last written level for this outbox level slot. Found {last_written_level}"
         );
 
-        let next_index = self.next_index.read() as usize;
-        if level != last_written_level || next_index == 0 {
-            // The outbox is empty for `level`
+        if level != last_written_level || self.messages.is_empty() {
             return Box::new([]);
         }
 
-        self.messages[..next_index]
+        self.messages
             .iter()
             .map(|msg| msg.deref().clone())
             .collect::<Box<[_]>>()
@@ -420,38 +421,26 @@ impl<'normal> Provable<'normal> for OutboxLevel<Normal> {
     type Prover = OutboxLevel<Prove<'normal>>;
 
     fn start_proof(&'normal self) -> Self::Prover {
-        let messages = self
-            .messages
-            .iter()
-            .map(|m| m.start_proof())
-            .collect::<Box<[_]>>();
-
         OutboxLevel {
-            messages,
-            next_index: self.next_index.start_proof(),
+            messages: self.messages.start_proof(),
             level: self.level.start_proof(),
         }
     }
 }
 
-impl<M: AtomMode> Default for OutboxLevel<M> {
+impl<M: AtomMode + VectorMode> Default for OutboxLevel<M> {
     fn default() -> Self {
-        let mut messages = Vec::with_capacity(MAX_LEVEL_SIZE);
-        messages.resize_with(MAX_LEVEL_SIZE, Atom::<OutboxMessage, M>::default);
-
         Self {
-            messages: messages.into_boxed_slice(),
-            next_index: Atom::default(),
+            messages: Vector::default(),
             level: Atom::default(),
         }
     }
 }
 
-impl<M: CloneAtomMode> CloneState for OutboxLevel<M> {
+impl<M: CloneAtomMode + CloneVectorMode> CloneState for OutboxLevel<M> {
     fn clone_state(&self) -> Self {
         Self {
             messages: self.messages.clone_state(),
-            next_index: self.next_index.clone_state(),
             level: self.level.clone_state(),
         }
     }
@@ -461,18 +450,12 @@ impl<M, F> Foldable<F> for OutboxLevel<M>
 where
     M: Mode,
     F: Fold,
-    Atom<OutboxMessage, M>: Foldable<F>,
+    Vector<Atom<OutboxMessage, M>, M>: Foldable<F>,
     Atom<u32, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
-        let message_generator = |idx| self.messages.index(idx);
         let mut builder = builder.into_node_fold();
-        builder.add(&IndexableSeqAsTree::new(
-            self.messages.len(),
-            LEVEL_MERKLE_ARITY,
-            &message_generator,
-        ));
-        builder.add(&self.next_index);
+        builder.add(&self.messages);
         builder.add(&self.level);
         builder.done()
     }
@@ -481,45 +464,24 @@ where
 impl Unfoldable for OutboxLevel<Normal> {
     fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
         let mut source = source.into_node()?;
-        let messages = source.next_branch_with(|source| {
-            let many = Many::<_, LEVEL_MERKLE_ARITY, MAX_LEVEL_SIZE>::unfold(source)?;
-            Ok(many.into_boxed_array())
-        })?;
-
-        let next_index = source.next_branch()?;
+        let messages = source.next_branch()?;
         let level = source.next_branch()?;
-
-        source.done(OutboxLevel {
-            messages,
-            next_index,
-            level,
-        })
+        source.done(OutboxLevel { messages, level })
     }
 }
 
 impl FromProof for OutboxLevel<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
-        let (proof, messages) = proof.next_branch_with(|p| {
-            let result = Many::<_, LEVEL_MERKLE_ARITY, MAX_LEVEL_SIZE>::from_proof(p)?;
-            Ok(result.map(|arr| arr.into_boxed_array()))
-        })?;
-
-        let (proof, next_index) = proof.next_branch()?;
+        let (proof, messages) = proof.next_branch()?;
         let (proof, level) = proof.next_branch()?;
-
-        proof.done(OutboxLevel {
-            messages,
-            next_index,
-            level,
-        })
+        proof.done(OutboxLevel { messages, level })
     }
 }
 
-impl<M: EncodeAtomMode> Encode for OutboxLevel<M> {
+impl<M: EncodeAtomMode + EncodeVectorMode> Encode for OutboxLevel<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.messages.encode(encoder)?;
-        self.next_index.encode(encoder)?;
         self.level.encode(encoder)?;
         Ok(())
     }
@@ -528,13 +490,8 @@ impl<M: EncodeAtomMode> Encode for OutboxLevel<M> {
 impl<C> Decode<C> for OutboxLevel<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let messages = Decode::decode(decoder)?;
-        let next_index = Decode::decode(decoder)?;
         let level = Decode::decode(decoder)?;
-        Ok(Self {
-            messages,
-            next_index,
-            level,
-        })
+        Ok(Self { messages, level })
     }
 }
 
@@ -594,7 +551,7 @@ pub(crate) mod tests {
                 prop_assert!(outbox.write_message(message.clone(), level).is_ok());
 
                 prop_assert_eq!(&*outbox.levels[idx].messages[i], &message);
-                prop_assert_eq!(*outbox.levels[idx].next_index, (i + 1) as u32);
+                prop_assert_eq!(outbox.levels[idx].messages.len(), i + 1);
                 prop_assert_eq!(*outbox.levels[idx].level, level);
             }
         });
@@ -612,7 +569,7 @@ pub(crate) mod tests {
             assert!(outbox.write_message(first_message, level).is_ok());
             assert!(outbox.write_message(second_message, level).is_ok());
 
-            assert_eq!(*outbox.levels[idx].next_index, 2);
+            assert_eq!(outbox.levels[idx].messages.len(), 2);
             assert_eq!(*outbox.levels[idx].level, level);
 
             // Now write at `level` + TEST_OUTBOX_SIZE which should wrap to `level`
@@ -621,7 +578,7 @@ pub(crate) mod tests {
             assert!(outbox.write_message(third_message.clone(), overflow_level).is_ok());
 
             assert_eq!(&*outbox.levels[idx].messages[0], &third_message);
-            assert_eq!(*outbox.levels[idx].next_index, 1);
+            assert_eq!(outbox.levels[idx].messages.len(), 1);
             assert_eq!(*outbox.levels[idx].level, overflow_level);
         });
     }
@@ -632,19 +589,19 @@ pub(crate) mod tests {
             let mut outbox = Outbox::<Normal>::default();
              for (i, message) in messages.iter().enumerate().take(MAX_LEVEL_SIZE) {
                 assert!(outbox.write_message(message.clone(), 0).is_ok());
-                assert_eq!(*outbox.levels[0].next_index, (i + 1) as u32);
+                assert_eq!(outbox.levels[0].messages.len(), i + 1);
                 assert_eq!(&*outbox.levels[0].messages[i], message);
             }
 
             for message in &messages[MAX_LEVEL_SIZE..] {
                 // Verify that outbox is full
-                assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
+                assert_eq!(outbox.levels[0].messages.len(), MAX_LEVEL_SIZE);
 
                 prop_assert!(matches!(
                     outbox.write_message(message.clone(), 0),
                     Err(OutboxWriteError::FullOutbox)
                 ));
-                prop_assert_eq!(*outbox.levels[0].next_index, MAX_LEVEL_SIZE as u32);
+                prop_assert_eq!(outbox.levels[0].messages.len(), MAX_LEVEL_SIZE);
             }
         });
     }
