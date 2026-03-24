@@ -28,7 +28,10 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use octez_riscv_data::components::bytes::Bytes;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::serialisation::deserialise;
@@ -77,6 +80,11 @@ impl ResolverId for ArcNodeId {
         *self.0.hash()
     }
 }
+impl Foldable<HashFold> for ArcNodeId {
+    fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
+        *self.0.hash()
+    }
+}
 
 /// ID for a tree that is always present
 #[derive(Debug, Clone, derive_more::From, Default)]
@@ -84,6 +92,11 @@ pub struct ArcTreeId(Tree<ArcNodeId>);
 
 impl ResolverId for ArcTreeId {
     fn hash(&self) -> Hash {
+        self.0.hash()
+    }
+}
+impl Foldable<HashFold> for ArcTreeId {
+    fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
         self.0.hash()
     }
 }
@@ -138,15 +151,6 @@ pub struct LazyId<Id, Value> {
     id: Option<Id>,
 }
 
-impl<Value> From<Hash> for LazyId<Hash, Value> {
-    fn from(hash: Hash) -> Self {
-        Self {
-            inner: OnceLock::new(),
-            id: Some(hash),
-        }
-    }
-}
-
 impl<Id, Value> LazyId<Id, Value> {
     /// Create an identifier from an already loaded value.
     pub fn new(value: Value) -> Self {
@@ -159,6 +163,25 @@ impl<Id, Value> LazyId<Id, Value> {
     /// Return the identifier if available.
     fn id(&self) -> Option<&Id> {
         self.id.as_ref()
+    }
+}
+
+impl<Value> From<Hash> for LazyId<Hash, Value> {
+    fn from(hash: Hash) -> Self {
+        Self {
+            inner: OnceLock::new(),
+            id: Some(hash),
+        }
+    }
+}
+
+impl<F: Fold, Id: Foldable<F>, Value: Foldable<F>> Foldable<F> for LazyId<Id, Value> {
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        if let Some(value) = self.inner.get() {
+            return value.fold(builder);
+        }
+
+        self.id.as_ref().expect("TODO").fold(builder)
     }
 }
 
@@ -191,6 +214,11 @@ impl ResolverId for LazyNodeId {
             .expect("ID should be present when node is absent")
     }
 }
+impl Foldable<HashFold> for LazyNodeId {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        self.0.fold(builder)
+    }
+}
 
 /// Identifier for an AVL tree.
 #[derive(Debug, Clone)]
@@ -221,6 +249,11 @@ impl ResolverId for LazyTreeId {
             .id()
             .cloned()
             .expect("ID should be present when tree is absent")
+    }
+}
+impl Foldable<HashFold> for LazyTreeId {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        self.0.fold(builder)
     }
 }
 
@@ -358,8 +391,9 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::hash::HashedData;
+    use octez_riscv_data::hash::HashFold;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::serialisation;
 
@@ -456,18 +490,18 @@ mod tests {
         resolver: &Res,
         persistence_layer: &KV,
     ) where
-        NodeId: ResolverId,
+        NodeId: ResolverId + Foldable<HashFold>,
         TreeId: ResolverId,
         KV: KeyValueStore,
         Res: AvlResolver<NodeId, TreeId, Normal>,
     {
         // LazyTreeId resolves by loading a serialised optional root hash.
+        let tree_id = tree.hash();
         let tree_repr: Option<Hash> = tree.root().map(ResolverId::hash);
         let tree_bytes =
             serialisation::serialise(tree_repr).expect("tree serialisation should succeed");
-        let tree_blob = HashedData::from_data(tree_bytes);
         persistence_layer
-            .blob_set(tree_blob.hash(), tree_blob.data())
+            .blob_set(tree_id, tree_bytes)
             .expect("persisting trees should succeed");
 
         let Some(node_id) = tree.root() else {
@@ -480,9 +514,8 @@ mod tests {
         let encoded = node.to_encode();
         let node_bytes =
             serialisation::serialise(encoded).expect("node serialisation should succeed");
-        let node_blob = HashedData::from_data(node_bytes);
         persistence_layer
-            .blob_set(node_blob.hash(), node_blob.data())
+            .blob_set(node_id.hash(), node_bytes)
             .expect("persisting nodes should succeed");
 
         persist_tree(

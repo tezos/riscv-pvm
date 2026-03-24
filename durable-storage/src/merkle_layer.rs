@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -42,9 +41,7 @@ use crate::storage::PersistentKeyValueStore;
 
 pub(crate) fn empty_tree_hash() -> Hash {
     static EMPTY_TREE_HASH: OnceLock<Hash> = OnceLock::new();
-    *EMPTY_TREE_HASH.get_or_init(|| {
-        Hash::hash_encodable(Option::<Hash>::None).expect("Hashing the empty tree should not fail")
-    })
+    *EMPTY_TREE_HASH.get_or_init(|| Tree::from(None::<LazyNodeId>).hash())
 }
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
@@ -305,16 +302,15 @@ impl<KV> NormalImpl<KV> {
         // calculated during the encoding of the node if necessary.
         for node in self.tree.iter(&self.resolver) {
             let node = node?;
-            let encoded = node.to_encode();
-            let value = serialise(encoded).expect("Serialisation of node data should not fail");
-            let blob = HashedData::from_data(value);
-            let node_hash = blob.hash();
-            self.persistence.blob_set(node_hash, blob.data())?;
 
-            let serialised_tree_repr = serialise(Some(node_hash))?;
-            let tree_blob = HashedData::from_data(serialised_tree_repr);
-            self.persistence
-                .blob_set(tree_blob.hash(), tree_blob.data())?;
+            let node_id = node.hash();
+            let node_bytes =
+                serialise(node.to_encode()).expect("Serialisation of node data should not fail");
+            self.persistence.blob_set(node_id, node_bytes)?;
+
+            let tree_id = Tree::from(Some(node_id)).hash();
+            let tree_bytes = serialise(Some(node_id))?;
+            self.persistence.blob_set(tree_id, tree_bytes)?;
         }
 
         Ok(CommitId::from(self.hash()))

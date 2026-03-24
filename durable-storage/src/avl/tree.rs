@@ -7,7 +7,6 @@
 use std::cmp::Ordering;
 
 use bincode::Decode;
-use bincode::Encode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
 #[cfg(test)]
@@ -15,12 +14,15 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
-use super::resolver::ResolverId;
 #[cfg(test)]
 use crate::avl::node::Meta;
 use crate::avl::resolver::AvlResolver;
@@ -130,24 +132,12 @@ impl<NodeId> Tree<NodeId> {
         })
     }
 
-    /// Returns the [`struct@Hash`] of this [`Tree`], potentially re-hashing uncached
-    /// [`Node`]s.
-    ///
-    /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
-    pub(crate) fn to_encode(&self) -> impl Encode + '_
-    where
-        NodeId: ResolverId,
-    {
-        self.0.as_ref().map(ResolverId::hash)
-    }
-
     /// Returns the hash of this tree.
     pub(crate) fn hash(&self) -> Hash
     where
-        NodeId: ResolverId,
+        NodeId: Foldable<HashFold>,
     {
-        let data = self.to_encode();
-        Hash::hash_encodable(data).expect("The hashing should not fail")
+        Hash::from_foldable(self)
     }
 
     /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
@@ -337,6 +327,21 @@ impl<C> Decode<C> for Tree<LazyNodeId> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let root_hash: Option<Hash> = Decode::decode(decoder)?;
         Ok(Tree::from(root_hash.map(LazyNodeId::from)))
+    }
+}
+
+impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        let mut node = builder.into_node_fold();
+
+        let present = self.0.is_some();
+        node.add(&Hash::hash_encodable(present).expect("TODO"));
+
+        if let Some(inner) = self.0.as_ref() {
+            node.add(inner);
+        }
+
+        node.done()
     }
 }
 
