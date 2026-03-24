@@ -312,7 +312,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
                 InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
             }
             PvmStatus::WaitingForInput => {
-                if self.level_is_set.read() {
+                if !self.level_is_set.read() {
                     InputRequest::Initial
                 } else {
                     InputRequest::FirstAfter {
