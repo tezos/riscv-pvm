@@ -34,8 +34,6 @@ use std::path::Path;
 
 use bincode::BorrowDecode;
 use bincode::Encode;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashedData;
 use rocksdb::ColumnFamilyDescriptor;
 use rocksdb::MergeOperands;
 use rocksdb::checkpoint::Checkpoint;
@@ -48,7 +46,7 @@ use crate::repo::DirectoryManager;
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 
-/// The name of the column family used for storing [`HashedData`].
+/// The name of the column family used for storing blob-keyed data.
 const BLOB_CF: &str = "blob";
 
 #[derive(BorrowDecode, Encode)]
@@ -294,7 +292,7 @@ impl KeyValueStore for PersistenceLayer {
         Self::clone_as_checkpoint(&self.db_instance, repo)
     }
 
-    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Error> {
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let key = key.as_ref();
         let entry = self
             .db_instance
@@ -311,17 +309,22 @@ impl KeyValueStore for PersistenceLayer {
         }
     }
 
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: HashedData<Data>) -> Result<(), OperationalError> {
+    fn blob_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        let key = key.as_ref();
         self.db_instance
-            .put_cf(self.blob_cf(), blob.hash(), blob.data())
+            .put_cf(self.blob_cf(), key, data.as_ref())
             .map_err(|error| OperationalError::PutFailed {
                 column: BLOB_CF.to_string(),
-                key: blob.hash().as_ref().to_owned(),
+                key: key.to_owned(),
                 error,
             })
     }
 
-    fn blob_delete(&self, key: Hash) -> Result<(), OperationalError> {
+    fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
         let key = key.as_ref();
         self.db_instance
             .delete_cf(self.blob_cf(), key)
@@ -499,6 +502,7 @@ mod tests {
     use std::path::PathBuf;
 
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::HashedData;
     use octez_riscv_test_utils::TestableTmpdir;
     use proptest::prelude::Strategy;
     use proptest::prelude::any;
@@ -594,14 +598,14 @@ mod tests {
             // Initially the key should not be found
             assert_blob_missing(&db, key);
 
-            db.blob_set(blob.clone())
+            db.blob_set(blob.hash(), blob.data())
                 .expect("Should be able to set a value");
 
             assert_blob_value(&db, &blob);
 
             let blob2 = HashedData::from_data(value_b.as_bytes());
             let key2 = blob2.hash();
-            db.blob_set(blob2.clone())
+            db.blob_set(blob2.hash(), blob2.data())
                 .expect("Should be able to set another value");
 
             assert_blob_value(&db, &blob2);
@@ -666,11 +670,11 @@ mod tests {
         let another_blob = HashedData::from_data(b"another_value");
         let third_blob = HashedData::from_data(b"third_value");
 
-        db_a.blob_set(initial_blob.clone())
+        db_a.blob_set(initial_blob.hash(), initial_blob.data())
             .expect("Failed to set initial blob in A");
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
 
-        db_b.blob_set(another_blob)
+        db_b.blob_set(another_blob.hash(), another_blob.data())
             .expect("Failed to set another blob in B");
 
         // get methods borrow the db so we have to drop the borrow to mutate the db in the next scope
@@ -680,7 +684,7 @@ mod tests {
         {
             assert_blob_value(&db_b, &initial_blob);
 
-            db_a.blob_set(third_blob.clone())
+            db_a.blob_set(third_blob.hash(), third_blob.data())
                 .expect("Failed to set third blob in A");
             assert_blob_missing(&db_b, third_blob.hash());
         }
@@ -706,7 +710,7 @@ mod tests {
 
         // A -> (B, C)
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.blob_set(blob.clone())
+        db_a.blob_set(blob.hash(), blob.data())
             .expect("Failed to set blob in A");
 
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
@@ -734,7 +738,7 @@ mod tests {
 
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
         let blob = HashedData::from_data(b"some_value");
-        db_a.blob_set(blob.clone())
+        db_a.blob_set(blob.hash(), blob.data())
             .expect("Failed to set blob in A");
 
         let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
@@ -783,18 +787,18 @@ mod tests {
         let blob_c = HashedData::from_data(b"third_value");
 
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.blob_set(blob_a.clone())
+        db_a.blob_set(blob_a.hash(), blob_a.data())
             .expect("Failed to set blob in A");
 
         let db_b = db_a.try_clone(&repo).expect("Failed to clone DB A to B");
-        db_b.blob_set(blob_b.clone())
+        db_b.blob_set(blob_b.hash(), blob_b.data())
             .expect("Failed to set blob in B");
 
         let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
         db_b.commit(&repo, &commit_id)
             .expect("Failed to commit DB B");
 
-        db_b.blob_set(blob_c.clone())
+        db_b.blob_set(blob_c.hash(), blob_c.data())
             .expect("Failed to set blob in B");
 
         drop(db_a);
@@ -825,14 +829,14 @@ mod tests {
         let commit_id_1 = CommitId::from(Hash::hash_bytes(b"commit_1"));
         let commit_id_2 = CommitId::from(Hash::hash_bytes(b"commit_2"));
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
-        db_a.blob_set(blob_a.clone())
+        db_a.blob_set(blob_a.hash(), blob_a.data())
             .expect("Failed to set blob in A");
         db_a.commit(&repo, &commit_id_1)
             .expect("Failed to commit DB A");
 
         let db_c = PersistenceLayer::checkout(&repo, &commit_id_1)
             .expect("Failed to checkout commit into DB C");
-        db_c.blob_set(blob_b.clone())
+        db_c.blob_set(blob_b.hash(), blob_b.data())
             .expect("Failed to set blob in C");
         db_c.commit(&repo, &commit_id_2)
             .expect("Failed to commit DB C");
@@ -864,7 +868,7 @@ mod tests {
         let db_a = PersistenceLayer::new(&repo).expect("Failed to create DB A");
 
         let blob = HashedData::from_data(b"some_value");
-        db_a.blob_set(blob.clone())
+        db_a.blob_set(blob.hash(), blob.data())
             .expect("Failed to set blob in A");
 
         let commit_id = CommitId::from(Hash::hash_bytes(b"commit_1"));
@@ -872,7 +876,7 @@ mod tests {
             .expect("Failed to commit DB A");
 
         let blob_2 = HashedData::from_data(b"another_value");
-        db_a.blob_set(blob_2.clone())
+        db_a.blob_set(blob_2.hash(), blob_2.data())
             .expect("Failed to set blob 2 in A");
 
         // Committing again with the same id should work
@@ -1001,7 +1005,7 @@ mod tests {
             }
 
             {
-                // these operations shouldn't affect the default column family for hashed data
+                // These operations shouldn't affect the blob column family.
                 let blob1 = HashedData::from_data(value.as_bytes());
                 let blob2 = HashedData::from_data(value2.as_bytes());
                 assert!(matches!(
