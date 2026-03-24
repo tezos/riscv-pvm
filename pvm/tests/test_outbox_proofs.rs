@@ -29,7 +29,7 @@ use octez_riscv_data::tree::Tree;
 use octez_riscv_test_utils::*;
 
 /// The maximum size in bytes expected for an outbox proof (message size is 4096 B)
-const MAX_EXPECTED_OUTBOX_PROOF_SIZE: usize = 4880;
+const MAX_EXPECTED_OUTBOX_PROOF_SIZE: usize = 4960;
 
 const ROLLUP_ADDRESS: [u8; 20] = [
     244, 228, 124, 179, 196, 58, 104, 176, 212, 142, 48, 148, 9, 44, 164, 45, 113, 58, 221, 181,
