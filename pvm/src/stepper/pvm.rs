@@ -45,6 +45,7 @@ use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
+use crate::pvm::InputRequest;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
@@ -211,6 +212,9 @@ impl<
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
+    ///
+    /// When `stop_for_input` is `true`, evaluates and handles reveals but does not
+    /// provide inbox messages. It instead returns once the PVM is waiting for input.
     // TODO RV-573:
     // There is a divergence from the semantics of the PVM. Namely, when failing to provide input
     // we actually still take a step whilst transitioning to the 'error mode'. This is needed to
@@ -219,7 +223,7 @@ impl<
     // we'd actually return `Running { X }` still in the second case. RV-573 will address this by no
     // longer returning stepper status, but rather allowing parts of the stepper harness, and the pvm, to
     // be queried directly.
-    fn step_max_once(&mut self, steps: Bound<usize>) -> StepperStatus {
+    pub fn step_max_once(&mut self, steps: Bound<usize>, stop_for_input: bool) -> StepperStatus {
         // SAFETY: We're in a stepper context where divergence (e.g. early exit) is allowed.
         unsafe {
             if let Some(exit_code) = self.pvm.has_exited() {
@@ -242,6 +246,8 @@ impl<
                 let steps = self.pvm.eval_max(&mut self.hooks, steps);
                 StepperStatus::Running { steps }
             }
+
+            PvmStatus::WaitingForInput if stop_for_input => StepperStatus::Running { steps: 0 },
 
             PvmStatus::WaitingForInput => match self.inbox.next() {
                 Some((level, counter, payload)) => {
@@ -307,9 +313,14 @@ impl<
         }
     }
 
+    /// Construct an [`InputRequest`] based on the PVM's current status and level.
+    pub fn input_request(&self) -> InputRequest {
+        self.pvm.input_request()
+    }
+
     /// Try to take one step and return true if the PVM is not in an errored state.
     fn try_step(&mut self) -> bool {
-        match self.step_max_once(Bound::Included(1)) {
+        match self.step_max_once(Bound::Included(1), false) {
             // We don't include errors in this case because errors count as 0 steps. That means if
             // we receive a [`StepperStatus::Errored`] with `steps: 1` then it tried to run 2 steps
             // but failed at the second.
@@ -384,6 +395,38 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode, PC: PageCache<MC, M>, DS>
 
         let stepper = self.to_verify_stepper(pvm)?;
         stepper.verify_proof_internal(deserialised_proof_tree, proof.final_state_hash())
+    }
+
+    /// Verify a Merkle proof and construct an input request in case of success, similar
+    /// to [`crate::pvm::node_pvm::NodePvm::verify_proof`].
+    ///
+    /// The [`PvmStepper`] is used for inbox information.
+    pub fn verify_proof_get_input_request(
+        &self,
+        proof: Proof,
+    ) -> Result<InputRequest, ProofVerificationFailure>
+    where
+        MC::State<Verify>: Foldable<PartialHashFold>,
+        DS: Foldable<PartialHashFold>,
+        DS: FromProof + DurableStorage<Verify>,
+    {
+        let proof_tree = ProofTree::Present(proof.tree());
+        let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
+            .map_err(ProofVerificationFailure::BadDeserialisation)?;
+
+        let gotten_proof_tree = match deserialised_proof_tree {
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::Absent,
+        };
+        debug_assert_eq!(
+            proof_tree, gotten_proof_tree,
+            "The Merkle proof tree obtained through deserialisation should match the original proof tree"
+        );
+
+        let stepper = self.to_verify_stepper(pvm)?;
+        let input_request = stepper.input_request();
+        stepper.verify_proof_internal(deserialised_proof_tree, proof.final_state_hash())?;
+        Ok(input_request)
     }
 
     fn to_verify_stepper(
@@ -508,7 +551,7 @@ impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorag
         let mut total_steps = 0usize;
 
         loop {
-            match self.step_max_once(step_bounds) {
+            match self.step_max_once(step_bounds, false) {
                 StepperStatus::Running { steps } => {
                     total_steps = total_steps.saturating_add(steps);
                     step_bounds = bound_saturating_sub(step_bounds, steps);
