@@ -10,12 +10,18 @@ use std::ops::Bound;
 use std::time::Instant;
 
 use octez_riscv::machine_state::memory::M64M;
+use octez_riscv::pvm::hooks::PvmHooks;
 use octez_riscv::pvm::outbox::OutboxMessage;
 use octez_riscv::pvm::outbox::OutboxProof;
+use octez_riscv::pvm::outbox::OutboxProofError;
 use octez_riscv::pvm::outbox::Output;
 use octez_riscv::pvm::outbox::OutputInfo;
+use octez_riscv::pvm::outbox::TEST_OUTBOX_SIZE;
+use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
 use octez_riscv::stepper::Stepper;
+use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv::stepper::pvm::verify_outbox_proof;
+use octez_riscv_data::mode::utils::NotFound;
 use octez_riscv_test_utils::*;
 
 /// The maximum size in bytes expected for an outbox proof (message size is 4096 B)
@@ -79,6 +85,63 @@ fn test_outbox_proofs(inputs: &TestConfig) {
     assert_eq!(stepper.hash(), deserialised_proof.state_hash());
     let output_from_deserialised_proof = verify_outbox_proof(&deserialised_proof).unwrap();
     assert_eq!(output, output_from_deserialised_proof);
+
+    test_invalid_outbox_level_proofs(&mut stepper);
+    test_invalid_merkle_proofs(&mut stepper);
+}
+
+fn test_invalid_outbox_level_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
+    let stepper_level = stepper.level().unwrap();
+    // Outbox proof production fails for stale level
+    assert!(matches!(
+        stepper.produce_outbox_proof(OutputInfo {
+            level: stepper_level
+                .checked_sub(TEST_OUTBOX_SIZE as u32)
+                .expect("Expected current level to be higher than the size of the outbox"),
+            index: 0,
+        }),
+        Err(OutboxProofError::LevelNotFound { level: 2 })
+    ));
+
+    // Outbox proof production fails for future level
+    assert!(matches!(
+        stepper.produce_outbox_proof(OutputInfo {
+            level: stepper_level + 1,
+            index: 0,
+        }),
+        Err(OutboxProofError::LevelNotFound { level  }) if level == stepper_level + 1
+    ));
+}
+
+fn test_invalid_merkle_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
+    let level = stepper.level().unwrap();
+
+    // Malicious outbox proof should fail
+    let mut outbox_proof1 = stepper
+        .produce_outbox_proof(OutputInfo { level, index: 0 })
+        .expect("Outbox proof should not be stale");
+
+    let mut outbox_proof2 = stepper
+        .produce_outbox_proof(OutputInfo {
+            level: level - 1,
+            index: 0,
+        })
+        .expect("Outbox proof should not be stale");
+
+    assert!(verify_outbox_proof(&outbox_proof1).is_ok());
+    assert!(verify_outbox_proof(&outbox_proof2).is_ok());
+
+    std::mem::swap(&mut outbox_proof1.proof, &mut outbox_proof2.proof);
+
+    assert!(matches!(
+        verify_outbox_proof(&outbox_proof1),
+        Err(ProofVerificationFailure::AbsentDataAccess(NotFound))
+    ));
+
+    assert!(matches!(
+        verify_outbox_proof(&outbox_proof2),
+        Err(ProofVerificationFailure::AbsentDataAccess(NotFound))
+    ));
 }
 
 #[test]
