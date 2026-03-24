@@ -626,6 +626,7 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
 }
 
 /// An [`InputRequest`] is what the PVM expects as input for a specific tick.
+#[derive(Debug, PartialEq)]
 pub enum InputRequest {
     /// No input is required at the moment, normal execution can continue.
     NoInputRequired,

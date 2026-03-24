@@ -87,6 +87,45 @@ fn test_etherlink_initial_proof_regression() {
     test_initial_proof_regression(ETHERLINK)
 }
 
+#[test]
+fn test_dummy_input_request_proof() {
+    use octez_riscv::pvm::InputRequest;
+
+    let make_stepper = make_stepper_factory::<M64M>(&DUMMY, None);
+    let mut stepper = make_stepper();
+
+    // Evaluate and handle reveals until the first `WaitingForInput` status
+    while stepper.step_max_once(Bound::Unbounded, true).steps() > 0 {}
+
+    assert_eq!(stepper.input_request(), InputRequest::Initial);
+
+    // Produce and verify a proof and check the input request
+    let proof = stepper.produce_proof().unwrap();
+    let verifier_input_request =
+        PvmStepper::verify_proof_get_input_request(&stepper, proof).unwrap();
+    assert_eq!(stepper.input_request(), verifier_input_request);
+
+    // Provide the first inbox message
+    stepper.step_max(Bound::Included(1));
+
+    // Evaluate and handle reveals until `WaitingForInput` again
+    while stepper.step_max_once(Bound::Unbounded, true).steps() > 0 {}
+
+    assert_eq!(
+        stepper.input_request(),
+        InputRequest::FirstAfter {
+            level: 0,
+            counter: 0
+        }
+    );
+
+    // Produce and verify a proof and check the input request
+    let proof = stepper.produce_proof().unwrap();
+    let verifier_input_request =
+        PvmStepper::verify_proof_get_input_request(&stepper, proof).unwrap();
+    assert_eq!(stepper.input_request(), verifier_input_request);
+}
+
 fn test_initial_proof_regression(inputs: TestConfig) {
     let make_stepper = make_stepper_factory::<M64M>(&inputs, None);
     let mut stepper = make_stepper();
