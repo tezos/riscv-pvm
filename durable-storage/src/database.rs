@@ -129,7 +129,11 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 
     /// Returns true if the provided key exists in the database, false if it does not.
     pub fn exists(&self, key: &Key) -> Result<bool, Error> {
-        M::exists(self, key)
+        match self.get(key) {
+            Ok(_) => Ok(true),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => Ok(false),
+            Err(other_error) => Err(other_error),
+        }
     }
 
     /// Obtain, and possibly calculate, the root hash of the database.
@@ -251,12 +255,6 @@ impl<KV> Modal for DatabaseTemplate<KV> {
 
 /// Modes that support the operational API exposed by [`Database`].
 pub trait DatabaseMode: Mode {
-    /// See [`Database::exists`]
-    fn exists<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-    ) -> Result<bool, Error>;
-
     /// See [`Database::set`]
     fn set<KV: BackgroundKeyValueStore>(
         this: &mut Database<KV, Self>,
@@ -296,17 +294,6 @@ impl DatabaseMode for Normal {
         key: &Key,
     ) -> Result<impl AsRef<[u8]>, Error> {
         this.inner.persistent.get(key.as_ref())
-    }
-
-    fn exists<KV: BackgroundKeyValueStore>(
-        this: &Database<KV, Self>,
-        key: &Key,
-    ) -> Result<bool, Error> {
-        match this.inner.persistent.get(key.as_ref()) {
-            Ok(_) => Ok(true),
-            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => Ok(false),
-            Err(other_error) => Err(other_error),
-        }
     }
 
     fn set<KV: BackgroundKeyValueStore>(
