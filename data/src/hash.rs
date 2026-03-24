@@ -16,6 +16,7 @@ use perfect_derive::perfect_derive;
 use thiserror::Error;
 
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::merkle_proof::proof_tree::MerkleProof;
@@ -195,6 +196,16 @@ impl Fold for HashFold {
 
     fn into_node_fold(self) -> Self::NodeFold {
         HashNodeFold::default()
+    }
+}
+
+impl FoldLeaf for HashFold {
+    fn fold_leaf<T: Encode>(self, t: T) -> Result<Hash, EncodeError> {
+        Hash::hash_encodable(t)
+    }
+
+    fn fold_leaf_raw(self, bytes: &[u8]) -> Hash {
+        Hash::hash_bytes(bytes)
     }
 }
 
