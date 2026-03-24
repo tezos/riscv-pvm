@@ -4,11 +4,14 @@
 
 #![cfg(test)]
 
+use std::convert::Infallible;
 use std::error;
 
 use bincode::Decode;
+use unwrap_infallible::UnwrapInfallible;
 
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
@@ -48,14 +51,14 @@ pub enum TestTree {
 }
 
 impl Foldable<TestFolder> for u8 {
-    fn fold(&self, _builder: TestFolder) -> TestTree {
-        TestTree::Leaf(vec![*self])
+    fn fold(&self, _builder: TestFolder) -> FoldResult<TestFolder> {
+        Ok(TestTree::Leaf(vec![*self]))
     }
 }
 
 impl Foldable<TestFolder> for TestTree {
-    fn fold(&self, _builder: TestFolder) -> TestTree {
-        self.clone()
+    fn fold(&self, _builder: TestFolder) -> FoldResult<TestFolder> {
+        Ok(self.clone())
     }
 }
 
@@ -63,6 +66,8 @@ impl Foldable<TestFolder> for TestTree {
 pub struct TestFolder;
 
 impl Fold for TestFolder {
+    type Error = Infallible;
+
     type Folded = TestTree;
 
     type NodeFold = TestNodeFolder;
@@ -82,13 +87,14 @@ pub struct TestNodeFolder {
 impl NodeFold for TestNodeFolder {
     type Parent = TestFolder;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
-        let folded_child = child.fold(TestFolder);
+    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) -> Result<(), Infallible> {
+        let folded_child = child.fold(TestFolder)?;
         self.children.push(folded_child);
+        Ok(())
     }
 
-    fn done(self) -> TestTree {
-        TestTree::Node(self.children)
+    fn done(self) -> FoldResult<TestFolder> {
+        Ok(TestTree::Node(self.children))
     }
 }
 
@@ -171,31 +177,31 @@ fn test_unfold() {
 
     // Fold and unfold data of a given shape
     let data: Data = (1, (2, 3, (4, 5, 6)), (7, 8));
-    let tree = data.fold(TestFolder);
+    let tree = data.fold(TestFolder).unwrap_infallible();
     let unfolded = Data::unfold(tree).unwrap();
     assert_eq!(data, unfolded);
 
     // Incorrect shape: too many children
     let bad_data = (1, (2, 3, (4, 5, 6)), (7, 8, 9));
-    let tree = bad_data.fold(TestFolder);
+    let tree = bad_data.fold(TestFolder).unwrap_infallible();
     let result = Data::unfold(tree);
     assert_eq!(result.unwrap_err().as_str(), "Too many children");
 
     // Incorrect shape: too few children
     let bad_data = (1, (2, 3, (4, 6)), (7, 8));
-    let tree = bad_data.fold(TestFolder);
+    let tree = bad_data.fold(TestFolder).unwrap_infallible();
     let result = Data::unfold(tree);
     assert_eq!(result.unwrap_err().as_str(), "Too few children");
 
     // Incorrect shape: unexpected leaf
     let bad_data = (1, (2, 3, 4), (7, 8));
-    let tree = bad_data.fold(TestFolder);
+    let tree = bad_data.fold(TestFolder).unwrap_infallible();
     let result = Data::unfold(tree);
     assert_eq!(result.unwrap_err().as_str(), "Unexpected leaf");
 
     // Incorrect shape: unexpected node
     let bad_data = (1, ((2, 2), 3, (4, 5, 6)), (7, 8));
-    let tree = bad_data.fold(TestFolder);
+    let tree = bad_data.fold(TestFolder).unwrap_infallible();
     let result = Data::unfold(tree);
     assert_eq!(result.unwrap_err().as_str(), "Unexpected node");
 }

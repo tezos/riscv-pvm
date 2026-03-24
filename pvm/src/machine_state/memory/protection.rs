@@ -17,6 +17,7 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::foldable::seq_tree::Many;
@@ -161,8 +162,8 @@ where
     F: Fold,
     Atom<bool, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
-        let page_generator = |idx| self.pages.index(idx);
+    fn fold(&self, builder: F) -> FoldResult<F> {
+        let page_generator = |idx| Ok(self.pages.index(idx));
         IndexableSeqAsTree::new(PAGES, MERKLE_ARITY, &page_generator).fold(builder)
     }
 }

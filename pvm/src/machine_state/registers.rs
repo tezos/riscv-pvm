@@ -30,6 +30,7 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::Unfold;
 use octez_riscv_data::foldable::Unfoldable;
@@ -286,7 +287,7 @@ where
     F: Fold,
     Atom<[u64; 31], M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         self.registers.fold(builder)
     }
 }
@@ -678,7 +679,7 @@ where
     F: Fold,
     Atom<[FValue; 32], M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         self.registers.fold(builder)
     }
 }

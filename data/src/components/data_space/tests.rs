@@ -15,11 +15,13 @@ use proptest::array;
 use proptest::prop_assert;
 use proptest::prop_assert_eq;
 use proptest::proptest;
+use unwrap_infallible::UnwrapInfallible;
 
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
 use crate::components::data_space::NODE_ARITY;
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::Unfoldable;
@@ -44,7 +46,7 @@ use crate::serialisation::elem::Elem;
 use crate::serialisation::serialise;
 
 impl Foldable<TestFolder> for DataSpace<Normal> {
-    fn fold(&self, builder: TestFolder) -> TestTree {
+    fn fold(&self, builder: TestFolder) -> FoldResult<TestFolder> {
         let length = self.len();
         let length_node = TestTree::Leaf(serialise(length).unwrap());
 
@@ -54,14 +56,14 @@ impl Foldable<TestFolder> for DataSpace<Normal> {
 
             let mut v = vec![];
             v.extend_from_slice(&self.data_space[page_start..page_end]);
-            TestTree::Leaf(v)
+            Ok(TestTree::Leaf(v))
         };
 
         let pages = length.div_ceil(PAGE_SIZE);
 
         let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.add(&length_node)?;
+        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator))?;
         builder.done()
     }
 }
@@ -659,7 +661,7 @@ fn fold_unfold() {
         let mut space: DataSpace<Normal> = DataSpace::new(length);
         space.fill(42);
 
-        let tree = space.fold(TestFolder);
+        let tree = space.fold(TestFolder).unwrap_infallible();
         let unfolded = DataSpace::unfold(tree).unwrap();
 
         assert!(space == unfolded);
@@ -672,7 +674,7 @@ fn unfold_error_on_invalid_length() {
     let mut space: DataSpace<Normal> = DataSpace::new(length);
     space.fill(42);
 
-    let tree = space.fold(TestFolder);
+    let tree = space.fold(TestFolder).unwrap_infallible();
     let unfold_result = DataSpace::unfold(tree.clone());
 
     assert!(unfold_result == Err("InvalidLength(5000)".to_string()));

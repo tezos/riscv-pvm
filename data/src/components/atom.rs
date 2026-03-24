@@ -21,7 +21,7 @@ use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
-use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::Unfold;
 use crate::foldable::Unfoldable;
@@ -159,24 +159,24 @@ impl<T: Default + 'static, M: AtomMode> Default for Atom<T, M> {
 }
 
 impl<T: Encode + 'static> Foldable<HashFold> for Atom<T, Normal> {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        Hash::hash_encodable(&self.atom).expect("Hashing should not fail")
+    fn fold(&self, _builder: HashFold) -> FoldResult<HashFold> {
+        Ok(Hash::hash_encodable(&self.atom).expect("Hashing should not fail"))
     }
 }
 
 impl<'normal, T: Encode + 'static> Foldable<HashFold> for Atom<T, Prove<'normal>> {
-    fn fold(&self, _builder: HashFold) -> Hash {
+    fn fold(&self, _builder: HashFold) -> FoldResult<HashFold> {
         let value = self
             .atom
             .current
             .as_deref()
             .unwrap_or_else(|| &self.atom.previous);
-        Hash::hash_encodable(value).expect("Hashing should not fail")
+        Ok(Hash::hash_encodable(value).expect("Hashing should not fail"))
     }
 }
 
 impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+    fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
         let data = serialise(self.atom.previous.deref()).expect("Serialisation should not fail");
 
         // Determine whether the value has been read or written during proof generation. If so, we
@@ -187,20 +187,20 @@ impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
             MinimumPresence::MayOmit
         };
 
-        builder.into_leaf(constraint, data)
+        Ok(builder.into_leaf(constraint, data))
     }
 }
 
 impl<T: Encode + 'static> Foldable<PartialHashFold> for Atom<T, Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+    fn fold(&self, builder: PartialHashFold) -> FoldResult<PartialHashFold> {
         let hash = match &self.atom {
-            Partial::Absent => return builder.previous(),
+            Partial::Absent => return Ok(builder.previous()),
             Partial::Blinded(hash) => *hash,
             Partial::Present(value) => {
                 Hash::hash_encodable(value).expect("Hashing should not fail")
             }
         };
-        PartialHash::Present(hash)
+        Ok(PartialHash::Present(hash))
     }
 }
 

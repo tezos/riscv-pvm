@@ -19,6 +19,7 @@ memmap2.workspace = true
 range-collections.workspace = true
 bytes.workspace = true
 unty.workspace = true
+unwrap-infallible.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

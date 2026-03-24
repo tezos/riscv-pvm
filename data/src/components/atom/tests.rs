@@ -14,9 +14,11 @@ use proptest::prop_assert_eq;
 use proptest::prop_oneof;
 use proptest::proptest;
 use proptest::strategy::Strategy;
+use unwrap_infallible::UnwrapInfallible;
 
 use crate::components::atom::Atom;
 use crate::components::atom::AtomMode;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
@@ -38,9 +40,9 @@ use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
 
 impl<T: Encode> Foldable<TestFolder> for Atom<T, Normal> {
-    fn fold(&self, _builder: TestFolder) -> TestTree {
+    fn fold(&self, _builder: TestFolder) -> FoldResult<TestFolder> {
         let bytes = serialise(&self.atom).expect("Serialisation should not fail");
-        TestTree::Leaf(bytes)
+        Ok(TestTree::Leaf(bytes))
     }
 }
 
@@ -374,7 +376,7 @@ fn atom_is_same_across_modes() {
 fn fold_unfold() {
     let atom: Atom<String, Normal> = Atom::new("Hello world!".to_string());
 
-    let tree = atom.fold(TestFolder);
+    let tree = atom.fold(TestFolder).unwrap_infallible();
     let unfolded = Atom::<String, Normal>::unfold(tree).unwrap();
 
     assert_eq!(atom, unfolded);

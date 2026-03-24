@@ -7,6 +7,7 @@
 pub(crate) mod tests {
     use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::foldable::Fold;
+    use octez_riscv_data::foldable::FoldResult;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
@@ -46,10 +47,10 @@ pub(crate) mod tests {
             Atom<u64, M>: Foldable<F>,
             Atom<[u8; 64], M>: Foldable<F>,
         {
-            fn fold(&self, builder: F) -> <F as Fold>::Folded {
+            fn fold(&self, builder: F) -> FoldResult<F> {
                 let mut builder = builder.into_node_fold();
-                builder.add(&self.bar);
-                builder.add(&self.qux);
+                builder.add(&self.bar)?;
+                builder.add(&self.qux)?;
                 builder.done()
             }
         }

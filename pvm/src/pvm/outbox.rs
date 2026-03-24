@@ -32,6 +32,7 @@ use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
@@ -248,8 +249,8 @@ where
     F: Fold,
     OutboxLevel<M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
-        let level_generator = |idx| &self.levels[idx];
+    fn fold(&self, builder: F) -> FoldResult<F> {
+        let level_generator = |idx| Ok(&self.levels[idx]);
         IndexableSeqAsTree::new(TEST_OUTBOX_SIZE, OUTBOX_MERKLE_ARITY, &level_generator)
             .fold(builder)
     }
@@ -465,16 +466,16 @@ where
     Atom<OutboxMessage, M>: Foldable<F>,
     Atom<u32, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
-        let message_generator = |idx| self.messages.index(idx);
+    fn fold(&self, builder: F) -> FoldResult<F> {
+        let message_generator = |idx| Ok(self.messages.index(idx));
         let mut builder = builder.into_node_fold();
         builder.add(&IndexableSeqAsTree::new(
             self.messages.len(),
             LEVEL_MERKLE_ARITY,
             &message_generator,
-        ));
-        builder.add(&self.next_index);
-        builder.add(&self.level);
+        ))?;
+        builder.add(&self.next_index)?;
+        builder.add(&self.level)?;
         builder.done()
     }
 }

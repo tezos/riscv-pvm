@@ -24,6 +24,7 @@ use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
@@ -131,8 +132,8 @@ impl<M: BytesMode> Bytes<M> {
         builder: Build,
         length: usize,
         length_node: impl Foldable<Build>,
-        get_item: impl Fn(Range<usize>) -> Item,
-    ) -> Build::Folded {
+        get_item: impl Fn(Range<usize>) -> Result<Item, Build::Error>,
+    ) -> FoldResult<Build> {
         let generator = |idx: usize| {
             let address = PAGE_SIZE
                 .checked_mul(idx)
@@ -149,8 +150,8 @@ impl<M: BytesMode> Bytes<M> {
         let pages = length.div_ceil(PAGE_SIZE);
 
         let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.add(&length_node)?;
+        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator))?;
         builder.done()
     }
 
@@ -160,7 +161,7 @@ impl<M: BytesMode> Bytes<M> {
         builder: HashFold,
         length: usize,
         get_data: F,
-    ) -> Hash {
+    ) -> FoldResult<HashFold> {
         let length_node =
             Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
 
@@ -169,7 +170,7 @@ impl<M: BytesMode> Bytes<M> {
             let page = ChunkedPage {
                 chunks: &[data.borrow()],
             };
-            Hash::hash_encodable(page).expect("Hashing should not fail for bytes data")
+            Ok(Hash::hash_encodable(page).expect("Hashing should not fail for bytes data"))
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -254,7 +255,7 @@ impl<M: CloneBytesMode> CloneState for Bytes<M> {
 }
 
 impl Foldable<HashFold> for Bytes<Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
+    fn fold(&self, builder: HashFold) -> FoldResult<HashFold> {
         self.fold_hash(builder, self.bytes.len(), |addr_range| {
             &self.bytes[addr_range]
         })
@@ -262,7 +263,7 @@ impl Foldable<HashFold> for Bytes<Normal> {
 }
 
 impl Foldable<HashFold> for Bytes<Prove<'_>> {
-    fn fold(&self, builder: HashFold) -> Hash {
+    fn fold(&self, builder: HashFold) -> FoldResult<HashFold> {
         self.fold_hash(builder, self.bytes.unrecorded_len(), |addr_range| {
             let previous_len = self.bytes.previous.len();
             let previous_range =
@@ -281,7 +282,7 @@ impl Foldable<HashFold> for Bytes<Prove<'_>> {
 }
 
 impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+    fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
         // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
         // generation. This means we need to use `previous` state for the length and data.
 
@@ -310,7 +311,7 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
             // variably sized.
             let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
 
-            MerkleProofFold::new_leaf(constraint, leaf_data)
+            Ok(MerkleProofFold::new_leaf(constraint, leaf_data))
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -318,15 +319,15 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
 }
 
 impl Foldable<PartialHashFold> for Bytes<Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+    fn fold(&self, builder: PartialHashFold) -> FoldResult<PartialHashFold> {
         if self.bytes.is_completely_absent() {
-            return builder.previous();
+            return Ok(builder.previous());
         }
 
         // The length must be present if the byte array is not completely absent. Otherwise we can't
         // properly construct the partial Merkle tree and therefore obtain the final hash.
         let Some(length) = self.bytes.length.clone().to_present() else {
-            return PartialHash::InvalidProof;
+            return Ok(PartialHash::InvalidProof);
         };
         let length_hash =
             Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
@@ -339,10 +340,10 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
                         // This means there are undefined and defined ranges in this page.
                         // That's not allowed as pages must be either fully present or fully
                         // absent.
-                        return PartialHash::InvalidProof;
+                        return Ok(PartialHash::InvalidProof);
                     }
 
-                    PartialHash::Previous
+                    Ok(PartialHash::Previous)
                 }
 
                 Some(chunks) => {
@@ -351,7 +352,7 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
                     };
                     let hash =
                         Hash::hash_encodable(page).expect("Hashing encoded bytes should not fail");
-                    PartialHash::Present(hash)
+                    Ok(PartialHash::Present(hash))
                 }
             }
         };

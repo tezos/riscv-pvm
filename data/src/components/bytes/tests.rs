@@ -16,6 +16,7 @@ use proptest::proptest;
 use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
 use crate::components::bytes::ChunkedPage;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
@@ -32,7 +33,7 @@ use crate::mode_test;
 use crate::serialisation::serialise;
 
 impl Foldable<TestFolder> for Bytes<Normal> {
-    fn fold(&self, builder: TestFolder) -> TestTree {
+    fn fold(&self, builder: TestFolder) -> FoldResult<TestFolder> {
         let length = self.len();
         let length_node = TestTree::Leaf(serialise(length as u64).unwrap());
 
@@ -42,7 +43,7 @@ impl Foldable<TestFolder> for Bytes<Normal> {
             };
             let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
 
-            TestTree::Leaf(leaf_data)
+            Ok(TestTree::Leaf(leaf_data))
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -544,7 +545,9 @@ fn proof_round_trip() {
             let parsed_proof_tree = parsed_proof_tree.into_present();
 
             // The parsed state should have a state hash equal to that of the initial Normal/Prove state
-            let init_verify_hash = PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash().unwrap();
+            let init_verify_hash = PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify)
+                .to_hash()
+                .unwrap();
             prop_assert_eq!(init_verify_hash, init_prove_hash);
 
             // Run the operation which we would like to verify.
@@ -552,7 +555,9 @@ fn proof_round_trip() {
             prop_assert_eq!(&verify_result, &prove_result);
 
             // The post-operation hash should match the Normal mode hash.
-            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree, &bytes_verify).to_hash().unwrap();
+            let after_verify_hash = PartialHash::from_foldable(parsed_proof_tree, &bytes_verify)
+                .to_hash()
+                .unwrap();
             prop_assert_eq!(after_verify_hash, after_proof_hash);
 
             // Finally advance the Normal mode state as well
@@ -573,7 +578,7 @@ fn fold_unfold() {
         let v = [4u8, 0, 89, 251, 3].iter().copied().cycle().take(length).collect::<Vec<_>>();
         let bytes: Bytes<Normal> = Bytes::from(&v[..]);
 
-        let tree = bytes.fold(TestFolder);
+        let tree = bytes.fold(TestFolder).unwrap();
         let unfolded = Bytes::unfold(tree).unwrap();
 
         assert!(bytes == unfolded);

@@ -39,6 +39,7 @@ use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
@@ -174,11 +175,11 @@ where
     MC::State<M>: Foldable<F>,
     SignalActions<M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.hart);
-        builder.add(&self.main_memory);
-        builder.add(&self.signal_actions);
+        builder.add(&self.hart)?;
+        builder.add(&self.main_memory)?;
+        builder.add(&self.signal_actions)?;
         builder.done()
     }
 }
@@ -825,7 +826,7 @@ where
     F: Fold,
     MachineCoreState<MC, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         self.core.fold(builder)
     }
 }

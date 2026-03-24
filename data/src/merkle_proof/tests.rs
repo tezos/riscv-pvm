@@ -12,7 +12,7 @@ use proptest::test_runner::TestCaseResult;
 
 use super::proof_tree::MerkleProofFold;
 use super::proof_tree::MinimumPresence;
-use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
@@ -478,9 +478,9 @@ fn test_valid_computation_stream() {
 struct TestLeaf<T>(T);
 
 impl<T: Encode> Foldable<MerkleProofFold> for TestLeaf<T> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+    fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
         let data = serialise(&self.0).expect("Serialising u8 should not fail");
-        builder.into_leaf(MinimumPresence::Present, data)
+        Ok(builder.into_leaf(MinimumPresence::Present, data))
     }
 }
 
@@ -488,7 +488,7 @@ impl<T: Encode> Foldable<MerkleProofFold> for TestLeaf<T> {
 fn test_descend_tree_trailing_remainder() {
     let arity = 4;
     let leaves = 17;
-    let generator = |idx: usize| TestLeaf(idx);
+    let generator = |idx: usize| Ok(TestLeaf(idx));
     let seq_as_tree = IndexableSeqAsTree::new(leaves, arity, &generator);
     let proof = MerkleProof::from_foldable(&seq_as_tree);
 
@@ -528,7 +528,7 @@ fn test_descend_tree_trailing_remainder() {
 #[test]
 fn round_trip_descend_tree_indexable_seq_as_tree() {
     fn test(data: Vec<usize>, arity: NonZeroUsize) -> TestCaseResult {
-        let get_item = |idx: usize| TestLeaf(data[idx]);
+        let get_item = |idx: usize| Ok(TestLeaf(data[idx]));
         let seq_as_tree = IndexableSeqAsTree::new(data.len(), arity.get(), &get_item);
         let proof = MerkleProof::from_foldable(&seq_as_tree);
 

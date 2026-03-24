@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::Bytes;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
@@ -196,8 +197,8 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 }
 
 impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        self.inner.merkle.hash().expect("Hashing should not fail")
+    fn fold(&self, _builder: HashFold) -> FoldResult<HashFold> {
+        Ok(self.inner.merkle.hash().expect("Hashing should not fail"))
     }
 }
 

@@ -7,12 +7,12 @@
 use derive_more::From;
 
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
 use crate::foldable::Unfoldable;
-use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::tree::Tree;
 
@@ -74,13 +74,13 @@ impl<'a, L, G, F> Foldable<F> for IndexableSeqAsTree<'a, L, G>
 where
     L: Foldable<F>,
     F: Fold,
-    G: Fn(usize) -> L,
+    G: Fn(usize) -> Result<L, F::Error>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         // For compatibility with the previous Merklisation scheme, we treat single-item sequences
         // as just a leaf.
         if self.total_len == 1 {
-            return (self.generator)(self.current_start).fold(builder);
+            return (self.generator)(self.current_start)?.fold(builder);
         }
 
         let mut builder = builder.into_node_fold();
@@ -92,8 +92,8 @@ where
                     break;
                 }
 
-                let item = (self.generator)(idx);
-                builder.add(&item);
+                let item = (self.generator)(idx)?;
+                builder.add(&item)?;
             }
 
             return builder.done();
@@ -115,7 +115,7 @@ where
                 arity: self.arity,
                 generator: self.generator,
                 _leaf: std::marker::PhantomData,
-            });
+            })?;
         }
 
         builder.done()
@@ -243,7 +243,7 @@ pub struct DepthAdjustedSeqAsTree<T> {
 }
 
 impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for DepthAdjustedSeqAsTree<T> {
-    fn fold(&self, mut builder: PartialHashFold) -> PartialHash {
+    fn fold(&self, mut builder: PartialHashFold) -> FoldResult<PartialHashFold> {
         // If the original depth is larger than the current depth, then we need to scope the proof
         // that underlies the `PartialHash::Blinded` to not exceed that depth. We can do that by
         // picking the first child of any node until we reach the original depth - thereby
@@ -286,6 +286,9 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for DepthAdjustedSe
 
 #[cfg(test)]
 mod tests {
+    use unwrap_infallible::UnwrapInfallible;
+
+    use crate::foldable::FoldResult;
     use crate::foldable::Foldable;
     use crate::foldable::Unfold;
     use crate::foldable::Unfoldable;
@@ -316,9 +319,9 @@ mod tests {
         nodes.pop().unwrap_or_else(|| unreachable!())
     }
 
-    fn generator(i: usize) -> TestTree {
+    fn generator(i: usize) -> FoldResult<TestFolder> {
         let bytes: Vec<u8> = serialise(i).unwrap();
-        TestTree::Leaf(bytes)
+        Ok(TestTree::Leaf(bytes))
     }
 
     /// This test ensures that the Merkle tree layout produced by [`IndexableSeqAsTree`] is
@@ -327,10 +330,10 @@ mod tests {
     fn consistency_with_previous_merkle_tree_layout() {
         proptest::proptest!(|(arity in 2usize..=32, max_len in 1..=1024usize)| {
             let driver = IndexableSeqAsTree::new(max_len, arity, &generator);
-            let tree = driver.fold(TestFolder);
+            let tree = driver.fold(TestFolder).unwrap_infallible();
 
             let custom_tree =
-                build_custom_merkle_tree(arity, (0..max_len).map(generator).collect());
+                build_custom_merkle_tree(arity, (0..max_len).map(|i| generator(i).unwrap_infallible()).collect());
 
             assert_eq!(
                 tree, custom_tree,
@@ -343,7 +346,7 @@ mod tests {
     #[test]
     fn len_zero() {
         let driver = IndexableSeqAsTree::new(0, 2, &generator);
-        let tree = driver.fold(TestFolder);
+        let tree = driver.fold(TestFolder).unwrap_infallible();
 
         assert_eq!(tree, TestTree::Node(vec![]));
     }
@@ -362,7 +365,7 @@ mod tests {
     fn fold_unfold() {
         proptest::proptest!(|(arity in 2usize..=32, max_len in 1..=1024usize)| {
             let driver = IndexableSeqAsTree::new(max_len, arity, &generator);
-            let tree = driver.fold(TestFolder);
+            let tree = driver.fold(TestFolder).unwrap_infallible();
 
             let mut unfolded: Vec<Option<usize>> = vec![None; max_len];
 
@@ -393,7 +396,7 @@ mod tests {
         let generator = |i: usize| data[i].fold(TestFolder);
 
         let driver = IndexableSeqAsTree::new(71, 5, &generator);
-        let tree = driver.fold(TestFolder);
+        let tree = driver.fold(TestFolder).unwrap_infallible();
 
         let unfolded = Data::unfold(tree.clone()).unwrap();
         assert_eq!(&unfolded.into_boxed_array()[..], &data);

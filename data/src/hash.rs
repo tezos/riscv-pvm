@@ -7,6 +7,7 @@
 
 use std::borrow::Borrow;
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::ops::Deref;
 
 use bincode::Decode;
@@ -14,8 +15,10 @@ use bincode::Encode;
 use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
+use unwrap_infallible::UnwrapInfallible;
 
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::merkle_proof::proof_tree::MerkleProof;
@@ -84,7 +87,7 @@ impl Hash {
 
     /// Hash the underlying state of a foldable structure.
     pub fn from_foldable(foldable: &impl Foldable<HashFold>) -> Self {
-        foldable.fold(HashFold)
+        foldable.fold(HashFold).unwrap_infallible()
     }
 }
 
@@ -113,8 +116,8 @@ impl AsRef<[u8]> for Hash {
 }
 
 impl Foldable<HashFold> for Hash {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        *self
+    fn fold(&self, _builder: HashFold) -> Result<Hash, Infallible> {
+        Ok(*self)
     }
 }
 
@@ -189,6 +192,8 @@ impl<Data: AsRef<[u8]>> HashedData<Data> {
 pub struct HashFold;
 
 impl Fold for HashFold {
+    type Error = Infallible;
+
     type Folded = Hash;
 
     type NodeFold = HashNodeFold;
@@ -211,13 +216,14 @@ pub struct HashNodeFold {
 impl NodeFold for HashNodeFold {
     type Parent = HashFold;
 
-    fn add<F: Foldable<HashFold>>(&mut self, child: &F) {
-        let folded_child = child.fold(HashFold);
+    fn add<F: Foldable<HashFold>>(&mut self, child: &F) -> Result<(), Infallible> {
+        let folded_child = child.fold(HashFold)?;
         self.hasher.update(folded_child.as_ref());
+        Ok(())
     }
 
-    fn done(self) -> Hash {
-        self.hasher.to_hash()
+    fn done(self) -> Result<Hash, Infallible> {
+        Ok(self.hasher.to_hash())
     }
 }
 
@@ -237,6 +243,9 @@ pub enum PartialHash {
     /// Effectively, this indicates that the compressed partial Merkle tree which was used to
     /// instantiate the state did not contain the right information to compute the state hash after
     /// modifications to the state.
+    ///
+    /// TODO (TZX-116): We could move this into a separate error type now that `Fold` supports
+    /// fallibility.
     InvalidProof,
 
     /// State is unchanged compared to the previous state
@@ -266,17 +275,17 @@ impl PartialHash {
         proof: Option<MerkleProof>,
         foldable: &impl Foldable<PartialHashFold>,
     ) -> PartialHash {
-        foldable.fold(PartialHashFold { proof })
+        foldable.fold(PartialHashFold { proof }).unwrap_infallible()
     }
 }
 
 impl Foldable<PartialHashFold> for PartialHash {
-    fn fold(&self, builder: PartialHashFold) -> Self {
-        match self {
+    fn fold(&self, builder: PartialHashFold) -> Result<PartialHash, Infallible> {
+        Ok(match self {
             PartialHash::Previous => builder.previous(),
             PartialHash::Present(hash) => builder.present(*hash),
             PartialHash::InvalidProof => PartialHash::InvalidProof,
-        }
+        })
     }
 }
 
@@ -320,6 +329,8 @@ impl PartialHashFold {
 }
 
 impl Fold for PartialHashFold {
+    type Error = Infallible;
+
     type Folded = PartialHash;
 
     type NodeFold = PartialHashNodeFold;
@@ -370,11 +381,11 @@ pub struct PartialHashNodeFold {
 impl NodeFold for PartialHashNodeFold {
     type Parent = PartialHashFold;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) -> Result<(), Infallible> {
         let hash = match self.children.pop_front() {
             Some(tree) => {
                 let prev_hash = tree.root_hash();
-                let hash = child.fold(PartialHashFold { proof: Some(tree) });
+                let hash = child.fold(PartialHashFold { proof: Some(tree) })?;
 
                 // If the child is absent but we have the previous hash, we can use it here.
                 match hash {
@@ -383,13 +394,14 @@ impl NodeFold for PartialHashNodeFold {
                 }
             }
 
-            None => child.fold(PartialHashFold { proof: None }),
+            None => child.fold(PartialHashFold { proof: None })?,
         };
 
         self.child_hashes.push_back(hash);
+        Ok(())
     }
 
-    fn done(self) -> PartialHash {
+    fn done(self) -> FoldResult<PartialHashFold> {
         let mut saw_absent_child = false;
         let mut hasher = Hasher::default();
 
@@ -399,7 +411,7 @@ impl NodeFold for PartialHashNodeFold {
                     if hasher.count() > 0 {
                         // There was at least one present child before. Mixing absent and present
                         // makes it invalid.
-                        return PartialHash::InvalidProof;
+                        return Ok(PartialHash::InvalidProof);
                     }
 
                     // Ensure that encountering any further present child will make the whole node
@@ -410,7 +422,7 @@ impl NodeFold for PartialHashNodeFold {
                 PartialHash::Present(hash) => {
                     // Are we mixing absent and present children?
                     if saw_absent_child {
-                        return PartialHash::InvalidProof;
+                        return Ok(PartialHash::InvalidProof);
                     }
 
                     hasher.update_with_hash(&hash);
@@ -418,19 +430,19 @@ impl NodeFold for PartialHashNodeFold {
 
                 PartialHash::InvalidProof => {
                     // Any invalid child makes the whole node invalid.
-                    return PartialHash::InvalidProof;
+                    return Ok(PartialHash::InvalidProof);
                 }
             }
         }
 
         if saw_absent_child {
-            return self
+            return Ok(self
                 .node_hash
                 .map(PartialHash::Present)
-                .unwrap_or(PartialHash::Previous);
+                .unwrap_or(PartialHash::Previous));
         }
 
-        PartialHash::Present(hasher.to_hash())
+        Ok(PartialHash::Present(hasher.to_hash()))
     }
 }
 

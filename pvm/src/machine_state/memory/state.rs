@@ -20,6 +20,7 @@ use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
@@ -459,13 +460,13 @@ where
     B: Foldable<F>,
     PagePermissions<PAGES, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.data);
-        builder.add(&self.readable_pages);
-        builder.add(&self.writable_pages);
-        builder.add(&self.executable_pages);
-        builder.add(&self.allocated_pages);
+        builder.add(&self.data)?;
+        builder.add(&self.readable_pages)?;
+        builder.add(&self.writable_pages)?;
+        builder.add(&self.executable_pages)?;
+        builder.add(&self.allocated_pages)?;
         builder.done()
     }
 }

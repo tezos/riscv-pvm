@@ -11,6 +11,9 @@ use bincode::Decode;
 
 pub mod seq_tree;
 
+/// Utility type alias for the return type of `fold`.
+pub type FoldResult<F> = Result<<F as Fold>::Folded, <F as Fold>::Error>;
+
 /// Implementing types which define a state structure that can be folded
 ///
 /// The `F` parameter is used to describe the folding capabilities. Implementing types will commonly
@@ -25,40 +28,40 @@ pub mod seq_tree;
 /// [`crate::merkle_proof::proof_tree::MerkleProof`] for things in [`crate::mode::Prove`] mode.
 pub trait Foldable<F: Fold> {
     /// Fold the state data structure.
-    fn fold(&self, builder: F) -> F::Folded;
+    fn fold(&self, builder: F) -> FoldResult<F>;
 }
 
 impl<T: Foldable<F>, F: Fold> Foldable<F> for &T {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         T::fold(self, builder)
     }
 }
 
 impl<A: Foldable<F>, B: Foldable<F>, F: Fold> Foldable<F> for (A, B) {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.0);
-        builder.add(&self.1);
+        builder.add(&self.0)?;
+        builder.add(&self.1)?;
         builder.done()
     }
 }
 
 impl<A: Foldable<F>, B: Foldable<F>, C: Foldable<F>, F: Fold> Foldable<F> for (A, B, C) {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.0);
-        builder.add(&self.1);
-        builder.add(&self.2);
+        builder.add(&self.0)?;
+        builder.add(&self.1)?;
+        builder.add(&self.2)?;
         builder.done()
     }
 }
 
 impl<T: Foldable<F>, const LEN: usize, F: Fold> Foldable<F> for [T; LEN] {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
 
         for item in self.iter() {
-            builder.add(item);
+            builder.add(item)?;
         }
 
         builder.done()
@@ -67,6 +70,8 @@ impl<T: Foldable<F>, const LEN: usize, F: Fold> Foldable<F> for [T; LEN] {
 
 /// Implementing types describe a folding scheme
 pub trait Fold {
+    type Error: std::error::Error;
+
     /// Result of the folding operations
     type Folded;
 
@@ -85,10 +90,13 @@ pub trait NodeFold {
     type Parent: Fold;
 
     /// Add a child branch to the node folder.
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F);
+    fn add<F: Foldable<Self::Parent>>(
+        &mut self,
+        child: &F,
+    ) -> Result<(), <Self::Parent as Fold>::Error>;
 
     /// Finalise the node folding and produce the node.
-    fn done(self) -> <Self::Parent as Fold>::Folded;
+    fn done(self) -> FoldResult<Self::Parent>;
 }
 
 /// Implementing types define a state structure which can be unfolded.

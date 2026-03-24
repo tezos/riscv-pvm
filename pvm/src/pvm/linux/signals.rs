@@ -22,6 +22,7 @@ use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
@@ -224,13 +225,13 @@ where
     Atom<u32, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.actions);
-        builder.add(&self.flags);
-        builder.add(&self.masks);
-        builder.add(&self.restorer);
-        builder.add(&self.thread_mask);
+        builder.add(&self.actions)?;
+        builder.add(&self.flags)?;
+        builder.add(&self.masks)?;
+        builder.add(&self.restorer)?;
+        builder.add(&self.thread_mask)?;
         builder.done()
     }
 }

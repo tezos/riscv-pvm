@@ -22,6 +22,7 @@ use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::NodeUnfold;
@@ -463,19 +464,19 @@ where
     Atom<u32, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> F::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let mut builder = builder.into_node_fold();
-        builder.add(&self.machine_state);
-        builder.add(&self.durable_storage);
-        builder.add(&self.outbox);
-        builder.add(&self.reveal_request);
-        builder.add(&self.system_state);
-        builder.add(&self.version);
-        builder.add(&self.tick);
-        builder.add(&self.message_counter);
-        builder.add(&self.level);
-        builder.add(&self.level_is_set);
-        builder.add(&self.status);
+        builder.add(&self.machine_state)?;
+        builder.add(&self.durable_storage)?;
+        builder.add(&self.outbox)?;
+        builder.add(&self.reveal_request)?;
+        builder.add(&self.system_state)?;
+        builder.add(&self.version)?;
+        builder.add(&self.tick)?;
+        builder.add(&self.message_counter)?;
+        builder.add(&self.level)?;
+        builder.add(&self.level_is_set)?;
+        builder.add(&self.status)?;
         builder.done()
     }
 }

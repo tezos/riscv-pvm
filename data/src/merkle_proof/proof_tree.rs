@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 use std::borrow::Borrow;
+use std::convert::Infallible;
 use std::marker::PhantomData;
 
 use bincode::Decode;
 use bincode::enc::write::Writer;
+use unwrap_infallible::UnwrapInfallible;
 
 use super::Deserialiser;
 use super::DeserialiserNode;
@@ -16,6 +18,7 @@ use super::Suspended;
 use super::tag::LeafTag;
 use super::tag::Tag;
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
@@ -93,7 +96,10 @@ impl MerkleProof {
 
     /// Fold the given data structure into a compressed Merkle proof tree.
     pub fn from_foldable(foldable: &impl Foldable<MerkleProofFold>) -> Self {
-        foldable.fold(MerkleProofFold::new()).tree
+        foldable
+            .fold(MerkleProofFold::new())
+            .unwrap_infallible()
+            .tree
     }
 }
 
@@ -232,9 +238,9 @@ impl CompressibleMerkleProof {
 }
 
 impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
-    fn fold(&self, _builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+    fn fold(&self, _builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
         if self.constraint == MinimumPresence::Present || self.tree.is_blind() {
-            return self.clone();
+            return Ok(self.clone());
         }
 
         // Here we know the presence constraint is not `Present`, so the tree can be compressed
@@ -243,10 +249,10 @@ impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
         let hash = self.tree.root_hash();
         let tree = MerkleProof::leaf_blind(hash);
 
-        CompressibleMerkleProof {
+        Ok(CompressibleMerkleProof {
             constraint: self.constraint,
             tree,
-        }
+        })
     }
 }
 
@@ -264,10 +270,10 @@ pub struct ForceMinimumPresence<T> {
 }
 
 impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPresence<T> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let mut proof = self.inner.fold(builder);
+    fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
+        let mut proof = self.inner.fold(builder)?;
         proof.constraint = self.min_constraint.max(proof.constraint);
-        proof
+        Ok(proof)
     }
 }
 
@@ -308,6 +314,8 @@ impl MerkleProofFold {
 }
 
 impl Fold for MerkleProofFold {
+    type Error = Infallible;
+
     type Folded = CompressibleMerkleProof;
 
     type NodeFold = MerkleProofNodeFold;
@@ -328,12 +336,13 @@ pub struct MerkleProofNodeFold {
 impl NodeFold for MerkleProofNodeFold {
     type Parent = MerkleProofFold;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
-        let child_info = child.fold(MerkleProofFold::new());
+    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) -> Result<(), Infallible> {
+        let child_info = child.fold(MerkleProofFold::new()).unwrap_infallible();
         self.children.push(child_info);
+        Ok(())
     }
 
-    fn done(self) -> <Self::Parent as Fold>::Folded {
+    fn done(self) -> FoldResult<Self::Parent> {
         let presence_constraint =
             MinimumPresence::for_node(self.children.iter().map(|child| &child.constraint));
 
@@ -346,10 +355,10 @@ impl NodeFold for MerkleProofNodeFold {
             tree = MerkleProof::leaf_blind(hash);
         }
 
-        CompressibleMerkleProof {
+        Ok(CompressibleMerkleProof {
             constraint: presence_constraint,
             tree,
-        }
+        })
     }
 }
 
@@ -720,8 +729,8 @@ mod tests {
     }
 
     impl Foldable<MerkleProofFold> for Leaf {
-        fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-            builder.into_leaf(self.constraint, self.data.to_vec())
+        fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
+            Ok(builder.into_leaf(self.constraint, self.data.to_vec()))
         }
     }
 
@@ -771,11 +780,11 @@ mod tests {
     }
 
     impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Node<T> {
-        fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
             let mut node = builder.into_node_fold();
 
             for child in self.children.iter() {
-                node.add(child);
+                node.add(child)?;
             }
 
             node.done()

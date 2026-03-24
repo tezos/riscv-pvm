@@ -19,6 +19,7 @@ use super::bytes::Bytes;
 use super::bytes::ChunkedPage;
 use crate::clone::CloneState;
 use crate::foldable::Fold;
+use crate::foldable::FoldResult;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
@@ -227,7 +228,7 @@ impl<C> Decode<C> for DataSpace<Normal> {
 }
 
 impl Foldable<HashFold> for DataSpace<Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
+    fn fold(&self, builder: HashFold) -> FoldResult<HashFold> {
         let length = self.data_space.len();
         let length_node =
             Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
@@ -243,14 +244,14 @@ impl Foldable<HashFold> for DataSpace<Normal> {
 
             // The data needs to be encoded before hashing to match the Merkle scheme which includes
             // the length of the page data in each leaf.
-            Hash::hash_encodable(page).expect("Hashing page data should not fail")
+            Ok(Hash::hash_encodable(page).expect("Hashing page data should not fail"))
         };
 
         let pages = length.div_ceil(PAGE_SIZE);
 
         let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.add(&length_node)?;
+        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator))?;
         builder.done()
     }
 }
@@ -259,7 +260,7 @@ impl<'a, F: Fold> Foldable<F> for DataSpace<Prove<'a>>
 where
     Bytes<Prove<'a>>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         self.data_space.fold(builder)
     }
 }
@@ -268,7 +269,7 @@ impl<F: Fold> Foldable<F> for DataSpace<Verify>
 where
     Bytes<Verify>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         self.data_space.fold(builder)
     }
 }

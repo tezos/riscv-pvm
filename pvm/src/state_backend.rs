@@ -41,6 +41,7 @@ mod tests {
     use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::data_space::DataSpace;
     use octez_riscv_data::foldable::Fold;
+    use octez_riscv_data::foldable::FoldResult;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::foldable::NodeFold;
     use octez_riscv_data::hash::Hash;
@@ -162,25 +163,25 @@ mod tests {
         }
 
         impl Foldable<HashFold> for Foo<Prove<'_>> {
-            fn fold(&self, builder: HashFold) -> Hash {
+            fn fold(&self, builder: HashFold) -> FoldResult<HashFold> {
                 let mut node = builder.into_node_fold();
-                node.add(&self.bar);
+                node.add(&self.bar)?;
                 node.done()
             }
         }
 
         impl Foldable<MerkleProofFold> for Foo<Prove<'_>> {
-            fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+            fn fold(&self, builder: MerkleProofFold) -> FoldResult<MerkleProofFold> {
                 let mut node = builder.into_node_fold();
-                node.add(&self.bar);
+                node.add(&self.bar)?;
                 node.done()
             }
         }
 
         impl Foldable<PartialHashFold> for Foo<Verify> {
-            fn fold(&self, builder: PartialHashFold) -> PartialHash {
+            fn fold(&self, builder: PartialHashFold) -> FoldResult<PartialHashFold> {
                 let mut node = builder.into_node_fold();
-                node.add(&self.bar);
+                node.add(&self.bar)?;
                 node.done()
             }
         }

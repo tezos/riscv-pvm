@@ -14,6 +14,7 @@ use std::sync::Arc;
 use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::hash::Hash;
@@ -239,10 +240,11 @@ impl<KV: KeyValueStore, F: Fold> Foldable<F> for Registry<KV, Normal>
 where
     Database<KV, Normal>: Foldable<F>,
 {
-    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         let get_hash = |idx: usize| {
-            self.database(idx)
-                .expect("Getting a database at a valid index should succeed")
+            Ok(self
+                .database(idx)
+                .expect("Getting a database at a valid index should succeed"))
         };
 
         IndexableSeqAsTree::new(self.len(), REGISTRY_ARITY, &get_hash).fold(builder)

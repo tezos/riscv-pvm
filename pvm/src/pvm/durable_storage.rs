@@ -8,6 +8,7 @@ use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldResult;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
@@ -55,7 +56,7 @@ impl<M: Mode> DurableStorage<M> for DurableStorageDummy {
 }
 
 impl<F: Fold> Foldable<F> for DurableStorageDummy {
-    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+    fn fold(&self, builder: F) -> FoldResult<F> {
         builder.into_node_fold().done()
     }
 }
