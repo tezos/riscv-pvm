@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -13,7 +14,10 @@ use std::marker::PhantomData;
 use std::ops::Index;
 use std::ops::IndexMut;
 
+use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::error::DecodeError;
 use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
@@ -21,6 +25,10 @@ use crate::clone::CloneState;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
+use crate::foldable::NodeUnfold;
+use crate::foldable::Unfold;
+use crate::foldable::Unfoldable;
+use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
@@ -286,6 +294,47 @@ impl<T: FromProof> FromProof for Vector<T, Verify> {
     }
 }
 
+impl<T: Unfoldable> Unfoldable for Vector<T, Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
+        let mut source = source.into_node()?;
+
+        let length: u64 = source.next_branch_with(|source| source.into_leaf())?;
+
+        let values = source.next_branch_with(|source| {
+            let mut values = Vec::with_capacity(length as usize);
+
+            seq_tree::descend_tree(source, NODE_ARITY, length as usize, &mut |_idx, leaf| {
+                values.push(T::unfold(leaf)?);
+                Ok(())
+            })?;
+
+            Ok(values)
+        })?;
+
+        source.done(Vector::new(values))
+    }
+}
+
+impl<T: PartialEq, M: VectorMode> PartialEq for Vector<T, M> {
+    fn eq(&self, other: &Self) -> bool {
+        let len = self.len();
+
+        if len != other.len() {
+            return false;
+        }
+
+        for i in 0..len {
+            if self[i] != other[i] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<T: Eq, M: VectorMode> Eq for Vector<T, M> {}
+
 impl<T: Clone, M: CloneVectorMode> Clone for Vector<T, M> {
     fn clone(&self) -> Self {
         M::clone(self)
@@ -298,6 +347,14 @@ impl<T: Encode, M: EncodeVectorMode> Encode for Vector<T, M> {
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
         M::encode(self, encoder)
+    }
+}
+
+/// Decode into owned [`Vector<T, Normal>`].
+impl<Context, T: Decode<Context>> Decode<Context> for Vector<T, Normal> {
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let vec: Vec<T> = Decode::decode(decoder)?;
+        Ok(Vector::new(vec))
     }
 }
 
