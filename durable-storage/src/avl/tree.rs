@@ -7,7 +7,6 @@
 use std::cmp::Ordering;
 
 use bincode::Decode;
-use bincode::Encode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
 #[cfg(test)]
@@ -15,7 +14,11 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
@@ -129,24 +132,12 @@ impl<NodeId> Tree<NodeId> {
         })
     }
 
-    /// Returns the [`struct@Hash`] of this [`Tree`], potentially re-hashing uncached
-    /// [`Node`]s.
-    ///
-    /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
-    pub(crate) fn to_encode<TreeId, M: Mode>(
-        &self,
-        resolver: &impl NodeResolver<NodeId, TreeId, M>,
-    ) -> impl Encode + '_ {
-        self.0.as_ref().map(|id| resolver.get_hash(id))
-    }
-
     /// Returns the hash of this tree.
-    pub(crate) fn hash<TreeId, M: Mode>(
-        &self,
-        resolver: &impl NodeResolver<NodeId, TreeId, M>,
-    ) -> Hash {
-        let data = self.to_encode(resolver);
-        Hash::hash_encodable(data).expect("The hashing should not fail")
+    pub(crate) fn hash(&self) -> Hash
+    where
+        NodeId: Foldable<HashFold>,
+    {
+        Hash::from_foldable(self)
     }
 
     /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
@@ -336,6 +327,21 @@ impl<C> Decode<C> for Tree<LazyNodeId> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let root_hash: Option<Hash> = Decode::decode(decoder)?;
         Ok(Tree::from(root_hash.map(LazyNodeId::from)))
+    }
+}
+
+impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        let mut node = builder.into_node_fold();
+
+        let present = self.0.is_some();
+        node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
+
+        if let Some(inner) = self.0.as_ref() {
+            node.add(inner);
+        }
+
+        node.done()
     }
 }
 
@@ -631,10 +637,6 @@ mod tests {
     }
 
     impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for FailOnKeyResolver {
-        fn get_hash(&self, id: &ArcNodeId) -> Hash {
-            ArcResolver.get_hash(id)
-        }
-
         fn resolve<'a>(
             &self,
             id: &'a ArcNodeId,
@@ -663,10 +665,6 @@ mod tests {
     }
 
     impl Resolver<ArcTreeId, Tree<ArcNodeId>> for FailOnKeyResolver {
-        fn get_hash(&self, id: &ArcTreeId) -> Hash {
-            ArcResolver.get_hash(id)
-        }
-
         fn resolve<'a>(&self, id: &'a ArcTreeId) -> Result<&'a Tree<ArcNodeId>, OperationalError> {
             ArcResolver.resolve(id)
         }
@@ -872,14 +870,14 @@ mod tests {
             .iter()
             .zip(data)
             .map(|(key, data)| -> Hash {
-                let digest = tree.hash(&resolver);
+                let digest = tree.hash();
                 tree.set(key, data.as_bytes(), &mut resolver)
                     .expect("Set should succeed");
                 digest
             })
             .collect();
 
-            digests.push(tree.hash(&resolver));
+            digests.push(tree.hash());
 
             digests
         };

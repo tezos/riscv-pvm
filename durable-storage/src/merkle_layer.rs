@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -42,9 +41,7 @@ use crate::storage::PersistentKeyValueStore;
 
 pub(crate) fn empty_tree_hash() -> Hash {
     static EMPTY_TREE_HASH: OnceLock<Hash> = OnceLock::new();
-    *EMPTY_TREE_HASH.get_or_init(|| {
-        Hash::hash_encodable(Option::<Hash>::None).expect("Hashing the empty tree should not fail")
-    })
+    *EMPTY_TREE_HASH.get_or_init(|| Tree::from(None::<LazyNodeId>).hash())
 }
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
@@ -235,11 +232,8 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    fn hash(&mut self) -> Hash
-    where
-        KV: KeyValueStore,
-    {
-        self.tree.hash(&self.resolver)
+    fn hash(&mut self) -> Hash {
+        self.tree.hash()
     }
 
     /// Delete the data associated with a given [Key].
@@ -304,20 +298,19 @@ impl<KV> NormalImpl<KV> {
     where
         KV: PersistentKeyValueStore,
     {
-        // Note that although we're doing in-order iteration of the nodes, the hashes are
-        // calculated during the encoding of the node if necessary.
         for node in self.tree.iter(&self.resolver) {
             let node = node?;
-            let encoded = node.to_encode(&self.resolver);
-            let value = serialise(encoded).expect("Serialisation of node data should not fail");
-            let blob = HashedData::from_data(value);
-            let node_hash = blob.hash();
-            self.persistence.blob_set(node_hash, blob.data())?;
 
-            let serialised_tree_repr = serialise(Some(node_hash))?;
-            let tree_blob = HashedData::from_data(serialised_tree_repr);
-            self.persistence
-                .blob_set(tree_blob.hash(), tree_blob.data())?;
+            let node_hash = node.hash();
+            let node_bytes =
+                serialise(node.to_encode()).expect("Serialisation of node data should not fail");
+
+            self.persistence.blob_set(node_hash, node_bytes)?;
+
+            let tree_hash = Tree::from(Some(node_hash)).hash();
+            let tree_bytes = serialise(Some(node_hash))?;
+
+            self.persistence.blob_set(tree_hash, tree_bytes)?;
         }
 
         Ok(CommitId::from(self.hash()))
@@ -1343,19 +1336,19 @@ mod tests {
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
             let node: &Node<LazyTreeId, Normal> =
                 node.expect("The node should be retrieved successfully");
-            let encoded = node.to_encode(&merkle_layer.inner.resolver);
-            let serialised = octez_riscv_data::serialisation::serialise(encoded)
+            let node_repr = node.to_encode();
+            let node_bytes = octez_riscv_data::serialisation::serialise(node_repr)
                 .expect("We should be able to serialise the node");
-            let node_hash = *node.hash(&merkle_layer.inner.resolver);
+            let node_hash = *node.hash();
             let blob = merkle_layer
                 .inner
                 .persistence
                 .blob_get(node_hash)
                 .expect("The blob with the given key should be present");
-            assert_eq!(serialised, blob.as_ref());
+            assert_eq!(node_bytes, blob.as_ref());
         }
 
-        let root_hash = merkle_layer.inner.tree.hash(&merkle_layer.inner.resolver);
+        let root_hash = merkle_layer.inner.tree.hash();
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }

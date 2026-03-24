@@ -6,6 +6,7 @@
 //! Foldable data structures
 
 use std::error;
+use std::sync::Arc;
 
 use bincode::Decode;
 
@@ -30,6 +31,12 @@ pub trait Foldable<F: Fold> {
 
 impl<T: Foldable<F>, F: Fold> Foldable<F> for &T {
     fn fold(&self, builder: F) -> F::Folded {
+        T::fold(self, builder)
+    }
+}
+
+impl<T: Foldable<F>, F: Fold> Foldable<F> for Arc<T> {
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
         T::fold(self, builder)
     }
 }
