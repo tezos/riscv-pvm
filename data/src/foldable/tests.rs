@@ -9,6 +9,7 @@ use std::error;
 use bincode::Decode;
 
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
@@ -71,6 +72,14 @@ impl Fold for TestFolder {
         TestNodeFolder {
             children: Vec::new(),
         }
+    }
+}
+
+impl FoldLeaf for TestFolder {
+    fn fold_leaf_raw(self, bytes: &[u8]) -> TestTree {
+        let mut v = vec![];
+        v.extend_from_slice(bytes);
+        TestTree::Leaf(v)
     }
 }
 

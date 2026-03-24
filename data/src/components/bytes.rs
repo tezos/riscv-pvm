@@ -23,8 +23,11 @@ use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
+use crate::foldable::FoldableClosure;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
@@ -32,7 +35,6 @@ use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::hash::Hash;
-use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -154,22 +156,26 @@ impl<M: BytesMode> Bytes<M> {
         builder.done()
     }
 
-    /// Folding hasher function that works for both [`Normal`] and [`Prove`] modes
-    fn fold_hash<D: Borrow<[u8]>, F: Fn(Range<usize>) -> D>(
+    /// Folding function that works for both [`Normal`] and [`Prove`] modes, and for any fold that
+    /// implements `FoldLeaf`.
+    fn fold_with_fold_leaf<D: Borrow<[u8]>, F: Fn(Range<usize>) -> D, Build: FoldLeaf>(
         &self,
-        builder: HashFold,
+        builder: Build,
         length: usize,
         get_data: F,
-    ) -> Hash {
-        let length_node =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+    ) -> <Build as Fold>::Folded {
+        let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail.");
 
-        let get_item = |range| {
+        let get_item = move |range| {
             let data = get_data(range);
-            let page = ChunkedPage {
-                chunks: &[data.borrow()],
-            };
-            Hash::hash_encodable(page).expect("Hashing should not fail for bytes data")
+            FoldableClosure::new(move |builder: Build| {
+                let page = ChunkedPage {
+                    chunks: &[data.borrow()],
+                };
+                builder
+                    .fold_leaf(page)
+                    .expect("Serialising page should not fail.")
+            })
         };
 
         self.fold_generic(builder, length, length_node, get_item)
@@ -253,17 +259,17 @@ impl<M: CloneBytesMode> CloneState for Bytes<M> {
     }
 }
 
-impl Foldable<HashFold> for Bytes<Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
-        self.fold_hash(builder, self.bytes.len(), |addr_range| {
+impl<F: FoldLeaf> Foldable<F> for Bytes<Normal> {
+    fn fold(&self, builder: F) -> F::Folded {
+        self.fold_with_fold_leaf(builder, self.bytes.len(), |addr_range| {
             &self.bytes[addr_range]
         })
     }
 }
 
-impl Foldable<HashFold> for Bytes<Prove<'_>> {
-    fn fold(&self, builder: HashFold) -> Hash {
-        self.fold_hash(builder, self.bytes.unrecorded_len(), |addr_range| {
+impl<F: FoldLeaf> Foldable<F> for Bytes<Prove<'_>> {
+    fn fold(&self, builder: F) -> F::Folded {
+        self.fold_with_fold_leaf(builder, self.bytes.unrecorded_len(), |addr_range| {
             let previous_len = self.bytes.previous.len();
             let previous_range =
                 addr_range.start.min(previous_len)..addr_range.end.min(previous_len);
@@ -951,8 +957,16 @@ impl VerifyImpl {
 /// length first, check it, and then decode the data.
 ///
 /// The encoding dual is [`ChunkedPage`].
-struct Page {
+pub struct Page {
     data: Vec<u8>,
+}
+
+impl Page {
+    /// Return the page data as an array. Panics if the page is not a full one of length
+    /// `PAGE_SIZE`.
+    pub fn full_page(self) -> [u8; PAGE_SIZE] {
+        <[u8; PAGE_SIZE]>::try_from(self.data).expect("Should be a page of length `PAGE_SIZE`")
+    }
 }
 
 impl<C> Decode<C> for Page {

@@ -19,13 +19,9 @@ use proptest::proptest;
 use super::PAGE_SIZE;
 use crate::components::data_space::DataSpace;
 use crate::components::data_space::NODE_ARITY;
-use crate::foldable::Fold;
 use crate::foldable::Foldable;
-use crate::foldable::NodeFold;
 use crate::foldable::Unfoldable;
-use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::foldable::tests::TestFolder;
-use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_tree;
@@ -42,29 +38,6 @@ use crate::mode::utils::assert_not_found;
 use crate::serialisation::deserialise;
 use crate::serialisation::elem::Elem;
 use crate::serialisation::serialise;
-
-impl Foldable<TestFolder> for DataSpace<Normal> {
-    fn fold(&self, builder: TestFolder) -> TestTree {
-        let length = self.len();
-        let length_node = TestTree::Leaf(serialise(length).unwrap());
-
-        let generator = |idx: usize| {
-            let page_start = PAGE_SIZE.checked_mul(idx).unwrap();
-            let page_end = page_start.checked_add(PAGE_SIZE).unwrap().min(length);
-
-            let mut v = vec![];
-            v.extend_from_slice(&self.data_space[page_start..page_end]);
-            TestTree::Leaf(v)
-        };
-
-        let pages = length.div_ceil(PAGE_SIZE);
-
-        let mut builder = builder.into_node_fold();
-        builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
-        builder.done()
-    }
-}
 
 /// Dummy type that helps us implement custom serialisation via [`Elem`]
 #[repr(C, packed)]

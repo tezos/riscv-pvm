@@ -17,9 +17,13 @@ use bincode::error::EncodeError;
 
 use super::bytes::Bytes;
 use super::bytes::ChunkedPage;
+use super::bytes::Page;
 use crate::clone::CloneState;
+use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
+use crate::foldable::FoldableClosure;
 use crate::foldable::NodeFold;
 use crate::foldable::NodeUnfold;
 use crate::foldable::Unfold;
@@ -27,8 +31,6 @@ use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
-use crate::hash::Hash;
-use crate::hash::HashFold;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Suspended;
@@ -226,24 +228,28 @@ impl<C> Decode<C> for DataSpace<Normal> {
     }
 }
 
-impl Foldable<HashFold> for DataSpace<Normal> {
-    fn fold(&self, builder: HashFold) -> Hash {
+impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal> {
+    fn fold(&self, builder: F) -> F::Folded {
         let length = self.data_space.len();
-        let length_node =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail");
 
         let generator = |idx: usize| {
             let address = PAGE_SIZE
                 .checked_mul(idx)
                 .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
-            let address_end = address.checked_add(PAGE_SIZE).expect("Address overflow");
+            let address_end = address
+                .checked_add(PAGE_SIZE)
+                .expect("Address overflow")
+                .min(length);
 
             let data = &self.data_space[address..address_end];
-            let page = ChunkedPage { chunks: &[data] };
 
-            // The data needs to be encoded before hashing to match the Merkle scheme which includes
-            // the length of the page data in each leaf.
-            Hash::hash_encodable(page).expect("Hashing page data should not fail")
+            FoldableClosure::new(move |builder: F| {
+                let page = ChunkedPage { chunks: &[data] };
+                builder
+                    .fold_leaf(page)
+                    .expect("Serialising page data should not fail")
+            })
         };
 
         let pages = length.div_ceil(PAGE_SIZE);
@@ -296,13 +302,13 @@ impl Unfoldable for DataSpace<Normal> {
             let mut space = DataSpace::new(length);
 
             let mut for_leaf = |idx, source: U| {
-                let page = source.into_leaf_raw::<PAGE_SIZE>()?;
+                let page = source.into_leaf::<Page>()?;
 
                 let addr = idx * PAGE_SIZE;
 
                 // SAFETY: `idx` is at most `length_in_pages - 1`, `length` has been checked to
                 // be a multiple of `PAGE_SIZE`, and `page` is exactly `PAGE_SIZE` in length
-                unsafe { space.write(addr, *page.as_ref()) };
+                unsafe { space.write(addr, page.full_page()) };
 
                 Ok(())
             };

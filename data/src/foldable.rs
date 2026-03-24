@@ -9,6 +9,10 @@ use std::error;
 use std::sync::Arc;
 
 use bincode::Decode;
+use bincode::Encode;
+use bincode::error::EncodeError;
+
+use crate::serialisation::serialise;
 
 pub mod seq_tree;
 
@@ -96,6 +100,51 @@ pub trait NodeFold {
 
     /// Finalise the node folding and produce the node.
     fn done(self) -> <Self::Parent as Fold>::Folded;
+}
+
+/// Extension trait for `Fold` implementations that can treat leaves in a standard way.
+pub trait FoldLeaf: Fold + Sized {
+    /// Fold any serialisable value as a single leaf.
+    fn fold_leaf<T: Encode>(self, t: T) -> Result<<Self as Fold>::Folded, EncodeError> {
+        let bytes = serialise(t)?;
+        Ok(self.fold_leaf_raw(&bytes))
+    }
+
+    /// Fold an explicit sequence of bytes as a single leaf.
+    fn fold_leaf_raw(self, bytes: &[u8]) -> <Self as Fold>::Folded;
+}
+
+/// A helper type that stores an encodable value in a wrapper that makes it `Foldable`.
+pub struct EncodeLeaf<T> {
+    data: T,
+    err_msg: &'static str,
+}
+
+impl<T> EncodeLeaf<T> {
+    pub fn new(data: T, err_msg: &'static str) -> Self {
+        EncodeLeaf { data, err_msg }
+    }
+}
+
+impl<F: FoldLeaf, T: Encode> Foldable<F> for EncodeLeaf<T> {
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        builder.fold_leaf(&self.data).expect(self.err_msg)
+    }
+}
+
+/// A helper struct that stores an arbitrary closure in a wrapper that makes it `Foldable`.
+pub struct FoldableClosure<G>(G);
+
+impl<G> FoldableClosure<G> {
+    pub fn new(g: G) -> Self {
+        Self(g)
+    }
+}
+
+impl<F: FoldLeaf, G: Fn(F) -> F::Folded> Foldable<F> for FoldableClosure<G> {
+    fn fold(&self, builder: F) -> F::Folded {
+        (self.0)(builder)
+    }
 }
 
 /// Implementing types define a state structure which can be unfolded.

@@ -4,7 +4,6 @@
 
 //! Tests for [`Atom`]
 
-use bincode::Encode;
 use proptest::arbitrary::Arbitrary;
 use proptest::collection::vec;
 use proptest::prelude::Just;
@@ -20,7 +19,6 @@ use crate::components::atom::AtomMode;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
-use crate::foldable::tests::TestTree;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::merkle_proof::proof_tree;
@@ -36,13 +34,6 @@ use crate::mode::utils::catch_not_found;
 use crate::mode_test;
 use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
-
-impl<T: Encode> Foldable<TestFolder> for Atom<T, Normal> {
-    fn fold(&self, _builder: TestFolder) -> TestTree {
-        let bytes = serialise(&self.atom).expect("Serialisation should not fail");
-        TestTree::Leaf(bytes)
-    }
-}
 
 mode_test!(init, F, {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]

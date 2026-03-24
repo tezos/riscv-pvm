@@ -22,11 +22,11 @@ use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
 use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
 use crate::foldable::Unfold;
 use crate::foldable::Unfoldable;
 use crate::hash::Hash;
-use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -158,20 +158,24 @@ impl<T: Default + 'static, M: AtomMode> Default for Atom<T, M> {
     }
 }
 
-impl<T: Encode + 'static> Foldable<HashFold> for Atom<T, Normal> {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        Hash::hash_encodable(&self.atom).expect("Hashing should not fail")
+impl<T: Encode, F: FoldLeaf> Foldable<F> for Atom<T, Normal> {
+    fn fold(&self, builder: F) -> F::Folded {
+        builder
+            .fold_leaf(self)
+            .expect("Should be able to serialise value in atom")
     }
 }
 
-impl<'normal, T: Encode + 'static> Foldable<HashFold> for Atom<T, Prove<'normal>> {
-    fn fold(&self, _builder: HashFold) -> Hash {
+impl<'normal, T: Encode + 'static, F: FoldLeaf> Foldable<F> for Atom<T, Prove<'normal>> {
+    fn fold(&self, builder: F) -> F::Folded {
         let value = self
             .atom
             .current
             .as_deref()
             .unwrap_or_else(|| &self.atom.previous);
-        Hash::hash_encodable(value).expect("Hashing should not fail")
+        builder
+            .fold_leaf(value)
+            .expect("Should be able to serialise value in atom")
     }
 }
 
