@@ -14,7 +14,11 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
@@ -151,29 +155,19 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
     /// Converts the [`Node`] to an encoded, serialisable representation,
     /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
-    pub(crate) fn to_encode<'a, NodeId>(
-        &'a self,
-        resolver: &impl TreeResolver<NodeId, TreeId>,
-    ) -> impl Encode + 'a
+    pub(crate) fn to_encode<'a>(&'a self) -> impl Encode + 'a
     where
         Bytes<M>: Encode,
+        TreeId: Foldable<HashFold>,
     {
-        // Recursively hashes any left child and its children. Stops when a hash was cached or a
-        // node is blinded.
-        let left = resolver.get_hash(&self.left);
-
-        // Recursively hashes any right child and its children. Stops when a hash was cached or a
-        // node is blinded.
-        let right = resolver.get_hash(&self.right);
-
         NodeHashRepresentation {
             meta: MetaHashRepresentation {
                 key: &self.meta.key,
                 balance_factor: self.meta.balance_factor,
             },
             data: &self.data,
-            left,
-            right,
+            left: Hash::from_foldable(&self.left),
+            right: Hash::from_foldable(&self.right),
         }
     }
 
@@ -181,14 +175,14 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
-    pub(crate) fn hash<NodeId>(&self, resolver: &impl TreeResolver<NodeId, TreeId>) -> &Hash
+    pub(crate) fn hash(&self) -> &Hash
     where
-        Bytes<M>: Encode,
+        TreeId: Foldable<HashFold>,
+        Atom<Meta, M>: Foldable<HashFold>,
+        Bytes<M>: Foldable<HashFold>,
+        TreeId: Foldable<HashFold>,
     {
-        self.hash.get_or_init(|| {
-            let data = self.to_encode(resolver);
-            Hash::hash_encodable(data).expect("The hashing should not fail")
-        })
+        self.hash.get_or_init(|| Hash::from_foldable(self))
     }
 
     #[inline]
@@ -818,5 +812,23 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
                 .is_inorder_inner(self.key(), max, resolver)?;
 
         Ok(left_in_order && right_in_order)
+    }
+}
+
+impl<F, TreeId, M> Foldable<F> for Node<TreeId, M>
+where
+    F: Fold,
+    M: Mode,
+    Atom<Meta, M>: Foldable<F>,
+    Bytes<M>: Foldable<F>,
+    TreeId: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        let mut node = builder.into_node_fold();
+        node.add(&self.meta);
+        node.add(&self.data);
+        node.add(&self.left);
+        node.add(&self.right);
+        node.done()
     }
 }
