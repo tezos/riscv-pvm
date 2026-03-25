@@ -71,8 +71,19 @@ impl<T, M: VectorMode> Vector<T, M> {
     }
 
     /// Resize the vector to the new length, filling new items with the given value.
-    pub fn resize_with(&mut self, new_len: usize, new_value: impl FnMut() -> T) {
-        M::resize_with(self, new_len, new_value)
+    pub fn resize_with(&mut self, new_len: usize, mut new_value: impl FnMut() -> T) {
+        M::try_resize_with::<_, Infallible>(self, new_len, || Ok(new_value()))
+            .expect("Infallible should not be constructable")
+    }
+
+    /// Like [`Self::resize_with`], but fallible.
+    pub fn try_resize_with<E>(
+        &mut self,
+        new_len: usize,
+        new_value: impl FnMut() -> Result<T, E>,
+    ) -> Result<(), E> {
+        M::try_resize_with(self, new_len, new_value)
+    }
     }
 }
 
@@ -311,7 +322,11 @@ pub trait VectorMode: Mode {
     fn len<T>(this: &Vector<T, Self>) -> usize;
 
     /// See [`Vector::resize_with`].
-    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, value: impl FnMut() -> T);
+    fn try_resize_with<T, E>(
+        this: &mut Vector<T, Self>,
+        new_len: usize,
+        value: impl FnMut() -> Result<T, E>,
+    ) -> Result<(), E>;
 }
 
 impl VectorMode for Normal {
@@ -331,8 +346,27 @@ impl VectorMode for Normal {
         this.vector.len()
     }
 
-    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, value: impl FnMut() -> T) {
-        this.vector.resize_with(new_len, value);
+    fn try_resize_with<T, E>(
+        this: &mut Vector<T, Self>,
+        new_len: usize,
+        mut new_value: impl FnMut() -> Result<T, E>,
+    ) -> Result<(), E> {
+        let current_len = this.len();
+
+        if new_len < current_len {
+            this.vector.truncate(new_len);
+            return Ok(());
+        }
+
+        let growth = current_len..new_len;
+        this.vector.reserve(growth.len());
+
+        for _ in growth {
+            let item = new_value()?;
+            this.vector.push(item);
+        }
+
+        Ok(())
     }
 }
 
@@ -374,17 +408,26 @@ impl VectorMode for Prove<'_> {
         this.vector.unrecorded_len()
     }
 
-    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, mut value: impl FnMut() -> T) {
+    fn try_resize_with<T, E>(
+        this: &mut Vector<T, Self>,
+        new_len: usize,
+        mut new_value: impl FnMut() -> Result<T, E>,
+    ) -> Result<(), E> {
         let current_len = this.len();
 
         this.vector.record_resize_boundary(new_len);
 
         // Increasing the size simply requires us to add items to the end, i.e. add them to `extra`.
         if new_len > current_len {
-            let growth = new_len - current_len;
-            this.vector.appended.reserve(growth);
-            this.vector.appended.extend((0..growth).map(|_| value()));
-            return;
+            let growth = current_len..new_len;
+            this.vector.appended.reserve(growth.len());
+
+            for _ in growth {
+                let item = new_value()?;
+                this.vector.appended.push(item);
+            }
+
+            return Ok(());
         }
 
         // When not shrinking below the number of active previous items, we can truncate `extra`.
@@ -392,13 +435,15 @@ impl VectorMode for Prove<'_> {
             this.vector
                 .appended
                 .truncate(new_len - this.vector.active_previous);
-            return;
+            return Ok(());
         }
 
         // When shrinking below the number of active previous items, we need to clear `extra` as
         // those are now invalid, and shrink `active_previous` to reflect the new size.
         this.vector.active_previous = new_len;
         this.vector.appended.clear();
+
+        Ok(())
     }
 }
 
@@ -443,14 +488,19 @@ impl VectorMode for Verify {
         }
     }
 
-    fn resize_with<T>(this: &mut Vector<T, Self>, new_len: usize, mut value: impl FnMut() -> T) {
+    fn try_resize_with<T, E>(
+        this: &mut Vector<T, Self>,
+        new_len: usize,
+        mut value: impl FnMut() -> Result<T, E>,
+    ) -> Result<(), E> {
         let current_len = this.len();
 
         // If there is anything to grow, we need to ensure the items are defined for the range that
         // we're growing.
         if new_len > current_len {
-            let growth = new_len - current_len;
-            let values = Vec::from_iter((0..growth).map(|_| value()));
+            let values = (current_len..new_len)
+                .map(|_| value())
+                .collect::<Result<Vec<T>, E>>()?;
             this.vector.items.define(current_len, values);
         }
 
@@ -460,6 +510,8 @@ impl VectorMode for Verify {
         }
 
         this.vector.length = Partial::Present(new_len);
+
+        Ok(())
     }
 }
 
