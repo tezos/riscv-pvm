@@ -241,6 +241,24 @@ impl<'normal> Provable<'normal> for Bytes<Normal> {
     }
 }
 
+impl Bytes<Normal> {
+    /// Convert this [`Bytes`] to [`Prove`] mode.
+    ///
+    /// Implementation matches [`Bytes::from_raw_source`], but takes ownership of the data instead
+    /// of borrowing it, with the `previous` set to [`Source::Owned`].
+    pub fn into_proof(self) -> Bytes<Prove<'static>> {
+        Bytes {
+            bytes: ProveImpl {
+                length: self.len(),
+                previous: Source::owned(self),
+                did_access_length: Cell::new(false),
+                reads: RefCell::new(RangeSet2::empty()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+}
+
 impl Borrow<[u8]> for Bytes<Normal> {
     fn borrow(&self) -> &[u8] {
         &self.bytes
