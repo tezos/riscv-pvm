@@ -469,7 +469,7 @@ impl<
 
     /// Get the current level of the PVM
     pub fn level(&self) -> Option<u32> {
-        self.pvm.level.read()
+        self.pvm.tezos.level.read()
     }
 }
 

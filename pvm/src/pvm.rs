@@ -14,3 +14,4 @@ mod reveals;
 mod tezos;
 
 pub use common::*;
+pub use tezos::Tezos;

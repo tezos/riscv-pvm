@@ -55,12 +55,11 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 use super::durable_storage::DurableStorage;
 use super::errors::OperationalError;
 use super::linux;
-use super::outbox::Outbox;
 use super::outbox::OutboxProof;
 use super::outbox::OutboxProofError;
 use super::outbox::Output;
 use super::outbox::OutputInfo;
-use super::reveals::RevealRequest;
+use super::tezos::Tezos;
 use crate::default::ConstDefault;
 use crate::machine_state;
 use crate::machine_state::csregisters::CSRegister;
@@ -126,13 +125,8 @@ pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     pub(crate) system_state: linux::SupervisorState<M>,
     pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
     pub(crate) durable_storage: DS,
-    pub(crate) outbox: Outbox<M>,
-    pub(crate) reveal_request: RevealRequest<M>,
+    pub(crate) tezos: Tezos<M>,
     version: Atom<u64, M>,
-    pub(crate) tick: Atom<u64, M>,
-    pub(crate) message_counter: Atom<u64, M>,
-    pub(crate) level: Atom<Option<u32>, M>,
-    pub(crate) status: Atom<PvmStatus, M>,
 }
 
 impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
@@ -183,7 +177,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         // When the status is WaitingForReveal during evaluation, we know that
         // nothing has been returned by the rollup node and the reveal request
         // is invalid.
-        if let PvmStatus::WaitingForReveal = self.status.read() {
+        if let PvmStatus::WaitingForReveal = self.tezos.status.read() {
             self.provide_reveal_error_response();
             return 1;
         }
@@ -193,18 +187,15 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             .step_max_handle(step_bounds, |machine_state| {
                 handle_system_call(
                     machine_state,
-                    &mut self.outbox,
+                    &mut self.tezos,
                     &mut self.system_state,
-                    &mut self.status,
-                    &mut self.reveal_request,
-                    &self.level,
                     &mut hooks,
                 )
             })
             .steps;
 
-        let tick = self.tick.read().wrapping_add(steps as u64);
-        self.tick.write(tick);
+        let tick = self.tezos.tick.read().wrapping_add(steps as u64);
+        self.tezos.tick.write(tick);
 
         steps
     }
@@ -232,7 +223,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         M: AtomMode + DataSpaceMode + VectorMode,
     {
         if !tezos::provide_input(
-            &mut self.status,
+            &mut self.tezos.status,
             &mut self.machine_state.core,
             level,
             counter,
@@ -241,11 +232,11 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             return false;
         }
 
-        let tick = self.tick.read().wrapping_add(1u64);
-        self.tick.write(tick);
+        let tick = self.tezos.tick.read().wrapping_add(1u64);
+        self.tezos.tick.write(tick);
 
-        self.message_counter.write(counter as u64);
-        self.level.write(Some(level));
+        self.tezos.message_counter.write(counter as u64);
+        self.tezos.level.write(Some(level));
         true
     }
 
@@ -256,15 +247,15 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         M: AtomMode + DataSpaceMode + VectorMode,
     {
         if !tezos::provide_reveal_response(
-            &mut self.status,
+            &mut self.tezos.status,
             &mut self.machine_state.core,
             reveal_data,
         ) {
             return false;
         }
 
-        let tick = self.tick.read().wrapping_add(1u64);
-        self.tick.write(tick);
+        let tick = self.tezos.tick.read().wrapping_add(1u64);
+        self.tezos.tick.write(tick);
 
         true
     }
@@ -274,7 +265,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     where
         M: AtomMode,
     {
-        self.reveal_request.to_vec()
+        self.tezos.reveal_request.to_vec()
     }
 
     /// Provide a reveal error response to the PVM
@@ -288,10 +279,10 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             .xregisters
             .write(a0, SbiError::InvalidParam as u64);
 
-        let tick = self.tick.read().wrapping_add(1u64);
-        self.tick.write(tick);
+        let tick = self.tezos.tick.read().wrapping_add(1u64);
+        self.tezos.tick.write(tick);
 
-        self.status.write(PvmStatus::Evaluating);
+        self.tezos.status.write(PvmStatus::Evaluating);
     }
 
     /// Get the current machine status.
@@ -299,7 +290,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     where
         M: AtomMode,
     {
-        self.status.read()
+        self.tezos.status.read()
     }
 
     /// Construct an [`InputRequest`] based on the PVM's current status and level.
@@ -307,16 +298,16 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     where
         M: AtomMode,
     {
-        match self.status.read() {
+        match self.tezos.status.read() {
             PvmStatus::Evaluating => InputRequest::NoInputRequired,
             PvmStatus::WaitingForReveal => {
                 InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
             }
             PvmStatus::WaitingForInput => {
-                if let Some(level) = self.level.read() {
+                if let Some(level) = self.tezos.level.read() {
                     InputRequest::FirstAfter {
                         level,
-                        counter: self.message_counter.read(),
+                        counter: self.tezos.message_counter.read(),
                     }
                 } else {
                     InputRequest::Initial
@@ -334,13 +325,8 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             system_state: self.system_state.clone(),
             machine_state: self.machine_state.clone(),
             durable_storage: self.durable_storage.try_clone()?,
-            outbox: self.outbox.clone(),
-            reveal_request: self.reveal_request.clone(),
+            tezos: self.tezos.clone(),
             version: self.version.clone(),
-            tick: self.tick.clone(),
-            message_counter: self.message_counter.clone(),
-            level: self.level.clone(),
-            status: self.status.clone(),
         })
     }
 
@@ -354,13 +340,8 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             machine_state: self.machine_state.clone_state(),
             // TODO: RV-911: Does the durable storage need a `try_clone_state`?
             durable_storage: self.durable_storage.try_clone()?,
-            outbox: self.outbox.clone_state(),
-            reveal_request: self.reveal_request.clone_state(),
+            tezos: self.tezos.clone_state(),
             version: self.version.clone_state(),
-            tick: self.tick.clone_state(),
-            message_counter: self.message_counter.clone_state(),
-            level: self.level.clone_state(),
-            status: self.status.clone_state(),
         })
     }
 }
@@ -390,7 +371,7 @@ where
         &self,
         output_info: OutputInfo,
     ) -> Result<OutboxProof, OutboxProofError> {
-        let proof_output = self.get_outbox_message(output_info)?;
+        let proof_output = self.tezos.get_outbox_message(output_info)?;
         let proof = MerkleProof::from_foldable(self);
 
         Ok(OutboxProof {
@@ -409,16 +390,11 @@ where
 {
     fn default() -> Self {
         Self {
+            system_state: linux::SupervisorState::default(),
             machine_state: machine_state::MachineState::default(),
             durable_storage: DS::default(),
-            outbox: Outbox::<M>::default(),
-            reveal_request: RevealRequest::default(),
-            system_state: linux::SupervisorState::default(),
+            tezos: Tezos::default(),
             version: Atom::new(INITIAL_VERSION),
-            status: Atom::default(),
-            tick: Atom::default(),
-            message_counter: Atom::default(),
-            level: Atom::default(),
         }
     }
 }
@@ -430,16 +406,11 @@ impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: Provable<'normal>
 
     fn start_proof(&'normal self) -> Self::Prover {
         Pvm {
+            system_state: self.system_state.start_proof(),
             machine_state: self.machine_state.start_proof(),
             durable_storage: self.durable_storage.start_proof(),
-            outbox: self.outbox.start_proof(),
-            reveal_request: self.reveal_request.start_proof(),
-            system_state: self.system_state.start_proof(),
+            tezos: self.tezos.start_proof(),
             version: self.version.start_proof(),
-            tick: self.tick.start_proof(),
-            message_counter: self.message_counter.start_proof(),
-            level: self.level.start_proof(),
-            status: self.status.start_proof(),
         }
     }
 }
@@ -452,25 +423,17 @@ where
     F: Fold,
     machine_state::MachineState<MC, PC, M>: Foldable<F>,
     DS: Foldable<F>,
-    Outbox<M>: Foldable<F>,
-    RevealRequest<M>: Foldable<F>,
+    Tezos<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
-    Atom<PvmStatus, M>: Foldable<F>,
-    Atom<Option<u32>, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
+        builder.add(&self.system_state);
         builder.add(&self.machine_state);
         builder.add(&self.durable_storage);
-        builder.add(&self.outbox);
-        builder.add(&self.reveal_request);
-        builder.add(&self.system_state);
+        builder.add(&self.tezos);
         builder.add(&self.version);
-        builder.add(&self.tick);
-        builder.add(&self.message_counter);
-        builder.add(&self.level);
-        builder.add(&self.status);
         builder.done()
     }
 }
@@ -483,28 +446,18 @@ where
     fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
         let mut src = src.into_node()?;
 
+        let system_state = src.next_branch()?;
         let machine_state = src.next_branch()?;
         let durable_storage = src.next_branch()?;
-        let outbox = src.next_branch()?;
-        let reveal_request = src.next_branch()?;
-        let system_state = src.next_branch()?;
+        let tezos = src.next_branch()?;
         let version = src.next_branch()?;
-        let tick = src.next_branch()?;
-        let message_counter = src.next_branch()?;
-        let level = src.next_branch()?;
-        let status = src.next_branch()?;
 
         src.done(Self {
+            system_state,
             machine_state,
             durable_storage,
-            outbox,
-            reveal_request,
-            system_state,
+            tezos,
             version,
-            tick,
-            message_counter,
-            level,
-            status,
         })
     }
 }
@@ -513,28 +466,18 @@ impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, 
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
+        let (proof, system_state) = proof.next_branch()?;
         let (proof, machine_state) = proof.next_branch()?;
         let (proof, durable_storage) = proof.next_branch()?;
-        let (proof, outbox) = proof.next_branch()?;
-        let (proof, reveal_request) = proof.next_branch()?;
-        let (proof, system_state) = proof.next_branch()?;
+        let (proof, tezos) = proof.next_branch()?;
         let (proof, version) = proof.next_branch()?;
-        let (proof, tick) = proof.next_branch()?;
-        let (proof, message_counter) = proof.next_branch()?;
-        let (proof, level) = proof.next_branch()?;
-        let (proof, status) = proof.next_branch()?;
 
         proof.done(Self {
+            system_state,
             machine_state,
             durable_storage,
-            outbox,
-            reveal_request,
-            system_state,
+            tezos,
             version,
-            tick,
-            message_counter,
-            level,
-            status,
         })
     }
 }
@@ -547,16 +490,11 @@ where
     M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.system_state.encode(encoder)?;
         self.machine_state.encode(encoder)?;
         self.durable_storage.encode(encoder)?;
-        self.outbox.encode(encoder)?;
-        self.reveal_request.encode(encoder)?;
-        self.system_state.encode(encoder)?;
+        self.tezos.encode(encoder)?;
         self.version.encode(encoder)?;
-        self.tick.encode(encoder)?;
-        self.message_counter.encode(encoder)?;
-        self.level.encode(encoder)?;
-        self.status.encode(encoder)?;
         Ok(())
     }
 }
@@ -570,16 +508,11 @@ where
 {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
+            system_state: Decode::decode(decoder)?,
             machine_state: Decode::decode(decoder)?,
             durable_storage: Decode::decode(decoder)?,
-            outbox: Decode::decode(decoder)?,
-            reveal_request: Decode::decode(decoder)?,
-            system_state: Decode::decode(decoder)?,
+            tezos: Decode::decode(decoder)?,
             version: Decode::decode(decoder)?,
-            tick: Decode::decode(decoder)?,
-            message_counter: Decode::decode(decoder)?,
-            level: Decode::decode(decoder)?,
-            status: Decode::decode(decoder)?,
         })
     }
 }
@@ -608,7 +541,8 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
 
         catch_not_found(move || {
             let (pvm, _): (Self, _) = proof_tree::deserialise(proof_tree)?;
-            pvm.get_outbox_message(outbox_proof.info)
+            pvm.tezos
+                .get_outbox_message(outbox_proof.info)
                 .map_err(ProofVerificationFailure::from)
         })?
     }
@@ -631,11 +565,8 @@ pub enum InputRequest {
 /// Handle a system call in the PVM.
 pub(crate) fn handle_system_call<MC, PC, M>(
     machine: &mut machine_state::MachineState<MC, PC, M>,
-    outbox: &mut Outbox<M>,
+    tezos_state: &mut Tezos<M>,
     system_state: &mut linux::SupervisorState<M>,
-    status: &mut Atom<PvmStatus, M>,
-    reveal_request: &mut RevealRequest<M>,
-    level: &Atom<Option<u32>, M>,
     hooks: impl PvmHooks,
 ) -> ControlFlow<()>
 where
@@ -644,9 +575,9 @@ where
     M: AtomMode + DataSpaceMode + VectorMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, outbox, status, reveal_request, level);
+        tezos::handle_tezos(core, tezos_state);
 
-        if status.read() == PvmStatus::Evaluating {
+        if tezos_state.status.read() == PvmStatus::Evaluating {
             ControlFlow::Continue(())
         } else {
             ControlFlow::Break(())
@@ -694,11 +625,8 @@ mod tests {
         {
             handle_system_call(
                 &mut self.machine_state,
-                &mut self.outbox,
+                &mut self.tezos,
                 &mut self.system_state,
-                &mut self.status,
-                &mut self.reveal_request,
-                &self.level,
                 hooks,
             )
             .is_continue()
@@ -900,7 +828,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::WaitingForReveal);
 
         // After ECALL the reveal_request field should be set correctly
-        assert_eq!(pvm.reveal_request.to_vec(), buffer);
+        assert_eq!(pvm.tezos.reveal_request.to_vec(), buffer);
 
         const REVEAL_DATA_SIZE: usize = 1000;
         let reveal_data = [1u8; REVEAL_DATA_SIZE];
@@ -972,7 +900,7 @@ mod tests {
         assert_eq!(pvm.status(), PvmStatus::WaitingForReveal);
 
         // After ECALL the reveal_request field should be set correctly
-        assert_eq!(pvm.reveal_request.to_vec(), buffer);
+        assert_eq!(pvm.tezos.reveal_request.to_vec(), buffer);
 
         const REVEAL_DATA_SIZE: usize = 1000;
         let reveal_data = [1u8; REVEAL_DATA_SIZE];
@@ -1011,11 +939,11 @@ mod tests {
 
             // Setup PVM
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.level.write(Some(level));
+            pvm.tezos.level.write(Some(level));
 
             // Write messages to the outbox at level `level`
             for message in &messages {
-                prop_assert!(pvm.outbox.write_message(message.clone(), level).is_ok());
+                prop_assert!(pvm.tezos.outbox.write_message(message.clone(), level).is_ok());
             }
 
             // Produce and verify an outbox proof for every message written in the outbox

@@ -7,6 +7,12 @@
 
 use std::cmp::min;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 use ed25519_dalek::Signature;
 use ed25519_dalek::Signer;
 use ed25519_dalek::SigningKey;
@@ -14,7 +20,31 @@ use ed25519_dalek::VerifyingKey;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
+use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
+use octez_riscv_data::components::atom::CloneAtomMode;
+use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::NodeUnfold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
+use octez_riscv_data::foldable::Unfoldable;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::mode::Mode;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
+use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
+use perfect_derive::perfect_derive;
 use sha3::Digest;
 use sha3::Keccak256;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
@@ -35,8 +65,6 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
 use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::data_space::DataSpaceMode;
-use octez_riscv_data::components::vector::VectorMode;
 
 use super::PvmStatus;
 use super::outbox::Outbox;
@@ -52,6 +80,151 @@ use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
 use crate::machine_state::registers::a6;
+
+/// Tezos-specific fields of the PVM.
+#[perfect_derive(Clone, PartialEq, Eq)]
+pub struct Tezos<M: Mode> {
+    pub(crate) outbox: Outbox<M>,
+    pub(crate) reveal_request: RevealRequest<M>,
+    pub(crate) tick: Atom<u64, M>,
+    pub(crate) message_counter: Atom<u64, M>,
+    pub(crate) level: Atom<Option<u32>, M>,
+    pub(crate) status: Atom<PvmStatus, M>,
+}
+
+impl<M: AtomMode + VectorMode> Default for Tezos<M> {
+    fn default() -> Self {
+        Self {
+            outbox: Outbox::<M>::default(),
+            reveal_request: RevealRequest::default(),
+            tick: Atom::default(),
+            message_counter: Atom::default(),
+            level: Atom::default(),
+            status: Atom::default(),
+        }
+    }
+}
+
+impl<'normal> Provable<'normal> for Tezos<Normal> {
+    type Prover = Tezos<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        Tezos {
+            outbox: self.outbox.start_proof(),
+            reveal_request: self.reveal_request.start_proof(),
+            tick: self.tick.start_proof(),
+            message_counter: self.message_counter.start_proof(),
+            level: self.level.start_proof(),
+            status: self.status.start_proof(),
+        }
+    }
+}
+
+impl<M: CloneAtomMode + CloneVectorMode> CloneState for Tezos<M> {
+    fn clone_state(&self) -> Self {
+        Self {
+            outbox: self.outbox.clone_state(),
+            reveal_request: self.reveal_request.clone_state(),
+            tick: self.tick.clone_state(),
+            message_counter: self.message_counter.clone_state(),
+            level: self.level.clone_state(),
+            status: self.status.clone_state(),
+        }
+    }
+}
+
+impl<M, F> Foldable<F> for Tezos<M>
+where
+    M: Mode,
+    F: Fold,
+    Outbox<M>: Foldable<F>,
+    RevealRequest<M>: Foldable<F>,
+    Atom<PvmStatus, M>: Foldable<F>,
+    Atom<Option<u32>, M>: Foldable<F>,
+    Atom<u64, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        let mut builder = builder.into_node_fold();
+
+        builder.add(&self.outbox);
+        builder.add(&self.reveal_request);
+        builder.add(&self.tick);
+        builder.add(&self.message_counter);
+        builder.add(&self.level);
+        builder.add(&self.status);
+
+        builder.done()
+    }
+}
+
+impl Unfoldable for Tezos<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
+        let mut src = src.into_node()?;
+
+        let outbox = src.next_branch()?;
+        let reveal_request = src.next_branch()?;
+        let tick = src.next_branch()?;
+        let message_counter = src.next_branch()?;
+        let level = src.next_branch()?;
+        let status = src.next_branch()?;
+
+        src.done(Self {
+            outbox,
+            reveal_request,
+            tick,
+            message_counter,
+            level,
+            status,
+        })
+    }
+}
+
+impl FromProof for Tezos<Verify> {
+    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+        let proof = proof.into_node()?;
+
+        let (proof, outbox) = proof.next_branch()?;
+        let (proof, reveal_request) = proof.next_branch()?;
+        let (proof, tick) = proof.next_branch()?;
+        let (proof, message_counter) = proof.next_branch()?;
+        let (proof, level) = proof.next_branch()?;
+        let (proof, status) = proof.next_branch()?;
+
+        proof.done(Self {
+            outbox,
+            reveal_request,
+            tick,
+            message_counter,
+            level,
+            status,
+        })
+    }
+}
+
+impl<M: EncodeAtomMode + EncodeVectorMode> Encode for Tezos<M> {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        self.outbox.encode(encoder)?;
+        self.reveal_request.encode(encoder)?;
+        self.tick.encode(encoder)?;
+        self.message_counter.encode(encoder)?;
+        self.level.encode(encoder)?;
+        self.status.encode(encoder)?;
+        Ok(())
+    }
+}
+
+impl<C> Decode<C> for Tezos<Normal> {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Ok(Self {
+            outbox: Decode::decode(decoder)?,
+            reveal_request: Decode::decode(decoder)?,
+            tick: Decode::decode(decoder)?,
+            message_counter: Decode::decode(decoder)?,
+            level: Decode::decode(decoder)?,
+            status: Decode::decode(decoder)?,
+        })
+    }
+}
 
 /// Write the SBI error code as the return value.
 #[inline]
@@ -384,13 +557,8 @@ where
 }
 
 /// Handle a Tezos SBI call.
-pub(super) fn handle_tezos<MC, M>(
-    machine: &mut MachineCoreState<MC, M>,
-    outbox: &mut Outbox<M>,
-    status: &mut Atom<PvmStatus, M>,
-    reveal_request: &mut RevealRequest<M>,
-    level: &Atom<Option<u32>, M>,
-) where
+pub(super) fn handle_tezos<MC, M>(machine: &mut MachineCoreState<MC, M>, tezos: &mut Tezos<M>)
+where
     MC: MemoryConfig,
     M: AtomMode + DataSpaceMode + VectorMode,
 {
@@ -400,14 +568,18 @@ pub(super) fn handle_tezos<MC, M>(
 
     let sbi_function = machine.hart.xregisters.read(a6);
     match sbi_function {
-        SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(status),
-        SBI_TEZOS_WRITE_OUTPUT => handle_tezos_write_output(machine, outbox, level),
+        SBI_TEZOS_INBOX_NEXT => handle_tezos_inbox_next(&mut tezos.status),
+        SBI_TEZOS_WRITE_OUTPUT => {
+            handle_tezos_write_output(machine, &mut tezos.outbox, &tezos.level)
+        }
         SBI_TEZOS_ED25519_SIGN => sbi_wrap(machine, handle_tezos_ed25519_sign),
         SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
         SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
-        SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
+        SBI_TEZOS_REVEAL => {
+            handle_tezos_reveal(machine, &mut tezos.reveal_request, &mut tezos.status)
+        }
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }
 }
