@@ -1132,7 +1132,6 @@ mod tests {
                         &mut state.status,
                         &mut state.reveal_request,
                         &state.level,
-                        &state.level_is_set,
                         StdoutDebugHooks,
                     )
                 });

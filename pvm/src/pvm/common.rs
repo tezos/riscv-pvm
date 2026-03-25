@@ -127,8 +127,7 @@ pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     version: Atom<u64, M>,
     pub(crate) tick: Atom<u64, M>,
     pub(crate) message_counter: Atom<u64, M>,
-    pub(crate) level: Atom<u32, M>,
-    pub(crate) level_is_set: Atom<bool, M>,
+    pub(crate) level: Atom<Option<u32>, M>,
     pub(crate) status: Atom<PvmStatus, M>,
 }
 
@@ -195,7 +194,6 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
                     &mut self.status,
                     &mut self.reveal_request,
                     &self.level,
-                    &self.level_is_set,
                     &mut hooks,
                 )
             })
@@ -243,8 +241,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         self.tick.write(tick);
 
         self.message_counter.write(counter as u64);
-        self.level_is_set.write(true);
-        self.level.write(level);
+        self.level.write(Some(level));
         true
     }
 
@@ -312,13 +309,13 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
                 InputRequest::NeedsReveal(self.reveal_request().into_boxed_slice())
             }
             PvmStatus::WaitingForInput => {
-                if !self.level_is_set.read() {
-                    InputRequest::Initial
-                } else {
+                if let Some(level) = self.level.read() {
                     InputRequest::FirstAfter {
-                        level: self.level.read(),
+                        level,
                         counter: self.message_counter.read(),
                     }
+                } else {
+                    InputRequest::Initial
                 }
             }
         }
@@ -339,7 +336,6 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             tick: self.tick.clone(),
             message_counter: self.message_counter.clone(),
             level: self.level.clone(),
-            level_is_set: self.level_is_set.clone(),
             status: self.status.clone(),
         })
     }
@@ -360,7 +356,6 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
             tick: self.tick.clone_state(),
             message_counter: self.message_counter.clone_state(),
             level: self.level.clone_state(),
-            level_is_set: self.level_is_set.clone_state(),
             status: self.status.clone_state(),
         })
     }
@@ -420,7 +415,6 @@ where
             tick: Atom::default(),
             message_counter: Atom::default(),
             level: Atom::default(),
-            level_is_set: Atom::default(),
         }
     }
 }
@@ -441,7 +435,6 @@ impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: Provable<'normal>
             tick: self.tick.start_proof(),
             message_counter: self.message_counter.start_proof(),
             level: self.level.start_proof(),
-            level_is_set: self.level_is_set.start_proof(),
             status: self.status.start_proof(),
         }
     }
@@ -459,8 +452,7 @@ where
     RevealRequest<M>: Foldable<F>,
     linux::SupervisorState<M>: Foldable<F>,
     Atom<PvmStatus, M>: Foldable<F>,
-    Atom<bool, M>: Foldable<F>,
-    Atom<u32, M>: Foldable<F>,
+    Atom<Option<u32>, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
@@ -474,7 +466,6 @@ where
         builder.add(&self.tick);
         builder.add(&self.message_counter);
         builder.add(&self.level);
-        builder.add(&self.level_is_set);
         builder.add(&self.status);
         builder.done()
     }
@@ -497,7 +488,6 @@ where
         let tick = src.next_branch()?;
         let message_counter = src.next_branch()?;
         let level = src.next_branch()?;
-        let level_is_set = src.next_branch()?;
         let status = src.next_branch()?;
 
         src.done(Self {
@@ -510,7 +500,6 @@ where
             tick,
             message_counter,
             level,
-            level_is_set,
             status,
         })
     }
@@ -529,7 +518,6 @@ impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, 
         let (proof, tick) = proof.next_branch()?;
         let (proof, message_counter) = proof.next_branch()?;
         let (proof, level) = proof.next_branch()?;
-        let (proof, level_is_set) = proof.next_branch()?;
         let (proof, status) = proof.next_branch()?;
 
         proof.done(Self {
@@ -542,7 +530,6 @@ impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, 
             tick,
             message_counter,
             level,
-            level_is_set,
             status,
         })
     }
@@ -565,7 +552,6 @@ where
         self.tick.encode(encoder)?;
         self.message_counter.encode(encoder)?;
         self.level.encode(encoder)?;
-        self.level_is_set.encode(encoder)?;
         self.status.encode(encoder)?;
         Ok(())
     }
@@ -589,7 +575,6 @@ where
             tick: Decode::decode(decoder)?,
             message_counter: Decode::decode(decoder)?,
             level: Decode::decode(decoder)?,
-            level_is_set: Decode::decode(decoder)?,
             status: Decode::decode(decoder)?,
         })
     }
@@ -640,18 +625,13 @@ pub enum InputRequest {
 }
 
 /// Handle a system call in the PVM.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Addressed by RV-909: Restructure Pvm type"
-)]
 pub(crate) fn handle_system_call<MC, PC, M>(
     machine: &mut machine_state::MachineState<MC, PC, M>,
     outbox: &mut Outbox<M>,
     system_state: &mut linux::SupervisorState<M>,
     status: &mut Atom<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
-    level: &Atom<u32, M>,
-    level_is_set: &Atom<bool, M>,
+    level: &Atom<Option<u32>, M>,
     hooks: impl PvmHooks,
 ) -> ControlFlow<()>
 where
@@ -660,7 +640,7 @@ where
     M: AtomMode + DataSpaceMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, outbox, status, reveal_request, level, level_is_set);
+        tezos::handle_tezos(core, outbox, status, reveal_request, level);
 
         if status.read() == PvmStatus::Evaluating {
             ControlFlow::Continue(())
@@ -715,7 +695,6 @@ mod tests {
                 &mut self.status,
                 &mut self.reveal_request,
                 &self.level,
-                &self.level_is_set,
                 hooks,
             )
             .is_continue()
@@ -1028,8 +1007,7 @@ mod tests {
 
             // Setup PVM
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
-            pvm.level_is_set.write(true);
-            pvm.level.write(level);
+            pvm.level.write(Some(level));
 
             // Write messages to the outbox at level `level`
             for message in &messages {

@@ -467,10 +467,7 @@ impl<
 
     /// Get the current level of the PVM
     pub fn level(&self) -> Option<u32> {
-        if !self.pvm.level_is_set.read() {
-            return None;
-        }
-        Some(self.pvm.level.read())
+        self.pvm.level.read()
     }
 }
 
