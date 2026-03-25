@@ -144,7 +144,76 @@ fn test_invalid_merkle_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
     ));
 }
 
+fn test_tampered_oversize_message(inputs: &TestConfig) {
+    let make_stepper = make_stepper_factory::<M64M>(inputs, Some(ROLLUP_ADDRESS));
+    let mut stepper = make_stepper();
+    let _result = stepper.step_max(Bound::Unbounded);
+    let level = stepper.level().unwrap();
+    let outbox_proof = stepper
+        .produce_outbox_proof(OutputInfo { level, index: 0 })
+        .expect("Outbox proof should be valid");
+
+    let tampered_outbox_proof = replace_outbox_message_of_proof(&outbox_proof, &[0x1; 8192]);
+    let tampered_outbox_proof = OutboxProof::deserialise(tampered_outbox_proof.as_slice());
+    tampered_outbox_proof.expect_err("Should fail deserialisation");
+}
+
+fn test_tampered_zero_sized_message(inputs: &TestConfig) {
+    let make_stepper = make_stepper_factory::<M64M>(inputs, Some(ROLLUP_ADDRESS));
+    let mut stepper = make_stepper();
+    let _result = stepper.step_max(Bound::Unbounded);
+    let level = stepper.level().unwrap();
+    let outbox_proof = stepper
+        .produce_outbox_proof(OutputInfo { level, index: 0 })
+        .expect("Outbox proof should be valid");
+
+    let tampered_outbox_proof_bytes = replace_outbox_message_of_proof(&outbox_proof, &[]);
+    let tampered_outbox_proof = OutboxProof::deserialise(tampered_outbox_proof_bytes.as_slice())
+        .expect("Zero sized messages are allowed");
+    assert!(verify_outbox_proof(&tampered_outbox_proof).is_ok());
+}
+
+/// Returns a serialized [OutboxProof] with the outbox message
+/// portion set to [message]. The original outbox proof message
+/// is expected to be 4096 B
+fn replace_outbox_message_of_proof(proof: &OutboxProof, message: &[u8]) -> Vec<u8> {
+    let proof_bytes = OutboxProof::serialise(&proof);
+    let message_size = 4096;
+    let message_pos = proof_bytes
+        .windows(message_size)
+        .position(|w| w.iter().all(|&b| b == 0x01))
+        .expect("Message content should be present in serialized proof");
+    let len_pos = message_pos - 8;
+
+    // Sanity check that the length prefix is correct
+    assert_eq!(
+        &proof_bytes[len_pos..len_pos + 8],
+        &(message_size as u64).to_le_bytes(),
+    );
+
+    // Craft serialized proof, replacing the outbox message with [message]
+    let mut tampered = vec![];
+    let new_size = message.len();
+    tampered.extend_from_slice(&proof_bytes[..len_pos]);
+    tampered.extend_from_slice(&new_size.to_le_bytes());
+    tampered.extend_from_slice(message);
+    tampered.extend_from_slice(&proof_bytes[(len_pos + 8 + message_size)..]);
+
+    tampered
+}
+
 #[test]
 fn test_outbox_proofs_dummy_kernel() {
     test_outbox_proofs(&DUMMY)
+}
+
+#[test]
+#[ignore = "TODO(RV-950)"]
+fn test_tampered_oversize_message_dummy_kernel() {
+    test_tampered_oversize_message(&DUMMY);
+}
+
+#[test]
+fn test_zero_sized_message_dummy_kernel() {
+    test_tampered_zero_sized_message(&DUMMY)
 }
