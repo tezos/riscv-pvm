@@ -20,8 +20,12 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
+use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use perfect_derive::perfect_derive;
 
+use super::resolver::LazyTreeId;
+use super::resolver::ProveTreeId;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
@@ -86,6 +90,19 @@ where
             left: TreeId::from(node_repr.left),
             right: TreeId::from(node_repr.right),
             hash: OnceLock::new(),
+        }
+    }
+}
+
+impl Node<LazyTreeId, Normal> {
+    /// Converts the [`Node`] to [`Prove`] mode.
+    pub fn into_proof(self) -> Node<ProveTreeId, Prove<'static>> {
+        Node {
+            meta: self.meta.into_proof(),
+            data: self.data.into_proof(),
+            left: self.left.into_proof(),
+            right: self.right.into_proof(),
+            hash: self.hash.clone(),
         }
     }
 }

@@ -4,17 +4,20 @@
 
 //! Resolution strategies for identifiers of [`Tree`] and [`Node`] objects.
 //!
-//! This module supports two resolver modes:
+//! This module supports three resolver modes:
 //! - [`ArcResolver`] for eagerly loaded values, where node and tree identifiers directly contain
 //!   in-memory data.
 //! - [`LazyResolver`] for hash-backed values, where identifiers can start as hashes and materialise
 //!   values from storage on first access.
+//! - [`ProveResolver`] to project lazy identifiers into prove-mode nodes and trees on
+//!   demand without changing the underlying storage format.
 //!
 //! # Lazy loading strategy
 //! `LazyResolver` works with [`LazyId`] wrappers. A `LazyId` keeps a hash (`id`) and/or a loaded
-//! value (`inner`) and transitions from "hash-only" to "value-cached" when `resolve` or
-//! `resolve_mut` is called. This avoids loading the full tree upfront while preserving stable hash
-//! computation.
+//! value (`inner`). Immutable resolution populates `inner` while keeping the hash available for
+//! later lookups. Mutable resolution clears the stored hash once the loaded value becomes the
+//! source of truth. This avoids loading the full tree upfront while preserving stable hash
+//! computation for unchanged identifiers.
 //!
 //! # ArcResolver vs LazyResolver
 //! Use [`ArcResolver`] when values are already present and can be shared directly via [`Arc`]. Use
@@ -24,6 +27,7 @@
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
 
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -34,6 +38,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::serialisation::deserialise;
 use trait_set::trait_set;
 
@@ -163,6 +168,20 @@ impl<Value> From<Hash> for LazyId<Hash, Value> {
 #[derive(Debug, Clone)]
 pub struct LazyNodeId(LazyId<Hash, Arc<Node<LazyTreeId, Normal>>>);
 
+impl LazyNodeId {
+    /// Wrap this lazy node identifier in a prove-mode identifier.
+    ///
+    /// The returned [`ProveNodeId`] keeps the original lazy identifier for hash lookups and
+    /// storage-backed resolution, while leaving its prove-mode cache empty until a
+    /// [`ProveResolver`] materialises the node.
+    pub fn into_proof(self) -> ProveNodeId {
+        ProveNodeId {
+            node: self.clone(),
+            inner: OnceLock::new(),
+        }
+    }
+}
+
 impl From<Node<LazyTreeId, Normal>> for LazyNodeId {
     fn from(value: Node<LazyTreeId, Normal>) -> Self {
         let value = Arc::new(value);
@@ -192,6 +211,20 @@ impl Foldable<HashFold> for LazyNodeId {
 /// Identifier for an AVL tree.
 #[derive(Debug, Clone)]
 pub struct LazyTreeId(LazyId<Hash, Tree<LazyNodeId>>);
+
+impl LazyTreeId {
+    /// Wrap this lazy tree identifier in a prove-mode identifier.
+    ///
+    /// The returned [`ProveTreeId`] keeps the original lazy identifier for hash lookups and
+    /// storage-backed resolution, while deferring construction of the prove-mode tree until a
+    /// [`ProveResolver`] resolves it.
+    pub fn into_proof(self) -> ProveTreeId {
+        ProveTreeId {
+            tree: self.clone(),
+            inner: OnceLock::new(),
+        }
+    }
+}
 
 impl From<Hash> for LazyTreeId {
     fn from(hash: Hash) -> Self {
@@ -345,6 +378,137 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
         id.0.inner
             .get_mut()
             .ok_or(OperationalError::ResolverInvariantViolated)
+    }
+}
+
+/// Identifier for a node resolved in [`Prove`] mode.
+///
+/// This wrapper keeps the original [`LazyNodeId`] to allow delegating hash computation and
+/// storage access to a lazy resolver. Once resolved, it caches the prove-mode projection of the
+/// node in `inner` so repeated accesses do not rebuild it.
+#[derive(Clone)]
+pub struct ProveNodeId {
+    inner: OnceLock<Rc<Node<ProveTreeId, Prove<'static>>>>,
+    node: LazyNodeId,
+}
+
+impl Foldable<HashFold> for ProveNodeId {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        match self.inner.get() {
+            Some(inner) => *inner.hash(),
+            None => self.node.fold(builder),
+        }
+    }
+}
+
+/// Identifier for a tree resolved in [`Prove`] mode.
+///
+/// Like [`ProveNodeId`], this wrapper keeps the original lazy identifier and fills `inner` on the
+/// first prove-mode resolution. The cached tree then serves subsequent reads without reprojecting
+/// the lazy tree.
+#[derive(Clone)]
+pub struct ProveTreeId {
+    inner: OnceLock<Tree<ProveNodeId>>,
+    tree: LazyTreeId,
+}
+
+impl Foldable<HashFold> for ProveTreeId {
+    fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
+        match self.inner.get() {
+            Some(inner) => inner.hash(),
+            None => self.tree.fold(builder),
+        }
+    }
+}
+
+/// Adapter that projects lazy AVL identifiers into prove-mode values on demand.
+///
+/// [`ProveResolver`] wraps another resolver for [`LazyNodeId`] and [`LazyTreeId`]. It preserves the
+/// lazy resolver's hash behaviour, but caches prove-mode nodes and trees inside [`ProveNodeId`]
+/// and [`ProveTreeId`] once they are resolved.
+pub struct ProveResolver<R>(R);
+
+impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tree<LazyNodeId>>>
+    Resolver<ProveNodeId, Node<ProveTreeId, Prove<'static>>> for ProveResolver<R>
+{
+    fn resolve<'b>(
+        &self,
+        id: &'b ProveNodeId,
+    ) -> Result<&'b Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        if let Some(inner) = id.inner.get() {
+            return Ok(inner);
+        }
+
+        let resolved: &Node<LazyTreeId, Normal> = self.0.resolve(&id.node)?;
+        let result_node: Node<ProveTreeId, Prove<'static>> = resolved.clone().into_proof();
+        id.inner
+            .set(Rc::new(result_node))
+            .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        Ok(id.inner.wait())
+    }
+
+    fn resolve_mut<'b>(
+        &mut self,
+        id: &'b mut ProveNodeId,
+    ) -> Result<&'b mut Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        {
+            // SAFETY: Rust doesn't understand that the reference on `id.inner` is dropped on return.
+            let inner_mut = unsafe { &mut *(&mut id.inner as *mut OnceLock<_>) };
+            if let Some(inner) = inner_mut.get_mut() {
+                let inner = Rc::make_mut(inner);
+                return Ok(inner);
+            }
+        }
+
+        let resolved: &Node<LazyTreeId, Normal> = self.0.resolve(&id.node)?;
+        let result_node: Node<ProveTreeId, Prove<'static>> = resolved.clone().into_proof();
+        id.inner
+            .set(Rc::new(result_node))
+            .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        Ok(Rc::make_mut(
+            id.inner.get_mut().expect("inner was just set"),
+        ))
+    }
+}
+
+impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<ProveNodeId>>
+    for ProveResolver<R>
+{
+    fn resolve<'b>(&self, id: &'b ProveTreeId) -> Result<&'b Tree<ProveNodeId>, OperationalError> {
+        if let Some(inner) = id.inner.get() {
+            return Ok(inner);
+        }
+
+        let resolved: &Tree<LazyNodeId> = self.0.resolve(&id.tree)?;
+        let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
+        id.inner
+            .set(result_tree)
+            .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        Ok(id.inner.wait())
+    }
+
+    fn resolve_mut<'b>(
+        &mut self,
+        id: &'b mut ProveTreeId,
+    ) -> Result<&'b mut Tree<ProveNodeId>, OperationalError> {
+        {
+            // SAFETY: Rust doesn't understand that the reference on `id.inner` is dropped on return.
+            let inner_mut = unsafe { &mut *(&mut id.inner as *mut OnceLock<_>) };
+            if let Some(inner) = inner_mut.get_mut() {
+                return Ok(inner);
+            }
+        }
+
+        let resolved: &Tree<LazyNodeId> = self.0.resolve(&id.tree)?;
+        let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
+        id.inner
+            .set(result_tree)
+            .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        Ok(id.inner.get_mut().expect("inner was just set"))
     }
 }
 

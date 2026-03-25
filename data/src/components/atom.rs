@@ -91,6 +91,20 @@ impl<T: 'static> Atom<T, Normal> {
 
         std::mem::offset_of!(Self, atom)
     };
+
+    /// Convert this [`Atom`] to [`Prove`] mode.
+    ///
+    /// Implementation matches [`Provable::start_proof`] for [`Atom`], but takes ownership of the data
+    /// instead of borrowing it, with the `previous` set to [`Source::Owned`].
+    pub fn into_proof(self) -> Atom<T, Prove<'static>> {
+        Atom {
+            atom: ProveImpl {
+                previous: Source::owned(self.atom),
+                current: None,
+                read: Cell::new(false),
+            },
+        }
+    }
 }
 
 impl<T: 'static> Atom<T, Verify> {

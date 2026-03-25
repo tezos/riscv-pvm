@@ -23,6 +23,7 @@ use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+use super::resolver::ProveNodeId;
 #[cfg(test)]
 use crate::avl::node::Meta;
 use crate::avl::resolver::AvlResolver;
@@ -39,6 +40,15 @@ use crate::key::Key;
 #[perfect_derive(Clone, Default, Debug)]
 #[derive(derive_more::From)]
 pub struct Tree<NodeId>(Option<NodeId>);
+
+impl Tree<LazyNodeId> {
+    /// Converts the [`Tree`] to [`Prove`] mode.
+    ///
+    /// [`Prove`]: octez_riscv_data::mode::Prove
+    pub fn into_proof(self) -> Tree<ProveNodeId> {
+        Tree(self.0.map(|id| id.into_proof()))
+    }
+}
 
 impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
