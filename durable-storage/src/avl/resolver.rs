@@ -43,12 +43,6 @@ use crate::storage::KeyValueStore;
 
 /// Trait for resolving identifiers to values.
 pub trait Resolver<Id, Value> {
-    /// Retrieve the hash that belongs to an identifier.
-    ///
-    /// Depending on the implementation, this may compute or fetch the hash without resolving the
-    /// full value.
-    fn get_hash(&self, id: &Id) -> Hash;
-
     /// Resolve an identifier to a value.
     fn resolve<'a>(&self, id: &'a Id) -> Result<&'a Value, OperationalError>;
 
@@ -67,14 +61,32 @@ trait_set! {
     pub trait AvlResolver<NodeId, TreeId, M: Mode> = NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId>;
 }
 
+/// Trait for types that can be used as a resolver identifier
+pub trait ResolverId {
+    /// Returns identity in the form of a [`Hash`].
+    fn hash(&self) -> Hash;
+}
+
 /// Identifier for a node that is always present.
 #[derive(Debug, Clone, derive_more::From)]
 #[from(Node<ArcTreeId, Normal>)]
 pub struct ArcNodeId(Arc<Node<ArcTreeId, Normal>>);
 
+impl ResolverId for ArcNodeId {
+    fn hash(&self) -> Hash {
+        *self.0.hash()
+    }
+}
+
 /// ID for a tree that is always present
 #[derive(Debug, Clone, derive_more::From, Default)]
 pub struct ArcTreeId(Tree<ArcNodeId>);
+
+impl ResolverId for ArcTreeId {
+    fn hash(&self) -> Hash {
+        self.0.hash()
+    }
+}
 
 /// Eager resolver that serves identifiers backed by in-memory [`Arc`] values.
 ///
@@ -84,10 +96,6 @@ pub struct ArcTreeId(Tree<ArcNodeId>);
 pub struct ArcResolver;
 
 impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for ArcResolver {
-    fn get_hash(&self, id: &ArcNodeId) -> Hash {
-        *id.0.hash(self)
-    }
-
     fn resolve<'a>(
         &self,
         id: &'a ArcNodeId,
@@ -104,10 +112,6 @@ impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for ArcResolver {
 }
 
 impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
-    fn get_hash(&self, id: &ArcTreeId) -> Hash {
-        id.0.hash(self)
-    }
-
     fn resolve<'a>(&self, id: &'a ArcTreeId) -> Result<&'a Tree<ArcNodeId>, OperationalError> {
         Ok(&id.0)
     }
@@ -175,6 +179,19 @@ impl From<Hash> for LazyNodeId {
     }
 }
 
+impl ResolverId for LazyNodeId {
+    fn hash(&self) -> Hash {
+        if let Some(node) = self.0.inner.get() {
+            return *node.hash();
+        }
+
+        self.0
+            .id()
+            .cloned()
+            .expect("ID should be present when node is absent")
+    }
+}
+
 /// Identifier for an AVL tree.
 #[derive(Debug, Clone)]
 pub struct LazyTreeId(LazyId<Hash, Tree<LazyNodeId>>);
@@ -191,6 +208,19 @@ impl Default for LazyTreeId {
             inner: OnceLock::from(Tree::default()),
             id: None,
         })
+    }
+}
+
+impl ResolverId for LazyTreeId {
+    fn hash(&self) -> Hash {
+        if let Some(tree) = self.0.inner.get() {
+            return tree.hash();
+        }
+
+        self.0
+            .id()
+            .cloned()
+            .expect("ID should be present when tree is absent")
     }
 }
 
@@ -247,13 +277,6 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
 }
 
 impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyResolver<KV> {
-    fn get_hash(&self, id: &LazyNodeId) -> Hash {
-        match id.0.inner.get() {
-            Some(value) => *value.hash(self),
-            None => *id.0.id().expect("Hash must be present if value is not."),
-        }
-    }
-
     fn resolve<'a>(
         &self,
         id: &'a LazyNodeId,
@@ -298,13 +321,6 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyR
 }
 
 impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<KV> {
-    fn get_hash(&self, id: &LazyTreeId) -> Hash {
-        match id.0.inner.get() {
-            Some(value) => value.hash(self),
-            None => *id.0.id().expect("Hash must be present if value is not."),
-        }
-    }
-
     fn resolve<'a>(&self, id: &'a LazyTreeId) -> Result<&'a Tree<LazyNodeId>, OperationalError> {
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
@@ -355,6 +371,7 @@ mod tests {
     use super::LazyTreeId;
     use super::Resolver;
     use crate::avl::resolver::AvlResolver;
+    use crate::avl::resolver::ResolverId;
     use crate::avl::tree::Tree;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
@@ -439,56 +456,47 @@ mod tests {
         resolver: &Res,
         persistence_layer: &KV,
     ) where
+        NodeId: ResolverId,
+        TreeId: ResolverId,
         KV: KeyValueStore,
         Res: AvlResolver<NodeId, TreeId, Normal>,
     {
-        fn persist_subtree<NodeId, TreeId, Res, KV>(
-            tree: &Tree<NodeId>,
-            resolver: &Res,
-            persistence_layer: &KV,
-        ) where
-            KV: KeyValueStore,
-            Res: AvlResolver<NodeId, TreeId, Normal>,
-        {
-            // LazyTreeId resolves by loading a serialised optional root hash.
-            let tree_repr: Option<Hash> = tree.root().map(|node_id| resolver.get_hash(node_id));
-            let tree_bytes =
-                serialisation::serialise(tree_repr).expect("tree serialisation should succeed");
-            let tree_blob = HashedData::from_data(tree_bytes);
-            persistence_layer
-                .blob_set(tree_blob.hash(), tree_blob.data())
-                .expect("persisting trees should succeed");
+        // LazyTreeId resolves by loading a serialised optional root hash.
+        let tree_repr: Option<Hash> = tree.root().map(ResolverId::hash);
+        let tree_bytes =
+            serialisation::serialise(tree_repr).expect("tree serialisation should succeed");
+        let tree_blob = HashedData::from_data(tree_bytes);
+        persistence_layer
+            .blob_set(tree_blob.hash(), tree_blob.data())
+            .expect("persisting trees should succeed");
 
-            let Some(node_id) = tree.root() else {
-                return;
-            };
+        let Some(node_id) = tree.root() else {
+            return;
+        };
 
-            let node = resolver
-                .resolve(node_id)
-                .expect("resolving nodes should succeed");
-            let encoded = node.to_encode(resolver);
-            let node_bytes =
-                serialisation::serialise(encoded).expect("node serialisation should succeed");
-            let node_blob = HashedData::from_data(node_bytes);
-            persistence_layer
-                .blob_set(node_blob.hash(), node_blob.data())
-                .expect("persisting nodes should succeed");
+        let node = resolver
+            .resolve(node_id)
+            .expect("resolving nodes should succeed");
+        let encoded = node.to_encode();
+        let node_bytes =
+            serialisation::serialise(encoded).expect("node serialisation should succeed");
+        let node_blob = HashedData::from_data(node_bytes);
+        persistence_layer
+            .blob_set(node_blob.hash(), node_blob.data())
+            .expect("persisting nodes should succeed");
 
-            persist_subtree(
-                node.left_ref(resolver)
-                    .expect("left subtree should resolve"),
-                resolver,
-                persistence_layer,
-            );
-            persist_subtree(
-                node.right_ref(resolver)
-                    .expect("right subtree should resolve"),
-                resolver,
-                persistence_layer,
-            );
-        }
-
-        persist_subtree(tree, resolver, persistence_layer);
+        persist_tree(
+            node.left_ref(resolver)
+                .expect("left subtree should resolve"),
+            resolver,
+            persistence_layer,
+        );
+        persist_tree(
+            node.right_ref(resolver)
+                .expect("right subtree should resolve"),
+            resolver,
+            persistence_layer,
+        );
     }
 
     #[test]
@@ -503,11 +511,8 @@ mod tests {
         tree.set(&left_key, b"left", &mut eager_resolver)
             .expect("set should succeed");
 
-        let tree_hash = tree.hash(&eager_resolver);
-        let root_hash = tree
-            .root()
-            .map(|root_id| eager_resolver.get_hash(root_id))
-            .expect("tree should have a root node");
+        let tree_hash = tree.hash();
+        let root_hash = tree.root().expect("tree should have a root node").hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -516,7 +521,7 @@ mod tests {
         let lazy_tree: LazyTreeId = LazyTreeId::from(tree_hash);
 
         assert_eq!(persistence_layer.blob_get_calls(), 0);
-        assert_eq!(lazy_resolver.get_hash(&lazy_tree), tree_hash);
+        assert_eq!(lazy_tree.hash(), tree_hash);
         assert_eq!(
             persistence_layer.blob_get_calls(),
             0,
@@ -534,7 +539,7 @@ mod tests {
 
         let lazy_root = loaded_tree.root().expect("tree should have a root");
         assert!(lazy_root.0.inner.get().is_none());
-        assert_eq!(lazy_resolver.get_hash(lazy_root), root_hash);
+        assert_eq!(lazy_root.hash(), root_hash);
         assert_eq!(
             persistence_layer.blob_get_calls(),
             1,
@@ -621,10 +626,7 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = tree
-            .root()
-            .map(|root_id| eager_resolver.get_hash(root_id))
-            .expect("tree should have a root node");
+        let root_hash = tree.root().expect("tree should have a root node").hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -657,10 +659,7 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = tree
-            .root()
-            .map(|root_id| eager_resolver.get_hash(root_id))
-            .expect("tree should have a root node");
+        let root_hash = tree.root().expect("tree should have a root node").hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -702,7 +701,7 @@ mod tests {
         node.data().read(0, &mut data);
         assert_eq!(data.as_slice(), b"root-mutated");
 
-        let persisted_tree_hash = lazy_tree.hash(&lazy_resolver);
+        let persisted_tree_hash = lazy_tree.hash();
         persist_tree(&lazy_tree, &lazy_resolver, persistence_layer.as_ref());
         assert_eq!(
             persistence_layer.blob_get_calls(),
@@ -745,12 +744,12 @@ mod tests {
             .set(&left_key, b"left", &mut original_resolver)
             .expect("set should succeed");
 
-        let initial_tree_hash: Hash = original_tree.hash(&original_resolver);
+        let initial_tree_hash: Hash = original_tree.hash();
 
         let persisted_root_hash = original_tree
             .root()
-            .map(|root_id| original_resolver.get_hash(root_id))
-            .expect("tree should have a root node");
+            .expect("tree should have a root node")
+            .hash();
 
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
         persist_tree(
@@ -765,14 +764,14 @@ mod tests {
         lazy_tree
             .set(&left_key, b"left-mutated", &mut lazy_resolver)
             .expect("set should succeed");
-        let hash_after_mutation = lazy_tree.hash(&lazy_resolver);
+        let hash_after_mutation = lazy_tree.hash();
 
         let mut expected_tree = original_tree.clone();
         let mut expected_resolver = ArcResolver;
         expected_tree
             .set(&left_key, b"left-mutated", &mut expected_resolver)
             .expect("set should succeed");
-        let expected_hash = expected_tree.hash(&expected_resolver);
+        let expected_hash = expected_tree.hash();
 
         assert_ne!(
             hash_after_mutation, initial_tree_hash,

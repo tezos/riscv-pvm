@@ -20,6 +20,7 @@ use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+use super::resolver::ResolverId;
 #[cfg(test)]
 use crate::avl::node::Meta;
 use crate::avl::resolver::AvlResolver;
@@ -133,19 +134,19 @@ impl<NodeId> Tree<NodeId> {
     /// [`Node`]s.
     ///
     /// Cached node hashes are reused. Uncached node hashes are calculated and cached.
-    pub(crate) fn to_encode<TreeId, M: Mode>(
-        &self,
-        resolver: &impl NodeResolver<NodeId, TreeId, M>,
-    ) -> impl Encode + '_ {
-        self.0.as_ref().map(|id| resolver.get_hash(id))
+    pub(crate) fn to_encode(&self) -> impl Encode + '_
+    where
+        NodeId: ResolverId,
+    {
+        self.0.as_ref().map(ResolverId::hash)
     }
 
     /// Returns the hash of this tree.
-    pub(crate) fn hash<TreeId, M: Mode>(
-        &self,
-        resolver: &impl NodeResolver<NodeId, TreeId, M>,
-    ) -> Hash {
-        let data = self.to_encode(resolver);
+    pub(crate) fn hash(&self) -> Hash
+    where
+        NodeId: ResolverId,
+    {
+        let data = self.to_encode();
         Hash::hash_encodable(data).expect("The hashing should not fail")
     }
 
@@ -631,10 +632,6 @@ mod tests {
     }
 
     impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for FailOnKeyResolver {
-        fn get_hash(&self, id: &ArcNodeId) -> Hash {
-            ArcResolver.get_hash(id)
-        }
-
         fn resolve<'a>(
             &self,
             id: &'a ArcNodeId,
@@ -663,10 +660,6 @@ mod tests {
     }
 
     impl Resolver<ArcTreeId, Tree<ArcNodeId>> for FailOnKeyResolver {
-        fn get_hash(&self, id: &ArcTreeId) -> Hash {
-            ArcResolver.get_hash(id)
-        }
-
         fn resolve<'a>(&self, id: &'a ArcTreeId) -> Result<&'a Tree<ArcNodeId>, OperationalError> {
             ArcResolver.resolve(id)
         }
@@ -872,14 +865,14 @@ mod tests {
             .iter()
             .zip(data)
             .map(|(key, data)| -> Hash {
-                let digest = tree.hash(&resolver);
+                let digest = tree.hash();
                 tree.set(key, data.as_bytes(), &mut resolver)
                     .expect("Set should succeed");
                 digest
             })
             .collect();
 
-            digests.push(tree.hash(&resolver));
+            digests.push(tree.hash());
 
             digests
         };

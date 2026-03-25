@@ -235,11 +235,8 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    fn hash(&mut self) -> Hash
-    where
-        KV: KeyValueStore,
-    {
-        self.tree.hash(&self.resolver)
+    fn hash(&mut self) -> Hash {
+        self.tree.hash()
     }
 
     /// Delete the data associated with a given [Key].
@@ -308,7 +305,7 @@ impl<KV> NormalImpl<KV> {
         // calculated during the encoding of the node if necessary.
         for node in self.tree.iter(&self.resolver) {
             let node = node?;
-            let encoded = node.to_encode(&self.resolver);
+            let encoded = node.to_encode();
             let value = serialise(encoded).expect("Serialisation of node data should not fail");
             let blob = HashedData::from_data(value);
             let node_hash = blob.hash();
@@ -1343,10 +1340,10 @@ mod tests {
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
             let node: &Node<LazyTreeId, Normal> =
                 node.expect("The node should be retrieved successfully");
-            let encoded = node.to_encode(&merkle_layer.inner.resolver);
+            let encoded = node.to_encode();
             let serialised = octez_riscv_data::serialisation::serialise(encoded)
                 .expect("We should be able to serialise the node");
-            let node_hash = *node.hash(&merkle_layer.inner.resolver);
+            let node_hash = *node.hash();
             let blob = merkle_layer
                 .inner
                 .persistence
@@ -1355,7 +1352,7 @@ mod tests {
             assert_eq!(serialised, blob.as_ref());
         }
 
-        let root_hash = merkle_layer.inner.tree.hash(&merkle_layer.inner.resolver);
+        let root_hash = merkle_layer.inner.tree.hash();
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }

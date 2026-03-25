@@ -18,6 +18,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Mode;
 use perfect_derive::perfect_derive;
 
+use super::resolver::ResolverId;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
@@ -151,29 +152,19 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
     /// Converts the [`Node`] to an encoded, serialisable representation,
     /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
-    pub(crate) fn to_encode<'a, NodeId>(
-        &'a self,
-        resolver: &impl TreeResolver<NodeId, TreeId>,
-    ) -> impl Encode + 'a
+    pub(crate) fn to_encode<'a>(&'a self) -> impl Encode + 'a
     where
         Bytes<M>: Encode,
+        TreeId: ResolverId,
     {
-        // Recursively hashes any left child and its children. Stops when a hash was cached or a
-        // node is blinded.
-        let left = resolver.get_hash(&self.left);
-
-        // Recursively hashes any right child and its children. Stops when a hash was cached or a
-        // node is blinded.
-        let right = resolver.get_hash(&self.right);
-
         NodeHashRepresentation {
             meta: MetaHashRepresentation {
                 key: &self.meta.key,
                 balance_factor: self.meta.balance_factor,
             },
             data: &self.data,
-            left,
-            right,
+            left: self.left.hash(),
+            right: self.right.hash(),
         }
     }
 
@@ -181,12 +172,13 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
-    pub(crate) fn hash<NodeId>(&self, resolver: &impl TreeResolver<NodeId, TreeId>) -> &Hash
+    pub(crate) fn hash(&self) -> &Hash
     where
+        TreeId: ResolverId,
         Bytes<M>: Encode,
     {
         self.hash.get_or_init(|| {
-            let data = self.to_encode(resolver);
+            let data = self.to_encode();
             Hash::hash_encodable(data).expect("The hashing should not fail")
         })
     }
