@@ -7,6 +7,7 @@
 
 use std::io::Write;
 use std::ops::Bound;
+use std::ops::Range;
 use std::time::Instant;
 
 use octez_riscv::machine_state::memory::M64M;
@@ -21,7 +22,10 @@ use octez_riscv::state_backend::verify_backend::ProofVerificationFailure;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv::stepper::pvm::verify_outbox_proof;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
 use octez_riscv_data::mode::utils::NotFound;
+use octez_riscv_data::tree::Tree;
 use octez_riscv_test_utils::*;
 
 /// The maximum size in bytes expected for an outbox proof (message size is 4096 B)
@@ -87,20 +91,21 @@ fn test_outbox_proofs(inputs: &TestConfig) {
     assert_eq!(output, output_from_deserialised_proof);
 
     test_invalid_outbox_level_proofs(&mut stepper);
-    test_invalid_merkle_proofs(&mut stepper);
+    test_invalid_output_info(&mut stepper);
 }
 
 fn test_invalid_outbox_level_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
     let stepper_level = stepper.level().unwrap();
     // Outbox proof production fails for stale level
+    let expected_level = stepper_level
+        .checked_sub(TEST_OUTBOX_SIZE as u32)
+        .expect("Expected current level to be higher than the size of the outbox");
     assert!(matches!(
         stepper.produce_outbox_proof(OutputInfo {
-            level: stepper_level
-                .checked_sub(TEST_OUTBOX_SIZE as u32)
-                .expect("Expected current level to be higher than the size of the outbox"),
+            level: expected_level,
             index: 0,
         }),
-        Err(OutboxProofError::LevelNotFound { level: 2 })
+        Err(OutboxProofError::LevelNotFound { level }) if level == expected_level
     ));
 
     // Outbox proof production fails for future level
@@ -113,10 +118,9 @@ fn test_invalid_outbox_level_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64
     ));
 }
 
-fn test_invalid_merkle_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
+fn test_invalid_output_info<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
     let level = stepper.level().unwrap();
 
-    // Malicious outbox proof should fail
     let mut outbox_proof1 = stepper
         .produce_outbox_proof(OutputInfo { level, index: 0 })
         .expect("Outbox proof should not be stale");
@@ -133,6 +137,7 @@ fn test_invalid_merkle_proofs<H: PvmHooks>(stepper: &mut PvmStepper<H, M64M>) {
 
     std::mem::swap(&mut outbox_proof1.proof, &mut outbox_proof2.proof);
 
+    // Malicious outbox proofs should fail
     assert!(matches!(
         verify_outbox_proof(&outbox_proof1),
         Err(ProofVerificationFailure::AbsentDataAccess(NotFound))
@@ -158,7 +163,7 @@ fn test_tampered_oversize_message(inputs: &TestConfig) {
     tampered_outbox_proof.expect_err("Should fail deserialisation");
 }
 
-fn test_tampered_zero_sized_message(inputs: &TestConfig) {
+fn test_tampered_size(inputs: &TestConfig) {
     let make_stepper = make_stepper_factory::<M64M>(inputs, Some(ROLLUP_ADDRESS));
     let mut stepper = make_stepper();
     let _result = stepper.step_max(Bound::Unbounded);
@@ -167,23 +172,31 @@ fn test_tampered_zero_sized_message(inputs: &TestConfig) {
         .produce_outbox_proof(OutputInfo { level, index: 0 })
         .expect("Outbox proof should be valid");
 
-    let tampered_outbox_proof_bytes = replace_outbox_message_of_proof(&outbox_proof, &[]);
-    let tampered_outbox_proof = OutboxProof::deserialise(tampered_outbox_proof_bytes.as_slice())
-        .expect("Zero sized messages are allowed");
-    assert!(verify_outbox_proof(&tampered_outbox_proof).is_ok());
+    let proof_bytes = OutboxProof::serialise(&outbox_proof);
+    let Range { start, .. } = find_message_pos(proof_bytes.as_slice());
+    let len_pos = start - 8;
+
+    let mut zero_sized = proof_bytes.clone();
+    zero_sized[len_pos..len_pos + 8].copy_from_slice(&0usize.to_le_bytes());
+    OutboxProof::deserialise(zero_sized.as_slice()).expect_err("Should fail to deserialise");
+
+    let mut incoherent_size = proof_bytes.clone();
+    incoherent_size[len_pos..len_pos + 8].copy_from_slice(&2000usize.to_le_bytes());
+    OutboxProof::deserialise(incoherent_size.as_slice()).expect_err("Should fail to deserialise");
+
+    let mut oversized = proof_bytes.clone();
+    oversized[len_pos..len_pos + 8].copy_from_slice(&8192usize.to_le_bytes());
+    OutboxProof::deserialise(oversized.as_slice()).expect_err("Should fail to deserialise");
 }
 
 /// Returns a serialized [OutboxProof] with the outbox message
 /// portion set to [message]. The original outbox proof message
 /// is expected to be 4096 B
 fn replace_outbox_message_of_proof(proof: &OutboxProof, message: &[u8]) -> Vec<u8> {
-    let proof_bytes = OutboxProof::serialise(&proof);
-    let message_size = 4096;
-    let message_pos = proof_bytes
-        .windows(message_size)
-        .position(|w| w.iter().all(|&b| b == 0x01))
-        .expect("Message content should be present in serialized proof");
-    let len_pos = message_pos - 8;
+    let proof_bytes = OutboxProof::serialise(proof);
+    let Range { start, end } = find_message_pos(proof_bytes.as_slice());
+    let len_pos = start - 8;
+    let message_size = end - start;
 
     // Sanity check that the length prefix is correct
     assert_eq!(
@@ -202,6 +215,41 @@ fn replace_outbox_message_of_proof(proof: &OutboxProof, message: &[u8]) -> Vec<u
     tampered
 }
 
+fn find_message_pos(serialised_proof: &[u8]) -> Range<usize> {
+    let proof = OutboxProof::deserialise(serialised_proof).unwrap();
+    let output = verify_outbox_proof(&proof).unwrap();
+
+    // Compute the exact bincode encoding of the message (what the Read leaf stores)
+    let expected_leaf_data = octez_riscv_data::serialisation::serialise(&output.message).unwrap();
+
+    // OutputInfo is two u32 values = 8 bytes
+    let header_size = size_of::<u32>() * 2;
+
+    // Walk the MerkleProof tree in serialisation order (pre-order DFS)
+    let mut offset = header_size;
+    let mut stack = vec![&proof.proof];
+
+    while let Some(node) = stack.pop() {
+        offset += 1; // Every node/leaf starts with a 1-byte tag
+        match node {
+            Tree::Node(n) => {
+                stack.extend(n.children.iter().rev());
+            }
+            Tree::Leaf(MerkleProofLeaf::Read(data)) => {
+                if *data == expected_leaf_data {
+                    return offset..offset + data.len();
+                }
+                offset += data.len();
+            }
+            Tree::Leaf(MerkleProofLeaf::Blind(_)) => {
+                offset += Hash::DIGEST_SIZE;
+            }
+        }
+    }
+
+    panic!("Outbox message not found in proof")
+}
+
 #[test]
 fn test_outbox_proofs_dummy_kernel() {
     test_outbox_proofs(&DUMMY)
@@ -214,6 +262,6 @@ fn test_tampered_oversize_message_dummy_kernel() {
 }
 
 #[test]
-fn test_zero_sized_message_dummy_kernel() {
-    test_tampered_zero_sized_message(&DUMMY)
+fn test_tampered_size_dummy_kernel() {
+    test_tampered_size(&DUMMY);
 }
