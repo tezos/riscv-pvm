@@ -66,12 +66,10 @@ pub use self::output::OutboxMessageError;
 pub use self::output::Output;
 pub use self::output::OutputInfo;
 use super::Pvm;
-use super::durable_storage::DurableStorage;
+use super::Tezos;
 use super::durable_storage::DurableStorageDummy;
 use super::node_pvm::NodePvmMemConfig;
-use crate::machine_state::memory::MemoryConfig;
 use crate::machine_state::page_cache::EmptyPageCache;
-use crate::machine_state::page_cache::PageCache;
 
 /// Small outbox size for testing
 pub const TEST_OUTBOX_SIZE: usize = 16;
@@ -271,7 +269,7 @@ impl<C> Decode<C> for Outbox<Normal> {
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm<MC, PC, DS, M> {
+impl<M: Mode> Tezos<M> {
     /// Get the outbox message at the given level and index. This is the state transition
     /// captured in outbox proofs.
     pub fn get_outbox_message(&self, info: OutputInfo) -> Result<Output, OutboxProofError>
@@ -309,9 +307,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     }
 }
 
-impl<MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
-    Pvm<MC, PC, DS, Normal>
-{
+impl Tezos<Normal> {
     /// Retrieves the outbox messages for a given level. Returns None if the level is
     /// not in the outbox
     pub(crate) fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
@@ -758,15 +754,15 @@ pub(crate) mod tests {
 
             // Getting a message from an uninitialised outbox fails
             let info = OutputInfo { level: 0, index: 0 };
-            let output = pvm.get_outbox_message(info);
+            let output = pvm.tezos.get_outbox_message(info);
             prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
-            prop_assert!(pvm.get_outbox_messages(0).is_none());
+            prop_assert!(pvm.tezos.get_outbox_messages(0).is_none());
 
-            pvm.level.write(Some(write_level));
+            pvm.tezos.level.write(Some(write_level));
 
             // Write messages at write_level
             for message in &messages {
-                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+                prop_assert!(pvm.tezos.outbox.write_message(message.clone(), write_level).is_ok());
             }
 
             // Getting a message at a future level fails
@@ -774,9 +770,9 @@ pub(crate) mod tests {
                 level: write_level + 1,
                 index: 0,
             };
-            let output = pvm.get_outbox_message(info);
+            let output = pvm.tezos.get_outbox_message(info);
             prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
-            prop_assert!(pvm.get_outbox_messages(write_level + 1).is_none());
+            prop_assert!(pvm.tezos.get_outbox_messages(write_level + 1).is_none());
         })
     }
 
@@ -792,22 +788,22 @@ pub(crate) mod tests {
 
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
 
-            pvm.level.write(Some(write_level));
+            pvm.tezos.level.write(Some(write_level));
 
             // Write messages at write_level
             for message in &messages {
-                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+                prop_assert!(pvm.tezos.outbox.write_message(message.clone(), write_level).is_ok());
             }
 
             // Read messages back at write_level
-            let all_outputs = pvm.get_outbox_messages(write_level).unwrap();
+            let all_outputs = pvm.tezos.get_outbox_messages(write_level).unwrap();
             prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: write_level,
                     index: i as u32,
                 };
-                let output = pvm.get_outbox_message(info).unwrap();
+                let output = pvm.tezos.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
                 prop_assert_eq!(output.info, info);
                 prop_assert_eq!(&all_outputs[i].message, message);
@@ -816,16 +812,16 @@ pub(crate) mod tests {
 
             // Also verify we can read with current_level up to write_level + TEST_OUTBOX_SIZE - 1
             let future_level = write_level + (TEST_OUTBOX_SIZE as u32) - 1;
-            pvm.level.write(Some(future_level));
+            pvm.tezos.level.write(Some(future_level));
 
-            let all_outputs = pvm.get_outbox_messages(write_level).unwrap();
+            let all_outputs = pvm.tezos.get_outbox_messages(write_level).unwrap();
             prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: write_level,
                     index: i as u32,
                 };
-                let output = pvm.get_outbox_message(info).unwrap();
+                let output = pvm.tezos.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
                 prop_assert_eq!(&all_outputs[i].message, message);
                 prop_assert_eq!(all_outputs[i].info, info);
@@ -851,17 +847,17 @@ pub(crate) mod tests {
 
             // Write M messages at write_level
             for message in &first_messages {
-                prop_assert!(pvm.outbox.write_message(message.clone(), write_level).is_ok());
+                prop_assert!(pvm.tezos.outbox.write_message(message.clone(), write_level).is_ok());
             }
 
             // Write N messages at write_level + TEST_OUTBOX_SIZE (where N < M)
             let wrapped_level = write_level + TEST_OUTBOX_SIZE as u32;
             for message in &second_messages {
-                prop_assert!(pvm.outbox.write_message(message.clone(), wrapped_level).is_ok());
+                prop_assert!(pvm.tezos.outbox.write_message(message.clone(), wrapped_level).is_ok());
             }
 
             // Set up PVM level at the wrapped level
-            pvm.level.write(Some(wrapped_level));
+            pvm.tezos.level.write(Some(wrapped_level));
 
             // Reading at old level should fail
             for i in 0..m {
@@ -869,20 +865,20 @@ pub(crate) mod tests {
                     level: write_level,
                     index: i as u32,
                 };
-                let output = pvm.get_outbox_message(info);
+                let output = pvm.tezos.get_outbox_message(info);
                 prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }))
             }
-            prop_assert!(pvm.get_outbox_messages(write_level).is_none());
+            prop_assert!(pvm.tezos.get_outbox_messages(write_level).is_none());
 
             // Reading at wrapped level for indices 0..N should work
-            let all_outputs = pvm.get_outbox_messages(wrapped_level).unwrap();
+            let all_outputs = pvm.tezos.get_outbox_messages(wrapped_level).unwrap();
             prop_assert_eq!(all_outputs.len(), second_messages.len());
             for (i, message) in second_messages.iter().enumerate() {
                 let info = OutputInfo {
                     level: wrapped_level,
                     index: i as u32,
                 };
-                let output = pvm.get_outbox_message(info).unwrap();
+                let output = pvm.tezos.get_outbox_message(info).unwrap();
                 prop_assert_eq!(&output.message, message);
                 prop_assert_eq!(&all_outputs[i].message, message);
                 prop_assert_eq!(all_outputs[i].info, info);
@@ -894,7 +890,7 @@ pub(crate) mod tests {
                     level: wrapped_level,
                     index: i as u32,
                 };
-                let output = pvm.get_outbox_message(info);
+                let output = pvm.tezos.get_outbox_message(info);
                 prop_assert_eq!(output, Err(OutboxProofError::MessageNotFound { info }));
             }
         });

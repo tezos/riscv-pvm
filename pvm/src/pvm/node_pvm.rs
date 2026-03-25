@@ -109,21 +109,21 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
     where
         M: AtomMode,
     {
-        self.with_backend(|pvm| pvm.tick.read())
+        self.with_backend(|pvm| pvm.tezos.tick.read())
     }
 
     pub fn get_current_level(&self) -> Option<u32>
     where
         M: AtomMode,
     {
-        self.with_backend(|pvm| pvm.level.read())
+        self.with_backend(|pvm| pvm.tezos.level.read())
     }
 
     pub fn get_message_counter(&self) -> u64
     where
         M: AtomMode,
     {
-        self.with_backend(|pvm| pvm.message_counter.read())
+        self.with_backend(|pvm| pvm.tezos.message_counter.read())
     }
 
     /// Get the reveal request from the PVM state
@@ -250,7 +250,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
 
     /// Get the outbox messages for the specified level
     pub fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
-        self.with_backend(|pvm| pvm.get_outbox_messages(level))
+        self.with_backend(|pvm| pvm.tezos.get_outbox_messages(level))
     }
 }
 
