@@ -128,9 +128,11 @@ impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
 
 /// Identifier wrapper used by lazy resolution.
 ///
-/// A `LazyId` is either:
-/// - unresolved, where `id` contains a hash and `inner` is empty, or
-/// - resolved, where `inner` contains the loaded value and `id` may be absent.
+/// A [`LazyId`] may be in one of three states:
+/// - hash-only, where `id` contains a hash and `inner` is empty,
+/// - cached, where both `id` and `inner` are populated after immutable resolution, or
+/// - owned, where `inner` is populated and `id` has been cleared after mutable resolution or
+///   construction from an in-memory value.
 ///
 /// This representation lets hashes move through the AVL structure without forcing immediate loads,
 /// while caching loaded values for subsequent accesses.
@@ -291,7 +293,8 @@ impl<KV: KeyValueStore> LazyResolver<KV> {
     /// Load and decode a tree root reference by its content hash.
     ///
     /// The serialised payload is expected to be an optional root node hash, which is then wrapped
-    /// in a lazy node identifier.
+    /// in a lazy node identifier. The canonical empty-tree hash resolves directly to default
+    /// [`Tree`] without hitting storage.
     fn load_tree(&self, hash: Hash) -> Result<Tree<LazyNodeId>, OperationalError> {
         if hash == crate::merkle_layer::empty_tree_hash() {
             return Ok(Tree::default());
@@ -332,7 +335,7 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyR
             // is unable to identify the `value` mutable reference being dropped straight
             // away if the condition is false.
             //
-            // SAFETY: This is a valid active &mut Arc<_> reference with no other
+            // SAFETY: This is a valid active `&mut Arc<_>` reference with no other
             // references to the same Arc being used after this return.
             return Ok(Arc::make_mut(unsafe { &mut *temp }));
         };
@@ -531,6 +534,8 @@ mod tests {
     use super::LazyNodeId;
     use super::LazyResolver;
     use super::LazyTreeId;
+    use super::ProveNodeId;
+    use super::ProveResolver;
     use super::Resolver;
     use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
@@ -943,5 +948,220 @@ mod tests {
             hash_after_mutation, expected_hash,
             "lazy resolver tree hash should match eager resolver after same mutation"
         );
+    }
+
+    /// Helper: build a two-node tree (root key=2, left key=1), persist it,
+    /// and return the root node hash, the eager tree, and the persistence
+    /// layer for counting calls.
+    fn setup_prove_fixture() -> (Hash, Tree<ArcNodeId>, Arc<CountingKeyValueStore>) {
+        let root_key = Key::new(&[2]).expect("key should be valid");
+        let left_key = Key::new(&[1]).expect("key should be valid");
+
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut resolver = ArcResolver;
+        tree.set(&root_key, b"root", &mut resolver)
+            .expect("set should succeed");
+        tree.set(&left_key, b"left", &mut resolver)
+            .expect("set should succeed");
+
+        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+
+        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        persist_tree(&tree, &resolver, persistence_layer.as_ref());
+
+        (root_hash, tree, persistence_layer)
+    }
+
+    #[test]
+    fn prove_resolver_resolves_node() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let lazy_node_id = lazy_tree.root().expect("tree should have a root");
+
+        let prove_id = lazy_node_id.clone().into_proof();
+
+        prove_resolver
+            .resolve(&prove_id)
+            .expect("should resolve to a prove node");
+    }
+
+    #[test]
+    fn prove_resolver_hash_matches_lazy_resolver() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+        let lazy_root = lazy_tree.root().expect("tree should have a root");
+
+        let expected_hash = Hash::from_foldable(lazy_root);
+
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_id = lazy_root.clone().into_proof();
+
+        // Hash before resolve (delegates to lazy path).
+        let hash_before = Hash::from_foldable(&prove_id);
+        assert_eq!(
+            hash_before, expected_hash,
+            "prove hash before resolve should match lazy hash"
+        );
+
+        // Resolve, then hash again (now computed from prove-mode inner).
+        prove_resolver
+            .resolve(&prove_id)
+            .expect("resolve should succeed");
+
+        let hash_after = Hash::from_foldable(&prove_id);
+        assert_eq!(
+            hash_after, expected_hash,
+            "prove hash after resolve should still match lazy hash"
+        );
+    }
+
+    #[test]
+    fn prove_resolver_recursive_resolution() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_root_id = lazy_tree
+            .root()
+            .expect("tree should have a root")
+            .clone()
+            .into_proof();
+
+        // Resolve root node.
+        let prove_node = prove_resolver
+            .resolve(&prove_root_id)
+            .expect("should resolve root prove node");
+
+        // Resolve its left subtree.
+        let left_tree: &Tree<ProveNodeId> = prove_node
+            .left_ref(&prove_resolver)
+            .expect("left subtree should resolve");
+        let left_root_arc = left_tree.root().expect("left subtree should have a root");
+
+        // Resolve the left child node.
+        prove_resolver
+            .resolve(left_root_arc)
+            .expect("should resolve left prove node");
+
+        // Resolve the right subtree — should be empty for a two-node tree
+        // with keys [1, 2] where 2 is root and 1 is left.
+        let right_tree: &Tree<ProveNodeId> = prove_node
+            .right_ref(&prove_resolver)
+            .expect("right subtree should resolve");
+        assert!(right_tree.root().is_none(), "right subtree should be empty");
+    }
+
+    #[test]
+    fn prove_resolver_caches_resolved_values() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer.clone());
+
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_id = lazy_tree
+            .root()
+            .expect("tree should have a root")
+            .clone()
+            .into_proof();
+
+        prove_resolver
+            .resolve(&prove_id)
+            .expect("first resolve should succeed");
+        let calls_after_first = persistence_layer.blob_get_calls();
+
+        prove_resolver
+            .resolve(&prove_id)
+            .expect("second resolve should use cache");
+        assert_eq!(
+            persistence_layer.blob_get_calls(),
+            calls_after_first,
+            "second resolve should not trigger additional storage loads"
+        );
+    }
+
+    #[test]
+    fn prove_resolver_resolve_mut_node() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let mut prove_resolver = ProveResolver(lazy_resolver);
+        let mut prove_id = lazy_tree
+            .root()
+            .expect("tree should have a root")
+            .clone()
+            .into_proof();
+
+        let node = prove_resolver
+            .resolve_mut(&mut prove_id)
+            .expect("resolve_mut should succeed");
+
+        // Verify we can read the key from the mutably resolved node.
+        let root_key = Key::new(&[2]).expect("key should be valid");
+        assert_eq!(node.key(), &root_key);
+    }
+
+    #[test]
+    fn prove_resolver_tree_hash_matches_lazy_resolver() {
+        let (root_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let lazy_root = lazy_tree.root().expect("tree should have a root");
+
+        // Get the lazy left child node hash via the lazy resolver.
+        let node = lazy_resolver
+            .resolve(lazy_root)
+            .expect("resolve should succeed");
+        let lazy_left_tree = node
+            .left_ref(&lazy_resolver)
+            .expect("left subtree should resolve");
+        let lazy_left_id = lazy_left_tree
+            .root()
+            .expect("left subtree should have a root");
+        let lazy_left_node_hash = Hash::from_foldable(lazy_left_id);
+
+        // Now get the same hash via the prove resolver path.
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_root_id = lazy_root.clone().into_proof();
+        let prove_node = prove_resolver
+            .resolve(&prove_root_id)
+            .expect("resolve should succeed");
+
+        let left_prove_tree = prove_node
+            .left_ref(&prove_resolver)
+            .expect("left subtree should resolve");
+        let left_prove_node_arc = left_prove_tree
+            .root()
+            .expect("left subtree should have a root");
+
+        // Hash via the node resolver.
+        let prove_left_node_hash = Hash::from_foldable(left_prove_node_arc);
+
+        assert_eq!(
+            prove_left_node_hash, lazy_left_node_hash,
+            "prove tree child node hash should match lazy resolver hash"
+        );
+    }
+
+    #[test]
+    fn prove_resolver_empty_tree() {
+        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+
+        let empty_lazy_tree: LazyTreeId = LazyTreeId::default();
+        let prove_tree_id = empty_lazy_tree.clone().into_proof();
+
+        let prove_resolver = ProveResolver(lazy_resolver);
+        let tree = prove_resolver
+            .resolve(&prove_tree_id)
+            .expect("resolving empty prove tree should succeed");
+
+        assert!(tree.root().is_none(), "empty tree should have no root");
     }
 }
