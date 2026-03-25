@@ -84,6 +84,15 @@ impl<T, M: VectorMode> Vector<T, M> {
     ) -> Result<(), E> {
         M::try_resize_with(self, new_len, new_value)
     }
+}
+
+impl<T> Vector<T, Normal> {
+    /// Iterate over the vector's items.
+    ///
+    /// This is only implemented for `Normal` mode as iteration in `Prove` mode can be very costly
+    /// in terms of proof size.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        (0..self.len()).map(|idx| self.index(idx))
     }
 }
 
