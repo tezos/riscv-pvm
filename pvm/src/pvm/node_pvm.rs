@@ -114,13 +114,7 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
     where
         M: AtomMode,
     {
-        self.with_backend(|pvm| {
-            if pvm.level_is_set.read() {
-                Some(pvm.level.read())
-            } else {
-                None
-            }
-        })
+        self.with_backend(|pvm| pvm.level.read())
     }
 
     pub fn get_message_counter(&self) -> u64

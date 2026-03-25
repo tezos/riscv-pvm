@@ -305,10 +305,9 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
         M: AtomMode,
     {
         // An uninitialised outbox contains no levels
-        if !self.level_is_set.read() {
+        let Some(current_level) = self.level.read() else {
             return Err(OutboxProofError::LevelNotFound { level });
-        }
-        let current_level = self.level.read();
+        };
 
         // A future level is not in the outbox
         if level > current_level {
@@ -819,8 +818,7 @@ pub(crate) mod tests {
             prop_assert_eq!(output, Err(OutboxProofError::LevelNotFound { level: info.level }));
             prop_assert!(pvm.get_outbox_messages(0).is_none());
 
-            pvm.level_is_set.write(true);
-            pvm.level.write(write_level);
+            pvm.level.write(Some(write_level));
 
             // Write messages at write_level
             for message in &messages {
@@ -850,8 +848,7 @@ pub(crate) mod tests {
 
             let mut pvm = Pvm::<MC, PC, DS, Normal>::default();
 
-            pvm.level_is_set.write(true);
-            pvm.level.write(write_level);
+            pvm.level.write(Some(write_level));
 
             // Write messages at write_level
             for message in &messages {
@@ -875,7 +872,7 @@ pub(crate) mod tests {
 
             // Also verify we can read with current_level up to write_level + TEST_OUTBOX_SIZE - 1
             let future_level = write_level + (TEST_OUTBOX_SIZE as u32) - 1;
-            pvm.level.write(future_level);
+            pvm.level.write(Some(future_level));
 
             let all_outputs = pvm.get_outbox_messages(write_level).unwrap();
             prop_assert_eq!(all_outputs.len(), messages.len());
@@ -920,8 +917,7 @@ pub(crate) mod tests {
             }
 
             // Set up PVM level at the wrapped level
-            pvm.level_is_set.write(true);
-            pvm.level.write(wrapped_level);
+            pvm.level.write(Some(wrapped_level));
 
             // Reading at old level should fail
             for i in 0..m {
