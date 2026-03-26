@@ -124,7 +124,7 @@ impl<KV> Command<KV> {
         let receive = || {
             receiver
                 .blocking_recv()
-                .map_err(|_error| OperationalError::WorkerThreadDied)?
+                .map_err(|_error| OperationalError::WorkerThreadDied)
         };
 
         (receive, this)
@@ -374,9 +374,7 @@ mod tests {
 
                 Self::Hash => {
                     let hash1 = worker.hash().unwrap();
-                    let hash2 = layer
-                        .hash()
-                        .expect("Resolving the tree for the hash should succeed.");
+                    let hash2 = layer.hash();
                     assert_eq!(hash1, hash2);
                 }
 
@@ -476,7 +474,7 @@ mod tests {
                 command.run(handle, &repo, &mut merkle_worker, &mut merkle_layer);
             }
 
-            let layer_hash = merkle_layer.hash().expect("Resolving the tree should succeed.");
+            let layer_hash = merkle_layer.hash();
             let worker_hash = merkle_worker.hash().unwrap();
             prop_assert_eq!(layer_hash, worker_hash);
         });

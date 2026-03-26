@@ -85,10 +85,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    pub fn hash(&mut self) -> Result<Hash, OperationalError>
-    where
-        KV: KeyValueStore,
-    {
+    pub fn hash(&self) -> Hash {
         M::hash(self)
     }
 
@@ -126,7 +123,7 @@ pub trait MerkleLayerMode: Mode {
     ) -> MerkleLayer<KV, Self>;
 
     /// See [`MerkleLayer::hash`]
-    fn hash<KV: KeyValueStore>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError>;
+    fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash;
 
     /// See [`MerkleLayer::delete`]
     fn delete<KV: KeyValueStore>(
@@ -160,8 +157,8 @@ impl MerkleLayerMode for Normal {
         }
     }
 
-    fn hash<KV: KeyValueStore>(this: &mut MerkleLayer<KV, Self>) -> Result<Hash, OperationalError> {
-        Ok(this.inner.hash())
+    fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
+        this.inner.hash()
     }
 
     fn delete<KV: KeyValueStore>(
@@ -226,8 +223,8 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
-    fn hash(&mut self) -> Hash {
-        self.tree.hash()
+    fn hash(&self) -> Hash {
+        Hash::from_foldable(&self.tree)
     }
 
     /// Delete the data associated with a given [Key].
@@ -346,23 +343,14 @@ mod tests {
         }
 
         let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
-        let original_hash = ml.hash().expect("hash operation should succeed.");
-        assert_eq!(
-            original_hash,
-            ml2.hash().expect("hash operation should succeed.")
-        );
+        let original_hash = ml.hash();
+        assert_eq!(original_hash, ml2.hash());
 
         let cow_data = "🐮<(moo!)";
         ml2.set(&keys[0], cow_data.as_bytes())
             .expect("setting node should succeed");
-        assert_ne!(
-            original_hash,
-            ml2.hash().expect("hash operation should succeed.")
-        );
-        assert_eq!(
-            original_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
+        assert_ne!(original_hash, ml2.hash());
+        assert_eq!(original_hash, ml.hash());
 
         let old_node1: Node<LazyTreeId, Normal> =
             Node::new(keys[0].clone(), bytes::Bytes::copy_from_slice(&data[0]));
@@ -436,9 +424,9 @@ mod tests {
             }
 
             // Create a cheap copy
-            let original_hash = ml.hash().expect("hash operation should succeed.");
+            let original_hash = ml.hash();
             let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
-            prop_assert_eq!(original_hash, ml2.hash().expect("hash operation should succeed."));
+            prop_assert_eq!(original_hash, ml2.hash());
 
             // Delete all the keys in the copy
             for bytes in &keys1 {
@@ -454,11 +442,11 @@ mod tests {
             }
 
             if keys1.is_empty() && keys2.is_empty() {
-                prop_assert_eq!(original_hash, ml2.hash().expect("hash operation should succeed."));
+                prop_assert_eq!(original_hash, ml2.hash());
             } else {
-                prop_assert_ne!(original_hash, ml2.hash().expect("hash operation should succeed."));
+                prop_assert_ne!(original_hash, ml2.hash());
             }
-            prop_assert_eq!(original_hash, ml.hash().expect("hash operation should succeed."));
+            prop_assert_eq!(original_hash, ml.hash());
 
             // Check both trees are still correct
             for bytes in &keys1 {
@@ -481,12 +469,9 @@ mod tests {
         let data = bytes::Bytes::from("create");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
-        let empty_hash = ml.hash().expect("hash operation should succeed.");
+        let empty_hash = ml.hash();
         ml.set(&key, &data).expect("setting node should succeed");
-        assert_ne!(
-            empty_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
+        assert_ne!(empty_hash, ml.hash());
 
         let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
@@ -508,7 +493,7 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
-        let old_hash = ml.hash().expect("hash operation should succeed.");
+        let old_hash = ml.hash();
 
         let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
         let get_node = ml
@@ -519,10 +504,9 @@ mod tests {
         assert_eq!(&get_node, &node.data());
 
         ml.set(&key, &data2).expect("setting node should succeed");
-        assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+        assert_ne!(old_hash, ml.hash());
         assert!(
-            ml.inner
-                .tree
+            ml.tree()
                 .is_inorder(&ml.inner.resolver)
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
@@ -560,9 +544,9 @@ mod tests {
         let mut ml = new_merkle_layer(repo);
 
         for (key, data) in keys.iter().zip(data.iter()) {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -590,24 +574,21 @@ mod tests {
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
-        let empty_hash = ml.hash().expect("hash operation should succeed.");
+        let empty_hash = ml.hash();
 
         // Left imbalance
         let data = bytes::Bytes::from("imbalanced left");
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
         }
 
         ml.clear();
-        assert_eq!(
-            empty_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
+        assert_eq!(empty_hash, ml.hash());
 
         let keys = {
             let mut keys = keys;
@@ -618,9 +599,9 @@ mod tests {
         // Right imbalance
         let data = bytes::Bytes::from("imbalanced right");
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -638,9 +619,9 @@ mod tests {
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -664,9 +645,9 @@ mod tests {
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -701,9 +682,9 @@ mod tests {
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -738,9 +719,9 @@ mod tests {
         let mut ml = new_merkle_layer(repo);
 
         for key in keys.iter() {
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
             ml.set(key, &data).expect("setting node should succeed");
-            assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+            assert_ne!(old_hash, ml.hash());
             ml.tree()
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
@@ -759,7 +740,7 @@ mod tests {
             let data = bytes::Bytes::from("property");
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
@@ -767,7 +748,7 @@ mod tests {
             }
 
             if !keys.is_empty() {
-                assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+                assert_ne!(old_hash, ml.hash());
             }
 
             for bytes in &keys {
@@ -785,19 +766,13 @@ mod tests {
         let data = bytes::Bytes::from("delete");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
-        let empty_hash = ml.hash().expect("hash operation should succeed.");
+        let empty_hash = ml.hash();
         ml.set(&key, &data).expect("setting node should succeed");
-        let full_hash = ml.hash().expect("hash operation should succeed.");
+        let full_hash = ml.hash();
 
         ml.delete(&key).expect("deleting node should succeed.");
-        assert_ne!(
-            full_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
-        assert_eq!(
-            empty_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
+        assert_ne!(full_hash, ml.hash());
+        assert_eq!(empty_hash, ml.hash());
 
         let get_node = ml
             .get(&key)
@@ -815,7 +790,7 @@ mod tests {
             let data = bytes::Bytes::from("delete_prop");
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
-            let empty_hash = ml.hash().expect("hash operation should succeed.");
+            let empty_hash = ml.hash();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
@@ -823,7 +798,7 @@ mod tests {
             }
 
             if !keys.is_empty() {
-                prop_assert_ne!(empty_hash, ml.hash().expect("hash operation should succeed."));
+                prop_assert_ne!(empty_hash, ml.hash());
             }
 
             for bytes in &keys {
@@ -832,7 +807,7 @@ mod tests {
                 prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully."), None);
             }
 
-            prop_assert_eq!(empty_hash, ml.hash().expect("hash operation should succeed."));
+            prop_assert_eq!(empty_hash, ml.hash());
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
         }
@@ -843,7 +818,7 @@ mod tests {
 
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
-        let empty_hash = ml.hash().expect("hash operation should succeed.");
+        let empty_hash = ml.hash();
 
         for key in keys.iter() {
             ml.set(key, &data).expect("setting node should succeed");
@@ -859,10 +834,7 @@ mod tests {
         }
 
         if !keys.is_empty() {
-            assert_ne!(
-                empty_hash,
-                ml.hash().expect("hash operation should succeed.")
-            );
+            assert_ne!(empty_hash, ml.hash());
         }
 
         for key in keys.iter() {
@@ -874,10 +846,7 @@ mod tests {
             assert_eq!(ml.get(key).expect("The data should exist."), None);
         }
 
-        assert_eq!(
-            empty_hash,
-            ml.hash().expect("hash operation should succeed.")
-        );
+        assert_eq!(empty_hash, ml.hash());
     }
 
     // Requires replacing a node with its successor while rebalancing a node on the return path.
@@ -1020,7 +989,7 @@ mod tests {
         let data = bytes::Bytes::from("write_new_value");
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
-        let old_hash = ml.hash().expect("hash operation should succeed.");
+        let old_hash = ml.hash();
         ml.write(&key, 0, &data).expect("write should succeed.");
 
         let node: Node<ArcTreeId, Normal> = Node::new(key.clone(), data);
@@ -1030,7 +999,7 @@ mod tests {
             .expect("The data should exist.");
 
         assert_eq!(&get_node, &node.data());
-        assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+        assert_ne!(old_hash, ml.hash());
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("The tree should be retrieved successfully.");
@@ -1044,7 +1013,7 @@ mod tests {
         let (_keepalive, repo) = setup_repo();
         let mut ml = new_merkle_layer(repo);
         ml.set(&key, &data).expect("setting node should succeed");
-        let old_hash = ml.hash().expect("hash operation should succeed.");
+        let old_hash = ml.hash();
 
         let data_len = data.len();
         let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
@@ -1056,7 +1025,7 @@ mod tests {
         assert_eq!(&get_node, &node.data());
 
         ml.write(&key, 2, &data2).expect("write should succeed.");
-        assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+        assert_ne!(old_hash, ml.hash());
         assert!(
             ml.inner
                 .tree
@@ -1091,7 +1060,7 @@ mod tests {
 
             let (_keepalive, repo) = setup_repo();
             let mut ml = new_merkle_layer(repo);
-            let old_hash = ml.hash().expect("hash operation should succeed.");
+            let old_hash = ml.hash();
 
             for bytes in &keys {
                 let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
@@ -1102,7 +1071,7 @@ mod tests {
             }
 
             if !keys.is_empty() {
-                assert_ne!(old_hash, ml.hash().expect("hash operation should succeed."));
+                assert_ne!(old_hash, ml.hash());
             }
 
             for bytes in &keys {
@@ -1227,13 +1196,13 @@ mod tests {
                 }
             }
 
-            let expected_hash = merkle_layer.hash().expect("Hash operation should succeed");
+            let expected_hash = merkle_layer.hash();
             let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
             let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
 
             let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
                 .expect("Lazy checkout should succeed");
-            let loaded_hash = lazy_loaded.hash().expect("Hash operation should succeed");
+            let loaded_hash = lazy_loaded.hash();
 
             prop_assert_eq!(loaded_hash, expected_hash);
 
@@ -1324,7 +1293,7 @@ mod tests {
             assert_eq!(node.value(), loaded_node.value());
         }
 
-        let root_hash = merkle_layer.inner.tree.hash();
+        let root_hash = merkle_layer.hash();
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 }
