@@ -256,6 +256,8 @@ impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
         DS: Foldable<PartialHashFold>,
     {
         self.with_backend_mut(|pvm| {
+            let input_request = pvm.input_request();
+
             match input {
                 None => pvm.eval_one(pvm_hooks),
                 Some(input) => {
@@ -271,7 +273,7 @@ impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
                 return None;
             }
 
-            Some(pvm.input_request())
+            Some(input_request)
         })
     }
 }
