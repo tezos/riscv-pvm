@@ -213,11 +213,21 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
         DS: Provable<'normal>,
         DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
     {
-        let mut proof_state = self.state.start_proof();
+        let mut proof_state;
 
-        match input {
-            None => proof_state.eval_one(pvm_hooks),
-            Some(input) => {
+        match (self.state.status(), input) {
+            // `Some` input is not valid when the PVM is evaluating
+            (PvmStatus::Evaluating, Some(_)) => return None,
+            // `None` input is not valid when the PVM is waiting for input
+            (PvmStatus::WaitingForInput | PvmStatus::WaitingForReveal, None) => {
+                return None;
+            }
+            (PvmStatus::Evaluating, None) => {
+                proof_state = self.state.start_proof();
+                proof_state.eval_one(pvm_hooks)
+            }
+            (PvmStatus::WaitingForInput | PvmStatus::WaitingForReveal, Some(input)) => {
+                proof_state = self.state.start_proof();
                 if !proof_state.provide_input(input) {
                     return None;
                 }
@@ -264,9 +274,15 @@ impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
         self.with_backend_mut(|pvm| {
             let input_request = pvm.input_request();
 
-            match input {
-                None => pvm.eval_one(pvm_hooks),
-                Some(input) => {
+            match (pvm.status(), input) {
+                // `Some` input is not valid when the PVM is evaluating
+                (PvmStatus::Evaluating, Some(_)) => return None,
+                // `None` input is not valid when the PVM is waiting for input
+                (PvmStatus::WaitingForInput | PvmStatus::WaitingForReveal, None) => {
+                    return None;
+                }
+                (PvmStatus::Evaluating, None) => pvm.eval_one(pvm_hooks),
+                (PvmStatus::WaitingForInput | PvmStatus::WaitingForReveal, Some(input)) => {
                     if !pvm.provide_input(input) {
                         return None;
                     }
