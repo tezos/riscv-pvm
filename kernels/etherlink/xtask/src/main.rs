@@ -19,7 +19,7 @@ const SANDBOX_DIR: &str = "tools/sandbox";
 const SANDBOX_BIN: &str = "riscv-sandbox";
 const GEN_STORE_ACCESSES_DIR: &str = "tools/gen-etherlink-store-accesses";
 const GEN_STORE_ACCESSES_BIN: &str = "target/release/gen-etherlink-store-accesses";
-const DS_BENCHMARK_INPUT: &str = "durable-storage/benches/store_accesses.json";
+const DS_BENCHMARK_INPUT: &str = "durable-storage/benches/erc20_core/store_accesses.json";
 
 const TX_COUNT: usize = 200;
 const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
