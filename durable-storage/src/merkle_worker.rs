@@ -25,6 +25,7 @@ use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::StoreOptions;
 
 trait_set! {
     /// [`KeyValueStore`] that can be used in a background thread
@@ -130,14 +131,16 @@ impl<KV> Command<KV> {
     }
 
     /// Construct a command that performs a [`MerkleLayer::commit`].
-    fn new_commit() -> (impl FnOnce() -> Result<CommitId, OperationalError>, Self)
+    fn new_commit(
+        options: StoreOptions,
+    ) -> (impl FnOnce() -> Result<CommitId, OperationalError>, Self)
     where
         KV: PersistentKeyValueStore,
     {
         let (sender, receiver) = oneshot::channel();
 
         let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            let result = layer.commit();
+            let result = layer.commit(&options);
             let _ = sender.send(result);
         }));
 
@@ -280,11 +283,11 @@ impl<KV> MerkleWorker<KV> {
     }
 
     /// See [`MerkleLayer::commit`].
-    pub(crate) fn commit(&self) -> Result<CommitId, OperationalError>
+    pub(crate) fn commit(&self, options: StoreOptions) -> Result<CommitId, OperationalError>
     where
         KV: PersistentKeyValueStore,
     {
-        let (receive, command) = Command::new_commit();
+        let (receive, command) = Command::new_commit(options);
         self.sender
             .send(command)
             .map_err(|_| OperationalError::WorkerThreadDied)?;
@@ -379,8 +382,11 @@ mod tests {
 
                 #[cfg(feature = "rocksdb")]
                 Self::Commit => {
-                    let commit1 = worker.commit().expect("Commit should succeed");
-                    let commit2 = layer.commit().expect("Commit should succeed");
+                    let options = crate::storage::StoreOptions::default()
+                        .with_deep()
+                        .with_node_data();
+                    let commit2 = layer.commit(&options).expect("Commit should succeed");
+                    let commit1 = worker.commit(options).expect("Commit should succeed");
                     assert_eq!(commit1, commit2);
                 }
 

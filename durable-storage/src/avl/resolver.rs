@@ -13,7 +13,7 @@
 //!   demand without changing the underlying storage format.
 //!
 //! # Lazy loading strategy
-//! `LazyResolver` works with [`LazyId`] wrappers. A `LazyId` keeps a hash (`id`) and/or a loaded
+//! `LazyResolver` works with [`LazyId`] wrappers. A `LazyId` keeps a hash and/or a loaded
 //! value (`inner`). Immutable resolution populates `inner` while keeping the hash available for
 //! later lookups. Mutable resolution clears the stored hash once the loaded value becomes the
 //! source of truth. This avoids loading the full tree upfront while preserving stable hash
@@ -31,7 +31,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
@@ -39,15 +38,15 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
-use octez_riscv_data::serialisation::deserialise;
 use trait_set::trait_set;
 
 use super::node::Node;
 use super::tree::Tree;
-use crate::avl::node::NodeHashRepresentation;
 use crate::errors::OperationalError;
-use crate::key::Key;
 use crate::storage::KeyValueStore;
+use crate::storage::Loadable;
+use crate::storage::Storable;
+use crate::storage::StoreOptions;
 
 /// Trait for resolving identifiers to values.
 pub trait Resolver<Id, Value> {
@@ -80,6 +79,22 @@ impl Foldable<HashFold> for ArcNodeId {
     }
 }
 
+impl Storable for ArcNodeId {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
+    ) -> Result<(), OperationalError> {
+        self.0.store(store, options)
+    }
+}
+
+impl Loadable for ArcNodeId {
+    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        Arc::load(id, store).map(Self)
+    }
+}
+
 /// ID for a tree that is always present
 #[derive(Debug, Clone, derive_more::From, Default)]
 pub struct ArcTreeId(Tree<ArcNodeId>);
@@ -87,6 +102,22 @@ pub struct ArcTreeId(Tree<ArcNodeId>);
 impl Foldable<HashFold> for ArcTreeId {
     fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
         self.0.hash()
+    }
+}
+
+impl Storable for ArcTreeId {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
+    ) -> Result<(), OperationalError> {
+        self.0.store(store, options)
+    }
+}
+
+impl Loadable for ArcTreeId {
+    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        Tree::load(id, store).map(Self)
     }
 }
 
@@ -129,46 +160,62 @@ impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
 /// Identifier wrapper used by lazy resolution.
 ///
 /// A [`LazyId`] may be in one of three states:
-/// - hash-only, where `id` contains a hash and `inner` is empty,
-/// - cached, where both `id` and `inner` are populated after immutable resolution, or
-/// - owned, where `inner` is populated and `id` has been cleared after mutable resolution or
+/// - hash-only, where `hash` contains a hash and `inner` is empty,
+/// - cached, where both `hash` and `inner` are populated after immutable resolution, or
+/// - owned, where `inner` is populated and `hash` has been cleared after mutable resolution or
 ///   construction from an in-memory value.
 ///
 /// This representation lets hashes move through the AVL structure without forcing immediate loads,
 /// while caching loaded values for subsequent accesses.
 #[derive(Default, Debug, Clone)]
-pub struct LazyId<Id, Value> {
+pub struct LazyId<Value> {
     inner: OnceLock<Value>,
-    id: Option<Id>,
+    hash: Option<Hash>,
 }
 
-impl<Id, Value> LazyId<Id, Value> {
+impl<Value> LazyId<Value> {
     /// Create an identifier from an already loaded value.
     pub fn new(value: Value) -> Self {
         Self {
             inner: OnceLock::from(value),
-            id: None,
+            hash: None,
         }
     }
 
-    /// Return the identifier if available.
-    fn id(&self) -> Option<&Id> {
-        self.id.as_ref()
+    /// Return the hash if available.
+    fn hash(&self) -> Option<&Hash> {
+        self.hash.as_ref()
+    }
+
+    /// Populate the inner value from the store.
+    ///
+    /// This does not check if the value is already loaded.
+    fn load(&self, store: &impl KeyValueStore) -> Result<(), OperationalError>
+    where
+        Value: Loadable,
+    {
+        let hash = self
+            .hash
+            .ok_or(OperationalError::ResolverInvariantViolated)?;
+        let node = Value::load(hash, store)?;
+        let _ = self.inner.set(node);
+
+        Ok(())
     }
 }
 
-impl<Value> From<Hash> for LazyId<Hash, Value> {
+impl<Value> From<Hash> for LazyId<Value> {
     fn from(hash: Hash) -> Self {
         Self {
             inner: OnceLock::new(),
-            id: Some(hash),
+            hash: Some(hash),
         }
     }
 }
 
 /// Identifier for an AVL node.
 #[derive(Debug, Clone)]
-pub struct LazyNodeId(LazyId<Hash, Arc<Node<LazyTreeId, Normal>>>);
+pub struct LazyNodeId(LazyId<Arc<Node<LazyTreeId, Normal>>>);
 
 impl LazyNodeId {
     /// Wrap this lazy node identifier in a prove-mode identifier.
@@ -204,15 +251,37 @@ impl Foldable<HashFold> for LazyNodeId {
         }
 
         self.0
-            .id()
+            .hash()
             .cloned()
             .expect("ID should be present when node is absent")
     }
 }
 
+impl Storable for LazyNodeId {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
+    ) -> Result<(), OperationalError> {
+        let Some(node) = self.0.inner.get() else {
+            // There is nothing to store. We assume that the node has been persisted already, as the
+            // alternative is loading and then storing the node again.
+            return Ok(());
+        };
+
+        node.store(store, options)
+    }
+}
+
+impl Loadable for LazyNodeId {
+    fn load(id: Hash, _store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        Ok(Self::from(id))
+    }
+}
+
 /// Identifier for an AVL tree.
 #[derive(Debug, Clone)]
-pub struct LazyTreeId(LazyId<Hash, Tree<LazyNodeId>>);
+pub struct LazyTreeId(LazyId<Tree<LazyNodeId>>);
 
 impl LazyTreeId {
     /// Wrap this lazy tree identifier in a prove-mode identifier.
@@ -238,7 +307,7 @@ impl Default for LazyTreeId {
     fn default() -> Self {
         Self(LazyId {
             inner: OnceLock::from(Tree::default()),
-            id: None,
+            hash: None,
         })
     }
 }
@@ -250,9 +319,31 @@ impl Foldable<HashFold> for LazyTreeId {
         }
 
         self.0
-            .id()
+            .hash()
             .cloned()
             .expect("ID should be present when tree is absent")
+    }
+}
+
+impl Storable for LazyTreeId {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
+    ) -> Result<(), OperationalError> {
+        let Some(tree) = self.0.inner.get() else {
+            // There is nothing to store. We assume that the tree has been persisted already, as the
+            // alternative is loading and then storing the tree again.
+            return Ok(());
+        };
+
+        tree.store(store, options)
+    }
+}
+
+impl Loadable for LazyTreeId {
+    fn load(id: Hash, _store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        Ok(Self::from(id))
     }
 }
 
@@ -276,39 +367,6 @@ impl<KV> LazyResolver<KV> {
     }
 }
 
-impl<KV: KeyValueStore> LazyResolver<KV> {
-    /// Load and decode a node by its content hash.
-    ///
-    /// This performs a `blob_get` lookup and deserialises the returned bytes into a node representation.
-    fn load_node(&self, hash: Hash) -> Result<Arc<Node<LazyTreeId, Normal>>, OperationalError> {
-        let bytes = self
-            .persistence_layer
-            .blob_get(hash)
-            .map_err(|error| error.into_resolver_op_error(hash))?;
-        let noderepr =
-            deserialise::<NodeHashRepresentation<Bytes<Normal>, Key, Hash>>(bytes.as_ref())?;
-        Ok(Arc::new(Node::from(noderepr)))
-    }
-
-    /// Load and decode a tree root reference by its content hash.
-    ///
-    /// The serialised payload is expected to be an optional root node hash, which is then wrapped
-    /// in a lazy node identifier. The canonical empty-tree hash resolves directly to default
-    /// [`Tree`] without hitting storage.
-    fn load_tree(&self, hash: Hash) -> Result<Tree<LazyNodeId>, OperationalError> {
-        if hash == crate::merkle_layer::empty_tree_hash() {
-            return Ok(Tree::default());
-        }
-
-        let bytes = self
-            .persistence_layer
-            .blob_get(hash)
-            .map_err(|error| error.into_resolver_op_error(hash))?;
-        let tree_repr = deserialise::<Option<Hash>>(bytes.as_ref())?.map(LazyNodeId::from);
-        Ok(Tree::from(tree_repr))
-    }
-}
-
 impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyResolver<KV> {
     fn resolve<'a>(
         &self,
@@ -317,11 +375,9 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyR
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
-        let &hash =
-            id.0.id()
-                .ok_or(OperationalError::ResolverInvariantViolated)?;
-        let node = self.load_node(hash)?;
-        let _ = id.0.inner.set(node);
+
+        id.0.load(self.persistence_layer.as_ref())?;
+
         Ok(id.0.inner.wait().as_ref())
     }
 
@@ -340,12 +396,9 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyR
             return Ok(Arc::make_mut(unsafe { &mut *temp }));
         };
 
-        let hash =
-            id.0.id()
-                .ok_or(OperationalError::ResolverInvariantViolated)?;
-        let _ = id.0.inner.set(self.load_node(*hash)?);
+        id.0.load(self.persistence_layer.as_ref())?;
 
-        id.0.id = None;
+        id.0.hash = None;
         id.0.inner
             .get_mut()
             .ok_or(OperationalError::ResolverInvariantViolated)
@@ -358,11 +411,9 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
-        let &hash =
-            id.0.id()
-                .ok_or(OperationalError::ResolverInvariantViolated)?;
-        let tree = self.load_tree(hash)?;
-        let _ = id.0.inner.set(tree);
+
+        id.0.load(self.persistence_layer.as_ref())?;
+
         Ok(id.0.inner.wait())
     }
 
@@ -371,13 +422,10 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
         id: &'a mut LazyTreeId,
     ) -> Result<&'a mut Tree<LazyNodeId>, OperationalError> {
         if id.0.inner.get().is_none() {
-            let hash =
-                id.0.id()
-                    .ok_or(OperationalError::ResolverInvariantViolated)?;
-            let _ = id.0.inner.set(self.load_tree(*hash)?);
+            id.0.load(self.persistence_layer.as_ref())?;
         }
 
-        id.0.id = None;
+        id.0.hash = None;
         id.0.inner
             .get_mut()
             .ok_or(OperationalError::ResolverInvariantViolated)
@@ -522,11 +570,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::hash::HashFold;
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::serialisation;
 
     use super::ArcNodeId;
     use super::ArcResolver;
@@ -540,10 +585,11 @@ mod tests {
     use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
     use crate::errors::Error;
-    use crate::errors::InvalidArgumentError;
     use crate::errors::OperationalError;
     use crate::key::Key;
     use crate::storage::KeyValueStore;
+    use crate::storage::Storable;
+    use crate::storage::StoreOptions;
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::storage::in_memory::InMemoryRepo;
 
@@ -622,20 +668,15 @@ mod tests {
         resolver: &Res,
         persistence_layer: &KV,
     ) where
-        NodeId: Foldable<HashFold>,
-        TreeId: Foldable<HashFold>,
+        NodeId: Storable,
+        TreeId: Storable,
         KV: KeyValueStore,
         Res: AvlResolver<NodeId, TreeId, Normal>,
     {
-        // LazyTreeId resolves by loading a serialised optional root hash.
-        let tree_hash = tree.hash();
-        let tree_repr: Option<Hash> = tree.root().map(Hash::from_foldable);
-        let tree_bytes =
-            serialisation::serialise(tree_repr).expect("tree serialisation should succeed");
+        let store_options = StoreOptions::default().with_shallow().with_node_data();
 
-        persistence_layer
-            .blob_set(tree_hash, tree_bytes)
-            .expect("persisting trees should succeed");
+        tree.store(persistence_layer, &store_options)
+            .expect("persisting tree should succeed");
 
         let Some(node_id) = tree.root() else {
             return;
@@ -645,14 +686,8 @@ mod tests {
             .resolve(node_id)
             .expect("resolving nodes should succeed");
 
-        let node_hash = Hash::from_foldable(node_id);
-        let node_repr = node.to_encode();
-        let node_bytes =
-            serialisation::serialise(node_repr).expect("node serialisation should succeed");
-
-        persistence_layer
-            .blob_set(node_hash, node_bytes)
-            .expect("persisting nodes should succeed");
+        node.store(persistence_layer, &store_options)
+            .expect("persisting node should succeed");
 
         persist_tree(
             node.left_ref(resolver)
@@ -732,7 +767,7 @@ mod tests {
 
         let node_without_hash = LazyNodeId(LazyId {
             inner: OnceLock::new(),
-            id: None,
+            hash: None,
         });
         let mut node_without_hash_mut = node_without_hash.clone();
 
@@ -747,7 +782,7 @@ mod tests {
 
         let tree_without_hash = LazyTreeId(LazyId {
             inner: OnceLock::new(),
-            id: None,
+            hash: None,
         });
         let mut tree_without_hash_mut = tree_without_hash.clone();
 
@@ -762,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn lazy_resolver_maps_missing_cas_entries_to_lookup_error() {
+    fn lazy_resolver_maps_missing_cas_entries_to_commit_data_missing() {
         let missing_hash = Hash::hash_bytes(b"missing");
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
         let lazy_resolver = LazyResolver::new(persistence_layer);
@@ -770,19 +805,13 @@ mod tests {
         let node_id = LazyNodeId::from(missing_hash);
         assert!(matches!(
             lazy_resolver.resolve(&node_id),
-            Err(OperationalError::ResolverCasLookup {
-                hash,
-                error: InvalidArgumentError::KeyNotFound
-            }) if hash == missing_hash
+            Err(OperationalError::CommitDataMissing { root, .. }) if root == missing_hash
         ));
 
         let tree_id = LazyTreeId::from(missing_hash);
         assert!(matches!(
             lazy_resolver.resolve(&tree_id),
-            Err(OperationalError::ResolverCasLookup {
-                hash,
-                error: InvalidArgumentError::KeyNotFound
-            }) if hash == missing_hash
+            Err(OperationalError::CommitDataMissing { root, .. }) if root == missing_hash
         ));
     }
 

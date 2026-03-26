@@ -32,6 +32,7 @@ use crate::merkle_worker::MerkleWorker;
 pub use crate::repo::DirectoryManager;
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::StoreOptions;
 
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
@@ -111,7 +112,8 @@ impl<KV> Database<KV, Normal> {
     where
         KV: PersistentKeyValueStore,
     {
-        let commit_id = self.inner.merkle.commit()?;
+        let commit_options = StoreOptions::default().with_deep().without_node_data();
+        let commit_id = self.inner.merkle.commit(commit_options)?;
         self.inner.persistent.commit(repo, &commit_id)?;
 
         Ok(commit_id)
@@ -603,7 +605,7 @@ mod tests {
 
         assert!(matches!(
             Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id),
-            Err(Error::Operational(OperationalError::CommitDataMissing { root }))
+            Err(Error::Operational(OperationalError::CommitDataMissing { root, .. }))
                 if root == *commit_id.as_hash()
         ));
     }
