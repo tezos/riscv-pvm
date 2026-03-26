@@ -5,12 +5,11 @@
 //! Interface for an optional root [`Node`] of a Merklisable AVL tree
 
 use std::cmp::Ordering;
+use std::sync::LazyLock;
 
 use bincode::Decode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
-#[cfg(test)]
-use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
@@ -19,22 +18,23 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
-use octez_riscv_data::mode::Mode;
+use octez_riscv_data::serialisation::deserialise;
+use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
 use super::resolver::ProveNodeId;
-#[cfg(test)]
-use crate::avl::node::Meta;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
-#[cfg(test)]
-use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
+use crate::storage::KeyValueStore;
+use crate::storage::Loadable;
+use crate::storage::Storable;
+use crate::storage::StoreOptions;
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[perfect_derive(Clone, Default, Debug)]
@@ -148,26 +148,6 @@ impl<NodeId> Tree<NodeId> {
         NodeId: Foldable<HashFold>,
     {
         Hash::from_foldable(self)
-    }
-
-    /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
-    ///
-    /// Each call to [`Iterator::next`] first descends as far left as possible from the current
-    /// subtree, pushing the visited node ids onto an explicit stack. Once it reaches an empty
-    /// subtree, it pops the next node from the stack, yields that node, and continues from that
-    /// node's right subtree on the next call.
-    ///
-    /// The iterator yields an error if resolving any intermediate node or subtree fails.
-    pub(crate) fn iter<'tree, 'res, TreeId, M: Mode, Res: AvlResolver<NodeId, TreeId, M>>(
-        &'tree self,
-        resolver: &'res Res,
-    ) -> TreeIterator<'tree, 'res, NodeId, TreeId, M, Res> {
-        TreeIterator {
-            stack: vec![],
-            current: self,
-            resolver,
-            _marker: std::marker::PhantomData,
-        }
     }
 
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
@@ -355,187 +335,60 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
     }
 }
 
-/// Used for iterating through the nodes of the [`Tree`] in-order (left-to-right).
-///
-/// `current` tracks the subtree that still needs to be explored, while `stack` stores the path of
-/// ancestor node ids whose left subtrees have already been explored. This lets the iterator do an
-/// in-order traversal without recursion.
-///
-/// Resolution failures are surfaced as iterator items of type `Err`.
-pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver> {
-    stack: Vec<&'tree NodeId>,
-    current: &'tree Tree<NodeId>,
-    resolver: &'res Resolver,
-    _marker: std::marker::PhantomData<fn() -> (TreeId, M)>,
-}
-
-impl<'tree, 'res, NodeId, TreeId: 'tree, M: Mode + 'tree, Resolver: AvlResolver<NodeId, TreeId, M>>
-    Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
-{
-    type Item = Result<&'tree Node<TreeId, M>, OperationalError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(root_id) = self.current.root() {
-            if let Err(err) = self.advance_to_leftmost_in_subtree(root_id) {
-                return Some(Err(err));
-            }
-        }
-
-        match self.pop_and_prepare_right_subtree() {
-            Ok(Some(node)) => Some(Ok(node)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
-        }
-    }
-}
-
-impl<'tree, 'res, NodeId, TreeId: 'tree, M: Mode + 'tree, Resolver: AvlResolver<NodeId, TreeId, M>>
-    TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
-{
-    /// Helper to descend to the leftmost node in the current subtree, pushing nodes onto the stack.
-    fn advance_to_leftmost_in_subtree(
-        &mut self,
-        mut node_id: &'tree NodeId,
+impl<NodeId: Storable> Storable for Tree<NodeId> {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
     ) -> Result<(), OperationalError> {
-        loop {
-            self.stack.push(node_id);
-            let resolved_node = self.resolver.resolve(node_id)?;
-            let left = resolved_node.left_ref(self.resolver)?;
-            match left.root() {
-                Some(left_id) => node_id = left_id,
-                None => {
-                    self.current = left;
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
+        let repr = self.0.as_ref().map(Hash::from_foldable);
 
-    /// Helper to pop the next node from the stack and prepare to traverse its right subtree.
-    fn pop_and_prepare_right_subtree(
-        &mut self,
-    ) -> Result<Option<&'tree Node<TreeId, M>>, OperationalError> {
-        let node_id = match self.stack.pop() {
-            Some(id) => id,
-            None => return Ok(None),
-        };
-        let resolved_node = self.resolver.resolve(node_id)?;
-        let right = resolved_node.right_ref(self.resolver)?;
-        self.current = right;
-        Ok(Some(resolved_node))
+        // We don't store empty trees. All leaf nodes contain two empty trees. Adding two more
+        // redundant writes to all leaves is not desirable.
+        // The empty tree can be recovered during loading, as the hash of the empty tree is known.
+        if repr.is_none() {
+            return Ok(());
+        }
+
+        let id = self.hash();
+        let bytes = serialise(repr)?;
+        store.blob_set(id, bytes)?;
+
+        if let Some(node) = &self.0
+            && options.deep()
+        {
+            node.store(store, options)?;
+        }
+
+        Ok(())
     }
 }
 
-#[cfg(test)]
-impl<NodeId> Tree<NodeId> {
-    #[inline]
-    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
-        &'a self,
-        key: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<Option<&'a Bytes<M>>, OperationalError> {
-        let Some(node) = self.root() else {
-            return Ok(None);
+impl<NodeId: Loadable> Loadable for Tree<NodeId> {
+    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        static EMPTY_HASH: LazyLock<Hash> =
+            LazyLock::new(|| Hash::from_foldable(&Tree::<LazyNodeId>(None)));
+
+        // Empty trees are not stored. We can short-circuit here, if we detect the requested hash
+        // corresponds to the hash of the empty tree.
+        if id == *EMPTY_HASH {
+            return Ok(Self(None));
+        }
+
+        let repr: Option<Hash> = {
+            let bytes =
+                store
+                    .blob_get(id)
+                    .map_err(|error| OperationalError::CommitDataMissing {
+                        root: id,
+                        source: Box::new(error),
+                    })?;
+            deserialise(bytes.as_ref())?
         };
-        Node::get(node, key, resolver)
-    }
 
-    /// Asserts that the [`Tree`] is a valid AVL tree
-    pub(crate) fn check<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<(), OperationalError>
-    where
-        NodeId: std::fmt::Debug,
-        TreeId: std::fmt::Debug,
-        Bytes<M>: std::fmt::Debug,
-        Atom<Meta, M>: std::fmt::Debug,
-    {
-        let inorder = self.is_inorder(resolver)?;
-        let is_balanced = self.is_balanced(resolver)?;
-        let has_correct_balance_factors = self.has_correct_balance_factors(resolver)?;
-        if !inorder || !is_balanced || !has_correct_balance_factors {
-            eprintln!("{self:?}");
-        }
-        assert!(inorder, "AVL tree isn't in order");
-        assert!(is_balanced, "AVL tree isn't balanced");
-        assert!(
-            has_correct_balance_factors,
-            "AVL tree balance factors are incorrect"
-        );
-        Ok(())
-    }
-
-    /// Returns true if the [`Tree`] is in-order.
-    pub(crate) fn is_inorder<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<bool, OperationalError> {
-        self.is_inorder_inner(
-            &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
-            &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
-            resolver,
-        )
-    }
-
-    /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
-    pub(super) fn has_correct_balance_factors<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<bool, OperationalError>
-    where
-        NodeId: std::fmt::Debug,
-        TreeId: std::fmt::Debug,
-        Bytes<M>: std::fmt::Debug,
-        Atom<Meta, M>: std::fmt::Debug,
-    {
-        match self.root() {
-            None => Ok(true),
-            Some(node) => resolver
-                .resolve(node)
-                .map(|res| res.has_correct_balance_factors(resolver))?,
-        }
-    }
-
-    /// Returns the height of the [`Tree`].
-    pub(super) fn height<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<u32, OperationalError> {
-        match self.root() {
-            None => Ok(0),
-            Some(node) => resolver.resolve(node).map(|res| res.height(resolver))?,
-        }
-    }
-
-    /// Returns true if the [`Tree`] is balanced.
-    pub(super) fn is_balanced<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<bool, OperationalError> {
-        match self.root() {
-            None => Ok(true),
-            Some(node) => resolver
-                .resolve(node)
-                .map(|res| res.is_balanced(resolver))?,
-        }
-    }
-
-    /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
-    pub(super) fn is_inorder_inner<TreeId, M: BytesMode + AtomMode>(
-        &self,
-        min: &Key,
-        max: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<bool, OperationalError> {
-        match self.root() {
-            None => Ok(true),
-            Some(node) => resolver
-                .resolve(node)
-                .map(|res| res.is_inorder(min, max, resolver))?,
-        }
+        repr.map(|node_id| NodeId::load(node_id, store))
+            .transpose()
+            .map(Self)
     }
 }
 
@@ -545,17 +398,240 @@ mod tests {
     use std::io::prelude::*;
 
     use goldenfile::Mint;
+    use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::mode::Normal;
     use proptest::prelude::*;
     use proptest::test_runner::TestCaseError;
 
     use super::*;
+    use crate::avl::node::Meta;
     use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcResolver;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::Resolver;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+
+    impl<NodeId> Tree<NodeId> {
+        #[inline]
+        /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
+        pub fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
+            &'a self,
+            key: &Key,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<Option<&'a Bytes<M>>, OperationalError> {
+            let Some(node) = self.root() else {
+                return Ok(None);
+            };
+            Node::get(node, key, resolver)
+        }
+
+        /// Asserts that the [`Tree`] is a valid AVL tree
+        pub(crate) fn check<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<(), OperationalError>
+        where
+            NodeId: std::fmt::Debug,
+            TreeId: std::fmt::Debug,
+            Bytes<M>: std::fmt::Debug,
+            Atom<Meta, M>: std::fmt::Debug,
+        {
+            let inorder = self.is_inorder(resolver)?;
+            let is_balanced = self.is_balanced(resolver)?;
+            let has_correct_balance_factors = self.has_correct_balance_factors(resolver)?;
+            if !inorder || !is_balanced || !has_correct_balance_factors {
+                eprintln!("{self:?}");
+            }
+            assert!(inorder, "AVL tree isn't in order");
+            assert!(is_balanced, "AVL tree isn't balanced");
+            assert!(
+                has_correct_balance_factors,
+                "AVL tree balance factors are incorrect"
+            );
+            Ok(())
+        }
+
+        /// Returns true if the [`Tree`] is in-order.
+        pub(crate) fn is_inorder<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<bool, OperationalError> {
+            self.is_inorder_inner(
+                &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
+                &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
+                resolver,
+            )
+        }
+
+        /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
+        pub(crate) fn has_correct_balance_factors<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<bool, OperationalError>
+        where
+            NodeId: std::fmt::Debug,
+            TreeId: std::fmt::Debug,
+            Bytes<M>: std::fmt::Debug,
+            Atom<Meta, M>: std::fmt::Debug,
+        {
+            match self.root() {
+                None => Ok(true),
+                Some(node) => resolver
+                    .resolve(node)
+                    .map(|res| res.has_correct_balance_factors(resolver))?,
+            }
+        }
+
+        /// Returns the height of the [`Tree`].
+        pub(crate) fn height<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<u32, OperationalError> {
+            match self.root() {
+                None => Ok(0),
+                Some(node) => resolver.resolve(node).map(|res| res.height(resolver))?,
+            }
+        }
+
+        /// Returns true if the [`Tree`] is balanced.
+        pub(crate) fn is_balanced<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<bool, OperationalError> {
+            match self.root() {
+                None => Ok(true),
+                Some(node) => resolver
+                    .resolve(node)
+                    .map(|res| res.is_balanced(resolver))?,
+            }
+        }
+
+        /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
+        pub(crate) fn is_inorder_inner<TreeId, M: BytesMode + AtomMode>(
+            &self,
+            min: &Key,
+            max: &Key,
+            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        ) -> Result<bool, OperationalError> {
+            match self.root() {
+                None => Ok(true),
+                Some(node) => resolver
+                    .resolve(node)
+                    .map(|res| res.is_inorder(min, max, resolver))?,
+            }
+        }
+
+        /// Creates an in-order iterator for the [`Node`]s in the [`Tree`].
+        ///
+        /// Each call to [`Iterator::next`] first descends as far left as possible from the current
+        /// subtree, pushing the visited node ids onto an explicit stack. Once it reaches an empty
+        /// subtree, it pops the next node from the stack, yields that node, and continues from that
+        /// node's right subtree on the next call.
+        ///
+        /// The iterator yields an error if resolving any intermediate node or subtree fails.
+        pub(crate) fn iter<
+            'tree,
+            'res,
+            TreeId,
+            M: octez_riscv_data::mode::Mode,
+            Res: AvlResolver<NodeId, TreeId, M>,
+        >(
+            &'tree self,
+            resolver: &'res Res,
+        ) -> TreeIterator<'tree, 'res, NodeId, TreeId, M, Res> {
+            TreeIterator {
+                stack: vec![],
+                current: self,
+                resolver,
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+
+    /// Used for iterating through the nodes of the [`Tree`] in-order (left-to-right).
+    ///
+    /// `current` tracks the subtree that still needs to be explored, while `stack` stores the path of
+    /// ancestor node ids whose left subtrees have already been explored. This lets the iterator do an
+    /// in-order traversal without recursion.
+    ///
+    /// Resolution failures are surfaced as iterator items of type `Err`.
+    pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver> {
+        stack: Vec<&'tree NodeId>,
+        current: &'tree Tree<NodeId>,
+        resolver: &'res Resolver,
+        _marker: std::marker::PhantomData<fn() -> (TreeId, M)>,
+    }
+
+    impl<
+        'tree,
+        'res,
+        NodeId,
+        TreeId: 'tree,
+        M: octez_riscv_data::mode::Mode + 'tree,
+        Resolver: AvlResolver<NodeId, TreeId, M>,
+    > TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+    {
+        /// Helper to descend to the leftmost node in the current subtree, pushing nodes onto the stack.
+        fn advance_to_leftmost_in_subtree(
+            &mut self,
+            mut node_id: &'tree NodeId,
+        ) -> Result<(), OperationalError> {
+            loop {
+                self.stack.push(node_id);
+                let resolved_node = self.resolver.resolve(node_id)?;
+                let left = resolved_node.left_ref(self.resolver)?;
+                match left.root() {
+                    Some(left_id) => node_id = left_id,
+                    None => {
+                        self.current = left;
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        /// Helper to pop the next node from the stack and prepare to traverse its right subtree.
+        fn pop_and_prepare_right_subtree(
+            &mut self,
+        ) -> Result<Option<&'tree Node<TreeId, M>>, OperationalError> {
+            let node_id = match self.stack.pop() {
+                Some(id) => id,
+                None => return Ok(None),
+            };
+            let resolved_node = self.resolver.resolve(node_id)?;
+            let right = resolved_node.right_ref(self.resolver)?;
+            self.current = right;
+            Ok(Some(resolved_node))
+        }
+    }
+
+    impl<
+        'tree,
+        'res,
+        NodeId,
+        TreeId: 'tree,
+        M: octez_riscv_data::mode::Mode + 'tree,
+        Resolver: AvlResolver<NodeId, TreeId, M>,
+    > Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+    {
+        type Item = Result<&'tree Node<TreeId, M>, OperationalError>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(root_id) = self.current.root() {
+                if let Err(err) = self.advance_to_leftmost_in_subtree(root_id) {
+                    return Some(Err(err));
+                }
+            }
+
+            match self.pop_and_prepare_right_subtree() {
+                Ok(Some(node)) => Some(Ok(node)),
+                Ok(None) => None,
+                Err(err) => Some(Err(err)),
+            }
+        }
+    }
 
     const GOLDEN_DIR: &str = "tests/expected";
 

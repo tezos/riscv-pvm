@@ -6,6 +6,7 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use bincode::Decode;
@@ -22,6 +23,8 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::serialisation::deserialise;
+use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::resolver::LazyTreeId;
@@ -32,6 +35,10 @@ use crate::avl::resolver::AvlResolver;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
+use crate::storage::KeyValueStore;
+use crate::storage::Loadable;
+use crate::storage::Storable;
+use crate::storage::StoreOptions;
 
 /// Metadata of a [`Node`] needed for accesses.
 #[derive(Clone, Default, Debug, Encode, Decode)]
@@ -42,22 +49,12 @@ pub(crate) struct Meta {
     balance_factor: i64,
 }
 
-/// A serialisable representation of [`Meta`].
+/// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
 #[derive(Encode, Decode)]
-pub(super) struct MetaHashRepresentation<K: Borrow<self::Key>> {
-    key: K,
-    balance_factor: i64,
-}
-
-/// A serialisable representation of [`Node`].
-#[derive(Encode, Decode)]
-pub(super) struct NodeHashRepresentation<Data, K: Borrow<self::Key>, H: Borrow<self::Hash>> {
-    meta: MetaHashRepresentation<K>,
-    data: Data,
-    // The hash of the left subtree.
-    left: H,
-    // The hash of the right subtree.
-    right: H,
+struct StoredNode {
+    meta: Meta,
+    left: Hash,
+    right: Hash,
 }
 
 /// A node that supports rebalancing and Merklisation.
@@ -73,25 +70,6 @@ pub struct Node<TreeId, M: Mode> {
     ///
     /// An uninitialised hash is a hash that has not been set or has been dirtied.
     hash: OnceLock<Hash>,
-}
-
-impl<TreeId, M: BytesMode + AtomMode> From<NodeHashRepresentation<Bytes<M>, Key, Hash>>
-    for Node<TreeId, M>
-where
-    TreeId: From<Hash>,
-{
-    fn from(node_repr: NodeHashRepresentation<Bytes<M>, Key, Hash>) -> Self {
-        Node {
-            meta: Atom::new(Meta {
-                key: node_repr.meta.key,
-                balance_factor: node_repr.meta.balance_factor,
-            }),
-            data: node_repr.data,
-            left: TreeId::from(node_repr.left),
-            right: TreeId::from(node_repr.right),
-            hash: OnceLock::new(),
-        }
-    }
 }
 
 impl Node<LazyTreeId, Normal> {
@@ -170,31 +148,12 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
         }
     }
 
-    /// Converts the [`Node`] to an encoded, serialisable representation,
-    /// [`NodeHashRepresentation`], potentially re-hashing uncached [`Node`]s.
-    pub(crate) fn to_encode<'a>(&'a self) -> impl Encode + 'a
-    where
-        Bytes<M>: Encode,
-        TreeId: Foldable<HashFold>,
-    {
-        NodeHashRepresentation {
-            meta: MetaHashRepresentation {
-                key: &self.meta.key,
-                balance_factor: self.meta.balance_factor,
-            },
-            data: &self.data,
-            left: Hash::from_foldable(&self.left),
-            right: Hash::from_foldable(&self.right),
-        }
-    }
-
     /// Returns the hash of this node.
     ///
     /// If the hash has been cached, the memo is returned. Otherwise, the hash is calculated and
     /// cached.
     pub(crate) fn hash(&self) -> &Hash
     where
-        TreeId: Foldable<HashFold>,
         Atom<Meta, M>: Foldable<HashFold>,
         Bytes<M>: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
@@ -204,7 +163,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
     #[inline]
     /// The difference in heights between child branches.
-    pub(super) fn balance_factor(&self) -> i64 {
+    pub(crate) fn balance_factor(&self) -> i64 {
         self.meta.balance_factor
     }
 
@@ -216,8 +175,14 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
     #[inline]
     /// The [`Key`] used for determining the [`Node`].
-    pub(super) fn key(&self) -> &Key {
+    pub(crate) fn key(&self) -> &Key {
         &self.meta.key
+    }
+
+    /// Retrieve the value associated with this node.
+    #[cfg(all(test, feature = "rocksdb"))]
+    pub(crate) fn value(&self) -> &Bytes<M> {
+        &self.data
     }
 
     /// Rebalance the subtree of the [`Node`] so that the difference in height between child
@@ -829,6 +794,80 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
                 .is_inorder_inner(self.key(), max, resolver)?;
 
         Ok(left_in_order && right_in_order)
+    }
+}
+
+impl<TreeId: Storable> Storable for Node<TreeId, Normal> {
+    fn store(
+        &self,
+        store: &impl KeyValueStore,
+        options: &StoreOptions,
+    ) -> Result<(), OperationalError> {
+        // The stored representation is more compact. We don't include the `data` field, as that
+        // should be written to the KV store separately.
+        let repr = StoredNode {
+            meta: self.meta.deref().clone(),
+            left: Hash::from_foldable(&self.left),
+            right: Hash::from_foldable(&self.right),
+        };
+
+        let &id = self.hash();
+        let bytes = serialise(repr)?;
+        store.blob_set(id, bytes)?;
+
+        // Are we in charge of writing the value data to the KV store?
+        if options.node_data() {
+            let key: &[u8] = self.meta.key.as_ref();
+            let value: &[u8] = self.data.borrow();
+            store.set(key, value)?;
+        }
+
+        if options.deep() {
+            self.left.store(store, options)?;
+            self.right.store(store, options)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<TreeId: Loadable> Loadable for Node<TreeId, Normal> {
+    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        let StoredNode { meta, left, right } = {
+            let bytes =
+                store
+                    .blob_get(id)
+                    .map_err(|error| OperationalError::CommitDataMissing {
+                        root: id,
+                        source: Box::new(error),
+                    })?;
+            deserialise(bytes.as_ref())?
+        };
+
+        let meta = Atom::new(meta);
+
+        // The stored representation does not include the `data` field, so we need to load it
+        // separately from the KV store.
+        let data = {
+            let bytes = store.get(meta.key.as_ref()).map_err(|error| {
+                OperationalError::CommitValueMissing {
+                    key: meta.key.clone(),
+                    source: Box::new(error),
+                }
+            })?;
+            Bytes::from(bytes.as_ref())
+        };
+
+        let left = TreeId::load(left, store)?;
+        let right = TreeId::load(right, store)?;
+
+        Ok(Self {
+            meta,
+            data,
+            left,
+            right,
+            hash: OnceLock::new(),
+        })
     }
 }
 

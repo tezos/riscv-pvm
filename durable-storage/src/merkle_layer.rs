@@ -18,14 +18,11 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::LazyNodeId;
@@ -33,16 +30,13 @@ use crate::avl::resolver::LazyResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::Error;
-use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
+use crate::storage::Loadable;
 use crate::storage::PersistentKeyValueStore;
-
-pub(crate) fn empty_tree_hash() -> Hash {
-    static EMPTY_TREE_HASH: OnceLock<Hash> = OnceLock::new();
-    *EMPTY_TREE_HASH.get_or_init(|| Tree::from(None::<LazyNodeId>).hash())
-}
+use crate::storage::Storable;
+use crate::storage::StoreOptions;
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
 /// [`PersistentKeyValueStore`].
@@ -73,11 +67,11 @@ impl<KV> MerkleLayer<KV, Normal> {
     }
 
     /// Generates a commitment for the [MerkleLayer].
-    pub fn commit(&mut self) -> Result<CommitId, OperationalError>
+    pub fn commit(&mut self, options: &StoreOptions) -> Result<CommitId, OperationalError>
     where
         KV: PersistentKeyValueStore,
     {
-        self.inner.commit()
+        self.inner.commit(options)
     }
 }
 
@@ -269,22 +263,7 @@ impl<KV> NormalImpl<KV> {
         KV: KeyValueStore,
     {
         let resolver = LazyResolver::new(persistence.clone());
-        let tree = if *root.as_hash() == empty_tree_hash() {
-            Tree::default()
-        } else {
-            let tree_data = persistence
-                .blob_get(*root.as_hash())
-                .map_err(|error| match error {
-                    Error::InvalidArgument(InvalidArgumentError::KeyNotFound) => {
-                        OperationalError::CommitDataMissing {
-                            root: *root.as_hash(),
-                        }
-                        .into()
-                    }
-                    other => other,
-                })?;
-            deserialise(tree_data.as_ref()).map_err(OperationalError::from)?
-        };
+        let tree = Tree::load(*root.as_hash(), persistence.as_ref())?;
 
         Ok(Self {
             tree,
@@ -294,25 +273,11 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Generates a commitment for the [MerkleLayer].
-    fn commit(&mut self) -> Result<CommitId, OperationalError>
+    fn commit(&mut self, options: &StoreOptions) -> Result<CommitId, OperationalError>
     where
         KV: PersistentKeyValueStore,
     {
-        for node in self.tree.iter(&self.resolver) {
-            let node = node?;
-
-            let node_hash = node.hash();
-            let node_bytes =
-                serialise(node.to_encode()).expect("Serialisation of node data should not fail");
-
-            self.persistence.blob_set(node_hash, node_bytes)?;
-
-            let tree_hash = Tree::from(Some(node_hash)).hash();
-            let tree_bytes = serialise(Some(node_hash))?;
-
-            self.persistence.blob_set(tree_hash, tree_bytes)?;
-        }
-
+        self.tree.store(self.persistence.as_ref(), options)?;
         Ok(CommitId::from(self.hash()))
     }
 }
@@ -1263,7 +1228,8 @@ mod tests {
             }
 
             let expected_hash = merkle_layer.hash().expect("Hash operation should succeed");
-            let commit_id = merkle_layer.commit().expect("Commit operation should succeed");
+            let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
+            let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
 
             let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
                 .expect("Lazy checkout should succeed");
@@ -1300,6 +1266,10 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
+        use crate::storage::Loadable;
+        use crate::storage::Storable;
+        use crate::storage::StoreOptions;
+
         let (_keepalive, repo) = setup_repo();
         let mut merkle_layer = new_merkle_layer(repo);
 
@@ -1329,23 +1299,29 @@ mod tests {
                 .expect("setting node should succeed");
         }
 
+        let commit_opts = StoreOptions::default().with_deep().with_node_data();
         let commit_id = merkle_layer
-            .commit()
+            .commit(&commit_opts)
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
             let node: &Node<LazyTreeId, Normal> =
                 node.expect("The node should be retrieved successfully");
-            let node_repr = node.to_encode();
-            let node_bytes = octez_riscv_data::serialisation::serialise(node_repr)
-                .expect("We should be able to serialise the node");
-            let node_hash = *node.hash();
-            let blob = merkle_layer
-                .inner
-                .persistence
-                .blob_get(node_hash)
-                .expect("The blob with the given key should be present");
-            assert_eq!(node_bytes, blob.as_ref());
+
+            node.store(
+                merkle_layer.inner.persistence.as_ref(),
+                &StoreOptions::default().with_shallow().with_node_data(),
+            )
+            .expect("Storing node should succeed");
+
+            let loaded_node: Node<LazyTreeId, Normal> =
+                Node::load(*node.hash(), merkle_layer.inner.persistence.as_ref())
+                    .expect("Loading node should succeed");
+
+            assert_eq!(node.hash(), loaded_node.hash());
+            assert_eq!(node.balance_factor(), loaded_node.balance_factor());
+            assert_eq!(node.key(), loaded_node.key());
+            assert_eq!(node.value(), loaded_node.value());
         }
 
         let root_hash = merkle_layer.inner.tree.hash();

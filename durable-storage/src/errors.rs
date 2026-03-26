@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use octez_riscv_data::hash::Hash;
 
+use crate::key::Key;
+
 /// Errors that are the result of an operational failure
 ///
 /// These kinds of errors are fatal. When encountering such an error, there is no guarantee that the
@@ -17,8 +19,11 @@ pub enum OperationalError {
     #[error("Unable to locate commitment on disk")]
     CommitNotFound,
 
-    #[error("Commit metadata is missing for root hash {root:?}")]
-    CommitDataMissing { root: Hash },
+    #[error("Commit data is missing for a node or tree with hash {root:?}")]
+    CommitDataMissing { root: Hash, source: Box<Error> },
+
+    #[error("Commit is missing data for the value of key {key:?}")]
+    CommitValueMissing { key: Key, source: Box<Error> },
 
     #[cfg(feature = "rocksdb")]
     #[error("Unable to create checkpoint: {error}")]
@@ -108,19 +113,6 @@ pub enum OperationalError {
     #[error("Resolver invariant violated. Either the hash or the value of an ID must exist.")]
     ResolverInvariantViolated,
 
-    /// A content-addressed-storage (`blob_get`) lookup returned an invalid-argument error while
-    /// resolving a known hash.
-    ///
-    /// Resolver lookups are performed with a concrete hash that was already accepted by resolver
-    /// logic. Receiving an [`InvalidArgumentError`] at that point signals an unexpected storage
-    /// contract violation, so it is surfaced as an operational failure with the failing hash.
-    #[error("Resolver CAS lookup returned invalid argument for hash {hash:?}: {error}")]
-    ResolverCasLookup {
-        hash: Hash,
-        #[source]
-        error: InvalidArgumentError,
-    },
-
     #[error("Encountered a poisoned lock")]
     LockPoisoned,
 
@@ -161,14 +153,4 @@ pub enum Error {
 
     #[error("Invalid argument error: {0}")]
     InvalidArgument(#[from] InvalidArgumentError),
-}
-
-impl Error {
-    pub(super) fn into_resolver_op_error(self, hash: Hash) -> OperationalError {
-        match self {
-            // See [`OperationalError::ResolverCasLookup`]
-            Error::InvalidArgument(error) => OperationalError::ResolverCasLookup { hash, error },
-            Error::Operational(error) => error,
-        }
-    }
 }
