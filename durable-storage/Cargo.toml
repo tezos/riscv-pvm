@@ -45,3 +45,8 @@ harness = false
 name = "database"
 harness = false
 required-features = ["rocksdb"]
+
+[[bench]]
+name = "database_checkout"
+harness = false
+required-features = ["rocksdb"]
