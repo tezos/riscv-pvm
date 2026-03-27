@@ -6,6 +6,7 @@
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -47,7 +48,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // Limit how much data we can write to prevent proof-size explosion
         let length = length.min(PAGE_SIZE.get());
@@ -79,7 +80,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // `write` takes an unsigned int as the first parameter, which is then converted to a FileDescriptorWriteable
         self.write_to_fd(core, hooks, fd, addr, length)
@@ -98,7 +99,7 @@ impl<M: Mode> SupervisorState<M> {
         len: u64,
     ) -> Result<u64, Error>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // `writev` takes an unsigned long as the first parameter
 
@@ -166,7 +167,7 @@ impl<M: Mode> SupervisorState<M> {
         num_fds: parameters::FileDescriptorCount,
     ) -> Result<u64, Error>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // The file descriptors are passed as `struct pollfd[]`.
         //

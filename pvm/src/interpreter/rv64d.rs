@@ -8,6 +8,7 @@
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use rustc_apfloat::Float;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
@@ -343,7 +344,7 @@ where
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     /// `FLD` I-type instruction.
     ///

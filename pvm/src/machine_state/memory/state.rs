@@ -19,6 +19,9 @@ use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpace;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -47,13 +50,13 @@ pub struct MemoryImpl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode> 
     pub(super) data: DataSpace<M>,
 
     /// Read permissions per page
-    pub(super) readable_pages: PagePermissions<PAGES, M>,
+    pub(super) readable_pages: PagePermissions<M>,
 
     /// Write permissions per page
-    pub(super) writable_pages: PagePermissions<PAGES, M>,
+    pub(super) writable_pages: PagePermissions<M>,
 
     /// Execute permissions per page
-    pub(super) executable_pages: PagePermissions<PAGES, M>,
+    pub(super) executable_pages: PagePermissions<M>,
 
     /// Allocation tracker
     pub(super) allocated_pages: B,
@@ -77,7 +80,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     pub(crate) fn set_all_readable_writeable(&mut self, listener: impl MemoryGovernanceListener)
     where
         B: Buddy<M>,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let length =
             NonZeroUsize::new(TOTAL_BYTES).expect("`TOTAL_BYTES` must be greater than zero");
@@ -98,7 +101,7 @@ impl<const PAGES: usize, const TOTAL_BYTES: usize, B, M: Mode>
     ) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let length = E::STORED_SIZE;
 
@@ -125,13 +128,13 @@ where
 {
     fn default() -> Self
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         MemoryImpl {
             data: DataSpace::new(TOTAL_BYTES),
-            readable_pages: PagePermissions::default(),
-            writable_pages: PagePermissions::default(),
-            executable_pages: PagePermissions::default(),
+            readable_pages: PagePermissions::new(PAGES),
+            writable_pages: PagePermissions::new(PAGES),
+            executable_pages: PagePermissions::new(PAGES),
             allocated_pages: B::default(),
         }
     }
@@ -140,7 +143,7 @@ where
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -159,7 +162,7 @@ where
     fn read_exec<E>(&self, address: Address) -> Result<super::InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -183,7 +186,7 @@ where
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let Some(values_len) = NonZeroUsize::new(values.len()) else {
             // zero-sized reads always valid
@@ -211,7 +214,7 @@ where
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         Self::check_bounds(address, E::STORED_SIZE, BadMemoryAccess)?;
 
@@ -233,7 +236,7 @@ where
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let Some(values_len) = NonZeroUsize::new(values.len()) else {
             // zero-sized writes always valid
@@ -258,7 +261,7 @@ where
 
     fn clone_state(&self) -> Self
     where
-        M: CloneAtomMode + CloneDataSpaceMode,
+        M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode,
     {
         Self {
             data: self.data.clone_state(),
@@ -271,7 +274,7 @@ where
 
     fn reset(&mut self, mut listener: impl MemoryGovernanceListener)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         const SIZE_OF_U64: usize = u64::STORED_SIZE.get();
 
@@ -315,7 +318,7 @@ where
         mut listener: impl MemoryGovernanceListener,
     ) -> Result<(), super::MemoryGovernanceError>
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         Self::check_bounds(address, length, super::MemoryGovernanceError)?;
 
@@ -397,7 +400,7 @@ where
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, super::MemoryGovernanceError>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // Mark the page range as occupied
         let address = self.allocate_pages(address_hint, length, allow_replace)?;
@@ -444,7 +447,7 @@ where
 
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
-        M: EncodeAtomMode + EncodeDataSpaceMode,
+        M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode,
     {
         Encode::encode(self, encoder)
     }
@@ -457,7 +460,7 @@ where
     F: Fold,
     DataSpace<M>: Foldable<F>,
     B: Foldable<F>,
-    PagePermissions<PAGES, M>: Foldable<F>,
+    PagePermissions<M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
@@ -476,7 +479,7 @@ where
     M: Mode,
     B: Unfoldable,
     DataSpace<M>: Unfoldable,
-    PagePermissions<PAGES, M>: Unfoldable,
+    PagePermissions<M>: Unfoldable,
 {
     fn unfold<U: Unfold>(source: U) -> Result<Self, U::Error> {
         let mut source = source.into_node()?;
@@ -501,7 +504,7 @@ impl<
     const PAGES: usize,
     const TOTAL_BYTES: usize,
     B: Buddy<M>,
-    M: EncodeAtomMode + EncodeDataSpaceMode,
+    M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode,
 > Encode for MemoryImpl<PAGES, TOTAL_BYTES, B, M>
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {

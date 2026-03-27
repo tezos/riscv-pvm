@@ -38,6 +38,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -105,7 +108,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     /// Reset the machine state.
     pub fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.hart.reset(memory::FIRST_ADDRESS);
         self.main_memory.reset(listener);
@@ -119,7 +122,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
         phys_addr: Address,
     ) -> Result<memory::InstructionData<u16>, Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.main_memory
             .read_exec(phys_addr)
@@ -132,7 +135,7 @@ impl<MC: memory::MemoryConfig, M: Mode> MachineCoreState<MC, M> {
     #[inline]
     fn fetch_instr(&self, addr: Address) -> Result<memory::InstructionData<Instruction>, Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let lower = self.fetch_instr_halfword(addr)?;
 
@@ -229,7 +232,9 @@ where
 pub const RISCV_ABI_SP_ALIGNMENT: NonZeroU64 =
     NonZeroU64::new(16).expect("Alignment must be non-zero");
 
-impl<MC: memory::MemoryConfig, M: AtomMode + DataSpaceMode> Default for MachineCoreState<MC, M> {
+impl<MC: memory::MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode> Default
+    for MachineCoreState<MC, M>
+{
     fn default() -> Self {
         Self {
             hart: HartState::default(),
@@ -251,7 +256,7 @@ impl<'normal, MC: memory::MemoryConfig> Provable<'normal> for MachineCoreState<M
     }
 }
 
-impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> Clone
+impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode> Clone
     for MachineCoreState<MC, M>
 {
     fn clone(&self) -> Self {
@@ -263,7 +268,7 @@ impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> Clone
     }
 }
 
-impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> CloneState
+impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode> CloneState
     for MachineCoreState<MC, M>
 {
     fn clone_state(&self) -> Self {
@@ -275,7 +280,7 @@ impl<MC: memory::MemoryConfig, M: CloneAtomMode + CloneDataSpaceMode> CloneState
     }
 }
 
-impl<MC: memory::MemoryConfig, M: EncodeAtomMode + EncodeDataSpaceMode> Encode
+impl<MC: memory::MemoryConfig, M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode> Encode
     for MachineCoreState<MC, M>
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
@@ -307,8 +312,11 @@ pub struct MachineState<MC: memory::MemoryConfig, PC, M: Mode> {
     pub page_cache: PC,
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode> Clone
-    for MachineState<MC, PC, M>
+impl<
+    MC: memory::MemoryConfig,
+    PC: PageCache<MC, M>,
+    M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode,
+> Clone for MachineState<MC, PC, M>
 {
     // TODO: RV-806: implement Clone on PageCache
     fn clone(&self) -> Self {
@@ -332,8 +340,11 @@ impl<'normal, MC: memory::MemoryConfig, PC: PageCache<MC, Normal>> Provable<'nor
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: CloneAtomMode + CloneDataSpaceMode>
-    CloneState for MachineState<MC, PC, M>
+impl<
+    MC: memory::MemoryConfig,
+    PC: PageCache<MC, M>,
+    M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode,
+> CloneState for MachineState<MC, PC, M>
 {
     fn clone_state(&self) -> Self {
         Self {
@@ -378,7 +389,7 @@ impl<MC, PC, M> Encode for MachineState<MC, PC, M>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    M: EncodeAtomMode + EncodeDataSpaceMode,
+    M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode,
 {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.core.encode(encoder)
@@ -468,8 +479,8 @@ impl<E> Default for StepManyResult<E> {
     }
 }
 
-impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode> Default
-    for MachineState<MC, PC, M>
+impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: AtomMode + DataSpaceMode + VectorMode>
+    Default for MachineState<MC, PC, M>
 {
     fn default() -> Self {
         Self {
@@ -483,7 +494,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     /// Reset the machine state.
     pub fn reset(&mut self)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let listener = &mut self.page_cache;
         self.core.reset(listener);
@@ -506,7 +517,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     /// *not* writable.
     fn run_instr_at(&mut self, addr: Address) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let memory::InstructionData {
             data: instr,
@@ -531,7 +542,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     #[inline]
     pub fn step(&mut self) -> Result<(), Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         match self.step_max_inner(1).error {
             Some(error) => Err(error),
@@ -541,7 +552,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
 
     pub(super) fn step_max_inner(&mut self, max_steps: usize) -> StepManyResult<Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -583,7 +594,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     #[inline]
     pub fn step_max(&mut self, max_steps: Bound<usize>) -> StepManyResult<Exception>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let mut result = StepManyResult::ZERO;
 
@@ -614,7 +625,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> StepManyResult<E>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let mut steps = 0usize;
 
@@ -652,7 +663,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         mut handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         match cause {
             Exception::EnvCall => return handle(self),
@@ -701,7 +712,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         handle: impl FnMut(&mut Self) -> ControlFlow<E>,
     ) -> ControlFlow<E>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let instr_pc = self.core.hart.pc.read();
         let result = self
@@ -740,7 +751,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
         program: &Program<MC>,
     ) -> Result<(Address, Address), MachineError>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let program_start = program.segments.keys().min().copied().unwrap_or(0);
         let program_end = program
@@ -797,7 +808,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
 
     fn dispatch_signal_or_trap(&mut self, signal: Signal)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         if self.core.dispatch_signal(signal).is_err() {
             self.core.hart.pc.write(0);
@@ -810,7 +821,7 @@ impl<MC: memory::MemoryConfig, PC: PageCache<MC, M>, M: Mode> MachineState<MC, P
     ) where
         MB: memory::buddy::Buddy<M>,
         MC: MemoryConfig<State<M> = memory::state::MemoryImpl<PAGES, TOTAL_BYTES, MB, M>>,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         let (main_memory, listener) = self.memory_with_listener();
         main_memory.set_all_readable_writeable(listener);

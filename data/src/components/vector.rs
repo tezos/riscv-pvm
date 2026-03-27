@@ -127,12 +127,14 @@ impl<T> Vector<T, Normal> {
 impl<T, M: VectorMode> Index<usize> for Vector<T, M> {
     type Output = T;
 
+    #[inline(always)]
     fn index(&self, idx: usize) -> &T {
         M::index(self, idx)
     }
 }
 
 impl<T, M: VectorMode> IndexMut<usize> for Vector<T, M> {
+    #[inline(always)]
     fn index_mut(&mut self, idx: usize) -> &mut T {
         M::index_mut(self, idx)
     }
@@ -434,6 +436,7 @@ impl VectorMode for Normal {
         Vector { vector }
     }
 
+    #[inline(always)]
     fn index<T>(this: &Vector<T, Self>, idx: usize) -> &T {
         &this.vector[idx]
     }
@@ -448,6 +451,7 @@ impl VectorMode for Normal {
         unsafe { this.vector.get_unchecked_mut(idx) }
     }
 
+    #[inline(always)]
     fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
         &mut this.vector[idx]
     }

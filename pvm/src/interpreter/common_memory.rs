@@ -5,6 +5,7 @@
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::serialisation::elem::Elem;
 
 use crate::exceptions::Exception;
@@ -17,7 +18,7 @@ use crate::machine_state::registers::XRegister;
 impl<MC, M> MachineCoreState<MC, M>
 where
     MC: memory::MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     /// Generic read function for loading `T::STORED_SIZE` bytes from `address`
     pub(super) fn read_from_address<T: Elem>(&mut self, address: u64) -> Result<T, Exception> {

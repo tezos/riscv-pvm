@@ -18,8 +18,6 @@ use octez_riscv::parser::parse;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
-use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::data_space::DataSpaceMode;
 
 use crate::cli::BenchMode;
 use crate::cli::BenchRunOptions;
@@ -37,10 +35,7 @@ use crate::format_status;
 
 /// Helper function to look in the [`Stepper`] to peek for the current [`Instr`]
 /// Assumes the program counter will be a multiple of 2.
-fn get_current_instr<S: Stepper>(stepper: &S) -> Result<Instr, InstrGetError>
-where
-    S::Mode: AtomMode + DataSpaceMode,
-{
+fn get_current_instr<S: Stepper>(stepper: &S) -> Result<Instr, InstrGetError> {
     let machine_state = stepper.machine_state();
     let get_half_instr = |raw_pc: Address| -> Result<u16, InstrGetError> {
         machine_state

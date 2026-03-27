@@ -15,6 +15,7 @@ use arithmetic::Arithmetic;
 use comparable::Comparable;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use rustc_apfloat::Float;
 use rustc_apfloat::Status;
 use rustc_apfloat::StatusAnd;
@@ -248,7 +249,7 @@ where
     fn csr_write(&mut self, reg: CSRegister, value: Self::XValue);
 }
 
-impl<MC: MemoryConfig, M: AtomMode + DataSpaceMode> ICB for MachineCoreState<MC, M> {
+impl<MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode> ICB for MachineCoreState<MC, M> {
     type XValue = XValue;
 
     type FValue = FValue;

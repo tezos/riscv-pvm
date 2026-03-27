@@ -211,7 +211,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Provide input. Returns `false` if the machine state is not expecting input.
     pub(crate) fn provide_input(&mut self, input: PvmInput) -> bool
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // TODO RV-615: Remove `as u32` conversion
         match input {
@@ -228,7 +228,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// expecting a message.
     pub(crate) fn provide_inbox_message(&mut self, level: u32, counter: u32, payload: &[u8]) -> bool
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         if !tezos::provide_input(
             &mut self.status,
@@ -252,7 +252,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Returns `false` if the machine is not expecting a reveal.
     pub(crate) fn provide_reveal_response(&mut self, reveal_data: &[u8]) -> bool
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         if !tezos::provide_reveal_response(
             &mut self.status,
@@ -279,7 +279,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Provide a reveal error response to the PVM
     pub fn provide_reveal_error_response(&mut self)
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.machine_state
             .core

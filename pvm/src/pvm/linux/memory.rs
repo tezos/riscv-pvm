@@ -20,6 +20,7 @@ use std::num::NonZeroUsize;
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -87,7 +88,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         if let Some(length) = NonZeroUsize::new(length as usize) {
             let (main_memory, listener) = state.memory_with_listener();
@@ -119,7 +120,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // We don't allow shared mappings
         match flags.visibility {
@@ -177,7 +178,7 @@ impl<M: Mode> SupervisorState<M> {
     where
         MC: MemoryConfig,
         PC: PageCache<MC, M>,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         // TODO: RV-561: use u64 everywhere in the PVM
         let length: NonZeroUsize = length.try_into().expect("expect length to fit into usize");

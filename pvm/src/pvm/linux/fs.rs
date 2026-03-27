@@ -6,6 +6,7 @@
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::mode::Mode;
 
 use super::SupervisorState;
@@ -82,7 +83,7 @@ impl<M: Mode> SupervisorState<M> {
         length: u64,
     ) -> Result<u64, Error>
     where
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         const CWD: &[u8] = c"/".to_bytes_with_nul();
 

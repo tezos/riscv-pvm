@@ -32,6 +32,7 @@ pub use entrypoint::Entrypoint;
 pub use interpreted::InterpretedCompiler;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::mode::Mode;
 use state::PageCacheImpl;
 
@@ -110,7 +111,7 @@ pub trait PageCache<MC: MemoryConfig, M: Mode>: MemoryGovernanceListener {
     /// page will contain the code for `addr`.
     fn get_code_page(&mut self, addr: Address) -> Option<impl CodePage<'_, MC, M>>
     where
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Populate a page with instruction and dispatch information, if the page has R+X permissions only.
     fn populate_page(&mut self, address: Address, core: &MachineCoreState<MC, M>)
@@ -150,7 +151,7 @@ pub(crate) fn run_code_page_interpreted<I, MC, M>(
 where
     I: AsRef<Instruction>,
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let mut result = StepManyResult::ZERO;
 
