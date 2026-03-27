@@ -92,6 +92,26 @@ impl<T, M: VectorMode> Vector<T, M> {
     ) -> Result<(), E> {
         M::try_resize_with(self, new_len, new_value)
     }
+
+    /// Perform an [`Self::index`] operation without a bounds check.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the provided index is within the vector's bounds.
+    #[inline(always)]
+    pub unsafe fn index_unchecked(&self, idx: usize) -> &T {
+        unsafe { M::index_unchecked(self, idx) }
+    }
+
+    /// Perform an [`Self::index_mut`] operation without a bounds check.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the provided index is within the vector's bounds.
+    #[inline(always)]
+    pub unsafe fn index_unchecked_mut(&mut self, idx: usize) -> &mut T {
+        unsafe { M::index_unchecked_mut(self, idx) }
+    }
 }
 
 impl<T> Vector<T, Normal> {
@@ -381,6 +401,20 @@ pub trait VectorMode: Mode {
     /// See [`Vector::index`].
     fn index<T>(this: &Vector<T, Self>, idx: usize) -> &T;
 
+    /// See [`Vector::index_unchecked`].
+    ///
+    /// # Safety
+    ///
+    /// See notice in [`Vector::index_unchecked`].
+    unsafe fn index_unchecked<T>(this: &Vector<T, Self>, idx: usize) -> &T;
+
+    /// See [`Vector::index_unchecked_mut`].
+    ///
+    /// # Safety
+    ///
+    /// See notice in [`Vector::index_unchecked_mut`].
+    unsafe fn index_unchecked_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T;
+
     /// See [`Vector::index_mut`].
     fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T;
 
@@ -402,6 +436,16 @@ impl VectorMode for Normal {
 
     fn index<T>(this: &Vector<T, Self>, idx: usize) -> &T {
         &this.vector[idx]
+    }
+
+    #[inline(always)]
+    unsafe fn index_unchecked<T>(this: &Vector<T, Self>, idx: usize) -> &T {
+        unsafe { this.vector.get_unchecked(idx) }
+    }
+
+    #[inline(always)]
+    unsafe fn index_unchecked_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
+        unsafe { this.vector.get_unchecked_mut(idx) }
     }
 
     fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
@@ -457,6 +501,14 @@ impl VectorMode for Prove<'_> {
         } else {
             &this.vector.appended[idx - this.vector.active_previous]
         }
+    }
+
+    unsafe fn index_unchecked<T>(this: &Vector<T, Self>, idx: usize) -> &T {
+        Self::index(this, idx)
+    }
+
+    unsafe fn index_unchecked_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
+        Self::index_mut(this, idx)
     }
 
     fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
@@ -532,6 +584,14 @@ impl VectorMode for Verify {
                 unsafe { not_found() }
             }
         }
+    }
+
+    unsafe fn index_unchecked<T>(this: &Vector<T, Self>, idx: usize) -> &T {
+        Self::index(this, idx)
+    }
+
+    unsafe fn index_unchecked_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
+        Self::index_mut(this, idx)
     }
 
     fn index_mut<T>(this: &mut Vector<T, Self>, idx: usize) -> &mut T {
