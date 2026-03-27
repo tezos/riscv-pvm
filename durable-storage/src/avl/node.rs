@@ -20,6 +20,9 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -146,6 +149,31 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
             right: TreeId::default(),
             hash: OnceLock::new(),
         }
+    }
+
+    /// Construct a [`Node`] from its branches in a proof, advancing the deserialiser context.
+    pub(super) fn from_branches<D: DeserialiserNode>(
+        ctx: D,
+    ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
+    where
+        Atom<Meta, M>: FromProof,
+        Bytes<M>: FromProof,
+        TreeId: FromProof,
+    {
+        let (ctx, meta) = ctx.next_branch::<Atom<Meta, M>>()?;
+        let (ctx, data) = ctx.next_branch::<Bytes<M>>()?;
+        let (ctx, left) = ctx.next_branch::<TreeId>()?;
+        let (ctx, right) = ctx.next_branch::<TreeId>()?;
+
+        let node = Node {
+            meta,
+            data,
+            left,
+            right,
+            hash: Default::default(),
+        };
+
+        Ok((ctx, node))
     }
 
     /// Returns the hash of this node.

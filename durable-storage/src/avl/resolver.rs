@@ -35,9 +35,16 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
+use octez_riscv_data::mode::Verify;
+use octez_riscv_data::mode::utils::not_found;
 use trait_set::trait_set;
 
 use super::node::Node;
@@ -560,6 +567,115 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
 
         Ok(id.inner.get_mut().expect("inner was just set"))
+    }
+}
+
+/// Identifier for a node resolved in [`Verify`] mode.
+///
+/// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
+/// validation should be present or blinded from being accessed in the proof.
+#[derive(Clone)]
+pub enum VerifyNodeId {
+    Present(Arc<Node<VerifyTreeId, Verify>>),
+    Blinded(Hash),
+}
+
+impl FromProof for VerifyNodeId {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let ctx = proof.into_node()?;
+        match ctx.presence() {
+            Partial::Blinded(hash) => ctx.done(VerifyNodeId::Blinded(hash)),
+            Partial::Present(()) => {
+                let (ctx, node) = Node::from_branches(ctx)?;
+                ctx.done(VerifyNodeId::Present(Arc::new(node)))
+            }
+            // SAFETY: called only in `Verify` mode
+            Partial::Absent => unsafe { not_found() },
+        }
+    }
+}
+
+/// Identifier for a tree resolved in [`Verify`] mode.
+#[derive(Clone)]
+pub enum VerifyTreeId {
+    Present(Tree<VerifyNodeId>),
+    Blinded(Hash),
+    Absent,
+}
+
+impl FromProof for VerifyTreeId {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let ctx = proof.into_node()?;
+        match ctx.presence() {
+            Partial::Absent => ctx.done(VerifyTreeId::Absent),
+            Partial::Blinded(hash) => ctx.done(VerifyTreeId::Blinded(hash)),
+            Partial::Present(()) => {
+                let (ctx, present) = ctx.next_branch_with(|proof| proof.into_leaf::<bool>())?;
+                match present {
+                    Partial::Present(true) => {
+                        let (ctx, node_id) = ctx.next_branch_with(|proof| {
+                            let suspended = VerifyNodeId::from_proof(proof)?;
+                            Ok(suspended)
+                        })?;
+                        ctx.done(VerifyTreeId::Present(Tree::from(Some(node_id))))
+                    }
+                    Partial::Present(false) => ctx.done(VerifyTreeId::Present(Tree::default())),
+                    // SAFETY: called only in `Verify` mode
+                    Partial::Blinded(_) | Partial::Absent => unsafe { not_found() },
+                }
+            }
+        }
+    }
+}
+
+/// Adapter that projects in-memory AVL identifiers into verify-mode values.
+pub struct VerifyResolver;
+
+impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
+    fn resolve<'a>(
+        &self,
+        id: &'a VerifyNodeId,
+    ) -> Result<&'a Node<VerifyTreeId, Verify>, OperationalError> {
+        match id {
+            VerifyNodeId::Present(inner) => Ok(inner),
+            // SAFETY: called only in `Verify` mode
+            VerifyNodeId::Blinded(_) => unsafe { not_found() },
+        }
+    }
+
+    fn resolve_mut<'a>(
+        &mut self,
+        id: &'a mut VerifyNodeId,
+    ) -> Result<&'a mut Node<VerifyTreeId, Verify>, OperationalError> {
+        match id {
+            VerifyNodeId::Present(inner) => Ok(Arc::make_mut(inner)),
+            // SAFETY: called only in `Verify` mode
+            VerifyNodeId::Blinded(_) => unsafe { not_found() },
+        }
+    }
+}
+
+impl Resolver<VerifyTreeId, Tree<VerifyNodeId>> for VerifyResolver {
+    fn resolve<'a>(
+        &self,
+        id: &'a VerifyTreeId,
+    ) -> Result<&'a Tree<VerifyNodeId>, OperationalError> {
+        match id {
+            VerifyTreeId::Present(inner) => Ok(inner),
+            // SAFETY: called only in `Verify` mode
+            VerifyTreeId::Blinded(_) | VerifyTreeId::Absent => unsafe { not_found() },
+        }
+    }
+
+    fn resolve_mut<'a>(
+        &mut self,
+        id: &'a mut VerifyTreeId,
+    ) -> Result<&'a mut Tree<VerifyNodeId>, OperationalError> {
+        match id {
+            VerifyTreeId::Present(inner) => Ok(inner),
+            // SAFETY: called only in `Verify` mode
+            VerifyTreeId::Blinded(_) | VerifyTreeId::Absent => unsafe { not_found() },
+        }
     }
 }
 
