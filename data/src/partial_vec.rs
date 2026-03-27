@@ -31,6 +31,8 @@ use std::ops::Range;
 
 use perfect_derive::perfect_derive;
 
+use crate::clone::CloneState;
+
 /// Entry in the partial vector that represents a defined data range
 #[perfect_derive(Debug, Clone, Default)]
 struct DefinedEntry<T> {
@@ -45,6 +47,15 @@ impl<T> DefinedEntry<T> {
     /// Get the exclusive end index of this defined entry.
     const fn end(&self) -> usize {
         self.start + self.data.len()
+    }
+}
+
+impl<T: CloneState> CloneState for DefinedEntry<T> {
+    fn clone_state(&self) -> Self {
+        Self {
+            start: self.start,
+            data: self.data.clone_state(),
+        }
     }
 }
 
@@ -367,6 +378,14 @@ impl<T> From<Vec<T>> for PartialVec<T> {
 
         Self {
             entries: vec![entry],
+        }
+    }
+}
+
+impl<T: CloneState> CloneState for PartialVec<T> {
+    fn clone_state(&self) -> Self {
+        Self {
+            entries: self.entries.clone_state(),
         }
     }
 }

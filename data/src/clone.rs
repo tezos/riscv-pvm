@@ -51,6 +51,12 @@ impl<T: CloneState> CloneState for Box<[T]> {
     }
 }
 
+impl<T: CloneState> CloneState for Vec<T> {
+    fn clone_state(&self) -> Self {
+        self.iter().map(CloneState::clone_state).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CloneState;
