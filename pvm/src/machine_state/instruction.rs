@@ -20,6 +20,7 @@ use bincode::Decode;
 use bincode::Encode;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 
 use super::MachineCoreState;
 use super::ProgramCounterUpdate;
@@ -339,7 +340,7 @@ impl OpCode {
     pub(super) fn to_run<MC, M>(self) -> RunInstr<MC, M>
     where
         MC: MemoryConfig,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         match self {
             Self::X64Add => Args::run_x64_add,
@@ -678,7 +679,7 @@ impl Instruction {
     ) -> Result<ProgramCounterUpdate<Address>, Exception>
     where
         MC: MemoryConfig,
-        M: AtomMode + DataSpaceMode,
+        M: AtomMode + DataSpaceMode + VectorMode,
     {
         (self.opcode.to_run())(&self.args, core)
     }
@@ -852,7 +853,7 @@ macro_rules! impl_fload_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.$fn(self.imm, self.rs1.x, self.rd.f)
                 .map(|_| Next(self.width))
@@ -893,7 +894,7 @@ macro_rules! impl_fstore_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.$fn(self.imm, self.rs1.x, self.rs2.f)
                 .map(|_| Next(self.width))
@@ -995,7 +996,7 @@ macro_rules! impl_f_x_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.x, self.rd.f);
             Ok(Next(self.width))
@@ -1009,7 +1010,7 @@ macro_rules! impl_f_x_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.x, self.rm, self.rd.f);
             Ok(Next(self.width))
@@ -1033,7 +1034,7 @@ macro_rules! impl_x_f_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.f, self.rd.x);
             Ok(Next(self.width))
@@ -1047,7 +1048,7 @@ macro_rules! impl_x_f_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode,
+            M: AtomMode + VectorMode + DataSpaceMode,
         {
             core.hart.$fn(self.rs1.f, self.rm, self.rd.x);
             Ok(Next(self.width))
@@ -1063,7 +1064,7 @@ macro_rules! impl_f_r_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode
+            M: AtomMode + VectorMode + DataSpaceMode
         {
             core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.f);
             Ok(Next(self.width))
@@ -1077,7 +1078,7 @@ macro_rules! impl_f_r_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode
+            M: AtomMode + VectorMode + DataSpaceMode
         {
             core.hart.$fn(self.rs1.f, self.rs2.f, self.rd.x);
             Ok(Next(self.width))
@@ -1091,7 +1092,7 @@ macro_rules! impl_f_r_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode
+            M: AtomMode + VectorMode + DataSpaceMode
         {
             core.hart.$fn(self.rs1.f, self.rm, self.rd.f);
             Ok(Next(self.width))
@@ -1105,7 +1106,7 @@ macro_rules! impl_f_r_type {
         ) -> Result<ProgramCounterUpdate<Address>, Exception>
         where
             MC: MemoryConfig,
-            M: AtomMode + DataSpaceMode
+            M: AtomMode + VectorMode + DataSpaceMode
         {
             core.hart.$fn(self.rs1.f, self.rs2.f, $(self.$field,)* self.rd.f);
             Ok(Next(self.width))

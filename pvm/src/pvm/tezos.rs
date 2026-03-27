@@ -96,7 +96,7 @@ pub fn provide_input<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     // This method should only do something when we're waiting for input.
     match status.read() {
@@ -145,7 +145,7 @@ pub fn provide_reveal_response<MC, M>(
 ) -> bool
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     // This method should only do something when we're waiting for reveal.
     if status.read() != PvmStatus::WaitingForReveal {
@@ -219,7 +219,7 @@ fn handle_tezos_write_output<MC, M>(
 fn handle_tezos_ed25519_sign<MC, M>(machine: &mut MachineCoreState<MC, M>) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let arg_sk_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -248,7 +248,7 @@ fn handle_tezos_ed25519_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -278,7 +278,7 @@ fn handle_tezos_blake2b_hash256<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -302,7 +302,7 @@ fn handle_tezos_secp256k1_verify<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
@@ -327,7 +327,7 @@ fn handle_tezos_keccak256_hash<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let arg_out_addr = machine.hart.xregisters.read(a0);
     let arg_msg_addr = machine.hart.xregisters.read(a1);
@@ -353,7 +353,7 @@ fn handle_tezos_reveal<MC, M>(
     status: &mut Atom<PvmStatus, M>,
 ) where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode,
+    M: AtomMode + DataSpaceMode + VectorMode,
 {
     let request_address = machine.hart.xregisters.read(a0);
     let request_size = machine.hart.xregisters.read(a1) as usize;

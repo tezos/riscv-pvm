@@ -20,6 +20,9 @@ use octez_riscv_data::components::atom::EncodeAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
 use octez_riscv_data::components::data_space::EncodeDataSpaceMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -218,47 +221,47 @@ pub trait Memory<M: Mode>: Sized {
     /// Create a new memory instance.
     fn default() -> Self
     where
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Read an element in the region. `address` is in bytes.
     fn read<E>(&self, address: Address) -> Result<E, BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Read an element in the region that will be used in execution. `address` is in bytes.
     fn read_exec<E>(&self, address: Address) -> Result<InstructionData<E>, BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Read elements from the region. `address` is in bytes.
     fn read_all<E>(&self, address: Address, values: &mut [E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Update an element in the region. `address` is in bytes.
     fn write<E>(&mut self, address: Address, value: E) -> Result<(), BadMemoryAccess>
     where
         E: Elem,
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Update multiple elements in the region. `address` is in bytes.
     fn write_all<E>(&mut self, address: Address, values: &[E]) -> Result<(), BadMemoryAccess>
     where
         E: Elem + Copy,
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Clone the persistent memory state.
     fn clone_state(&self) -> Self
     where
-        M: CloneAtomMode + CloneDataSpaceMode;
+        M: CloneAtomMode + CloneVectorMode + CloneDataSpaceMode;
 
     /// Zero-out all memory.
     fn reset(&mut self, listener: impl MemoryGovernanceListener)
     where
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Protect the pages that belong to the given address range.
     fn protect_pages(
@@ -269,7 +272,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: AtomMode;
+        M: AtomMode + VectorMode;
 
     /// Allocate pages for the given address range.
     fn allocate_pages(
@@ -300,7 +303,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<Address, MemoryGovernanceError>
     where
-        M: AtomMode + DataSpaceMode;
+        M: AtomMode + DataSpaceMode + VectorMode;
 
     /// Free the pages in that address range and make sure the range is no longer accessible.
     fn deallocate_and_protect_pages(
@@ -310,7 +313,7 @@ pub trait Memory<M: Mode>: Sized {
         listener: impl MemoryGovernanceListener,
     ) -> Result<(), MemoryGovernanceError>
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         self.deallocate_pages(address, length)?;
         self.protect_pages(address, length, Permissions::NONE, listener)
@@ -319,7 +322,7 @@ pub trait Memory<M: Mode>: Sized {
     /// Serialise the memory state.
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError>
     where
-        M: EncodeAtomMode + EncodeDataSpaceMode;
+        M: EncodeAtomMode + EncodeDataSpaceMode + EncodeVectorMode;
 }
 
 /// Memory configuration

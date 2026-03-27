@@ -7,6 +7,7 @@ use std::ops::Bound;
 
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::data_space::DataSpaceMode;
+use octez_riscv_data::components::vector::VectorMode;
 
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::MemoryConfig;
@@ -90,7 +91,7 @@ pub trait Stepper {
     type MemoryConfig: MemoryConfig;
 
     /// State backend with which the stepper was instantiated
-    type Mode: AtomMode + DataSpaceMode;
+    type Mode: AtomMode + DataSpaceMode + VectorMode;
 
     /// Obtain a reference to the underlying machine state.
     fn machine_state(&self) -> &MachineCoreState<Self::MemoryConfig, Self::Mode>;

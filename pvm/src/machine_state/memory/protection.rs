@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::ops::Index;
 use std::ops::RangeInclusive;
 
 use bincode::Decode;
@@ -16,10 +15,12 @@ use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
+use octez_riscv_data::components::vector::CloneVectorMode;
+use octez_riscv_data::components::vector::EncodeVectorMode;
+use octez_riscv_data::components::vector::Vector;
+use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
-use octez_riscv_data::foldable::seq_tree::Many;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -33,30 +34,38 @@ use perfect_derive::perfect_derive;
 
 use super::Address;
 use super::address_to_page_index;
-use crate::array_utils::boxed_from_fn;
 use crate::state_backend::NarrowlySized;
-use crate::state_backend::proof_backend::merkle::MERKLE_ARITY;
 
 /// Tracks access permissions for each page
 #[perfect_derive(Clone, PartialEq, Eq)]
-pub struct PagePermissions<const PAGES: usize, M: Mode> {
-    pages: Box<[Atom<bool, M>; PAGES]>,
+pub struct PagePermissions<M: Mode> {
+    pages: Vector<Atom<bool, M>, M>,
 }
 
-impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
+impl<M: Mode> PagePermissions<M> {
+    /// Create a new [`PagePermissions`] with `pages` as the number of pages.
+    pub fn new(pages: usize) -> Self
+    where
+        M: AtomMode + VectorMode,
+    {
+        let values = (0..pages).map(|_| Atom::new(false)).collect();
+        let pages = Vector::new(values);
+        Self { pages }
+    }
+
     /// Check if the memory at `address..address+length` can be accessed.
     ///
     /// # Safety
     ///
-    /// The address and length must be valid for an address space consisting of a number of `PAGES`.
+    /// The address and length must be valid for an address space consisting of a number of `pages`.
     /// This function is not defined for address and length combinations which are out of bounds.
     #[inline]
     pub unsafe fn can_access(&self, pages: RangeInclusive<u64>) -> bool
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         for page in pages {
-            if unsafe { !self.pages.get_unchecked(page as usize).read() } {
+            if unsafe { !self.pages.index_unchecked(page as usize).read() } {
                 return false;
             }
         }
@@ -76,10 +85,10 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
     pub unsafe fn can_access_narrow<E>(&self, address: Address) -> bool
     where
         E: NarrowlySized,
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
         let start_page = address_to_page_index(address);
-        if unsafe { !self.pages.get_unchecked(start_page).read() } {
+        if unsafe { !self.pages.index_unchecked(start_page).read() } {
             return false;
         }
 
@@ -88,53 +97,46 @@ impl<const PAGES: usize, M: Mode> PagePermissions<PAGES, M> {
             .wrapping_sub(1);
 
         let end_page = address_to_page_index(end_address);
-        unsafe { self.pages.get_unchecked(end_page).read() }
+        unsafe { self.pages.index_unchecked(end_page).read() }
     }
 
     /// Change the access permissions for the given range.
     pub fn modify_access(&mut self, pages: RangeInclusive<u64>, accessible: bool)
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
-        pages.filter(|&page| page < PAGES as u64).for_each(|page| {
+        let len_pages = self.pages.len() as u64;
+
+        for page in pages {
+            if page >= len_pages {
+                break;
+            }
+
             self.pages[page as usize].write(accessible);
-        })
+        }
     }
 
     /// Reset access permissions on all pages.
     pub fn reset(&mut self)
     where
-        M: AtomMode,
+        M: AtomMode + VectorMode,
     {
-        self.pages.iter_mut().for_each(|page| page.write(false));
-    }
-}
-
-impl<'normal, const PAGES: usize> Provable<'normal> for PagePermissions<PAGES, Normal> {
-    type Prover = PagePermissions<PAGES, Prove<'normal>>;
-
-    fn start_proof(&'normal self) -> Self::Prover {
-        let pages = self
-            .pages
-            .iter()
-            .map(Atom::start_proof)
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Collecting into an array of the same length should always succeed");
-
-        PagePermissions { pages }
-    }
-}
-
-impl<const PAGES: usize, M: AtomMode> Default for PagePermissions<PAGES, M> {
-    fn default() -> Self {
-        PagePermissions {
-            pages: boxed_from_fn(Atom::default),
+        for page in 0..self.pages.len() {
+            self.pages[page].write(false);
         }
     }
 }
 
-impl<const PAGES: usize, M: CloneAtomMode> CloneState for PagePermissions<PAGES, M> {
+impl<'normal> Provable<'normal> for PagePermissions<Normal> {
+    type Prover = PagePermissions<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        let pages = self.pages.start_proof();
+        PagePermissions { pages }
+    }
+}
+
+impl<M: CloneAtomMode + CloneVectorMode> CloneState for PagePermissions<M> {
     fn clone_state(&self) -> Self {
         Self {
             pages: self.pages.clone_state(),
@@ -142,36 +144,32 @@ impl<const PAGES: usize, M: CloneAtomMode> CloneState for PagePermissions<PAGES,
     }
 }
 
-impl<C, const PAGES: usize> Decode<C> for PagePermissions<PAGES, Normal> {
+impl<C> Decode<C> for PagePermissions<Normal> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let pages = Decode::decode(decoder)?;
         Ok(Self { pages })
     }
 }
 
-impl<const PAGES: usize, M: EncodeAtomMode> Encode for PagePermissions<PAGES, M> {
+impl<M: EncodeAtomMode + EncodeVectorMode> Encode for PagePermissions<M> {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.pages.encode(encoder)
     }
 }
 
-impl<const PAGES: usize, M, F> Foldable<F> for PagePermissions<PAGES, M>
+impl<M, F> Foldable<F> for PagePermissions<M>
 where
     M: Mode,
     F: Fold,
-    Atom<bool, M>: Foldable<F>,
+    Vector<Atom<bool, M>, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
-        let page_generator = |idx| self.pages.index(idx);
-        IndexableSeqAsTree::new(PAGES, MERKLE_ARITY, &page_generator).fold(builder)
+        self.pages.fold(builder)
     }
 }
-impl<const PAGES: usize> FromProof for PagePermissions<PAGES, Verify> {
+
+impl FromProof for PagePermissions<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
-        let result = Many::<_, MERKLE_ARITY, PAGES>::from_proof(proof)?;
-        let result = result.map(|pages| Self {
-            pages: pages.into_boxed_array(),
-        });
-        Ok(result)
+        Vector::from_proof(proof).map(|result| result.map(|pages| Self { pages }))
     }
 }
