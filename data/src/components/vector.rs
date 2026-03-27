@@ -124,12 +124,6 @@ impl<T, M: VectorMode> Default for Vector<T, M> {
     }
 }
 
-impl<T: Clone, M: CloneVectorMode> CloneState for Vector<T, M> {
-    fn clone_state(&self) -> Self {
-        M::clone(self)
-    }
-}
-
 impl<T: Foldable<HashFold>> Foldable<HashFold> for Vector<T, Normal> {
     fn fold(&self, builder: HashFold) -> Hash {
         let mut node = builder.into_node_fold();
@@ -338,6 +332,12 @@ impl<T: Eq, M: VectorMode> Eq for Vector<T, M> {}
 impl<T: Clone, M: CloneVectorMode> Clone for Vector<T, M> {
     fn clone(&self) -> Self {
         M::clone(self)
+    }
+}
+
+impl<T: CloneState, M: CloneVectorMode> CloneState for Vector<T, M> {
+    fn clone_state(&self) -> Self {
+        M::clone_state(self)
     }
 }
 
@@ -588,12 +588,21 @@ pub trait CloneVectorMode: Mode {
     /// This clones the entire component, not just the internal value. Consider this when cloning
     /// components in [`crate::mode::Prove`] mode.
     fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self>;
+
+    /// Like [`Self::clone`] but uses `CloneState` instead.
+    fn clone_state<T: CloneState>(this: &Vector<T, Self>) -> Vector<T, Self>;
 }
 
 impl CloneVectorMode for Normal {
     fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
         Vector {
             vector: this.vector.clone(),
+        }
+    }
+
+    fn clone_state<T: CloneState>(this: &Vector<T, Self>) -> Vector<T, Self> {
+        Vector {
+            vector: this.vector.clone_state(),
         }
     }
 }
@@ -604,12 +613,24 @@ impl CloneVectorMode for Prove<'_> {
             vector: this.vector.clone(),
         }
     }
+
+    fn clone_state<T: CloneState>(this: &Vector<T, Self>) -> Vector<T, Self> {
+        Vector {
+            vector: this.vector.clone_state(),
+        }
+    }
 }
 
 impl CloneVectorMode for Verify {
     fn clone<T: Clone>(this: &Vector<T, Self>) -> Vector<T, Self> {
         Vector {
             vector: this.vector.clone(),
+        }
+    }
+
+    fn clone_state<T: CloneState>(this: &Vector<T, Self>) -> Vector<T, Self> {
+        Vector {
+            vector: this.vector.clone_state(),
         }
     }
 }
@@ -721,6 +742,18 @@ impl<T> ProveImpl<T> {
     }
 }
 
+impl<T: CloneState> CloneState for ProveImpl<T> {
+    fn clone_state(&self) -> Self {
+        Self {
+            previous: self.previous.clone_state(),
+            active_previous: self.active_previous,
+            accessed_indices: self.accessed_indices.clone(),
+            appended: self.appended.clone_state(),
+            read_length: self.read_length.clone(),
+        }
+    }
+}
+
 /// [`crate::mode::Verify`] mode implementation for the [`Vector`] component
 #[perfect_derive(Clone)]
 struct VerifyImpl<T> {
@@ -741,6 +774,16 @@ impl<T> VerifyImpl<T> {
         }
 
         self.items.is_all_undefined()
+    }
+}
+
+impl<T: CloneState> CloneState for VerifyImpl<T> {
+    fn clone_state(&self) -> Self {
+        Self {
+            original_length: self.original_length.clone(),
+            length: self.length.clone(),
+            items: self.items.clone_state(),
+        }
     }
 }
 
