@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::key::KEY_MAX_SIZE;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::registry::Registry;
@@ -264,6 +263,7 @@ fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
 fn test_durable_storage_inner(operations: Vec<Operation>) {
     cfg_if::cfg_if! {
         if #[cfg(feature = "rocksdb")] {
+            use octez_riscv_durable_storage::commit::CommitId;
             use octez_riscv_durable_storage::repo::DirectoryManager;
             use octez_riscv_test_utils::TestableTmpdir;
             use rand::random_range;
@@ -272,6 +272,7 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
             let base_dir = tmpdir.path().join("registry");
             let repo = DirectoryManager::new(&base_dir).expect("Failed to create manager");
             let checkout_repo = repo.clone();
+            let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
         } else {
             use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
             let repo = InMemoryRepo;
@@ -282,7 +283,6 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
         Registry::new(repo).expect("Creating the registry should succeed");
 
     let mut golden: Vec<GoldenData> = vec![];
-    let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
 
     for operation in operations {
         match operation {
