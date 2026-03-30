@@ -59,6 +59,7 @@ codecov.json: test-deps
 	@cargo llvm-cov \
 		--package octez-riscv \
 		--package octez-riscv-data \
+		--package octez-riscv-durable-storage \
 		--codecov \
 		--output-path $@ \
 		nextest
