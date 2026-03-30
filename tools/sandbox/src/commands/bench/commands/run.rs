@@ -30,6 +30,7 @@ use crate::commands::bench::data::SimpleBenchData;
 use crate::commands::bench::save_to_file;
 use crate::commands::bench::show_results;
 use crate::commands::run::PageCacheImpl;
+use crate::commands::run::durable_storage_dir;
 use crate::commands::run::make_pvm_stepper;
 use crate::format_status;
 
@@ -136,9 +137,14 @@ fn bench_simple<S: Stepper>(interpreter: &mut S, opts: &BenchRunOptions) -> Benc
 
 fn bench_iteration(path: &Path, opts: &BenchRunOptions) -> Result<BenchData, Box<dyn Error>> {
     let program = std::fs::read(path)?;
+    let durable_storage_dir = durable_storage_dir(&opts.common)?;
 
     let mut stepper =
-        make_pvm_stepper::<M1G, PageCacheImpl<M1G>>(program.as_slice(), &opts.common)?;
+        make_pvm_stepper::<M1G, PageCacheImpl<M1G>>(
+            program.as_slice(),
+            &opts.common,
+            &durable_storage_dir,
+        )?;
 
     Ok(match opts.mode {
         BenchMode::Simple => bench_simple(&mut stepper, opts),

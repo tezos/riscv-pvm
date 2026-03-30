@@ -19,6 +19,7 @@ comfy-table.workspace = true
 enum-tag.workspace = true
 gdbstub.workspace = true
 gdbstub_arch.workspace = true
+hex.workspace = true
 itertools.workspace = true
 meansd.workspace = true
 numfmt.workspace = true

@@ -3320,6 +3320,7 @@ dependencies = [
  "enum-tag",
  "gdbstub",
  "gdbstub_arch",
+ "hex",
  "itertools 0.14.0",
  "meansd",
  "numfmt",
