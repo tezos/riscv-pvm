@@ -285,6 +285,19 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for DepthAdjustedSe
     }
 }
 
+/// Compute the depth of a Merkle tree that encodes a sequence of the given length with the given
+/// arity.
+pub fn tree_depth(length: usize, arity: usize) -> u32 {
+    // `IndexableSeqAsTree` has a special-case layout where a single-element sequence is a
+    // bare leaf and all other lengths are wrapped in at least one node. We encode that in
+    // the adjusted depth by adding one level for all non-singleton lengths.
+    length
+        .saturating_sub(1)
+        .checked_ilog(arity)
+        .unwrap_or(0)
+        .saturating_add(u32::from(length != 1))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::foldable::Foldable;
