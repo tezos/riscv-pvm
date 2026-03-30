@@ -3,8 +3,7 @@
 
 all: check
 
-check: 
-	@cargo check --all-targets --no-default-features
-	@cargo check --all-targets
+check:
+	@cargo clippy --all-targets --no-default-features -- --deny warnings
 
 .PHONY: all check
