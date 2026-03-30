@@ -20,8 +20,9 @@ use crate::random::generate_keys;
 use crate::random::generate_random_bytes;
 use crate::random::generate_random_bytes_in_range;
 
+// Default values that can be overridden by passing environment variables.
 const BLOCK_FREQUENCY: usize = 5_000;
-const ERC_20_TRANSACTIONS: usize = 10_000;
+const ERC_20_TRANSACTION_COUNT: usize = 10_000;
 const PREPOPULATED_NODE_KEYS_COUNT: usize = 10_000_000;
 
 pub struct BenchmarkTemplate {
@@ -123,6 +124,26 @@ pub fn build_template(
     handle: &Handle,
     repo: &DirectoryManager,
 ) -> (BenchmarkTemplate, Database<PersistenceLayer, Normal>) {
+    let block_frequency: usize = std::env::var("BLOCK_FREQUENCY")
+        .ok()
+        .map(|v| v.parse().expect("BLOCK_FREQUENCY must be a number"))
+        .unwrap_or(BLOCK_FREQUENCY);
+
+    let transaction_count: usize = std::env::var("ERC_20_TRANSACTION_COUNT")
+        .ok()
+        .map(|v| {
+            v.parse()
+                .expect("ERC_20_TRANSACTION_COUNT must be a number")
+        })
+        .unwrap_or(ERC_20_TRANSACTION_COUNT);
+
+    let node_keys_count: usize = std::env::var("PREPOPULATED_NODE_KEYS_COUNT")
+        .ok()
+        .map(|v| {
+            v.parse()
+                .expect("PREPOPULATED_NODE_KEYS_COUNT must be a number")
+        })
+        .unwrap_or(PREPOPULATED_NODE_KEYS_COUNT);
     let mut database: Database<PersistenceLayer, _> =
         Database::try_new(handle, repo).expect("Creating a database should succeed");
     let mut rng = rng();
@@ -130,7 +151,7 @@ pub fn build_template(
     // The performance of the replayed operations depends on the number of nodes
     // already present, so prepopulate the database up front before timing the
     // ERC-20-shaped workload.
-    let keys = generate_keys(&mut rng, PREPOPULATED_NODE_KEYS_COUNT);
+    let keys = generate_keys(&mut rng, node_keys_count);
     for key in keys {
         let value = Bytes::from(generate_random_bytes_in_range(&mut rng, 1..32));
         database.set(key.clone(), value.clone()).ok();
@@ -191,9 +212,9 @@ pub fn build_template(
     // sample only replays the workload.
     let mut operations = Vec::new();
     operations.extend_from_slice(&erc_20_setup);
-    for i in 0..ERC_20_TRANSACTIONS {
+    for i in 0..transaction_count {
         operations.extend_from_slice(&erc_20_transaction);
-        if i % BLOCK_FREQUENCY == 0 {
+        if block_frequency > 0 && i % block_frequency == 0 {
             operations.extend_from_slice(&erc_20_block_creation);
         }
     }
