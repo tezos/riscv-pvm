@@ -15,6 +15,7 @@ use proptest::proptest;
 
 use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
+use crate::components::bytes::PAGE_SIZE;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
@@ -429,10 +430,11 @@ pub(crate) enum BytesMutOp {
 impl BytesMutOp {
     /// Strategy for generating operations to be issued against the Bytes state component
     pub(crate) fn any() -> impl Strategy<Value = Self> + Clone {
+        let upper_bound = 64 * PAGE_SIZE;
         prop_oneof![
-            (0usize..8192, vec(any::<u8>(), 0..50))
+            (0usize..upper_bound, vec(any::<u8>(), 0..50))
                 .prop_map(|(offset, data)| Self::Write { offset, data }),
-            (0usize..8192).prop_map(|new_size| Self::Resize { new_size }),
+            (0usize..upper_bound).prop_map(|new_size| Self::Resize { new_size }),
             BytesOp::any().prop_map(|op| Self::Immutable { op }),
         ]
     }
