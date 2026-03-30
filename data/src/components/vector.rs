@@ -32,6 +32,7 @@ use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::HashFold;
 use crate::hash::PartialHash;
@@ -244,19 +245,8 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verif
 
         node.add(&DepthAdjustedSeqAsTree {
             inner: IndexableSeqAsTree::new(length, NODE_ARITY, &get_item),
-            // `IndexableSeqAsTree` has a special-case layout where a single-element sequence is a
-            // bare leaf and all other lengths are wrapped in at least one node. We encode that in
-            // the adjusted depth by adding one level for all non-singleton lengths.
-            original_depth: original_length
-                .saturating_sub(1)
-                .checked_ilog(NODE_ARITY)
-                .unwrap_or(0)
-                .saturating_add(u32::from(original_length != 1)),
-            current_depth: length
-                .saturating_sub(1)
-                .checked_ilog(NODE_ARITY)
-                .unwrap_or(0)
-                .saturating_add(u32::from(length != 1)),
+            original_depth: tree_depth(original_length, NODE_ARITY),
+            current_depth: tree_depth(length, NODE_ARITY),
         });
 
         node.done()

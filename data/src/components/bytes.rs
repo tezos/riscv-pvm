@@ -34,7 +34,9 @@ use crate::foldable::Unfold;
 use crate::foldable::UnfoldError;
 use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
+use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
@@ -204,6 +206,7 @@ impl Bytes<Verify> {
     pub(crate) fn absent(len: usize) -> Self {
         Bytes {
             bytes: VerifyImpl {
+                original_length: Partial::Present(len),
                 length: Partial::Present(len),
                 data: PartialVec::empty(),
             },
@@ -348,16 +351,30 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
             return builder.previous();
         }
 
+        let Some(original_length) = self.bytes.original_length.clone().to_present() else {
+            return PartialHash::InvalidProof;
+        };
+
         // The length must be present if the byte array is not completely absent. Otherwise we can't
         // properly construct the partial Merkle tree and therefore obtain the final hash.
         let Some(length) = self.bytes.length.clone().to_present() else {
             return PartialHash::InvalidProof;
         };
+
         let length_hash =
             Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
         let length_node = PartialHash::Present(length_hash);
 
-        let get_item = |range: Range<usize>| {
+        let generator = |idx: usize| {
+            let address = PAGE_SIZE
+                    .checked_mul(idx)
+                    .expect("This should not overflow as we split the length into chunks of PAGE_SIZE bytes before");
+            let address_end = address
+                .checked_add(PAGE_SIZE)
+                .expect("Address overflow")
+                .min(length);
+            let range = address..address_end;
+
             match self.bytes.data.continuous_defined_range(range.clone()) {
                 None => {
                     if self.bytes.data.is_any_defined(range) {
@@ -381,7 +398,17 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
             }
         };
 
-        self.fold_generic(builder, length, length_node, get_item)
+        let original_pages = original_length.div_ceil(PAGE_SIZE);
+        let pages = length.div_ceil(PAGE_SIZE);
+
+        let mut builder = builder.into_node_fold();
+        builder.add(&length_node);
+        builder.add(&DepthAdjustedSeqAsTree {
+            inner: IndexableSeqAsTree::new(pages, NODE_ARITY, &generator),
+            original_depth: tree_depth(original_pages, NODE_ARITY),
+            current_depth: tree_depth(pages, NODE_ARITY),
+        });
+        builder.done()
     }
 }
 
@@ -423,6 +450,7 @@ impl FromProof for Bytes<Verify> {
                 let length_in_bytes = length.map_present(|len| len as usize);
                 let state = Bytes {
                     bytes: VerifyImpl {
+                        original_length: length_in_bytes.clone(),
                         length: length_in_bytes.clone(),
                         data: PartialVec::empty(),
                     },
@@ -816,6 +844,7 @@ impl BytesMode for Verify {
     fn new(len: usize) -> Bytes<Self> {
         Bytes {
             bytes: VerifyImpl {
+                original_length: Partial::Present(len),
                 length: Partial::Present(len),
                 data: PartialVec::from(vec![0u8; len]),
             },
@@ -952,6 +981,7 @@ impl<'normal> ProveImpl<'normal> {
 /// [`crate::mode::Verify`] mode implementation for the [`Bytes`] component
 #[perfect_derive(Clone)]
 struct VerifyImpl {
+    original_length: Partial<usize>,
     length: Partial<usize>,
     data: PartialVec<u8>,
 }
