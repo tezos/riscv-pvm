@@ -1,0 +1,21 @@
+[package]
+name = "riscv-tx-kernel"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies.tezos-smart-rollup]
+git = "https://gitlab.com/tezos/tezos.git"
+version = "0.2.2"
+default-features = false
+features = [
+  "debug_alloc",
+  "proto-alpha",
+  "panic-hook",
+  "data-encoding",
+  "alloc",
+  "experimental-host-in-memory-store",
+]
+
+[dependencies.tezos-smart-rollup-constants]
+git = "https://gitlab.com/tezos/tezos.git"
+

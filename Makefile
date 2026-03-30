@@ -7,13 +7,13 @@ NIGHTLY_VERSION = nightly-2026-02-24
 
 ### Generic top-level targets
 
-all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all docs/all
+all: riscv/all sandbox/all jstz/all dummy/all tx-kernel/all page-cache-tester/all etherlink/all docs/all
 
-check: riscv/check durable/check jstz/check dummy/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check check-format
+check: riscv/check durable/check jstz/check dummy/check tx-kernel/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check check-format
 
-build: sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
+build: sandbox/build jstz/build dummy/build tx-kernel/build dummy-no-std/build page-cache-tester/build etherlink/build
 
-clean: sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean cargo-clean
+clean: sandbox/clean jstz/clean dummy/clean tx-kernel/clean page-cache-tester/clean etherlink/clean cargo-clean
 
 ### Specific top-level targets
 
@@ -89,6 +89,9 @@ jstz/%:
 
 dummy/%:
 	@make -C kernels/dummy ${@:dummy/%=%}
+
+tx-kernel/%:
+	@make -C kernels/tx-kernel ${@:tx-kernel/%=%}
 
 dummy-no-std/%:
 	@make -C kernels/dummy-no-std ${@:dummy-no-std/%=%}
