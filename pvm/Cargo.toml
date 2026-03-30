@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 arbitrary-int.workspace = true
 bincode.workspace = true
+bytes.workspace = true
 cranelift.workspace = true
 cranelift-jit.workspace = true
 cranelift-module.workspace = true

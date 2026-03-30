@@ -52,6 +52,7 @@ use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
 use crate::pvm::durable_storage::DurableStorageDummy;
+use crate::pvm::durable_storage::RuntimeDurableStorage;
 use crate::pvm::errors::OperationalError;
 use crate::pvm::hooks::NoHooks;
 use crate::pvm::hooks::PvmHooks;
@@ -114,7 +115,28 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
     where
         DS: Default,
     {
-        let mut pvm = Pvm::default();
+        Self::new_with_durable_storage(
+            program,
+            inbox,
+            hooks,
+            rollup_address,
+            origination_level,
+            preimages_dir,
+            DS::default(),
+        )
+    }
+
+    /// Create a new PVM stepper with an explicit durable-storage backend.
+    pub fn new_with_durable_storage(
+        program: &[u8],
+        inbox: Inbox,
+        hooks: H,
+        rollup_address: [u8; 20],
+        origination_level: u32,
+        preimages_dir: Option<Box<Path>>,
+        durable_storage: DS,
+    ) -> Result<Self, PvmStepperError> {
+        let mut pvm = Pvm::with_durable_storage(durable_storage);
 
         let program = Program::<MC>::from_elf(program)?;
 
@@ -141,6 +163,11 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
         DS: Foldable<HashFold>,
     {
         Hash::from_foldable(&self.pvm)
+    }
+
+    /// Access the durable-storage backend used by the stepper.
+    pub fn durable_storage_mut(&mut self) -> &mut DS {
+        &mut self.pvm.durable_storage
     }
 }
 
@@ -178,7 +205,10 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
     where
         MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
+        DS::Prover: DurableStorage<Prove<'normal>>
+            + RuntimeDurableStorage
+            + Foldable<HashFold>
+            + Foldable<MerkleProofFold>,
     {
         // Step using the proof mode stepper in order to obtain the proof
         let mut proof_stepper = self.start_proof_mode();
@@ -198,7 +228,10 @@ impl<H, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>>
     where
         MC::State<Prove<'normal>>: Foldable<HashFold> + Foldable<MerkleProofFold>,
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
+        DS::Prover: DurableStorage<Prove<'normal>>
+            + RuntimeDurableStorage
+            + Foldable<HashFold>
+            + Foldable<MerkleProofFold>,
     {
         let proof_stepper = self.start_proof_mode();
         proof_stepper.pvm.produce_outbox_proof(output_info)
@@ -209,7 +242,7 @@ impl<
     H: PvmHooks,
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
-    DS: DurableStorage<M>,
+    DS: DurableStorage<M> + RuntimeDurableStorage,
     M: AtomMode + DataSpaceMode + VectorMode,
 > PvmStepper<H, MC, DS, PC, M>
 {
@@ -352,7 +385,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
     where
         MC::State<Verify>: Foldable<PartialHashFold>,
         DS: Foldable<PartialHashFold>,
-        DS: FromProof + DurableStorage<Verify>,
+        DS: FromProof + DurableStorage<Verify> + RuntimeDurableStorage,
     {
         let tree_serialisation: Box<[u8]> = serialise_merkle_tree(proof.tree()).into_boxed_slice();
         let (pvm, merkle_tree) = proof_binary::deserialise(&tree_serialisation)
@@ -380,7 +413,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
     where
         MC::State<Verify>: Foldable<PartialHashFold>,
         DS: Foldable<PartialHashFold>,
-        DS: FromProof + DurableStorage<Verify>,
+        DS: FromProof + DurableStorage<Verify> + RuntimeDurableStorage,
     {
         let proof_tree = ProofTree::Present(proof.tree());
         let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
@@ -410,7 +443,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
     where
         MC::State<Verify>: Foldable<PartialHashFold>,
         DS: Foldable<PartialHashFold>,
-        DS: FromProof + DurableStorage<Verify>,
+        DS: FromProof + DurableStorage<Verify> + RuntimeDurableStorage,
     {
         let proof_tree = ProofTree::Present(proof.tree());
         let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
@@ -459,7 +492,7 @@ impl<
     MC: MemoryConfig,
     M: AtomMode + DataSpaceMode + VectorMode,
     PC: PageCache<MC, M>,
-    DS: DurableStorage<M>,
+    DS: DurableStorage<M> + RuntimeDurableStorage,
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Perform one evaluation step.
@@ -473,7 +506,7 @@ impl<
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, DS: DurableStorage<Verify>>
+impl<H: PvmHooks, MC: MemoryConfig, DS: DurableStorage<Verify> + RuntimeDurableStorage>
     PvmStepper<H, MC, DS, EmptyPageCache, Verify>
 {
     /// Try to take one step. Stepping in the [`Verify`] mode may panic
@@ -525,8 +558,12 @@ impl<H: PvmHooks, MC: MemoryConfig, DS: DurableStorage<Verify>>
     }
 }
 
-impl<H: PvmHooks, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: DurableStorage<Normal>> Stepper
-    for PvmStepper<H, MC, DS, PC, Normal>
+impl<
+    H: PvmHooks,
+    MC: MemoryConfig,
+    PC: PageCache<MC, Normal>,
+    DS: DurableStorage<Normal> + RuntimeDurableStorage,
+> Stepper for PvmStepper<H, MC, DS, PC, Normal>
 {
     type MemoryConfig = MC;
 

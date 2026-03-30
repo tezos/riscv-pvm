@@ -5,6 +5,7 @@
 
 use std::error::Error;
 use std::path::Path;
+use std::path::PathBuf;
 
 use clap::Parser;
 use clap::Subcommand;
@@ -247,6 +248,10 @@ pub struct CommonOptions {
 
     #[command(flatten)]
     pub preimage: PreimageOptions,
+
+    /// Directory used for RocksDB-backed durable storage.
+    #[arg(long)]
+    pub durable_storage_dir: Option<PathBuf>,
 
     /// Memory configuration (e.g. 64M, 1G, 4G, 16G, 64G)
     #[arg(long = "memory", default_value = "1G")]

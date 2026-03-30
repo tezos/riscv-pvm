@@ -2475,6 +2475,7 @@ version = "0.0.0"
 dependencies = [
  "arbitrary-int",
  "bincode",
+ "bytes",
  "cranelift",
  "cranelift-jit",
  "cranelift-module",
@@ -3325,6 +3326,7 @@ dependencies = [
  "object",
  "octez-riscv",
  "octez-riscv-data",
+ "octez-riscv-durable-storage",
  "quanta",
  "rustc-demangle",
  "serde",

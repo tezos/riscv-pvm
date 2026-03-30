@@ -11,17 +11,22 @@ use std::error;
 use std::error::Error;
 use std::fs;
 use std::ops::Bound;
+use std::path::PathBuf;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use octez_riscv::machine_state::memory;
 use octez_riscv::machine_state::page_cache;
 use octez_riscv::machine_state::page_cache::PageCache;
-use octez_riscv::pvm::durable_storage::DurableStorageDummy;
 use octez_riscv::stepper::StepResult;
 use octez_riscv::stepper::Stepper;
 use octez_riscv::stepper::StepperStatus;
 use octez_riscv::stepper::pvm::PvmStepper;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_durable_storage::database::DirectoryManager;
+use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+use octez_riscv_durable_storage::registry::Registry;
 use tezos_smart_rollup::utils::console::Console;
 use tezos_smart_rollup::utils::inbox::InboxBuilder;
 use tezos_smart_rollup_encoding::smart_rollup::SmartRollupAddress;
@@ -83,7 +88,20 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn Error>> {
     }
 }
 
-type PvmStepperRunner<MC, PC> = PvmStepper<Console<'static>, MC, DurableStorageDummy, PC, Normal>;
+type RegistryDurableStorage = Registry<PersistenceLayer, Normal>;
+type PvmStepperRunner<MC, PC> =
+    PvmStepper<Console<'static>, MC, RegistryDurableStorage, PC, Normal>;
+
+fn durable_storage_dir(common: &CommonOptions) -> Result<PathBuf, Box<dyn Error>> {
+    if let Some(path) = &common.durable_storage_dir {
+        return Ok(path.clone());
+    }
+
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let path = std::env::temp_dir().join(format!("riscv-sandbox-durable-storage-{unique}"));
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
 
 pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, PC: PageCache<MC, Normal>>(
     program: &[u8],
@@ -102,14 +120,20 @@ pub(crate) fn make_pvm_stepper<MC: memory::MemoryConfig, PC: PageCache<MC, Norma
         Console::new()
     };
 
-    let stepper = PvmStepper::<_, MC, DurableStorageDummy, PC, Normal>::new(
-        program,
-        inbox.build(),
-        console,
-        rollup_address.into_hash().as_ref().try_into()?,
-        common.inbox.origination_level,
-        common.preimage.preimages_dir.clone(),
-    )?;
+    let durable_storage_dir = durable_storage_dir(common)?;
+    let durable_storage_repo = DirectoryManager::new(&durable_storage_dir)?;
+    let durable_storage = Registry::<PersistenceLayer, Normal>::new(durable_storage_repo)?;
+
+    let stepper =
+        PvmStepper::<_, MC, RegistryDurableStorage, PC, Normal>::new_with_durable_storage(
+            program,
+            inbox.build(),
+            console,
+            rollup_address.into_hash().as_ref().try_into()?,
+            common.inbox.origination_level,
+            common.preimage.preimages_dir.clone(),
+            durable_storage,
+        )?;
 
     Ok(stepper)
 }

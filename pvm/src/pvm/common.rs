@@ -53,6 +53,7 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::riscv::SbiError;
 
 use super::durable_storage::DurableStorage;
+use super::durable_storage::RuntimeDurableStorage;
 use super::errors::OperationalError;
 use super::linux;
 use super::outbox::OutboxProof;
@@ -146,6 +147,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Perform one evaluation step.
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
+        DS: RuntimeDurableStorage,
         M: AtomMode + DataSpaceMode + VectorMode,
     {
         self.eval_max(hooks, Bound::Included(1));
@@ -167,6 +169,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// but a page fault is not)
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
+        DS: RuntimeDurableStorage,
         M: AtomMode + DataSpaceMode + VectorMode,
     {
         // Do nothing if step_bounds is less than 1
@@ -188,6 +191,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
                 handle_system_call(
                     machine_state,
                     &mut self.tezos,
+                    &mut self.durable_storage,
                     &mut self.system_state,
                     &mut hooks,
                 )
@@ -399,6 +403,24 @@ where
     }
 }
 
+impl<MC, PC, DS, M> Pvm<MC, PC, DS, M>
+where
+    MC: MemoryConfig,
+    PC: PageCache<MC, M>,
+    M: AtomMode + DataSpaceMode + VectorMode,
+{
+    /// Construct a PVM using the provided durable-storage backend.
+    pub(crate) fn with_durable_storage(durable_storage: DS) -> Self {
+        Self {
+            system_state: linux::SupervisorState::default(),
+            machine_state: machine_state::MachineState::default(),
+            durable_storage,
+            tezos: Tezos::default(),
+            version: Atom::new(INITIAL_VERSION),
+        }
+    }
+}
+
 impl<'normal, MC: MemoryConfig, PC: PageCache<MC, Normal>, DS: Provable<'normal>> Provable<'normal>
     for Pvm<MC, PC, DS, Normal>
 {
@@ -563,19 +585,21 @@ pub enum InputRequest {
 }
 
 /// Handle a system call in the PVM.
-pub(crate) fn handle_system_call<MC, PC, M>(
+pub(crate) fn handle_system_call<MC, PC, DS, M>(
     machine: &mut machine_state::MachineState<MC, PC, M>,
     tezos_state: &mut Tezos<M>,
+    durable_storage: &mut DS,
     system_state: &mut linux::SupervisorState<M>,
     hooks: impl PvmHooks,
 ) -> ControlFlow<()>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
+    DS: RuntimeDurableStorage,
     M: AtomMode + DataSpaceMode + VectorMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, tezos_state);
+        tezos::handle_tezos(core, durable_storage, tezos_state);
 
         if tezos_state.status.read() == PvmStatus::Evaluating {
             ControlFlow::Continue(())
@@ -615,8 +639,27 @@ mod tests {
     use crate::pvm::linux;
     use crate::pvm::outbox::TEST_OUTBOX_SIZE;
     use crate::pvm::outbox::tests::messages_strategy;
+    #[cfg(feature = "rocksdb")]
+    use crate::pvm::tezos::SBI_TEZOS_DURABLE_DATABASE_READ;
+    #[cfg(feature = "rocksdb")]
+    use crate::pvm::tezos::SBI_TEZOS_DURABLE_DATABASE_SET;
+    #[cfg(feature = "rocksdb")]
+    use crate::pvm::tezos::SBI_TEZOS_DURABLE_DATABASE_VALUE_LENGTH;
+    #[cfg(feature = "rocksdb")]
+    use crate::pvm::tezos::SBI_TEZOS_DURABLE_REGISTRY_RESIZE_TICK;
 
-    impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS, M: Mode> Pvm<MC, PC, DS, M> {
+    #[cfg(feature = "rocksdb")]
+    use octez_riscv_durable_storage::database::DirectoryManager;
+    #[cfg(feature = "rocksdb")]
+    use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+    #[cfg(feature = "rocksdb")]
+    use octez_riscv_durable_storage::registry::Registry;
+    #[cfg(feature = "rocksdb")]
+    use tempfile::tempdir;
+
+    impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: RuntimeDurableStorage, M: Mode>
+        Pvm<MC, PC, DS, M>
+    {
         /// Handle an exception using the defined Execution Environment.
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
@@ -626,6 +669,7 @@ mod tests {
             handle_system_call(
                 &mut self.machine_state,
                 &mut self.tezos,
+                &mut self.durable_storage,
                 &mut self.system_state,
                 hooks,
             )
@@ -783,6 +827,178 @@ mod tests {
             // intended to write
             assert_eq!(written.to_vec(), buffer);
         });
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn test_durable_storage_ecall_round_trip() {
+        type MC = M1M;
+        type PC = EmptyPageCache;
+        type DS = Registry<PersistenceLayer, Normal>;
+
+        let tempdir = tempdir().expect("tempdir should be created");
+        let repo = DirectoryManager::new(tempdir.path()).expect("repo should be created");
+        let durable_storage =
+            Registry::<PersistenceLayer, Normal>::new(repo).expect("registry should be created");
+
+        let mut pvm = Pvm::<MC, PC, DS, Normal>::with_durable_storage(durable_storage);
+        pvm.machine_state.set_all_readable_writeable();
+
+        let key_addr = memory::FIRST_ADDRESS;
+        let value_addr = key_addr + 64;
+        let out_addr = value_addr + 64;
+        let key = [1u8, 2, 3];
+        let value = [7u8, 8, 9, 10];
+        pvm.machine_state
+            .core
+            .main_memory
+            .write_all(key_addr, &key)
+            .unwrap();
+        pvm.machine_state
+            .core
+            .main_memory
+            .write_all(value_addr, &value)
+            .unwrap();
+
+        pvm.machine_state.core.hart.xregisters.write(a7, SBI_FIRMWARE_TEZOS);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_REGISTRY_RESIZE_TICK);
+        pvm.machine_state.core.hart.xregisters.write(a0, 1);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+        assert_eq!(pvm.machine_state.core.hart.xregisters.read(a0), 0);
+
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_DATABASE_SET);
+        pvm.machine_state.core.hart.xregisters.write(a0, 0);
+        pvm.machine_state.core.hart.xregisters.write(a1, key_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a2, key.len() as u64);
+        pvm.machine_state.core.hart.xregisters.write(a3, value_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a4, value.len() as u64);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+        assert_eq!(pvm.machine_state.core.hart.xregisters.read(a0), value.len() as u64);
+
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_DATABASE_VALUE_LENGTH);
+        pvm.machine_state.core.hart.xregisters.write(a0, 0);
+        pvm.machine_state.core.hart.xregisters.write(a1, key_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a2, key.len() as u64);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+        assert_eq!(pvm.machine_state.core.hart.xregisters.read(a0), value.len() as u64);
+
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_DATABASE_READ);
+        pvm.machine_state.core.hart.xregisters.write(a0, 0);
+        pvm.machine_state.core.hart.xregisters.write(a1, key_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a2, key.len() as u64);
+        pvm.machine_state.core.hart.xregisters.write(a3, 0);
+        pvm.machine_state.core.hart.xregisters.write(a4, out_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a5, value.len() as u64);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+        assert_eq!(pvm.machine_state.core.hart.xregisters.read(a0), value.len() as u64);
+
+        let mut out = [0u8; 4];
+        pvm.machine_state
+            .core
+            .main_memory
+            .read_all(out_addr, &mut out)
+            .unwrap();
+        assert_eq!(out, value);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn test_durable_storage_ecall_rejects_oversized_value() {
+        type MC = M1M;
+        type PC = EmptyPageCache;
+        type DS = Registry<PersistenceLayer, Normal>;
+
+        let tempdir = tempdir().expect("tempdir should be created");
+        let repo = DirectoryManager::new(tempdir.path()).expect("repo should be created");
+        let durable_storage =
+            Registry::<PersistenceLayer, Normal>::new(repo).expect("registry should be created");
+
+        let mut pvm = Pvm::<MC, PC, DS, Normal>::with_durable_storage(durable_storage);
+        pvm.machine_state.set_all_readable_writeable();
+
+        let key_addr = memory::FIRST_ADDRESS;
+        let value_addr = key_addr + 512;
+        let key = [5u8];
+        let value = vec![0u8; tezos::MAX_DURABLE_VALUE_IO + 1];
+        pvm.machine_state
+            .core
+            .main_memory
+            .write_all(key_addr, &key)
+            .unwrap();
+        pvm.machine_state
+            .core
+            .main_memory
+            .write_all(value_addr, &value)
+            .unwrap();
+
+        pvm.machine_state.core.hart.xregisters.write(a7, SBI_FIRMWARE_TEZOS);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_REGISTRY_RESIZE_TICK);
+        pvm.machine_state.core.hart.xregisters.write(a0, 1);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a6, SBI_TEZOS_DURABLE_DATABASE_SET);
+        pvm.machine_state.core.hart.xregisters.write(a0, 0);
+        pvm.machine_state.core.hart.xregisters.write(a1, key_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a2, key.len() as u64);
+        pvm.machine_state.core.hart.xregisters.write(a3, value_addr);
+        pvm.machine_state
+            .core
+            .hart
+            .xregisters
+            .write(a4, value.len() as u64);
+        assert!(!pvm.handle_exception(StdoutDebugHooks));
+        assert_eq!(
+            pvm.machine_state.core.hart.xregisters.read(a0) as i64,
+            SbiError::InvalidParam as i64
+        );
     }
 
     mode_test!(test_reveal, F, {

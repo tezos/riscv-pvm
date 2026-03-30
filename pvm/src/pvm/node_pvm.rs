@@ -31,6 +31,7 @@ use thiserror::Error;
 use super::Pvm;
 use super::durable_storage::DurableStorage;
 use super::durable_storage::DurableStorageDummy;
+use super::durable_storage::RuntimeDurableStorage;
 use super::outbox::OutboxProof;
 use super::outbox::OutboxProofError;
 use super::outbox::Output;
@@ -67,7 +68,9 @@ pub struct NodePvm<M: Mode = Normal, PC = NodePvmPageCache, DS = DurableStorageD
     state: Box<NodePvmState<M, PC, DS>>,
 }
 
-impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm<M, PC, DS> {
+impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M> + RuntimeDurableStorage>
+    NodePvm<M, PC, DS>
+{
     /// Wrap the given PVM state.
     pub fn wrap(state: NodePvmState<M, PC, DS>) -> Self {
         Self {
@@ -181,7 +184,9 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
     }
 }
 
-impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePvm<Normal, PC, DS> {
+impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal> + RuntimeDurableStorage>
+    NodePvm<Normal, PC, DS>
+{
     /// Construct an empty PVM state.
     pub fn empty() -> Self
     where
@@ -207,7 +212,10 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
     ) -> Option<Proof>
     where
         DS: Provable<'normal>,
-        DS::Prover: DurableStorage<Prove<'normal>> + Foldable<HashFold> + Foldable<MerkleProofFold>,
+        DS::Prover: DurableStorage<Prove<'normal>>
+            + RuntimeDurableStorage
+            + Foldable<HashFold>
+            + Foldable<MerkleProofFold>,
     {
         let mut proof_state;
 
@@ -254,7 +262,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
     }
 }
 
-impl<DS: DurableStorage<Verify>> NodePvm<Verify, EmptyPageCache, DS> {
+impl<DS: DurableStorage<Verify> + RuntimeDurableStorage> NodePvm<Verify, EmptyPageCache, DS> {
     /// Verify the proof with the given input by evaluating one step.
     /// Upon success, return the input request which corresponds to the initial state of the proof.
     pub fn verify_proof(

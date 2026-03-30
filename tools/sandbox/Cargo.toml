@@ -29,8 +29,9 @@ serde.workspace = true
 serde_json.workspace = true
 tezos-smart-rollup-encoding.workspace = true
 tezos-smart-rollup.workspace = true
-octez-riscv.workspace = true
+octez-riscv = { workspace = true, features = ["rocksdb"] }
 octez-riscv-data.workspace = true
+octez-riscv-durable-storage = { workspace = true, features = ["rocksdb"] }
 strum.workspace = true
 
 [dependencies.tracing-subscriber]

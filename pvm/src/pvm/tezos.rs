@@ -63,6 +63,20 @@ use tezos_smart_rollup_constants::riscv::SbiError;
 /// Maximum size of pvm memory access by a host function in bytes
 /// To limit size of proofs in refutation games
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
+pub const MAX_DURABLE_VALUE_IO: usize = 4096;
+
+pub const SBI_TEZOS_DURABLE_REGISTRY_LEN: u64 = 0x1000;
+pub const SBI_TEZOS_DURABLE_REGISTRY_RESIZE_TICK: u64 = 0x1001;
+pub const SBI_TEZOS_DURABLE_REGISTRY_COPY_DATABASE: u64 = 0x1002;
+pub const SBI_TEZOS_DURABLE_REGISTRY_MOVE_DATABASE: u64 = 0x1003;
+pub const SBI_TEZOS_DURABLE_REGISTRY_CLEAR_DATABASE: u64 = 0x1004;
+pub const SBI_TEZOS_DURABLE_DATABASE_EXISTS: u64 = 0x1010;
+pub const SBI_TEZOS_DURABLE_DATABASE_DELETE: u64 = 0x1011;
+pub const SBI_TEZOS_DURABLE_DATABASE_VALUE_LENGTH: u64 = 0x1012;
+pub const SBI_TEZOS_DURABLE_DATABASE_READ: u64 = 0x1013;
+pub const SBI_TEZOS_DURABLE_DATABASE_SET: u64 = 0x1014;
+pub const SBI_TEZOS_DURABLE_DATABASE_WRITE: u64 = 0x1015;
+pub const SBI_TEZOS_DURABLE_DATABASE_HASH: u64 = 0x1016;
 
 use octez_riscv_data::components::atom::AtomMode;
 
@@ -79,7 +93,11 @@ use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
+use crate::machine_state::registers::a4;
+use crate::machine_state::registers::a5;
 use crate::machine_state::registers::a6;
+use crate::pvm::durable_storage::RuntimeDurableStorage;
+use crate::pvm::durable_storage::RuntimeError as DurableStorageRuntimeError;
 
 /// Tezos-specific fields of the PVM.
 #[perfect_derive(Clone, PartialEq, Eq)]
@@ -256,6 +274,46 @@ where
         Ok(value) => sbi_return1(&mut machine.hart.xregisters, value),
         Err(error) => sbi_return_error(&mut machine.hart.xregisters, error),
     }
+}
+
+#[inline]
+fn map_durable_storage_error(error: DurableStorageRuntimeError) -> SbiError {
+    match error {
+        DurableStorageRuntimeError::NotSupported => SbiError::NotSupported,
+        DurableStorageRuntimeError::Durable(error) => match error {
+            octez_riscv_durable_storage::errors::Error::InvalidArgument(_) => {
+                SbiError::InvalidParam
+            }
+            octez_riscv_durable_storage::errors::Error::Operational(_) => SbiError::Failed,
+        },
+        DurableStorageRuntimeError::InvalidArgument(_) => SbiError::InvalidParam,
+        DurableStorageRuntimeError::Operational(_) => SbiError::Failed,
+    }
+}
+
+#[inline]
+fn checked_usize(value: u64) -> Result<usize, SbiError> {
+    usize::try_from(value).map_err(|_| SbiError::InvalidParam)
+}
+
+#[inline]
+fn read_guest_bytes<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+    address: u64,
+    length: usize,
+    max_length: usize,
+) -> Result<Vec<u8>, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+{
+    if length > max_length {
+        return Err(SbiError::InvalidParam);
+    }
+
+    let mut bytes = vec![0u8; length];
+    machine.main_memory.read_all(address, &mut bytes)?;
+    Ok(bytes)
 }
 
 /// Provide input information to the machine. Returns `false` in case the
@@ -518,6 +576,233 @@ where
     Ok(hash.len() as u64)
 }
 
+#[inline]
+fn handle_tezos_durable_registry_len<DS: RuntimeDurableStorage>(
+    durable_storage: &DS,
+) -> Result<u64, SbiError> {
+    durable_storage
+        .registry_len()
+        .map(|len| len as u64)
+        .map_err(map_durable_storage_error)
+}
+
+#[inline]
+fn handle_tezos_durable_registry_resize_tick<DS: RuntimeDurableStorage>(
+    durable_storage: &mut DS,
+    new_size: u64,
+) -> Result<u64, SbiError> {
+    durable_storage
+        .registry_resize_tick(checked_usize(new_size)?)
+        .map_err(map_durable_storage_error)?;
+    Ok(0)
+}
+
+#[inline]
+fn handle_tezos_durable_registry_copy_database<DS: RuntimeDurableStorage>(
+    durable_storage: &mut DS,
+    src_index: u64,
+    dst_index: u64,
+) -> Result<u64, SbiError> {
+    durable_storage
+        .registry_copy_database(checked_usize(src_index)?, checked_usize(dst_index)?)
+        .map_err(map_durable_storage_error)?;
+    Ok(0)
+}
+
+#[inline]
+fn handle_tezos_durable_registry_move_database<DS: RuntimeDurableStorage>(
+    durable_storage: &mut DS,
+    src_index: u64,
+    dst_index: u64,
+) -> Result<u64, SbiError> {
+    durable_storage
+        .registry_move_database(checked_usize(src_index)?, checked_usize(dst_index)?)
+        .map_err(map_durable_storage_error)?;
+    Ok(0)
+}
+
+#[inline]
+fn handle_tezos_durable_registry_clear_database<DS: RuntimeDurableStorage>(
+    durable_storage: &mut DS,
+    index: u64,
+) -> Result<u64, SbiError> {
+    durable_storage
+        .registry_clear_database(checked_usize(index)?)
+        .map_err(map_durable_storage_error)?;
+    Ok(0)
+}
+
+#[inline]
+fn handle_tezos_durable_database_exists<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+
+    durable_storage
+        .database_exists(database_index, &key)
+        .map(|exists| exists as u64)
+        .map_err(map_durable_storage_error)
+}
+
+#[inline]
+fn handle_tezos_durable_database_delete<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &mut DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+
+    durable_storage
+        .database_delete(database_index, &key)
+        .map(|deleted| deleted as u64)
+        .map_err(map_durable_storage_error)
+}
+
+#[inline]
+fn handle_tezos_durable_database_value_length<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+
+    durable_storage
+        .database_value_length(database_index, &key)
+        .map(|len| len as u64)
+        .map_err(map_durable_storage_error)
+}
+
+#[inline]
+fn handle_tezos_durable_database_read<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let offset = checked_usize(machine.hart.xregisters.read(a3))?;
+    let out_addr = machine.hart.xregisters.read(a4);
+    let out_len = checked_usize(machine.hart.xregisters.read(a5))?;
+
+    if out_len > MAX_DURABLE_VALUE_IO {
+        return Err(SbiError::InvalidParam);
+    }
+
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+    let value = durable_storage
+        .database_read(database_index, &key, offset, out_len)
+        .map_err(map_durable_storage_error)?;
+    machine.main_memory.write_all(out_addr, &value)?;
+
+    Ok(value.len() as u64)
+}
+
+#[inline]
+fn handle_tezos_durable_database_set<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &mut DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let data_addr = machine.hart.xregisters.read(a3);
+    let data_len = checked_usize(machine.hart.xregisters.read(a4))?;
+
+    if data_len > MAX_DURABLE_VALUE_IO {
+        return Err(SbiError::InvalidParam);
+    }
+
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+    let data = read_guest_bytes(machine, data_addr, data_len, MAX_DURABLE_VALUE_IO)?;
+    durable_storage
+        .database_set(database_index, &key, &data)
+        .map_err(map_durable_storage_error)?;
+
+    Ok(data_len as u64)
+}
+
+#[inline]
+fn handle_tezos_durable_database_write<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &mut DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let key_addr = machine.hart.xregisters.read(a1);
+    let key_len = checked_usize(machine.hart.xregisters.read(a2))?;
+    let offset = checked_usize(machine.hart.xregisters.read(a3))?;
+    let data_addr = machine.hart.xregisters.read(a4);
+    let data_len = checked_usize(machine.hart.xregisters.read(a5))?;
+
+    if data_len > MAX_DURABLE_VALUE_IO {
+        return Err(SbiError::InvalidParam);
+    }
+
+    let key = read_guest_bytes(machine, key_addr, key_len, MAX_PVM_MEMORY_ACCESS)?;
+    let data = read_guest_bytes(machine, data_addr, data_len, MAX_DURABLE_VALUE_IO)?;
+    durable_storage
+        .database_write(database_index, &key, offset, &data)
+        .map(|written| written as u64)
+        .map_err(map_durable_storage_error)
+}
+
+#[inline]
+fn handle_tezos_durable_database_hash<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &DS,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode,
+    DS: RuntimeDurableStorage,
+{
+    let database_index = checked_usize(machine.hart.xregisters.read(a0))?;
+    let out_addr = machine.hart.xregisters.read(a1);
+    let hash = durable_storage
+        .database_hash(database_index)
+        .map_err(map_durable_storage_error)?;
+    machine.main_memory.write_all(out_addr, hash.as_ref())?;
+
+    Ok(hash.as_ref().len() as u64)
+}
+
 /// Handle a [SBI_TEZOS_REVEAL] call.
 #[inline]
 fn handle_tezos_reveal<MC, M>(
@@ -557,9 +842,13 @@ where
 }
 
 /// Handle a Tezos SBI call.
-pub(super) fn handle_tezos<MC, M>(machine: &mut MachineCoreState<MC, M>, tezos: &mut Tezos<M>)
-where
+pub(super) fn handle_tezos<MC, M, DS>(
+    machine: &mut MachineCoreState<MC, M>,
+    durable_storage: &mut DS,
+    tezos: &mut Tezos<M>,
+) where
     MC: MemoryConfig,
+    DS: RuntimeDurableStorage,
     M: AtomMode + DataSpaceMode + VectorMode,
 {
     // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
@@ -580,6 +869,56 @@ where
         SBI_TEZOS_REVEAL => {
             handle_tezos_reveal(machine, &mut tezos.reveal_request, &mut tezos.status)
         }
+        SBI_TEZOS_DURABLE_REGISTRY_LEN => sbi_wrap(machine, |_| {
+            handle_tezos_durable_registry_len(durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_REGISTRY_RESIZE_TICK => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_registry_resize_tick(
+                durable_storage,
+                machine.hart.xregisters.read(a0),
+            )
+        }),
+        SBI_TEZOS_DURABLE_REGISTRY_COPY_DATABASE => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_registry_copy_database(
+                durable_storage,
+                machine.hart.xregisters.read(a0),
+                machine.hart.xregisters.read(a1),
+            )
+        }),
+        SBI_TEZOS_DURABLE_REGISTRY_MOVE_DATABASE => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_registry_move_database(
+                durable_storage,
+                machine.hart.xregisters.read(a0),
+                machine.hart.xregisters.read(a1),
+            )
+        }),
+        SBI_TEZOS_DURABLE_REGISTRY_CLEAR_DATABASE => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_registry_clear_database(
+                durable_storage,
+                machine.hart.xregisters.read(a0),
+            )
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_EXISTS => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_exists(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_DELETE => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_delete(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_VALUE_LENGTH => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_value_length(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_READ => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_read(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_SET => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_set(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_WRITE => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_write(machine, durable_storage)
+        }),
+        SBI_TEZOS_DURABLE_DATABASE_HASH => sbi_wrap(machine, |machine| {
+            handle_tezos_durable_database_hash(machine, durable_storage)
+        }),
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }
 }
