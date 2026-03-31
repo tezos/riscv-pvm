@@ -17,6 +17,10 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.88.0"
 
+[workspace.lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ['cfg(kani)']
+
 [workspace.lints.clippy]
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"

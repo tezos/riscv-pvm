@@ -105,5 +105,10 @@ assets/%:
 docs/%:
 	@make -C docs ${@:docs/%=%}
 
+### Kani verification
+
+data/kani:
+	cd data && cargo kani --tests
+
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc cargo-clean
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc cargo-clean data/kani
