@@ -18,6 +18,11 @@ use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserNode;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
@@ -47,6 +52,30 @@ impl Tree<LazyNodeId> {
     /// [`Prove`]: octez_riscv_data::mode::Prove
     pub fn into_proof(self) -> Tree<ProveNodeId> {
         Tree(self.0.map(|id| id.into_proof()))
+    }
+}
+
+impl<NodeId: FromProof> Tree<NodeId> {
+    /// Parse a tree from a proof deserialiser node.
+    pub(super) fn from_branches<D: DeserialiserNode>(
+        ctx: D,
+    ) -> Result<(D, Partial<Self>), <D::Parent as Deserialiser>::Error> {
+        match ctx.presence() {
+            Partial::Absent => Ok((ctx, Partial::Absent)),
+            Partial::Blinded(hash) => Ok((ctx, Partial::Blinded(hash))),
+            Partial::Present(()) => {
+                let (ctx, present) = ctx.next_branch_with(|proof| proof.into_leaf::<bool>())?;
+                match present {
+                    Partial::Present(true) => {
+                        let (ctx, node_id) = ctx.next_branch()?;
+                        Ok((ctx, Partial::Present(Tree::from(Some(node_id)))))
+                    }
+                    Partial::Present(false) => Ok((ctx, Partial::Present(Tree::default()))),
+                    // SAFETY: called only in `Verify` mode
+                    Partial::Blinded(_) | Partial::Absent => unsafe { not_found() },
+                }
+            }
+        }
     }
 }
 
