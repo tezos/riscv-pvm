@@ -606,25 +606,13 @@ pub enum VerifyTreeId {
 impl FromProof for VerifyTreeId {
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
-        match ctx.presence() {
-            Partial::Absent => ctx.done(VerifyTreeId::Absent),
-            Partial::Blinded(hash) => ctx.done(VerifyTreeId::Blinded(hash)),
-            Partial::Present(()) => {
-                let (ctx, present) = ctx.next_branch_with(|proof| proof.into_leaf::<bool>())?;
-                match present {
-                    Partial::Present(true) => {
-                        let (ctx, node_id) = ctx.next_branch_with(|proof| {
-                            let suspended = VerifyNodeId::from_proof(proof)?;
-                            Ok(suspended)
-                        })?;
-                        ctx.done(VerifyTreeId::Present(Tree::from(Some(node_id))))
-                    }
-                    Partial::Present(false) => ctx.done(VerifyTreeId::Present(Tree::default())),
-                    // SAFETY: called only in `Verify` mode
-                    Partial::Blinded(_) | Partial::Absent => unsafe { not_found() },
-                }
-            }
-        }
+        let (ctx, partial) = Tree::from_branches(ctx)?;
+        let tree_id = match partial {
+            Partial::Absent => VerifyTreeId::Absent,
+            Partial::Blinded(hash) => VerifyTreeId::Blinded(hash),
+            Partial::Present(tree) => VerifyTreeId::Present(tree),
+        };
+        ctx.done(tree_id)
     }
 }
 
