@@ -112,7 +112,7 @@ features = ["rustls-tls"]
 
 [workspace.dependencies.derive_more]
 version = "2.1.1"
-features = ["debug", "display", "from", "into", "error"]
+features = ["debug", "display", "from", "into", "error", "eq"]
 
 [workspace.dependencies.serde]
 version = "1.0.228"
