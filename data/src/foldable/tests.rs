@@ -89,7 +89,7 @@ pub struct TestNodeFolder {
 impl NodeFold for TestNodeFolder {
     type Parent = TestFolder;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+    fn add_labelled<F: Foldable<Self::Parent>>(&mut self, child: &F, _label: Option<&str>) {
         let folded_child = child.fold(TestFolder);
         self.children.push(folded_child);
     }

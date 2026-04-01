@@ -96,7 +96,12 @@ pub trait NodeFold {
     type Parent: Fold;
 
     /// Add a child branch to the node folder.
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F);
+    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+        self.add_labelled(child, None)
+    }
+
+    /// Add a child branch to the node folder with `label`.
+    fn add_labelled<F: Foldable<Self::Parent>>(&mut self, child: &F, label: Option<&str>);
 
     /// Finalise the node folding and produce the node.
     fn done(self) -> <Self::Parent as Fold>::Folded;

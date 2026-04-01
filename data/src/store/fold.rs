@@ -61,7 +61,7 @@ impl<BS: BlobStore> FoldLeaf for BlobStoreFold<BS> {
 impl<BS: BlobStore> NodeFold for BlobStoreNodeFold<BS> {
     type Parent = BlobStoreFold<BS>;
 
-    fn add<T: Foldable<BlobStoreFold<BS>>>(&mut self, child: &T) {
+    fn add_labelled<T: Foldable<BlobStoreFold<BS>>>(&mut self, child: &T, _label: Option<&str>) {
         if self.error.is_some() {
             return;
         }
@@ -118,7 +118,7 @@ mod tests {
     }
 
     struct ErroringBlobStore {
-        inner: InMemoryBlobStore,
+        inner: InMemoryBlobStore<String>,
         error_hash: Hash,
     }
 
@@ -178,7 +178,7 @@ mod tests {
             ),
         );
 
-        let store = Arc::new(InMemoryBlobStore::new());
+        let store = Arc::new(InMemoryBlobStore::<String>::new());
         let folded = data
             .fold(BlobStoreFold {
                 store: Arc::clone(&store),

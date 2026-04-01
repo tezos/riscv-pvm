@@ -154,7 +154,7 @@ mod tests {
             Bytes::new(3720),
             (Bytes::new(38), Bytes::new(13002)),
         );
-        let store = Arc::new(InMemoryBlobStore::new());
+        let store = Arc::new(InMemoryBlobStore::<String>::new());
         let root_hash = data.fold(BlobStoreFold::from(Arc::clone(&store))).unwrap();
 
         let unfolded = Data::unfold(BlobStoreUnfold::new(store, root_hash)).unwrap();
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn fold_unfold_error() {
-        let store = Arc::new(InMemoryBlobStore::new());
+        let store = Arc::new(InMemoryBlobStore::<String>::new());
         let builder = || BlobStoreFold::from(Arc::clone(&store));
 
         let atom = || Atom::new(37u32);

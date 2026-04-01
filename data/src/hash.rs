@@ -222,7 +222,7 @@ pub struct HashNodeFold {
 impl NodeFold for HashNodeFold {
     type Parent = HashFold;
 
-    fn add<F: Foldable<HashFold>>(&mut self, child: &F) {
+    fn add_labelled<F: Foldable<HashFold>>(&mut self, child: &F, _label: Option<&str>) {
         let folded_child = child.fold(HashFold);
         self.hasher.update(folded_child.as_ref());
     }
@@ -381,7 +381,7 @@ pub struct PartialHashNodeFold {
 impl NodeFold for PartialHashNodeFold {
     type Parent = PartialHashFold;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+    fn add_labelled<F: Foldable<Self::Parent>>(&mut self, child: &F, _label: Option<&str>) {
         let hash = match self.children.pop_front() {
             Some(tree) => {
                 let prev_hash = tree.root_hash();

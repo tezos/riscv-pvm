@@ -341,7 +341,7 @@ pub struct MerkleProofNodeFold {
 impl NodeFold for MerkleProofNodeFold {
     type Parent = MerkleProofFold;
 
-    fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
+    fn add_labelled<F: Foldable<Self::Parent>>(&mut self, child: &F, _label: Option<&str>) {
         let child_info = child.fold(MerkleProofFold::new());
         self.children.push(child_info);
     }
