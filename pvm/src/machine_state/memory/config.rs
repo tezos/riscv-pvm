@@ -83,6 +83,7 @@ macro_rules! gen_memory_layout {
 gen_memory_layout!(M4K = 4 KiB);
 gen_memory_layout!(M8K = 8 KiB);
 gen_memory_layout!(M1M = 1 MiB);
+gen_memory_layout!(M8M = 8 MiB);
 gen_memory_layout!(M64M = 64 MiB);
 gen_memory_layout!(M1G = 1 GiB);
 gen_memory_layout!(M4G = 4 GiB);

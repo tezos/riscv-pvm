@@ -123,7 +123,7 @@ pub(crate) type PvmProve<'a, MC, DS> = Pvm<MC, EmptyPageCache, DS, Prove<'a>>;
 #[perfect_derive(PartialEq, Eq)]
 pub struct Pvm<MC: MemoryConfig, PC, DS, M: Mode> {
     pub(crate) system_state: linux::SupervisorState<M>,
-    pub(crate) machine_state: machine_state::MachineState<MC, PC, M>,
+    pub machine_state: machine_state::MachineState<MC, PC, M>,
     pub(crate) durable_storage: DS,
     pub(crate) tezos: Tezos<M>,
     version: Atom<u64, M>,
