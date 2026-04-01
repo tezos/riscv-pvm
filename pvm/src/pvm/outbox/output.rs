@@ -11,6 +11,9 @@ use std::ops::DerefMut;
 
 use bincode::Decode;
 use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::de::read::Reader;
+use bincode::error::DecodeError;
 use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 use tezos_smart_rollup_constants::riscv::SbiError;
 use thiserror::Error;
@@ -48,7 +51,7 @@ impl From<OutboxMessageError> for SbiError {
 
 /// An outbox message is a boxed byte slice, restricted to at most [`MAX_OUTPUT_SIZE`]
 /// in length
-#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Encode)]
 #[repr(transparent)]
 pub struct OutboxMessage(Box<[u8]>);
 
@@ -82,6 +85,28 @@ impl TryFrom<Box<[u8]>> for OutboxMessage {
     }
 }
 
+impl<Context> Decode<Context> for OutboxMessage {
+    /// Start by decoding the length and fail without trying to decode the rest
+    /// of the message if it is larger than `MAX_OUTPUT_SIZE`.
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let length = u64::decode(decoder)?;
+
+        if length > MAX_OUTPUT_SIZE as u64 {
+            return Err(DecodeError::OtherString(
+                OutboxMessageError::MessageTooLarge {
+                    size: length as usize,
+                }
+                .to_string(),
+            ));
+        }
+
+        let mut data = vec![0u8; length as usize];
+        decoder.reader().read(&mut data)?;
+
+        Ok(OutboxMessage(data.into_boxed_slice()))
+    }
+}
+
 impl From<OutboxMessage> for Box<[u8]> {
     fn from(value: OutboxMessage) -> Self {
         value.0
@@ -110,21 +135,40 @@ impl DerefMut for OutboxMessage {
 
 #[cfg(test)]
 mod tests {
+    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::serialise;
     use proptest::prelude::*;
 
     use super::*;
 
     #[test]
-    fn test_outbox_message_too_large() {
-        let size = MAX_OUTPUT_SIZE + 1;
-        assert_eq!(
-            OutboxMessage::try_from(vec![1u8; size].into_boxed_slice()),
-            Err(OutboxMessageError::MessageTooLarge { size })
-        );
-
+    fn test_oversized_outbox_message_is_rejected() {
+        // Can't initialise an oversized outbox message
         proptest!(|(size in MAX_OUTPUT_SIZE + 1..)| {
             let res = OutboxMessage::new(size).unwrap_err();
             assert!(matches!(res.into(), SbiError::OutputTooLarge));
-        })
+        });
+
+        let size = MAX_OUTPUT_SIZE + 1;
+        let message = vec![1u8; size].into_boxed_slice();
+
+        // Can't construct an oversized outbox message from a slice
+        assert_eq!(
+            OutboxMessage::try_from(message.clone()),
+            Err(OutboxMessageError::MessageTooLarge { size })
+        );
+
+        // Can't deserialise an oversized outbox message
+        let serialised = serialise(OutboxMessage(message)).unwrap();
+        let err = deserialise::<OutboxMessage>(&serialised)
+            .expect_err("Decoding an oversized outbox message should fail");
+
+        let DecodeError::OtherString(message) = err else {
+            panic!("Expected a MessageTooLarge decode error, got {err:?}");
+        };
+        assert_eq!(
+            message,
+            OutboxMessageError::MessageTooLarge { size }.to_string()
+        );
     }
 }
