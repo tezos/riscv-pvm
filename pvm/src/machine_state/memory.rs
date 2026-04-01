@@ -4,7 +4,7 @@
 
 pub(crate) mod buddy;
 mod config;
-pub(crate) mod listener;
+pub mod listener;
 mod protection;
 pub(crate) mod state;
 
@@ -112,7 +112,7 @@ impl Permissions {
     };
 
     /// Allow read and write
-    pub(crate) const READ_WRITE: Self = Self {
+    pub const READ_WRITE: Self = Self {
         read: true,
         write: true,
         exec: false,
@@ -348,6 +348,7 @@ pub use config::M1M;
 pub use config::M4G;
 pub use config::M4K;
 pub use config::M8K;
+pub use config::M8M;
 pub use config::M16G;
 pub use config::M32G;
 pub use config::M64G;

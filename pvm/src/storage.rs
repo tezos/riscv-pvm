@@ -186,6 +186,12 @@ pub struct Repo<BS> {
     backend: Arc<BS>,
 }
 
+impl<BS> Repo<BS> {
+    pub fn backend(self) -> Arc<BS> {
+        self.backend
+    }
+}
+
 impl<BS: PersistentBlobStore> Repo<BS> {
     /// Load or create new repo at `path`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, StorageError> {
