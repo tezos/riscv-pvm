@@ -157,6 +157,13 @@ fn test_tampered_oversize_message(inputs: &TestConfig) {
     let outbox_proof = stepper
         .produce_outbox_proof(OutputInfo { level, index: 0 })
         .expect("Outbox proof should be valid");
+    let output = verify_outbox_proof(&outbox_proof).expect("Outbox proof should verify");
+
+    // Check that `replace_outbox_message_of_proof` behaves correctly
+    assert_eq!(
+        OutboxProof::serialise(&outbox_proof),
+        replace_outbox_message_of_proof(&outbox_proof, output.message.as_ref()),
+    );
 
     let tampered_outbox_proof = replace_outbox_message_of_proof(&outbox_proof, &[0x1; 8192]);
     let tampered_outbox_proof = OutboxProof::deserialise(tampered_outbox_proof.as_slice());
@@ -173,48 +180,49 @@ fn test_tampered_size(inputs: &TestConfig) {
         .expect("Outbox proof should be valid");
 
     let proof_bytes = OutboxProof::serialise(&outbox_proof);
-    let Range { start, .. } = find_message_pos(proof_bytes.as_slice());
-    let len_pos = start - 8;
+    let len_range = find_message_len_pos(proof_bytes.as_slice());
 
     let mut zero_sized = proof_bytes.clone();
-    zero_sized[len_pos..len_pos + 8].copy_from_slice(&0usize.to_le_bytes());
+    zero_sized[len_range.clone()].copy_from_slice(&0usize.to_le_bytes());
     OutboxProof::deserialise(zero_sized.as_slice()).expect_err("Should fail to deserialise");
 
     let mut incoherent_size = proof_bytes.clone();
-    incoherent_size[len_pos..len_pos + 8].copy_from_slice(&2000usize.to_le_bytes());
+    incoherent_size[len_range.clone()].copy_from_slice(&2000usize.to_le_bytes());
     OutboxProof::deserialise(incoherent_size.as_slice()).expect_err("Should fail to deserialise");
 
     let mut oversized = proof_bytes.clone();
-    oversized[len_pos..len_pos + 8].copy_from_slice(&8192usize.to_le_bytes());
+    oversized[len_range].copy_from_slice(&8192usize.to_le_bytes());
     OutboxProof::deserialise(oversized.as_slice()).expect_err("Should fail to deserialise");
 }
 
-/// Returns a serialized [OutboxProof] with the outbox message
+/// Returns a serialized [`OutboxProof`] with the outbox message
 /// portion set to [message]. The original outbox proof message
 /// is expected to be 4096 B
 fn replace_outbox_message_of_proof(proof: &OutboxProof, message: &[u8]) -> Vec<u8> {
     let proof_bytes = OutboxProof::serialise(proof);
-    let Range { start, end } = find_message_pos(proof_bytes.as_slice());
-    let len_pos = start - 8;
-    let message_size = end - start;
-
-    // Sanity check that the length prefix is correct
-    assert_eq!(
-        &proof_bytes[len_pos..len_pos + 8],
-        &(message_size as u64).to_le_bytes(),
-    );
+    let leaf_range = find_message_pos(proof_bytes.as_slice());
+    let replacement =
+        octez_riscv_data::serialisation::serialise(message.to_vec().into_boxed_slice())
+            .expect("serialising a boxed slice should succeed");
 
     // Craft serialized proof, replacing the outbox message with [message]
     let mut tampered = vec![];
-    let new_size = message.len();
-    tampered.extend_from_slice(&proof_bytes[..len_pos]);
-    tampered.extend_from_slice(&new_size.to_le_bytes());
-    tampered.extend_from_slice(message);
-    tampered.extend_from_slice(&proof_bytes[(len_pos + 8 + message_size)..]);
+    tampered.extend_from_slice(&proof_bytes[..leaf_range.start]);
+    tampered.extend_from_slice(&replacement);
+    tampered.extend_from_slice(&proof_bytes[leaf_range.end..]);
 
     tampered
 }
 
+/// Get the position of the length of the message from a valid serialised
+/// outbox proof
+fn find_message_len_pos(serialised_proof: &[u8]) -> Range<usize> {
+    let Range { start, .. } = find_message_pos(serialised_proof);
+    start..start + size_of::<u64>()
+}
+
+/// Get the position of the serialised [`OutboxMessage`] from a valid serialised
+/// outbox proof
 fn find_message_pos(serialised_proof: &[u8]) -> Range<usize> {
     let proof = OutboxProof::deserialise(serialised_proof).unwrap();
     let output = verify_outbox_proof(&proof).unwrap();
@@ -256,12 +264,11 @@ fn test_outbox_proofs_dummy_kernel() {
 }
 
 #[test]
-#[ignore = "TODO(RV-950)"]
-fn test_tampered_oversize_message_dummy_kernel() {
+fn test_outbox_proofs_tampered_oversize_message_dummy_kernel() {
     test_tampered_oversize_message(&DUMMY);
 }
 
 #[test]
-fn test_tampered_size_dummy_kernel() {
+fn test_outbox_proofs_tampered_size_dummy_kernel() {
     test_tampered_size(&DUMMY);
 }
