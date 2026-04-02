@@ -16,6 +16,7 @@ use bincode::error::DecodeError;
 
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::Many;
+use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
@@ -267,7 +268,7 @@ where
     let mut ctx = proof.into_node()?;
 
     // Time to add leaves.
-    if current_depth == 0 {
+    if current_depth <= 1 {
         for idx in current_start..current_start + arity {
             if idx >= total_leaves {
                 break;
@@ -280,7 +281,7 @@ where
         return ctx.done(());
     }
 
-    let next_chunk_len = arity.pow(current_depth);
+    let next_chunk_len = arity.pow(current_depth - 1);
 
     for child_no in 0..arity {
         let next_start = current_start + child_no * next_chunk_len;
@@ -324,10 +325,7 @@ where
         return for_leaf(0, proof);
     }
 
-    let depth = total_leaves
-        .saturating_sub(1)
-        .checked_ilog(arity)
-        .unwrap_or(0);
+    let depth = tree_depth(total_leaves, arity);
 
     descend_tree_helper(proof, arity, total_leaves, depth, 0, for_leaf)
 }
