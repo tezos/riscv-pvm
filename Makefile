@@ -51,7 +51,7 @@ taplo-check-format:
 rustfmt-check:
 	@exec scripts/format.sh --all --check
 
-test: jstz/test etherlink/test cargo-nextest-run cargo-test-doc
+test: jstz/test etherlink/test durable/test cargo-nextest-run cargo-test-doc
 
 test-deps: dummy/build page-cache-tester/build dummy-no-std/build
 
