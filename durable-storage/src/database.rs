@@ -125,7 +125,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///
     /// Deleting a missing key succeeds and leaves the database unchanged.
     /// TODO RV-943: Fix behaviour to returning an operational error when deleting a missing key.
-    pub fn delete(&mut self, key: Key) -> Result<(), Error> {
+    pub fn delete(&mut self, key: Key) -> Result<(), OperationalError> {
         M::delete(self, key)
     }
 
@@ -276,7 +276,7 @@ pub trait DatabaseMode: Mode {
     fn delete<KV: BackgroundKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
-    ) -> Result<(), Error>;
+    ) -> Result<(), OperationalError>;
 
     /// See [`Database::hash`]
     fn hash<KV: BackgroundKeyValueStore>(
@@ -323,7 +323,7 @@ impl DatabaseMode for Normal {
     fn delete<KV: BackgroundKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
-    ) -> Result<(), Error> {
+    ) -> Result<(), OperationalError> {
         this.inner.persistent.delete(key.as_ref())?;
         this.inner.merkle.delete(key)?;
         Ok(())
