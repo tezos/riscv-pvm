@@ -235,7 +235,7 @@ fn bench_run(mut state: BenchmarkState) {
                 );
             }
             Operation::Delete { key } => match state.database.delete(key) {
-                Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
+                Ok(_) => {}
                 Err(e) => panic!("The deletion should succeed: {e:?}"),
             },
             Operation::Exists { key } => {
