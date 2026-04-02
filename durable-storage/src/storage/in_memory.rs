@@ -148,7 +148,7 @@ impl KeyValueStore for InMemoryKeyValueStore {
         } else {
             store
                 .get_mut(key.as_ref())
-                .ok_or(InvalidArgumentError::KeyNotFound)?
+                .ok_or(InvalidArgumentError::OffsetTooLarge)?
         };
 
         // Trying to write past the existing value is not allowed.

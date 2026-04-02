@@ -368,7 +368,7 @@ impl KeyValueStore for PersistenceLayer {
             // `may_exist` can be cheaper than `get`
             let may_exist = self.db_instance.key_may_exist(&key);
             if !may_exist {
-                return Err(InvalidArgumentError::KeyNotFound)?;
+                return Err(InvalidArgumentError::OffsetTooLarge)?;
             }
 
             // Checking the length of a value requires a full retrieval. Returns an error if the

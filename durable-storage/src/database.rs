@@ -368,6 +368,8 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
+    use crate::errors::Error;
+    use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::storage::TestKeyValueStore;
@@ -961,7 +963,15 @@ mod tests {
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[]);
 
-        assert!(database.write(key.clone(), 1, data).is_err());
+        let res = database.write(key.clone(), 1, data);
+
+        assert!(
+            matches!(
+                res,
+                Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
+            ),
+            "Values that don't exist are implicitly zero in size when written. Got {res:?}"
+        );
     }
 
     #[test]
