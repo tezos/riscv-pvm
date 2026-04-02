@@ -57,8 +57,8 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
     /// ```
     pub fn new(len: usize, arity: usize, generator: &'a G) -> Self {
         // This is the tree depth needed to cover `len` items with nodes of `arity` children each.
-        // We will gradually traverse down to depth 0, where the leaves are placed.
-        let depth = len.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
+        // We will gradually traverse down to depth 1, where the leaves are placed.
+        let depth = tree_depth(len, arity);
 
         Self {
             total_len: len,
@@ -87,7 +87,7 @@ where
         let mut builder = builder.into_node_fold();
 
         // Time to add leaves.
-        if self.current_depth == 0 {
+        if self.current_depth <= 1 {
             for idx in self.current_start..self.current_start + self.arity {
                 if idx >= self.total_len {
                     break;
@@ -100,7 +100,7 @@ where
             return builder.done();
         }
 
-        let next_chunk_len = self.arity.pow(self.current_depth);
+        let next_chunk_len = self.arity.pow(self.current_depth - 1);
 
         for child_no in 0..self.arity {
             let next_start = self.current_start + child_no * next_chunk_len;
@@ -170,7 +170,7 @@ where
 
     let mut source = source.into_node()?;
 
-    if current_depth == 0 {
+    if current_depth <= 1 {
         for idx in current_start..current_start + arity {
             if idx >= total_len {
                 break;
@@ -182,7 +182,7 @@ where
         return source.done(());
     }
 
-    let next_chunk_len = arity.pow(current_depth);
+    let next_chunk_len = arity.pow(current_depth - 1);
 
     for child_no in 0..arity {
         let next_start = current_start + child_no * next_chunk_len;
@@ -221,7 +221,7 @@ where
     U: Unfold,
     LeafHandler: FnMut(usize, U) -> Result<(), UnfoldError>,
 {
-    let depth = length.saturating_sub(1).checked_ilog(arity).unwrap_or(0);
+    let depth = tree_depth(length, arity);
 
     descend_helper(source, length, depth, 0, arity, for_leaf)
 }
