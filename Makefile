@@ -11,7 +11,7 @@ all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/al
 
 check: riscv/check durable/check jstz/check dummy/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check check-format
 
-build: sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
+build: riscv/build sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
 
 clean: sandbox/clean jstz/clean dummy/clean page-cache-tester/clean etherlink/clean cargo-clean
 
@@ -55,14 +55,8 @@ test: jstz/test etherlink/test durable/test cargo-nextest-run cargo-test-doc
 
 test-deps: dummy/build page-cache-tester/build dummy-no-std/build
 
-codecov.json: test-deps
-	@cargo llvm-cov \
-		--package octez-riscv \
-		--package octez-riscv-data \
-		--package octez-riscv-durable-storage \
-		--codecov \
-		--output-path $@ \
-		nextest
+codecov.json:
+	@make -f riscv.mk $@
 
 cargo-nextest-run: test-deps
 	@cargo nextest run --workspace
@@ -76,7 +70,10 @@ cargo-clean:
 ### Target proxies
 
 riscv/%:
-	@make -C pvm ${@:riscv/%=%}
+	@make -f riscv.mk ${@:riscv/%=%}
+
+pvm/%:
+	@make -C pvm ${@:pvm/%=%}
 
 durable/%:
 	@make -C durable-storage ${@:durable/%=%}
