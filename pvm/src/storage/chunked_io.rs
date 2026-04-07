@@ -6,24 +6,26 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::io;
 use std::io::Cursor;
+use std::io::Write;
 
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation::deserialise;
+use octez_riscv_data::store::BlobStore;
 
 use super::CHUNK_SIZE;
 use super::StorageError;
-use super::Store;
 
-/// Simple writer that stores data in chunks of size [`CHUNK_SIZE`]
-pub struct ChunkWriter<'a> {
-    store: &'a mut Store,
+/// Simple writer that stores data in chunks of size [`CHUNK_SIZE`] in any [`BlobStore`].
+pub struct ChunkWriter<'a, BS> {
+    store: &'a BS,
     hashes: Vec<Hash>,
     buffer: Vec<u8>,
 }
 
-impl<'a> ChunkWriter<'a> {
-    /// Create a new writer that writes the chunks to the given [`Store`].
-    pub fn new(store: &'a mut Store) -> Self {
+impl<'a, BS: BlobStore> ChunkWriter<'a, BS> {
+    /// Create a new writer that writes the chunks to the given [`BlobStore`].
+    pub fn new(store: &'a BS) -> Self {
         Self {
             store,
             hashes: Vec::new(),
@@ -43,14 +45,15 @@ impl<'a> ChunkWriter<'a> {
 
     /// Write a chunk to the store.
     fn flush_buffer(&mut self) -> Result<(), StorageError> {
-        let chunk_hash = self.store.store(self.buffer.as_slice())?;
-        self.hashes.push(chunk_hash);
+        let hashed = HashedData::from_data(&self.buffer);
+        self.store.blob_set(&hashed)?;
+        self.hashes.push(hashed.hash());
         self.buffer.clear();
         Ok(())
     }
 }
 
-impl io::Write for ChunkWriter<'_> {
+impl<BS: BlobStore> Write for ChunkWriter<'_, BS> {
     fn write(&mut self, mut data: &[u8]) -> io::Result<usize> {
         let ret = data.len();
 
@@ -78,17 +81,17 @@ impl io::Write for ChunkWriter<'_> {
 }
 
 /// Just like [`ChunkWriter`], but for reading.
-pub struct ChunkedReader<'a> {
-    store: &'a Store,
+pub struct ChunkedReader<'a, BS> {
+    store: &'a BS,
     hashes: VecDeque<Hash>,
     buffer: Cursor<Vec<u8>>,
 }
 
-impl<'a> ChunkedReader<'a> {
-    /// Create a new reader that pulls the chunks from the given [`Store`].
-    pub fn new(store: &'a Store, hash: &Hash) -> Result<Self, StorageError> {
-        let raw_hashes = store.load(hash)?;
-        let hashes = deserialise(raw_hashes.as_slice())?;
+impl<'a, BS: BlobStore> ChunkedReader<'a, BS> {
+    /// Create a new reader that pulls the chunks from the given [`BlobStore`].
+    pub fn new(store: &'a BS, hash: &Hash) -> Result<Self, StorageError> {
+        let raw_hashes = store.blob_get(*hash)?;
+        let hashes = deserialise(raw_hashes.as_ref())?;
         Ok(Self {
             store,
             hashes,
@@ -102,13 +105,17 @@ impl<'a> ChunkedReader<'a> {
             return Ok(());
         };
 
-        self.buffer = Cursor::new(self.store.load(&hash)?);
+        let bytes = self.store.blob_get(hash)?;
+
+        self.buffer.get_mut().clear();
+        self.buffer.get_mut().extend_from_slice(bytes.as_ref());
+        self.buffer.set_position(0);
 
         Ok(())
     }
 }
 
-impl io::Read for ChunkedReader<'_> {
+impl<BS: BlobStore> io::Read for ChunkedReader<'_, BS> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.buffer.position() as usize >= self.buffer.get_ref().len() {
             self.next_chunk().map_err(io::Error::other)?;
