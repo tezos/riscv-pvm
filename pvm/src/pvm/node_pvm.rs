@@ -24,6 +24,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::store::BlobStore;
 use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
@@ -46,6 +47,7 @@ use crate::pvm::hooks::PvmHooks;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::storage;
+use crate::storage::PersistentBlobStore;
 use crate::storage::Repo;
 
 #[derive(Error, Debug)]
@@ -321,17 +323,11 @@ pub enum PvmStorageError {
     PvmError(#[from] PvmError),
 }
 
-pub struct PvmStorage {
-    repo: Repo,
+pub struct PvmStorage<BS> {
+    repo: Repo<BS>,
 }
 
-impl PvmStorage {
-    /// Load or create new repo at `path`.
-    pub fn load(path: impl AsRef<Path>) -> Result<PvmStorage, PvmStorageError> {
-        let repo = Repo::load(path)?;
-        Ok(PvmStorage { repo })
-    }
-
+impl<BS: BlobStore> PvmStorage<BS> {
     pub fn close(self) {
         self.repo.close()
     }
@@ -346,6 +342,14 @@ impl PvmStorage {
         let pvm = self.repo.checkout_serialised(id)?;
         Ok(NodePvm::wrap(pvm))
     }
+}
+
+impl<BS: PersistentBlobStore> PvmStorage<BS> {
+    /// Load or create new repo at `path`.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, PvmStorageError> {
+        let repo = Repo::load(path)?;
+        Ok(Self { repo })
+    }
 
     /// A snapshot is a new repo to which only `id` has been committed.
     pub fn export_snapshot(
@@ -353,6 +357,6 @@ impl PvmStorage {
         id: &Hash,
         path: impl AsRef<Path>,
     ) -> Result<(), PvmStorageError> {
-        Ok(self.repo.export_snapshot(id, path)?)
+        Ok(self.repo.export_snapshot_chunked(id, path)?)
     }
 }
