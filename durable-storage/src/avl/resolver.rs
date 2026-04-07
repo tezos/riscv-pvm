@@ -674,8 +674,12 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::NotFound;
+    use octez_riscv_data::mode::utils::catch_not_found;
 
     use super::ArcNodeId;
     use super::ArcResolver;
@@ -686,6 +690,10 @@ mod tests {
     use super::ProveNodeId;
     use super::ProveResolver;
     use super::Resolver;
+    use super::VerifyNodeId;
+    use super::VerifyResolver;
+    use super::VerifyTreeId;
+    use crate::avl::node::Node;
     use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
     use crate::errors::Error;
@@ -764,6 +772,15 @@ mod tests {
 
         fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
             self.inner.delete(key)
+        }
+    }
+
+    /// `Node::new` requires `TreeId: Default`. In production, a `VerifyTreeId` is only
+    /// created by deserialising a proof, never by defaulting, but tests need a way to
+    /// construct leaf nodes directly.
+    impl Default for VerifyTreeId {
+        fn default() -> Self {
+            Self::Absent
         }
     }
 
@@ -1296,5 +1313,77 @@ mod tests {
             .expect("resolving empty prove tree should succeed");
 
         assert!(tree.root().is_none(), "empty tree should have no root");
+    }
+
+    /// Assert that resolving the given ID through `VerifyResolver` triggers `not_found`.
+    fn assert_verify_resolve_not_found<T>(
+        resolve: impl FnOnce() -> Result<T, OperationalError> + std::panic::UnwindSafe,
+    ) {
+        let result = catch_not_found(resolve);
+        assert!(
+            matches!(result, Err(NotFound)),
+            "resolving should trigger not_found"
+        );
+    }
+
+    #[test]
+    fn test_verify_resolver_not_found() {
+        let id = VerifyTreeId::Absent;
+        assert_verify_resolve_not_found(|| VerifyResolver.resolve(&id));
+
+        let id = VerifyNodeId::Blinded(Hash::hash_bytes(b"dummy"));
+        assert_verify_resolve_not_found(|| VerifyResolver.resolve(&id));
+
+        let id = VerifyTreeId::Blinded(Hash::hash_bytes(b"dummy"));
+        assert_verify_resolve_not_found(|| VerifyResolver.resolve(&id));
+    }
+
+    #[test]
+    fn test_verify_resolver_resolve_mut_node() {
+        let key = Key::new(&[2]).expect("key should be valid");
+        let node: Node<VerifyTreeId, Verify> = Node::new(key.clone(), Bytes::<Verify>::new(0));
+        let mut id = VerifyNodeId::Present(Arc::new(node));
+
+        let mut resolver = VerifyResolver;
+
+        assert_eq!(
+            resolver
+                .resolve(&id)
+                .expect("resolve should succeed")
+                .balance_factor(),
+            0,
+            "balance factor should start at zero"
+        );
+
+        let resolved = resolver
+            .resolve_mut(&mut id)
+            .expect("resolve_mut should succeed");
+        assert_eq!(resolved.key(), &key);
+        *resolved.balance_factor_mut() = 1;
+
+        assert_eq!(
+            resolver
+                .resolve(&id)
+                .expect("resolve should succeed after mutation")
+                .balance_factor(),
+            1,
+            "balance factor should reflect mutation"
+        );
+    }
+
+    #[test]
+    fn test_verify_resolver_resolves_tree() {
+        let key = Key::new(&[1]).expect("key should be valid");
+        let node: Node<VerifyTreeId, Verify> = Node::new(key, Bytes::<Verify>::new(0));
+        let node_id = VerifyNodeId::Present(Arc::new(node));
+        let tree: Tree<VerifyNodeId> = Some(node_id).into();
+        let id = VerifyTreeId::Present(tree);
+
+        let resolver = VerifyResolver;
+        let resolved = resolver
+            .resolve(&id)
+            .expect("should resolve to a verify tree");
+
+        assert!(resolved.root().is_some(), "tree should have a root");
     }
 }
