@@ -84,16 +84,16 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M>> NodePvm
         Ok(Self::wrap(cloned_pvm))
     }
 
-    fn with_backend_mut<T, F>(&mut self, f: F) -> T
+    fn with_backend_mut<'a, T, F>(&'a mut self, f: F) -> T
     where
-        F: FnOnce(&mut NodePvmState<M, PC, DS>) -> T,
+        F: FnOnce(&'a mut NodePvmState<M, PC, DS>) -> T,
     {
         f(&mut self.state)
     }
 
-    fn with_backend<T, F>(&self, f: F) -> T
+    fn with_backend<'a, T, F>(&'a self, f: F) -> T
     where
-        F: FnOnce(&NodePvmState<M, PC, DS>) -> T,
+        F: FnOnce(&'a NodePvmState<M, PC, DS>) -> T,
     {
         f(&self.state)
     }
@@ -249,7 +249,7 @@ impl<PC: PageCache<NodePvmMemConfig, Normal>, DS: DurableStorage<Normal>> NodePv
     }
 
     /// Get the outbox messages for the specified level
-    pub fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
+    pub fn get_outbox_messages(&self, level: u32) -> Option<impl Iterator<Item = Output>> {
         self.with_backend(|pvm| pvm.tezos.get_outbox_messages(level))
     }
 }
