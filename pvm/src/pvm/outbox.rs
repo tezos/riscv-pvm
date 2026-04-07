@@ -194,7 +194,7 @@ impl Outbox<Normal> {
     ///
     /// Warning: The caller must ensure that `level` is within the outbox
     /// validity window
-    pub(crate) fn read_level(&self, level: u32) -> Box<[OutboxMessage]> {
+    pub(crate) fn read_level(&self, level: u32) -> impl Iterator<Item = OutboxMessage> {
         let level_index = self.level_index(level);
         self.levels[level_index].read_level(level)
     }
@@ -310,24 +310,21 @@ impl<M: Mode> Tezos<M> {
 impl Tezos<Normal> {
     /// Retrieves the outbox messages for a given level. Returns None if the level is
     /// not in the outbox
-    pub(crate) fn get_outbox_messages(&self, level: u32) -> Option<Vec<Output>> {
+    pub(crate) fn get_outbox_messages(&self, level: u32) -> Option<impl Iterator<Item = Output>> {
         self.check_level_in_outbox(level).ok()?;
 
-        let result = self
-            .outbox
-            .read_level(level)
-            .into_iter()
-            .enumerate()
-            .map(|(i, message)| Output {
-                message,
-                info: OutputInfo {
-                    level,
-                    index: i as u32,
-                },
-            })
-            .collect();
-
-        Some(result)
+        Some(
+            self.outbox
+                .read_level(level)
+                .enumerate()
+                .map(move |(i, message)| Output {
+                    message,
+                    info: OutputInfo {
+                        level,
+                        index: i as u32,
+                    },
+                }),
+        )
     }
 }
 
@@ -382,21 +379,19 @@ impl<M: AtomMode + VectorMode> OutboxLevel<M> {
 }
 
 impl OutboxLevel<Normal> {
-    fn read_level(&self, level: u32) -> Box<[OutboxMessage]> {
+    fn read_level(&self, level: u32) -> impl Iterator<Item = OutboxMessage> {
         let last_written_level = self.level.read();
         debug_assert!(
             level >= last_written_level,
             "level {level} must be gte to the last written level for this outbox level slot. Found {last_written_level}"
         );
 
-        if level != last_written_level || self.messages.is_empty() {
-            return Box::new([]);
-        }
-
-        self.messages
-            .iter()
-            .map(|msg| msg.deref().clone())
-            .collect::<Box<[_]>>()
+        // If the requested level is in the outbox, return an iterator over its messages.
+        // Otherwise, return an empty iterator.
+        (level == last_written_level)
+            .then(|| self.messages.iter().map(|msg| msg.deref().clone()))
+            .into_iter()
+            .flatten()
     }
 }
 
@@ -484,7 +479,6 @@ pub(crate) mod tests {
     use std::ops::RangeBounds;
     use std::ops::RangeInclusive;
 
-    use itertools::Itertools;
     use proptest::prelude::*;
     use tezos_smart_rollup_constants::core::MAX_OUTPUT_SIZE;
 
@@ -600,7 +594,7 @@ pub(crate) mod tests {
                 prop_assert!(outbox.write_message(msg.clone(), level).is_ok());
             }
 
-            let read_messages = outbox.read_level(level);
+            let read_messages: Vec<OutboxMessage> = outbox.read_level(level).collect();
 
             prop_assert_eq!(read_messages.len(), messages.len());
             for (i, msg) in messages.iter().enumerate() {
@@ -627,14 +621,8 @@ pub(crate) mod tests {
                 for msg in msgs {
                     prop_assert!(outbox.write_message(msg.clone(), wrap_level as u32).is_ok());
                 }
-                let read_messages = outbox.read_level(wrap_level as u32);
-                let expected_messages = Box::from(
-                    messages2[offset]
-                        .clone()
-                        .into_iter()
-                        .collect_vec(),
-                );
-                prop_assert_eq!(read_messages, expected_messages);
+                let read_messages: Vec<OutboxMessage> = outbox.read_level(wrap_level as u32).collect();
+                prop_assert_eq!(read_messages.as_slice(), messages2[offset].as_slice());
             }
         });
     }
@@ -643,7 +631,7 @@ pub(crate) mod tests {
     fn read_fresh_outbox_is_empty() {
         proptest!(|(level in 0u32..TEST_OUTBOX_SIZE as u32)| {
             let outbox = Outbox::<Normal>::default();
-            let result = outbox.read_level(level);
+            let result: Vec<OutboxMessage> = outbox.read_level(level).collect();
             prop_assert_eq!(result.len(), 0)
         });
     }
@@ -796,7 +784,7 @@ pub(crate) mod tests {
             }
 
             // Read messages back at write_level
-            let all_outputs = pvm.tezos.get_outbox_messages(write_level).unwrap();
+            let all_outputs: Vec<Output> = pvm.tezos.get_outbox_messages(write_level).unwrap().collect();
             prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
@@ -814,7 +802,7 @@ pub(crate) mod tests {
             let future_level = write_level + (TEST_OUTBOX_SIZE as u32) - 1;
             pvm.tezos.level.write(Some(future_level));
 
-            let all_outputs = pvm.tezos.get_outbox_messages(write_level).unwrap();
+            let all_outputs: Vec<Output> = pvm.tezos.get_outbox_messages(write_level).unwrap().collect();
             prop_assert_eq!(all_outputs.len(), messages.len());
             for (i, message) in messages.iter().enumerate() {
                 let info = OutputInfo {
@@ -871,7 +859,7 @@ pub(crate) mod tests {
             prop_assert!(pvm.tezos.get_outbox_messages(write_level).is_none());
 
             // Reading at wrapped level for indices 0..N should work
-            let all_outputs = pvm.tezos.get_outbox_messages(wrapped_level).unwrap();
+            let all_outputs: Vec<Output> = pvm.tezos.get_outbox_messages(wrapped_level).unwrap().collect();
             prop_assert_eq!(all_outputs.len(), second_messages.len());
             for (i, message) in second_messages.iter().enumerate() {
                 let info = OutputInfo {
