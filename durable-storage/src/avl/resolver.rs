@@ -453,6 +453,18 @@ pub struct ProveNodeId {
     node: LazyNodeId,
 }
 
+// TODO RV-895: This method is implemented to satisfy trait-bounds in `tree::upsert`.
+// The current implementation around proofs for created nodes during proof-generation
+// needs to be fixed.
+impl From<Node<ProveTreeId, Prove<'static>>> for ProveNodeId {
+    fn from(node: Node<ProveTreeId, Prove<'static>>) -> Self {
+        ProveNodeId {
+            inner: OnceLock::from(Rc::new(node)),
+            node: LazyNodeId::from(Hash::hash_bytes(&[])),
+        }
+    }
+}
+
 impl Foldable<HashFold> for ProveNodeId {
     fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
         match self.inner.get() {
@@ -480,6 +492,17 @@ impl Foldable<MerkleProofFold> for ProveNodeId {
 pub struct ProveTreeId {
     inner: OnceLock<Tree<ProveNodeId>>,
     tree: LazyTreeId,
+}
+
+// `Node::new` requires `TreeId: Default`. TODO RV-895: fix implementation around proofs
+// for created nodes during proof-generation.
+impl Default for ProveTreeId {
+    fn default() -> Self {
+        ProveTreeId {
+            inner: OnceLock::from(Tree::default()),
+            tree: LazyTreeId::default(),
+        }
+    }
 }
 
 impl Foldable<HashFold> for ProveTreeId {
@@ -729,8 +752,14 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
+    use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::bytes::Bytes;
+    use octez_riscv_data::components::bytes::BytesMode;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::PartialHash;
+    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
@@ -757,8 +786,10 @@ mod tests {
     use crate::storage::KeyValueStore;
     use crate::storage::Storable;
     use crate::storage::StoreOptions;
+    use crate::storage::TestKeyValueStore;
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::storage::in_memory::InMemoryRepo;
+    use crate::storage::setup_repo;
 
     /// A wrapper around an in-memory key-value store that counts the number of `blob_get` calls.
     #[derive(Debug, Default)]
@@ -1431,5 +1462,128 @@ mod tests {
             .expect("should resolve to a verify tree");
 
         assert!(resolved.root().is_some(), "tree should have a root");
+    }
+
+    /// Read `key` from `tree`, assert the contents match `expected`, then overwrite at
+    /// `offset` with `new_data`.
+    ///
+    /// Shared across the Prove and Verify halves of
+    /// [`prove_verify_round_trip_get_and_write`] so both modes execute byte-for-byte
+    /// identical operations.
+    // TODO RV-969: rewrite in terms of an `OperationStream`.
+    fn run_read_then_write<NodeId, TreeId, M, Res>(
+        tree: &mut Tree<NodeId>,
+        resolver: &mut Res,
+        key: &Key,
+        expected: &[u8],
+        offset: usize,
+        new_data: &[u8],
+    ) where
+        NodeId: Clone + From<Node<TreeId, M>>,
+        TreeId: Default,
+        M: BytesMode + AtomMode,
+        Res: AvlResolver<NodeId, TreeId, M>,
+    {
+        let data: &Bytes<M> = tree
+            .get(key, resolver)
+            .expect("get should succeed")
+            .expect("key should exist");
+        let mut buf = vec![0u8; data.len()];
+        data.read(0, &mut buf);
+        assert_eq!(&buf, expected, "read should observe the expected bytes");
+
+        tree.write(key, offset, new_data, resolver)
+            .expect("write should succeed");
+    }
+
+    /// Build a three-node tree, persist it, then run a round-trip through Prove and Verify
+    /// modes using only read (`get`) and in-place write operations (no structural changes).
+    ///
+    /// TODO: RV-969: Rewrite operations to use OperationStream.
+    #[test]
+    fn prove_verify_round_trip_get_and_write() {
+        let key1 = Key::new(&[1]).expect("key should be valid");
+        let key2 = Key::new(&[2]).expect("key should be valid");
+        let key3 = Key::new(&[3]).expect("key should be valid");
+
+        // Shared operation parameters replayed across Prove and Verify modes.
+        let initial_data: &[u8] = b"beta";
+        let write_offset: usize = 0;
+        let overwrite_data: &[u8] = b"BETA";
+
+        // ---- Normal: build a three-node tree and persist ----
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut resolver = ArcResolver;
+        tree.set(&key1, b"alpha", &mut resolver)
+            .expect("set should succeed");
+        tree.set(&key2, b"beta", &mut resolver)
+            .expect("set should succeed");
+        tree.set(&key3, b"gamma", &mut resolver)
+            .expect("set should succeed");
+
+        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+
+        let (_keepalive, repo) = setup_repo();
+        let persistence_layer = Arc::new(
+            TestKeyValueStore::new(&repo).expect("creating persistence layer should succeed"),
+        );
+        persist_tree(&tree, &resolver, persistence_layer.as_ref());
+
+        // ---- Prove: load, project, do get + write ----
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let lazy_resolver = LazyResolver::new(persistence_layer);
+        let mut prove_tree: Tree<ProveNodeId> = lazy_tree.into_proof();
+        let mut prove_resolver = ProveResolver(lazy_resolver);
+
+        // Read key2, then overwrite in place (no structural change).
+        run_read_then_write(
+            &mut prove_tree,
+            &mut prove_resolver,
+            &key2,
+            initial_data,
+            write_offset,
+            overwrite_data,
+        );
+
+        // Expected final hash (from prove-mode tree after operations)
+        let expected_hash = prove_tree.hash();
+
+        // ---- Generate proof ----
+        let merkle_proof = MerkleProof::from_foldable(&prove_tree);
+
+        // ---- Verify: deserialize proof, replay operations ----
+        let proof_deser = ProofTree::Present(&merkle_proof);
+        let verify_tree_id = VerifyTreeId::from_proof(proof_deser)
+            .expect("proof deserialization should succeed")
+            .into_result();
+
+        let VerifyTreeId::Present(mut verify_tree) = verify_tree_id else {
+            panic!("expected Present tree from proof, got {verify_tree_id:#?}");
+        };
+        let mut verify_resolver = VerifyResolver;
+
+        let final_hash = catch_not_found(move || {
+            // Replay the identical read + write against the verify tree.
+            run_read_then_write(
+                &mut verify_tree,
+                &mut verify_resolver,
+                &key2,
+                initial_data,
+                write_offset,
+                overwrite_data,
+            );
+
+            // Compute verify hash
+            let verify_tree_id = VerifyTreeId::Present(verify_tree);
+            PartialHash::from_foldable(Some(merkle_proof), &verify_tree_id)
+                .to_hash()
+                .expect("verify hash should be computable")
+        })
+        .expect("verify operations should not trigger not_found");
+
+        assert_eq!(
+            expected_hash, final_hash,
+            "prove and verify hashes should match after identical get + write operations"
+        );
     }
 }
