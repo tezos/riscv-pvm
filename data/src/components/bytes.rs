@@ -979,7 +979,7 @@ impl<'normal> ProveImpl<'normal> {
 }
 
 /// [`crate::mode::Verify`] mode implementation for the [`Bytes`] component
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, Debug)]
 struct VerifyImpl {
     original_length: Partial<usize>,
     length: Partial<usize>,
