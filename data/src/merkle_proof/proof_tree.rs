@@ -305,6 +305,19 @@ impl MerkleProofFold {
     pub fn new_leaf(constraint: MinimumPresence, data: Vec<u8>) -> impl Foldable<Self> {
         CompressibleMerkleProof::new_leaf(constraint, data)
     }
+
+    /// Create a blinded proof leaf from a known hash.
+    ///
+    /// Use this when a subtree was not accessed during proof generation and should be represented
+    /// only by its hash in the proof.
+    /// TODO: RV-968 - remove workaround for creating CompressibleMerkleProof, as users can also be
+    /// in "may-blind" state.
+    pub fn into_blind(self, hash: Hash) -> CompressibleMerkleProof {
+        CompressibleMerkleProof {
+            constraint: MinimumPresence::MayOmit,
+            tree: MerkleProof::leaf_blind(hash),
+        }
+    }
 }
 
 impl Fold for MerkleProofFold {

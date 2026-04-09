@@ -35,11 +35,14 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -459,6 +462,15 @@ impl Foldable<HashFold> for ProveNodeId {
     }
 }
 
+impl Foldable<MerkleProofFold> for ProveNodeId {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        match self.inner.get() {
+            Some(inner) => inner.as_ref().fold(builder),
+            None => builder.into_blind(Hash::from_foldable(&self.node)),
+        }
+    }
+}
+
 /// Identifier for a tree resolved in [`Prove`] mode.
 ///
 /// Like [`ProveNodeId`], this wrapper keeps the original lazy identifier and fills `inner` on the
@@ -475,6 +487,15 @@ impl Foldable<HashFold> for ProveTreeId {
         match self.inner.get() {
             Some(inner) => inner.hash(),
             None => self.tree.fold(builder),
+        }
+    }
+}
+
+impl Foldable<MerkleProofFold> for ProveTreeId {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        match self.inner.get() {
+            Some(inner) => inner.fold(builder),
+            None => builder.into_blind(Hash::from_foldable(&self.tree)),
         }
     }
 }
@@ -586,6 +607,15 @@ impl From<Node<VerifyTreeId, Verify>> for VerifyNodeId {
     }
 }
 
+impl Foldable<PartialHashFold> for VerifyNodeId {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        match self {
+            VerifyNodeId::Present(inner) => inner.as_ref().fold(builder),
+            VerifyNodeId::Blinded(hash) => builder.present(*hash),
+        }
+    }
+}
+
 impl FromProof for VerifyNodeId {
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
@@ -607,6 +637,16 @@ pub enum VerifyTreeId {
     Present(Tree<VerifyNodeId>),
     Blinded(Hash),
     Absent,
+}
+
+impl Foldable<PartialHashFold> for VerifyTreeId {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        match self {
+            VerifyTreeId::Present(inner) => inner.fold(builder),
+            VerifyTreeId::Blinded(hash) => builder.present(*hash),
+            VerifyTreeId::Absent => builder.previous(),
+        }
+    }
 }
 
 impl FromProof for VerifyTreeId {
