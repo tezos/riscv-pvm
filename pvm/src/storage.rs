@@ -19,6 +19,7 @@ use octez_riscv_data::hash::HashError;
 use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation;
 use octez_riscv_data::store::BlobStore;
+use octez_riscv_data::store::BlobStoreError;
 use thiserror::Error;
 
 const CHUNK_SIZE: usize = 4096;
@@ -120,24 +121,30 @@ impl Store {
 }
 
 impl BlobStore for Store {
-    type Error = StorageError;
-
-    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Self::Error> {
-        self.load(&key)
+    fn blob_get(&self, hash: Hash) -> Result<impl AsRef<[u8]>, BlobStoreError> {
+        let file_name = self.path_of_hash(&hash);
+        std::fs::read(file_name).map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                BlobStoreError::NotFound(hash)
+            } else {
+                BlobStoreError::Custom(Box::new(e))
+            }
+        })
     }
 
-    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), Self::Error> {
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), BlobStoreError> {
         let file_name = self.path_of_hash(&blob.hash());
-        self.write_data_if_new(file_name, blob.data())?;
+        self.write_data_if_new(file_name, blob.data())
+            .map_err(|e| BlobStoreError::Custom(Box::new(e)))?;
         Ok(())
     }
 
-    fn blob_delete(&self, key: Hash) -> Result<(), Self::Error> {
+    fn blob_delete(&self, key: Hash) -> Result<(), BlobStoreError> {
         let file_name = self.path_of_hash(&key);
         match std::fs::remove_file(file_name) {
             Ok(_) => Ok(()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(StorageError::IoError(e)),
+            Err(e) => Err(BlobStoreError::Custom(Box::new(e))),
         }
     }
 }
@@ -232,8 +239,8 @@ mod tests {
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::HashedData;
     use octez_riscv_data::store::BlobStore;
+    use octez_riscv_data::store::BlobStoreError;
 
-    use super::StorageError;
     use super::Store;
 
     #[test]
@@ -256,7 +263,9 @@ mod tests {
         store.blob_delete(hash1).unwrap();
 
         match store.blob_get(hash1) {
-            Err(StorageError::NotFound(hash)) => assert_eq!(hash, hash1.to_string()),
+            Err(BlobStoreError::NotFound(hash)) => {
+                assert_eq!(hash, hash1)
+            }
             _ => panic!("Expected `NotFound` error"),
         };
 

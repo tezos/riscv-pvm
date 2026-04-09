@@ -9,6 +9,7 @@ use std::sync::Arc;
 use derive_more::From;
 
 use super::BlobStore;
+use super::BlobStoreError;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -32,11 +33,11 @@ pub struct BlobStoreFold<BS> {
 pub struct BlobStoreNodeFold<BS: BlobStore> {
     store: Arc<BS>,
     bytes: Vec<u8>,
-    error: Option<BS::Error>,
+    error: Option<BlobStoreError>,
 }
 
 impl<BS: BlobStore> Fold for BlobStoreFold<BS> {
-    type Folded = Result<Hash, BS::Error>;
+    type Folded = Result<Hash, BlobStoreError>;
 
     type NodeFold = BlobStoreNodeFold<BS>;
 
@@ -50,7 +51,7 @@ impl<BS: BlobStore> Fold for BlobStoreFold<BS> {
 }
 
 impl<BS: BlobStore> FoldLeaf for BlobStoreFold<BS> {
-    fn fold_leaf_raw(self, bytes: &[u8]) -> Result<Hash, BS::Error> {
+    fn fold_leaf_raw(self, bytes: &[u8]) -> Result<Hash, BlobStoreError> {
         let hashed = HashedData::from_data(bytes);
         self.store.blob_set(&hashed)?;
         Ok(hashed.hash())
@@ -76,7 +77,7 @@ impl<BS: BlobStore> NodeFold for BlobStoreNodeFold<BS> {
         };
     }
 
-    fn done(self) -> Result<Hash, BS::Error> {
+    fn done(self) -> Result<Hash, BlobStoreError> {
         if let Some(e) = self.error {
             Err(e)
         } else {
@@ -101,12 +102,19 @@ mod tests {
     use crate::hash::HashedData;
     use crate::mode::Normal;
     use crate::store::BlobStore;
+    use crate::store::BlobStoreError;
     use crate::store::InMemoryBlobStore;
 
     #[derive(Debug, thiserror::Error)]
     enum TestError {
         #[error("Test error")]
         TestError,
+    }
+
+    impl From<TestError> for BlobStoreError {
+        fn from(e: TestError) -> Self {
+            Self::Custom(Box::new(e))
+        }
     }
 
     struct ErroringBlobStore {
@@ -124,22 +132,23 @@ mod tests {
     }
 
     impl BlobStore for ErroringBlobStore {
-        type Error = TestError;
-
-        fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, Self::Error> {
+        fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, BlobStoreError> {
             Ok(self.inner.blob_get(key).unwrap())
         }
 
-        fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), Self::Error> {
+        fn blob_set<Data: AsRef<[u8]>>(
+            &self,
+            blob: &HashedData<Data>,
+        ) -> Result<(), BlobStoreError> {
             if blob.hash() == self.error_hash {
-                Err(TestError::TestError)
+                Err(TestError::TestError)?
             } else {
                 self.inner.blob_set(blob).unwrap();
                 Ok(())
             }
         }
 
-        fn blob_delete(&self, key: Hash) -> Result<(), Self::Error> {
+        fn blob_delete(&self, key: Hash) -> Result<(), BlobStoreError> {
             self.inner.blob_delete(key).unwrap();
             Ok(())
         }
