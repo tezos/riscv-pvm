@@ -23,7 +23,7 @@ use crate::hash::PartialHashFold;
 
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
 /// where the leaf is assumed to have type `T`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Partial<T> {
     /// The leaf or node is absent from the proof.
     Absent,

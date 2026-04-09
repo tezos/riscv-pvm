@@ -23,10 +23,13 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::LazyResolver;
+use crate::avl::resolver::VerifyNodeId;
+use crate::avl::resolver::VerifyResolver;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::Error;
@@ -186,6 +189,53 @@ impl MerkleLayerMode for Normal {
     }
 }
 
+impl MerkleLayerMode for Verify {
+    fn try_clone_with<KV: KeyValueStore>(
+        this: &MerkleLayer<KV, Self>,
+        _persistence: Arc<KV>,
+    ) -> MerkleLayer<KV, Self> {
+        MerkleLayer {
+            inner: VerifyImpl {
+                tree: this.inner.tree.clone(),
+                resolver: VerifyResolver,
+            },
+        }
+    }
+
+    fn hash<KV>(_this: &MerkleLayer<KV, Self>) -> Hash {
+        unimplemented!("Blocked by RV-961")
+    }
+
+    fn delete<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<(), OperationalError> {
+        this.inner.tree.delete(key, &mut this.inner.resolver)?;
+        Ok(())
+    }
+
+    fn set<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+        data: &[u8],
+    ) -> Result<(), OperationalError> {
+        this.inner.tree.set(key, data, &mut this.inner.resolver)?;
+        Ok(())
+    }
+
+    fn write<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        this.inner
+            .tree
+            .write(key, offset, data, &mut this.inner.resolver)?;
+        Ok(())
+    }
+}
+
 struct MerkleLayerTemplate<KV>(PhantomData<KV>, Infallible);
 
 impl<KV> Modal for MerkleLayerTemplate<KV> {
@@ -193,7 +243,7 @@ impl<KV> Modal for MerkleLayerTemplate<KV> {
 
     type Prove<'normal> = Infallible;
 
-    type Verify = Infallible;
+    type Verify = VerifyImpl;
 }
 
 #[derive(Debug)]
@@ -279,10 +329,19 @@ impl<KV> NormalImpl<KV> {
     }
 }
 
+#[derive(Debug)]
+struct VerifyImpl {
+    tree: Tree<VerifyNodeId>,
+    resolver: VerifyResolver,
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Verify;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -292,9 +351,12 @@ mod tests {
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::LazyNodeId;
     use crate::avl::resolver::LazyTreeId;
+    use crate::avl::resolver::VerifyNodeId;
+    use crate::avl::resolver::VerifyResolver;
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
+    use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
     use crate::storage::TestRepo;
@@ -313,6 +375,22 @@ mod tests {
         /// Returns an immutable reference to the data stored for a given [Key].
         pub fn get(&mut self, key: &Key) -> Result<Option<&Bytes<Normal>>, OperationalError> {
             self.inner.tree.get(key, &self.inner.resolver)
+        }
+    }
+
+    impl<KV> MerkleLayer<KV, Verify> {
+        fn get(&self, key: &Key) -> Result<Option<&Bytes<Verify>>, OperationalError> {
+            self.inner.tree.get(key, &self.inner.resolver)
+        }
+
+        /// Construct a Verify-mode MerkleLayer from a deserialised tree.
+        pub(crate) fn from_verify_tree(tree: Tree<VerifyNodeId>) -> Self {
+            MerkleLayer {
+                inner: VerifyImpl {
+                    tree,
+                    resolver: VerifyResolver,
+                },
+            }
         }
     }
 
@@ -1295,5 +1373,98 @@ mod tests {
 
         let root_hash = merkle_layer.hash();
         assert_eq!(*commit_id.as_hash(), root_hash);
+    }
+
+    #[test]
+    fn test_verify_delete() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
+            MerkleLayer::from_verify_tree(Tree::default());
+        ml.delete(&key)
+            .expect("deleting a key that doesn't exist should succeed");
+
+        ml.set(&key, b"delete")
+            .expect("setting node should succeed");
+        ml.delete(&key).expect("delete should succeed");
+
+        let got = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.");
+        assert!(got.is_none(), "data should not exist after deletion");
+    }
+
+    #[test]
+    fn test_verify_multiple_keys() {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+        let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
+
+        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
+            MerkleLayer::from_verify_tree(Tree::default());
+        for (key, datum) in keys.iter().zip(data.iter()) {
+            ml.set(key, datum).expect("setting node should succeed");
+        }
+
+        for (key, datum) in keys.iter().zip(data.iter()) {
+            let got = ml
+                .get(key)
+                .expect("The node should be retrieved successfully.")
+                .expect("data should exist");
+            assert_eq!(got, datum);
+        }
+    }
+
+    #[test]
+    fn test_verify_try_clone_with_cow() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
+            MerkleLayer::from_verify_tree(Tree::default());
+        let cow_data = "🐮<(verify a moo!)";
+        ml.set(&key, cow_data.as_bytes())
+            .expect("setting node should succeed");
+
+        let (_keepalive, repo) = setup_repo();
+        let kv: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+
+        let mut ml2 = ml.try_clone_with(kv);
+        let cow_data2 = "🐮<(mooify a moo!)";
+        ml2.set(&key, cow_data2.as_bytes())
+            .expect("setting node should succeed");
+
+        // Original should be unchanged.
+        let got_original = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("data should exist");
+        assert_eq!(got_original, &cow_data.as_bytes().to_vec());
+
+        // Clone should have the new value.
+        let got_clone = ml2
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("data should exist");
+        assert_eq!(got_clone, &cow_data2.as_bytes().to_vec());
+    }
+
+    #[test]
+    fn test_verify_write_partial() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
+            MerkleLayer::from_verify_tree(Tree::default());
+        ml.set(&key, b"partial")
+            .expect("setting node should succeed");
+        ml.write(&key, 4, b"ying").expect("write should succeed");
+
+        let got = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("The data should exist");
+
+        assert_eq!(got, b"partying");
     }
 }

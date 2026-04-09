@@ -574,10 +574,16 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
 ///
 /// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
 /// validation should be present or blinded from being accessed in the proof.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum VerifyNodeId {
     Present(Arc<Node<VerifyTreeId, Verify>>),
     Blinded(Hash),
+}
+
+impl From<Node<VerifyTreeId, Verify>> for VerifyNodeId {
+    fn from(node: Node<VerifyTreeId, Verify>) -> Self {
+        VerifyNodeId::Present(Arc::new(node))
+    }
 }
 
 impl FromProof for VerifyNodeId {
@@ -596,7 +602,7 @@ impl FromProof for VerifyNodeId {
 }
 
 /// Identifier for a tree resolved in [`Verify`] mode.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum VerifyTreeId {
     Present(Tree<VerifyNodeId>),
     Blinded(Hash),
@@ -616,7 +622,16 @@ impl FromProof for VerifyTreeId {
     }
 }
 
+// TODO: RV-895, RV-963: Required by the bounds in `Tree::upsert` and
+// `Tree::replace_with_successor`, may cause issues with round-trip verification.
+impl Default for VerifyTreeId {
+    fn default() -> Self {
+        Self::Present(Tree::default())
+    }
+}
+
 /// Adapter that projects in-memory AVL identifiers into verify-mode values.
+#[derive(Debug)]
 pub struct VerifyResolver;
 
 impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
@@ -772,15 +787,6 @@ mod tests {
 
         fn delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
             self.inner.delete(key)
-        }
-    }
-
-    /// `Node::new` requires `TreeId: Default`. In production, a `VerifyTreeId` is only
-    /// created by deserialising a proof, never by defaulting, but tests need a way to
-    /// construct leaf nodes directly.
-    impl Default for VerifyTreeId {
-        fn default() -> Self {
-            Self::Absent
         }
     }
 
