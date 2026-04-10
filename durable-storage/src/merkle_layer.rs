@@ -23,11 +23,14 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::LazyResolver;
+use crate::avl::resolver::ProveNodeId;
+use crate::avl::resolver::ProveResolver;
 use crate::avl::resolver::VerifyNodeId;
 use crate::avl::resolver::VerifyResolver;
 use crate::avl::tree::Tree;
@@ -189,6 +192,53 @@ impl MerkleLayerMode for Normal {
     }
 }
 
+impl MerkleLayerMode for Prove<'static> {
+    fn try_clone_with<KV: KeyValueStore>(
+        this: &MerkleLayer<KV, Self>,
+        persistence: Arc<KV>,
+    ) -> MerkleLayer<KV, Self> {
+        MerkleLayer {
+            inner: ProveImpl {
+                tree: this.inner.tree.clone(),
+                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+            },
+        }
+    }
+
+    fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
+        this.inner.tree.hash()
+    }
+
+    fn delete<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<(), OperationalError> {
+        this.inner.tree.delete(key, &mut this.inner.resolver)?;
+        Ok(())
+    }
+
+    fn set<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+        data: &[u8],
+    ) -> Result<(), OperationalError> {
+        this.inner.tree.set(key, data, &mut this.inner.resolver)?;
+        Ok(())
+    }
+
+    fn write<KV: KeyValueStore>(
+        this: &mut MerkleLayer<KV, Self>,
+        key: &Key,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        this.inner
+            .tree
+            .write(key, offset, data, &mut this.inner.resolver)?;
+        Ok(())
+    }
+}
+
 impl MerkleLayerMode for Verify {
     fn try_clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
@@ -241,7 +291,7 @@ struct MerkleLayerTemplate<KV>(PhantomData<KV>, Infallible);
 impl<KV> Modal for MerkleLayerTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
-    type Prove<'normal> = Infallible;
+    type Prove<'normal> = ProveImpl<KV>;
 
     type Verify = VerifyImpl;
 }
@@ -330,6 +380,12 @@ impl<KV> NormalImpl<KV> {
 }
 
 #[derive(Debug)]
+struct ProveImpl<KV> {
+    tree: Tree<ProveNodeId>,
+    resolver: ProveResolver<LazyResolver<KV>>,
+}
+
+#[derive(Debug)]
 struct VerifyImpl {
     tree: Tree<VerifyNodeId>,
     resolver: VerifyResolver,
@@ -341,16 +397,20 @@ mod tests {
 
     use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
 
     use super::MerkleLayer;
+    use super::ProveImpl;
     use crate::avl::node::Node;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::LazyNodeId;
+    use crate::avl::resolver::LazyResolver;
     use crate::avl::resolver::LazyTreeId;
+    use crate::avl::resolver::ProveResolver;
     use crate::avl::resolver::VerifyNodeId;
     use crate::avl::resolver::VerifyResolver;
     use crate::avl::tree::Tree;
@@ -374,6 +434,12 @@ mod tests {
 
         /// Returns an immutable reference to the data stored for a given [Key].
         pub fn get(&mut self, key: &Key) -> Result<Option<&Bytes<Normal>>, OperationalError> {
+            self.inner.tree.get(key, &self.inner.resolver)
+        }
+    }
+
+    impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
+        fn get(&self, key: &Key) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
             self.inner.tree.get(key, &self.inner.resolver)
         }
     }
@@ -1376,6 +1442,131 @@ mod tests {
     }
 
     #[test]
+    fn test_prove_delete() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let (_keepalive, repo) = setup_repo();
+        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: Tree::default(),
+                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+            },
+        };
+        ml.delete(&key)
+            .expect("deleting a key that doesn't exist should succeed");
+
+        ml.set(&key, b"delete")
+            .expect("setting node should succeed");
+        ml.delete(&key).expect("delete should succeed");
+
+        let got = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.");
+        assert!(got.is_none(), "data should not exist after deletion");
+    }
+
+    #[test]
+    fn test_prove_multiple_keys() {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+        let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
+
+        let (_keepalive, repo) = setup_repo();
+        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: Tree::default(),
+                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+            },
+        };
+        for (key, datum) in keys.iter().zip(data.iter()) {
+            ml.set(key, datum).expect("setting node should succeed");
+        }
+
+        for (key, datum) in keys.iter().zip(data.iter()) {
+            let got = ml
+                .get(key)
+                .expect("The node should be retrieved successfully.")
+                .expect("data should exist");
+            assert_eq!(got, datum);
+        }
+    }
+
+    #[test]
+    fn test_prove_try_clone_with_cow() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let (_keepalive, repo) = setup_repo();
+        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: Tree::default(),
+                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+            },
+        };
+        let cow_data = "🐮<(prove a moo!)";
+        ml.set(&key, cow_data.as_bytes())
+            .expect("setting node should succeed");
+
+        let (_keepalive, repo) = setup_repo();
+        let kv: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+
+        let mut ml2 = ml.try_clone_with(kv);
+        let cow_data2 = "🐮<(mooify a moo!)";
+        ml2.set(&key, cow_data2.as_bytes())
+            .expect("setting node should succeed");
+
+        // Original should be unchanged.
+        let got_original = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("data should exist");
+        assert_eq!(got_original, &cow_data.as_bytes().to_vec());
+
+        // Clone should have the new value.
+        let got_clone = ml2
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("data should exist");
+        assert_eq!(got_clone, &cow_data2.as_bytes().to_vec());
+    }
+
+    #[test]
+    fn test_prove_write_partial() {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let (_keepalive, repo) = setup_repo();
+        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: Tree::default(),
+                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+            },
+        };
+        ml.set(&key, b"partial")
+            .expect("setting node should succeed");
+        ml.write(&key, 4, b"ying").expect("write should succeed");
+
+        let got = ml
+            .get(&key)
+            .expect("The node should be retrieved successfully.")
+            .expect("The data should exist");
+
+        assert_eq!(got, b"partying");
+    }
+
+    #[test]
     fn test_verify_delete() {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
@@ -1466,5 +1657,37 @@ mod tests {
             .expect("The data should exist");
 
         assert_eq!(got, b"partying");
+    }
+
+    #[test]
+    fn test_prove_hash() {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = setup_repo();
+        let mut normal_ml = new_merkle_layer(repo);
+        normal_ml
+            .set(&keys[0], &[])
+            .expect("setting node should succeed");
+        normal_ml
+            .set(&keys[1], &[])
+            .expect("setting node should succeed");
+        normal_ml
+            .set(&keys[2], &[])
+            .expect("setting node should succeed");
+
+        let normal_hash = normal_ml.hash();
+
+        let prove_tree = normal_ml.inner.tree.into_proof();
+        let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: prove_tree,
+                resolver: ProveResolver::new(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+            },
+        };
+
+        assert_eq!(normal_hash, prove_ml.hash());
     }
 }

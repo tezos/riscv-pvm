@@ -447,7 +447,7 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
 /// This wrapper keeps the original [`LazyNodeId`] to allow delegating hash computation and
 /// storage access to a lazy resolver. Once resolved, it caches the prove-mode projection of the
 /// node in `inner` so repeated accesses do not rebuild it.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProveNodeId {
     inner: OnceLock<Rc<Node<ProveTreeId, Prove<'static>>>>,
     node: LazyNodeId,
@@ -488,7 +488,7 @@ impl Foldable<MerkleProofFold> for ProveNodeId {
 /// Like [`ProveNodeId`], this wrapper keeps the original lazy identifier and fills `inner` on the
 /// first prove-mode resolution. The cached tree then serves subsequent reads without reprojecting
 /// the lazy tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProveTreeId {
     inner: OnceLock<Tree<ProveNodeId>>,
     tree: LazyTreeId,
@@ -528,7 +528,15 @@ impl Foldable<MerkleProofFold> for ProveTreeId {
 /// [`ProveResolver`] wraps another resolver for [`LazyNodeId`] and [`LazyTreeId`]. It preserves the
 /// lazy resolver's hash behaviour, but caches prove-mode nodes and trees inside [`ProveNodeId`]
 /// and [`ProveTreeId`] once they are resolved.
+#[derive(Debug)]
 pub struct ProveResolver<R>(R);
+
+impl<R> ProveResolver<R> {
+    /// Create a new prove-mode resolver wrapping the given resolver.
+    pub(crate) fn new(resolver: R) -> Self {
+        Self(resolver)
+    }
+}
 
 impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tree<LazyNodeId>>>
     Resolver<ProveNodeId, Node<ProveTreeId, Prove<'static>>> for ProveResolver<R>
