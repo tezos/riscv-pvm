@@ -269,8 +269,6 @@ impl<NodeId> Tree<NodeId> {
             // This shouldn't happen: it's prevented by the `Database` API.
             assert_eq!(offset, 0);
 
-            // TODO: RV-895: Dynamic creation of the `Bytes<M>` state component may cause
-            // problems with proof generation
             let mut new_data = Bytes::<M>::default();
             data(&mut new_data)?;
 
