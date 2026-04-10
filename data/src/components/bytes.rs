@@ -927,7 +927,7 @@ impl BytesMode for Verify {
 }
 
 /// [`crate::mode::Prove`] mode implementation for the [`Bytes`] component
-#[perfect_derive(Clone)]
+#[perfect_derive(Clone, Debug)]
 struct ProveImpl<'normal> {
     previous: Source<'normal, Bytes<Normal>, [u8]>,
     length: usize,
