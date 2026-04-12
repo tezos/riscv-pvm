@@ -8,6 +8,8 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -24,6 +26,13 @@ use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_durable_storage::repo::DirectoryManager;
 use regex::Regex;
+use riscv_tx_kernel::ChainKernel;
+use riscv_tx_kernel::ContextLoader;
+use riscv_tx_kernel::ContextStore;
+use riscv_tx_kernel::Crypto;
+use riscv_tx_kernel::Logger;
+use riscv_tx_kernel::CONTEXT_NAME;
+use riscv_tx_kernel::META_HEAD_KEY as META_HEAD_KEY_SHARED;
 use serde::Deserialize;
 use serde::Serialize;
 use sha3::Digest;
@@ -31,13 +40,13 @@ use sha3::Keccak256;
 
 const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";
 const BLOCK_CHUNK_MAGIC: [u8; 4] = *b"TXC1";
-const CONTEXT_NAME: &str = "/tx-kernel/context";
 const ACCOUNT_KEY_PREFIX: &[u8] = b"/acct/";
 const KEYSPACE_INDEX_PREFIX: &[u8] = b"/keyspaces/";
+const KEYSPACE_INDEX_DATABASE: usize = 0;
 const DEFAULT_INITIAL_BALANCE: u64 = 1_000_000;
 const DURABLE_STORAGE_HEAD_FILE: &str = "registry-head";
 const META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
-const META_HEAD_KEY: &[u8] = b"/meta/head";
+const META_HEAD_KEY: &[u8] = META_HEAD_KEY_SHARED;
 const PREPARE_CONTEXT_PROGRESS_INTERVAL: usize = 1_000;
 const ROOT_TX_KERNEL_DIR_COMPONENTS: usize = 3;
 const BLOCK_CHUNK_HEADER_SIZE: usize = 4 + 8 + 2 + 2;
@@ -95,6 +104,8 @@ enum Commands {
         kernel: Option<PathBuf>,
         #[arg(long)]
         sandbox: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        native: bool,
     },
 }
 
@@ -156,6 +167,36 @@ struct BenchmarkOutcome {
     sampled_state_window: Option<Duration>,
     sampled_tx_count: usize,
     finalization_window: Option<Duration>,
+}
+
+#[derive(Serialize)]
+struct NativeLogLine {
+    elapsed: ElapsedLog,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct ElapsedLog {
+    secs: u64,
+    nanos: u32,
+}
+
+#[derive(Clone)]
+struct NativeKeySpace {
+    index: usize,
+    registry: Rc<RefCell<Registry<PersistenceLayer, Normal>>>,
+}
+
+#[derive(Default)]
+struct NativeKeySpaceLoader {
+    registry: Option<Rc<RefCell<Registry<PersistenceLayer, Normal>>>>,
+}
+
+struct NativeCrypto;
+
+struct NativeLogger {
+    start: Instant,
+    lines: String,
 }
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -357,6 +398,16 @@ fn context_mapping_key() -> Vec<u8> {
     key
 }
 
+fn keyspace_index_key(name: &str) -> std::result::Result<Vec<u8>, String> {
+    let mut key = Vec::with_capacity(KEYSPACE_INDEX_PREFIX.len() + name.len());
+    key.extend_from_slice(KEYSPACE_INDEX_PREFIX);
+    key.extend_from_slice(name.as_bytes());
+    if key.len() > 256 {
+        return Err("keyspace name exceeds durable key size limit".to_string());
+    }
+    Ok(key)
+}
+
 fn account_state_bytes(balance: u64, nonce: u64) -> [u8; 16] {
     let mut state = [0u8; 16];
     state[..8].copy_from_slice(&balance.to_le_bytes());
@@ -435,6 +486,170 @@ fn write_registry_head(dir: &Path, commit: CommitId) -> Result<()> {
     Ok(())
 }
 
+impl NativeKeySpaceLoader {
+    fn open(durable_storage_dir: &Path) -> Result<Self> {
+        let repo = DirectoryManager::new(durable_storage_dir)?;
+        let registry = match read_registry_head(durable_storage_dir)? {
+            Some(commit_id) => Registry::<PersistenceLayer, Normal>::checkout(repo, commit_id)?,
+            None => Registry::<PersistenceLayer, Normal>::new(repo)?,
+        };
+        Ok(Self {
+            registry: Some(Rc::new(RefCell::new(registry))),
+        })
+    }
+
+    fn persist(&self, durable_storage_dir: &Path) -> Result<()> {
+        let Some(registry) = &self.registry else {
+            return Ok(());
+        };
+        let commit = registry.borrow_mut().commit()?;
+        write_registry_head(durable_storage_dir, commit)
+    }
+
+    fn registry(&self) -> Rc<RefCell<Registry<PersistenceLayer, Normal>>> {
+        self.registry
+            .as_ref()
+            .expect("native keyspace loader must be opened before use")
+            .clone()
+    }
+}
+
+impl ContextStore for NativeKeySpace {
+    fn get(&self, key: &[u8]) -> std::result::Result<Option<Vec<u8>>, String> {
+        let key = Key::new(key).map_err(|error| error.to_string())?;
+        let registry = self.registry.borrow();
+        let database = registry.database(self.index).map_err(|error| error.to_string())?;
+        read_database_value(database, &key).map_err(|error| error.to_string())
+    }
+
+    fn set(&mut self, key: &[u8], value: &[u8]) -> std::result::Result<(), String> {
+        let key = Key::new(key).map_err(|error| error.to_string())?;
+        self.registry
+            .borrow_mut()
+            .database_mut(self.index)
+            .map_err(|error| error.to_string())?
+            .set(key, Bytes::copy_from_slice(value))
+            .map_err(|error| error.to_string())
+    }
+
+    fn contains(&self, key: &[u8]) -> std::result::Result<bool, String> {
+        let key = Key::new(key).map_err(|error| error.to_string())?;
+        self.registry
+            .borrow()
+            .database(self.index)
+            .map_err(|error| error.to_string())?
+            .exists(&key)
+            .map_err(|error| error.to_string())
+    }
+
+    fn hash(&self) -> std::result::Result<Vec<u8>, String> {
+        self.registry
+            .borrow()
+            .database(self.index)
+            .map_err(|error| error.to_string())?
+            .hash()
+            .map(|hash| hash.as_ref().to_vec())
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl ContextLoader for NativeKeySpaceLoader {
+    type Context = NativeKeySpace;
+
+    fn load_or_create(&mut self, name: &str) -> std::result::Result<Self::Context, String> {
+        let mapping_key = keyspace_index_key(name)?;
+        let mapping_key = Key::new(&mapping_key).map_err(|error| error.to_string())?;
+        let registry = self.registry();
+        let mut registry_mut = registry.borrow_mut();
+        let mut registry_len = registry_mut.len();
+        if registry_len == 0 {
+            registry_mut.resize_tick(1).map_err(|error| error.to_string())?;
+            registry_len = 1;
+        }
+
+        let index = if registry_mut
+            .database(KEYSPACE_INDEX_DATABASE)
+            .map_err(|error| error.to_string())?
+            .exists(&mapping_key)
+            .map_err(|error| error.to_string())?
+        {
+            let bytes = read_database_value(
+                registry_mut
+                    .database(KEYSPACE_INDEX_DATABASE)
+                    .map_err(|error| error.to_string())?,
+                &mapping_key,
+            )
+            .map_err(|error| error.to_string())?
+            .expect("native mapping must exist after exists() check");
+            decode_database_index(&bytes)
+        } else {
+            let new_index = registry_len;
+            registry_mut
+                .resize_tick(new_index + 1)
+                .map_err(|error| error.to_string())?;
+            registry_mut
+                .database_mut(KEYSPACE_INDEX_DATABASE)
+                .map_err(|error| error.to_string())?
+                .set(mapping_key, Bytes::copy_from_slice(&(new_index as u64).to_le_bytes()))
+                .map_err(|error| error.to_string())?;
+            new_index
+        };
+        drop(registry_mut);
+
+        Ok(NativeKeySpace { index, registry })
+    }
+}
+
+impl Crypto for NativeCrypto {
+    fn keccak256(&self, bytes: &[u8]) -> std::result::Result<[u8; 32], String> {
+        Ok(keccak256(bytes))
+    }
+
+    fn verify_signature(
+        &self,
+        public_key: &[u8; 65],
+        signature: &[u8; 64],
+        message_hash: &[u8; 32],
+    ) -> bool {
+        let message = Message::parse(message_hash);
+        let signature = libsecp256k1::Signature::parse_standard(signature)
+            .expect("benchmark signatures must be canonical");
+        let public_key =
+            PublicKey::parse(public_key).expect("benchmark public keys must be valid");
+        libsecp256k1::verify(&message, &signature, &public_key)
+    }
+}
+
+impl NativeLogger {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            lines: String::new(),
+        }
+    }
+
+    fn finish(self) -> String {
+        self.lines
+    }
+}
+
+impl Logger for NativeLogger {
+    fn log(&mut self, message: &str) {
+        let elapsed = self.start.elapsed();
+        let line = NativeLogLine {
+            elapsed: ElapsedLog {
+                secs: elapsed.as_secs(),
+                nanos: elapsed.subsec_nanos(),
+            },
+            message: message.trim_end_matches('\n').to_string(),
+        };
+        self.lines.push_str(
+            &serde_json::to_string(&line).expect("native log line should serialize"),
+        );
+        self.lines.push('\n');
+    }
+}
+
 fn read_registry_head(dir: &Path) -> Result<Option<CommitId>> {
     let head_path = dir.join(DURABLE_STORAGE_HEAD_FILE);
     if !head_path.exists() {
@@ -469,6 +684,13 @@ fn decode_account_nonce(bytes: &[u8]) -> Result<u64> {
         .try_into()
         .map_err(|_| "stored account state must be 16 bytes")?;
     Ok(u64::from_le_bytes(raw[8..].try_into().expect("slice has fixed length")))
+}
+
+fn decode_database_index(bytes: &[u8]) -> usize {
+    let raw: [u8; 8] = bytes
+        .try_into()
+        .expect("persisted keyspace index must be encoded as u64");
+    u64::from_le_bytes(raw) as usize
 }
 
 fn read_existing_context_state(
@@ -630,6 +852,33 @@ fn write_inbox(path: &Path, inbox: &InboxFile) -> Result<()> {
     Ok(())
 }
 
+fn inbox_payloads(inbox: &InboxFile) -> Vec<Vec<u8>> {
+    inbox.0
+        .iter()
+        .flat_map(|level| level.iter())
+        .map(|message| match message {
+            InboxMessageFile::External { external } => external.clone(),
+        })
+        .collect()
+}
+
+fn run_native_benchmark(inbox: &InboxFile, durable_storage_dir: &Path) -> Result<(String, Duration)> {
+    let payloads = inbox_payloads(inbox);
+    let mut loader = NativeKeySpaceLoader::open(durable_storage_dir)?;
+    let crypto = NativeCrypto;
+    let mut logger = NativeLogger::new();
+    let mut kernel = ChainKernel::new(&mut loader, &crypto)?;
+
+    let start = Instant::now();
+    for payload in &payloads {
+        kernel.handle_external_payload(&mut logger, &crypto, payload);
+    }
+    let wall_duration = start.elapsed();
+
+    loader.persist(durable_storage_dir)?;
+    Ok((logger.finish(), wall_duration))
+}
+
 fn run_benchmark(
     transactions: usize,
     block_frequency: usize,
@@ -640,6 +889,7 @@ fn run_benchmark(
     inbox_file: Option<PathBuf>,
     kernel: Option<PathBuf>,
     sandbox: Option<PathBuf>,
+    native: bool,
 ) -> Result<()> {
     if rebuild_context || !durable_storage_dir.exists() {
         prepare_context(&durable_storage_dir, accounts, initial_balance, rebuild_context)?;
@@ -659,33 +909,37 @@ fn run_benchmark(
     };
     write_inbox(&inbox_path, &inbox)?;
 
-    let sandbox = sandbox.unwrap_or_else(default_sandbox_path);
-    let kernel = kernel.unwrap_or_else(default_kernel_path);
+    let (stdout, wall_duration) = if native {
+        run_native_benchmark(&inbox, &durable_storage_dir)?
+    } else {
+        let sandbox = sandbox.unwrap_or_else(default_sandbox_path);
+        let kernel = kernel.unwrap_or_else(default_kernel_path);
 
-    let start = Instant::now();
-    let output = Command::new(&sandbox)
-        .arg("run")
-        .arg("--input")
-        .arg(&kernel)
-        .arg("--inbox-file")
-        .arg(&inbox_path)
-        .arg("--durable-storage-dir")
-        .arg(&durable_storage_dir)
-        .arg("--timings")
-        .output()?;
-    let wall_duration = start.elapsed();
+        let start = Instant::now();
+        let output = Command::new(&sandbox)
+            .arg("run")
+            .arg("--input")
+            .arg(&kernel)
+            .arg("--inbox-file")
+            .arg(&inbox_path)
+            .arg("--durable-storage-dir")
+            .arg(&durable_storage_dir)
+            .arg("--timings")
+            .output()?;
+        let wall_duration = start.elapsed();
 
-    if !output.status.success() {
-        return Err(format!(
-            "sandbox run failed with status {}:\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )
-        .into());
-    }
+        if !output.status.success() {
+            return Err(format!(
+                "sandbox run failed with status {}:\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
 
-    let stdout = String::from_utf8(output.stdout)?;
+        (String::from_utf8(output.stdout)?, wall_duration)
+    };
     let mut outcome = parse_benchmark_logs(&stdout)?;
     outcome.wall_duration = wall_duration;
 
@@ -803,6 +1057,7 @@ fn main() -> Result<()> {
             inbox_file,
             kernel,
             sandbox,
+            native,
         } => {
             run_benchmark(
                 transactions,
@@ -814,6 +1069,7 @@ fn main() -> Result<()> {
                 inbox_file,
                 kernel,
                 sandbox,
+                native,
             )?;
         }
     }

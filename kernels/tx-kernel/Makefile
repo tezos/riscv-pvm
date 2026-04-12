@@ -62,4 +62,14 @@ benchmark: cargo-build cargo-build-bench cargo-build-sandbox
 		--durable-storage-dir "$(DURABLE_STORAGE_DIR)" \
 		$(if $(strip $(INBOX_FILE)),--inbox-file "$(INBOX_FILE)")
 
+benchmark-native: cargo-build-bench
+	@cargo run $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml -- \
+		benchmark \
+		--native \
+		--transactions $(TRANSACTIONS) \
+		--block-frequency $(BLOCK_FREQUENCY) \
+		--accounts $(PREPOPULATED_ACCOUNTS) \
+		--durable-storage-dir "$(DURABLE_STORAGE_DIR)" \
+		$(if $(strip $(INBOX_FILE)),--inbox-file "$(INBOX_FILE)")
+
 .PHONY: all $(MAKECMDGOALS)

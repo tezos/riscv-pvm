@@ -32,11 +32,6 @@ impl Key {
         Ok(unsafe { std::mem::transmute::<&[u8], &Key>(key) })
     }
 
-    pub const fn from_static(key: &'static [u8]) -> &'static Self {
-        assert!(Self::check_bytes(key).is_ok(), "Invalid key");
-        unsafe { std::mem::transmute(key) }
-    }
-
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
