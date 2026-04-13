@@ -9,16 +9,22 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::UnfoldError;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashedData;
 use octez_riscv_data::serialisation;
 use octez_riscv_data::store::BlobStore;
 use octez_riscv_data::store::BlobStoreError;
+use octez_riscv_data::store::fold::BlobStoreFold;
+use octez_riscv_data::store::unfold::BlobStoreUnfold;
 use thiserror::Error;
 
 const CHUNK_SIZE: usize = 4096;
@@ -42,6 +48,9 @@ pub enum StorageError {
 
     #[error("Blob store error")]
     BlobStore(#[from] BlobStoreError),
+
+    #[error("Unfold error")]
+    UnfoldError(#[from] UnfoldError),
 }
 
 /// A subtrait for `BlobStore` to provide extra functionality required by the PVM storage to export
@@ -59,8 +68,8 @@ pub trait PersistentBlobStore: BlobStore {
     /// equivalent to using `blob_get` followed by `blob_set` to copy the blob across, it could in
     /// many impls be more efficient (especially for large blobs) by using `std::fs::copy` or
     /// equivalent instead.
-    fn export_blob(&self, other: &mut Self, hash: &Hash) -> Result<(), StorageError> {
-        let blob = self.blob_get(*hash)?;
+    fn export_blob(&self, other: &mut Self, hash: Hash) -> Result<(), StorageError> {
+        let blob = self.blob_get(hash)?;
         other.blob_set(&HashedData::from_data(blob.as_ref()))?;
 
         Ok(())
@@ -118,9 +127,9 @@ impl PersistentBlobStore for Store {
         })
     }
 
-    fn export_blob(&self, other: &mut Self, hash: &Hash) -> Result<(), StorageError> {
-        let source_path = self.path_of_hash(hash);
-        let target_path = other.path_of_hash(hash);
+    fn export_blob(&self, other: &mut Self, hash: Hash) -> Result<(), StorageError> {
+        let source_path = self.path_of_hash(&hash);
+        let target_path = other.path_of_hash(&hash);
         std::fs::copy(source_path, target_path)?;
         Ok(())
     }
@@ -157,15 +166,31 @@ impl BlobStore for Store {
 
 #[derive(Debug, PartialEq)]
 pub struct Repo<BS> {
-    backend: BS,
+    backend: Arc<BS>,
 }
 
 impl<BS: PersistentBlobStore> Repo<BS> {
     /// Load or create new repo at `path`.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         Ok(Repo {
-            backend: BS::init_from_path(path)?,
+            backend: Arc::new(BS::init_from_path(path)?),
         })
+    }
+
+    /// Makes sure an empty directory exists at the path, suitable for a new `Repo`, and
+    /// initialises a blob store there.
+    ///
+    /// If this is not possible (the directory isn't empty or is a file), we return
+    /// `Err(StorageError::InvalidRepo)`.
+    fn init_empty(path: impl AsRef<Path>) -> Result<BS, StorageError> {
+        let path = path.as_ref();
+
+        if path.exists() && (path.metadata()?.is_file() || path.read_dir()?.next().is_some()) {
+            return Err(StorageError::InvalidRepo);
+        }
+
+        std::fs::create_dir_all(path)?;
+        BS::init_from_path(path)
     }
 
     /// A snapshot is a new repo to which only `id` has been committed. This method exports an `id`
@@ -173,21 +198,14 @@ impl<BS: PersistentBlobStore> Repo<BS> {
     /// `commit_serialised`, which chunks the serialisation).
     pub fn export_snapshot_chunked(
         &self,
-        id: &Hash,
+        id: Hash,
         path: impl AsRef<Path>,
     ) -> Result<(), StorageError> {
-        // Only export a snapshot to a new or empty directory
-        let path = path.as_ref();
-        if !path.exists() || path.read_dir()?.next().is_none() {
-            std::fs::create_dir_all(path)?;
-        } else {
-            return Err(StorageError::InvalidRepo);
-        };
-        let mut other = BS::init_from_path(path)?;
-        let bytes = self.backend.blob_get(*id)?;
+        let mut other = Self::init_empty(path)?;
+        let bytes = self.backend.blob_get(id)?;
         let commit: Vec<Hash> = serialisation::deserialise(bytes.as_ref())?;
         for chunk in commit {
-            self.backend.export_blob(&mut other, &chunk)?;
+            self.backend.export_blob(&mut other, chunk)?;
         }
         self.backend.export_blob(&mut other, id)?;
         Ok(())
@@ -196,21 +214,32 @@ impl<BS: PersistentBlobStore> Repo<BS> {
     /// A snapshot is a new repo to which only `id` has been committed. This method exports an `id`
     /// which represents any Merkle tree structure.
     ///
-    /// Currently unimplemented.
-    ///
-    /// TODO (TZX-121)
-    pub fn export_snapshot_folded(
+    /// TODO (TZX-126): Improve this so that it doesn't need to deserialise the whole state being
+    /// snapshotted.
+    pub fn export_snapshot_folded<State>(
         &self,
-        _id: &Hash,
-        _path: impl AsRef<Path>,
-    ) -> Result<(), StorageError> {
-        todo!()
+        id: Hash,
+        path: impl AsRef<Path>,
+    ) -> Result<(), StorageError>
+    where
+        State: Foldable<BlobStoreFold<BS>> + Unfoldable,
+    {
+        let source = BlobStoreUnfold::new(Arc::clone(&self.backend), id);
+        let state = State::unfold(source)?;
+
+        let other = Self::init_empty(path)?;
+        let builder = BlobStoreFold::from(Arc::new(other));
+        state.fold(builder)?;
+
+        Ok(())
     }
 }
 
 impl<BS: BlobStore> Repo<BS> {
     pub fn new(store: BS) -> Self {
-        Repo { backend: store }
+        Repo {
+            backend: Arc::new(store),
+        }
     }
 
     pub fn close(self) {}
@@ -236,7 +265,7 @@ impl<BS: BlobStore> Repo<BS> {
     /// Commit something serialisable and return the commit ID.
     pub fn commit_serialised(&self, subject: &impl Encode) -> Result<Hash, StorageError> {
         let chunk_hashes = {
-            let mut writer = chunked_io::ChunkWriter::new(&self.backend);
+            let mut writer = chunked_io::ChunkWriter::new(self.backend.as_ref());
             serialisation::serialise_into(subject, &mut writer)?;
             writer.finalise()?
         };
@@ -247,6 +276,16 @@ impl<BS: BlobStore> Repo<BS> {
         self.backend.blob_set(&hashed_commit_bytes)?;
 
         Ok(hashed_commit_bytes.hash())
+    }
+
+    /// Commit something foldable and return the commit ID.
+    pub fn commit_folded(
+        &self,
+        subject: &impl Foldable<BlobStoreFold<BS>>,
+    ) -> Result<Hash, StorageError> {
+        let builder = BlobStoreFold::from(Arc::clone(&self.backend));
+
+        Ok(subject.fold(builder)?)
     }
 
     /// Checkout the bytes committed under `id`, if the commit exists.
@@ -271,8 +310,15 @@ impl<BS: BlobStore> Repo<BS> {
 
     /// Checkout something deserialisable from the store.
     pub fn checkout_serialised<S: Decode<()>>(&self, id: &Hash) -> Result<S, StorageError> {
-        let mut reader = chunked_io::ChunkedReader::new(&self.backend, id)?;
+        let mut reader = chunked_io::ChunkedReader::new(self.backend.as_ref(), id)?;
         Ok(serialisation::deserialise_from(&mut reader)?)
+    }
+
+    /// Checkout something unfoldable from the store.
+    pub fn checkout_folded<S: Unfoldable>(&self, id: &Hash) -> Result<S, StorageError> {
+        let source = BlobStoreUnfold::new(Arc::clone(&self.backend), *id);
+
+        Ok(S::unfold(source)?)
     }
 }
 
