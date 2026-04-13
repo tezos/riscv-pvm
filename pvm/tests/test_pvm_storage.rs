@@ -4,13 +4,19 @@
 
 use std::fs::File;
 
+use octez_riscv::machine_state::memory::M1M;
+use octez_riscv::machine_state::page_cache::EmptyPageCache;
+use octez_riscv::pvm::Pvm;
+use octez_riscv::pvm::durable_storage::DurableStorageDummy;
 use octez_riscv::pvm::node_pvm::NodePvm;
 use octez_riscv::pvm::node_pvm::PvmStorage;
 use octez_riscv::storage::Repo;
 use octez_riscv::storage::StorageError;
 use octez_riscv::storage::Store;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::mode::Normal;
 use octez_riscv_data::store::BlobStoreError;
+use octez_riscv_test_utils::TestableTmpdir;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
@@ -19,7 +25,7 @@ use proptest::test_runner::TestRunner;
 fn test_repo() {
     let mut runner = TestRunner::default();
 
-    let tmp_dir = tempfile::tempdir().unwrap();
+    let tmp_dir = TestableTmpdir::new();
     let mut test_data = Vec::new();
 
     // Create a new repo, commit 5 times and check that all 5 commits can
@@ -69,23 +75,20 @@ fn test_repo() {
 
     // Check that exporting a snapshot creates a new repo which contains
     // the requested commit
-    let snapshot_dir = tempfile::tempdir().unwrap();
+    let snapshot_dir = TestableTmpdir::new();
     let (export_hash, export_data) = &test_data[0];
-    repo.export_snapshot_chunked(export_hash, &snapshot_dir)
+    repo.export_snapshot_chunked(*export_hash, snapshot_dir.path())
         .unwrap();
     let snapshot_repo = Repo::<Store>::load(snapshot_dir.path()).unwrap();
     let checked_out_data = snapshot_repo.checkout(export_hash).unwrap();
     assert_eq!(checked_out_data, *export_data);
-
-    tmp_dir.close().unwrap();
-    snapshot_dir.close().unwrap()
 }
 
 #[test]
 fn test_repo_serialised() {
     let mut runner = TestRunner::default();
 
-    let tmp_dir = tempfile::tempdir().unwrap();
+    let tmp_dir = TestableTmpdir::new();
     let mut test_data = Vec::new();
 
     // Create a new repo, commit 5 times and check that all 5 commits can
@@ -135,22 +138,43 @@ fn test_repo_serialised() {
 
     // Check that exporting a snapshot creates a new repo which contains
     // the requested commit
-    let snapshot_dir = tempfile::tempdir().unwrap();
+    let snapshot_dir = TestableTmpdir::new();
     let (export_hash, export_data) = &test_data[0];
-    repo.export_snapshot_chunked(export_hash, &snapshot_dir)
+    repo.export_snapshot_chunked(*export_hash, snapshot_dir.path())
         .unwrap();
     let snapshot_repo = Repo::<Store>::load(snapshot_dir.path()).unwrap();
     let checked_out_data: Vec<u8> = snapshot_repo.checkout_serialised(export_hash).unwrap();
     assert_eq!(checked_out_data, *export_data);
+}
 
-    tmp_dir.close().unwrap();
-    snapshot_dir.close().unwrap()
+type TestPvm = Pvm<M1M, EmptyPageCache, DurableStorageDummy, Normal>;
+
+#[test]
+fn test_repo_folding() {
+    let tmp_dir = TestableTmpdir::new();
+    let repo = Repo::<Store>::load(tmp_dir.path()).unwrap();
+
+    let empty_pvm = TestPvm::default();
+    let hash = repo.commit_folded(&empty_pvm).unwrap();
+    let checked_out = repo.checkout_folded::<TestPvm>(&hash).unwrap();
+
+    // We use `assert!` to avoid very verbose test failures
+    assert!(empty_pvm == checked_out);
+
+    let snapshot_dir = TestableTmpdir::new();
+    repo.export_snapshot_folded::<TestPvm>(hash, &snapshot_dir.path())
+        .unwrap();
+
+    let snapshot_repo = Repo::<Store>::load(snapshot_dir.path()).unwrap();
+    let checked_out_from_snapshot = snapshot_repo.checkout_folded::<TestPvm>(&hash).unwrap();
+
+    assert!(empty_pvm == checked_out_from_snapshot);
 }
 
 // Mirrors `src/lib_riscv/pvm/test/test_storage.ml`
 #[test]
 fn test_pvm_storage() {
-    let tmp_dir = tempfile::tempdir().unwrap();
+    let tmp_dir = TestableTmpdir::new();
     let empty = NodePvm::empty();
     let mut repo = PvmStorage::<Store>::load(tmp_dir.path()).unwrap();
     let id = repo.commit(&empty).unwrap();
@@ -164,23 +188,24 @@ fn test_pvm_storage() {
 #[test]
 fn test_invalid_repo() {
     // Error if we try to initialise a repo with a path that is a file, not a directory.
-    let tmp_dir = tempfile::tempdir().unwrap();
+    let tmp_dir = TestableTmpdir::new();
     let tmp_file_path = tmp_dir.path().join("blah");
-    let _tmp_file = File::create(&tmp_file_path).unwrap();
-    assert!(matches!(
-        Repo::<Store>::load(tmp_file_path),
-        Err(StorageError::InvalidRepo)
-    ));
+    let _tmp_file = File::create(tmp_file_path.as_path()).unwrap();
+    let load_result = Repo::<Store>::load(tmp_file_path.as_path());
+
+    assert!(matches!(load_result, Err(StorageError::InvalidRepo)));
 
     // Error if we try to export a snapshot to non-empty directory.
-    let tmp_dir_2 = tempfile::tempdir().unwrap();
+    let tmp_dir_2 = TestableTmpdir::new();
     let repo = Repo::<Store>::load(tmp_dir_2.path()).unwrap();
 
     let data = vec![];
     let id = repo.commit(&data).unwrap();
+    let export_result = repo.export_snapshot_chunked(id, tmp_dir.path());
 
-    assert!(matches!(
-        repo.export_snapshot_chunked(&id, tmp_dir.path()),
-        Err(StorageError::InvalidRepo)
-    ));
+    assert!(matches!(export_result, Err(StorageError::InvalidRepo)));
+
+    // Error if we try to export a snapshot to a path that is a file, not a directory.
+    let export_result = repo.export_snapshot_chunked(id, tmp_file_path);
+    assert!(matches!(export_result, Err(StorageError::InvalidRepo)));
 }

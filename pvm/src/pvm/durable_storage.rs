@@ -10,6 +10,9 @@ use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
@@ -66,6 +69,12 @@ impl FromProof for DurableStorageDummy {
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self> {
         let node = proof.into_node()?;
         node.done(Self)
+    }
+}
+
+impl Unfoldable for DurableStorageDummy {
+    fn unfold<U: Unfold>(_src: U) -> Result<Self, UnfoldError> {
+        Ok(Self)
     }
 }
 

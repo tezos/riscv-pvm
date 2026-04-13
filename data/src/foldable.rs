@@ -196,10 +196,10 @@ pub enum UnfoldError {
     UnexpectedNode,
 
     #[error("Component specific error: {0}")]
-    OfComponent(Box<dyn std::error::Error>),
+    OfComponent(Box<dyn std::error::Error + Send + Sync>),
 
     #[error("Source specific error: {0}")]
-    OfSource(Box<dyn std::error::Error>),
+    OfSource(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Implementing types describe 'source' data structures than can be deserialised or extracted in a

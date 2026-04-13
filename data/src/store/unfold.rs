@@ -24,10 +24,10 @@ pub struct BlobStoreUnfold<BS> {
     hash: Hash,
 }
 
-// TODO TZX-86: cfg annotation will be removed as part of wiring up the new PVM commit and checkout
-#[cfg(test)]
 impl<BS> BlobStoreUnfold<BS> {
-    fn new(store: Arc<BS>, hash: Hash) -> Self {
+    /// To construct a source for blob-store unfolding we need a cloneable reference to a store
+    /// together with a `hash` (the root hash of the tree, to start from) in the store.
+    pub fn new(store: Arc<BS>, hash: Hash) -> Self {
         Self { store, hash }
     }
 }

@@ -352,11 +352,7 @@ impl<BS: PersistentBlobStore> PvmStorage<BS> {
     }
 
     /// A snapshot is a new repo to which only `id` has been committed.
-    pub fn export_snapshot(
-        &self,
-        id: &Hash,
-        path: impl AsRef<Path>,
-    ) -> Result<(), PvmStorageError> {
+    pub fn export_snapshot(&self, id: Hash, path: impl AsRef<Path>) -> Result<(), PvmStorageError> {
         Ok(self.repo.export_snapshot_chunked(id, path)?)
     }
 }

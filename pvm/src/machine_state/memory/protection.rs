@@ -21,6 +21,9 @@ use octez_riscv_data::components::vector::Vector;
 use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::foldable::Unfold;
+use octez_riscv_data::foldable::UnfoldError;
+use octez_riscv_data::foldable::Unfoldable;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -171,5 +174,12 @@ where
 impl FromProof for PagePermissions<Verify> {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         Vector::from_proof(proof).map(|result| result.map(|pages| Self { pages }))
+    }
+}
+
+impl Unfoldable for PagePermissions<Normal> {
+    fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
+        let pages = Vector::<Atom<bool, Normal>, Normal>::unfold(src)?;
+        Ok(Self { pages })
     }
 }
