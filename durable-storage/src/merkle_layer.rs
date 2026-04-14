@@ -396,6 +396,9 @@ mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
+    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
@@ -413,6 +416,7 @@ mod tests {
     use crate::avl::resolver::ProveResolver;
     use crate::avl::resolver::VerifyNodeId;
     use crate::avl::resolver::VerifyResolver;
+    use crate::avl::resolver::VerifyTreeId;
     use crate::avl::tree::Tree;
     use crate::errors::OperationalError;
     use crate::key::Key;
@@ -1564,6 +1568,64 @@ mod tests {
             .expect("The data should exist");
 
         assert_eq!(got, b"partying");
+    }
+
+    #[test]
+    fn test_prove_verify_round_trip() {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+
+        // `Normal` mode
+        let (_keepalive, repo) = setup_repo();
+        let mut normal_ml = new_merkle_layer(repo);
+        normal_ml
+            .set(&keys[0], &[])
+            .expect("setting node should succeed");
+        normal_ml
+            .set(&keys[1], b"prove to verify")
+            .expect("setting node should succeed");
+
+        // Causes the tree to rotate
+        normal_ml
+            .set(&keys[2], &[])
+            .expect("setting node should succeed");
+
+        // `Prove` mode
+        let prove_tree = normal_ml.inner.tree.into_proof();
+        let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: prove_tree,
+                resolver: ProveResolver::new(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+            },
+        };
+
+        // Read to mark it as present in the proof
+        let node = prove_ml
+            .get(&keys[1])
+            .expect("The node should be retrieved successfully.")
+            .expect("The data should exist");
+        assert_eq!(node, b"prove to verify");
+
+        // Verify mode
+        let proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
+        let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&proof))
+            .expect("The proof should be deserialisable")
+            .into_result();
+
+        let tree = match verify_tree_id {
+            VerifyTreeId::Present(tree) => tree,
+            _ => panic!("Should be present"),
+        };
+
+        let verify_ml: MerkleLayer<TestKeyValueStore, Verify> = MerkleLayer::from_verify_tree(tree);
+
+        let node = verify_ml
+            .get(&keys[1])
+            .expect("The node should be retrieved successfully.")
+            .expect("The data should exist");
+        assert_eq!(node, b"prove to verify");
     }
 
     #[test]
