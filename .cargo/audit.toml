@@ -1,6 +1,7 @@
 [advisories]
 ignore = [
-  # The affected dependency is only used in the dependency cone of `kernel-bench-utils`.
-  # We don't make use of it in the main PVM library.
-  "RUSTSEC-2026-0049",
+  # The affected dependencies are only used in the dependency cone of
+  # `kernel-bench-utils`. We don't make use of them in the main PVM library.
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
 ]
