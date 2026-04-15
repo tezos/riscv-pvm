@@ -743,7 +743,7 @@ fn default_kernel_path() -> PathBuf {
 }
 
 fn default_sandbox_path() -> PathBuf {
-    default_repo_root().join("target/debug/riscv-sandbox")
+    default_repo_root().join("target/release/riscv-sandbox")
 }
 
 fn parse_benchmark_logs(stdout: &str) -> Result<BenchmarkOutcome> {

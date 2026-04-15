@@ -26,10 +26,10 @@ cargo-build:
 	@cargo build --release
 
 cargo-build-bench:
-	@cargo build $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml
+	@cargo build $(NATIVE_OPT) --release --manifest-path inbox-generator/Cargo.toml
 
 cargo-build-sandbox:
-	@cd ../.. && cargo build -p riscv-sandbox --offline
+	@cd ../.. && cargo build --release -p riscv-sandbox --offline
 
 cargo-format:
 	@exec ../../scripts/format.sh --check
@@ -63,7 +63,7 @@ benchmark: cargo-build cargo-build-bench cargo-build-sandbox
 		$(if $(strip $(INBOX_FILE)),--inbox-file "$(INBOX_FILE)")
 
 benchmark-native: cargo-build-bench
-	@cargo run $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml -- \
+	@cargo run $(NATIVE_OPT) --release --manifest-path inbox-generator/Cargo.toml -- \
 		benchmark \
 		--native \
 		--transactions $(TRANSACTIONS) \
