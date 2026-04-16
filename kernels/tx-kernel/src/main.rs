@@ -14,6 +14,7 @@ use keyspace::Key;
 use keyspace::KeySpace;
 use keyspace::KeySpaceLoader;
 use keyspace::Name;
+use riscv_tx_kernel::AsyncKeccak;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -70,6 +71,20 @@ impl Crypto for SbiCrypto {
         message_hash: &[u8; 32],
     ) -> bool {
         unsafe { sbi_crypto::secp256k1_verify(public_key, signature, message_hash) }
+    }
+}
+
+impl AsyncKeccak for SbiCrypto {
+    fn enqueue(&self, bytes: &[u8]) -> Result<(), String> {
+        unsafe { sbi_crypto::keccak256_enqueue(bytes) }
+            .map_err(|_| "keccak enqueue host call failed".into())
+    }
+
+    fn dequeue(&self) -> Result<[u8; 32], String> {
+        let mut out = [0u8; 32];
+        unsafe { sbi_crypto::keccak256_dequeue(&mut out) }
+            .map_err(|_| "keccak dequeue host call failed".into())?;
+        Ok(out)
     }
 }
 

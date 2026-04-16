@@ -48,6 +48,8 @@ use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
+use crate::pvm::KeccakWorkerMode;
+use crate::pvm::keccak_queue::KeccakWorkerTemplate;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
@@ -243,7 +245,7 @@ impl<
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M> + RuntimeDurableStorage,
-    M: AtomMode + DataSpaceMode + VectorMode,
+    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
@@ -367,7 +369,9 @@ impl<
     /// Re-bind the PVM type by cloning the underlying regions.
     pub fn rebind_via_clone(&mut self) -> Result<(), OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode
+            + KeccakWorkerMode,
+        M::Select<KeccakWorkerTemplate>: Default,
         DS: CloneState,
     {
         self.pvm = self.pvm.try_clone_state()?;
@@ -490,7 +494,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
 impl<
     H: PvmHooks,
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode + VectorMode,
+    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M> + RuntimeDurableStorage,
 > PvmStepper<H, MC, DS, PC, M>

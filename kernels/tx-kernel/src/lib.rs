@@ -41,6 +41,24 @@ pub trait Crypto {
     ) -> bool;
 }
 
+/// Asynchronous keccak-256 interface backed by the PVM parallel crypto queue.
+///
+/// The two operations correspond directly to the `SBI_TEZOS_KECCAK256_ENQUEUE` and
+/// `SBI_TEZOS_KECCAK256_DEQUEUE` host functions.  In Normal (fast) mode the hash
+/// computation starts in a background thread as soon as `enqueue` is called, so that
+/// `dequeue` can return with minimal or no blocking.
+pub trait AsyncKeccak {
+    /// Submit a keccak-256 hash request.  Returns immediately; the result will be
+    /// available via [`dequeue`](AsyncKeccak::dequeue) in FIFO order.
+    fn enqueue(&self, bytes: &[u8]) -> Result<(), String>;
+
+    /// Retrieve the oldest pending keccak-256 result.
+    ///
+    /// In Normal mode this may block briefly until the background thread finishes.
+    /// Returns an error if the queue is empty.
+    fn dequeue(&self) -> Result<[u8; 32], String>;
+}
+
 pub trait Logger {
     fn log(&mut self, message: &str);
 }
@@ -234,7 +252,7 @@ impl<C: ContextStore> ChainKernel<C> {
     pub fn handle_external_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &impl Crypto,
+        crypto: &(impl Crypto + AsyncKeccak),
         payload: &[u8],
     ) {
         if payload.starts_with(&BLOCK_CHUNK_MAGIC) {
@@ -259,7 +277,7 @@ impl<C: ContextStore> ChainKernel<C> {
     fn handle_block_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &impl Crypto,
+        crypto: &(impl Crypto + AsyncKeccak),
         payload: &[u8],
     ) {
         if let Err(error) = apply_block_blueprint(
@@ -390,7 +408,17 @@ fn validate_transaction_signature(
     transaction: &SignedTransaction,
 ) -> Result<(), String> {
     let sender = address_from_public_key(crypto, &transaction.public_key)?;
-    if sender != transaction.from {
+    validate_transaction_signature_with_sender(crypto, transaction, &sender)
+}
+
+/// Like [`validate_transaction_signature`] but accepts a pre-computed sender address,
+/// avoiding the redundant keccak call in the parallel-crypto two-pass path.
+fn validate_transaction_signature_with_sender(
+    crypto: &impl Crypto,
+    transaction: &SignedTransaction,
+    sender: &[u8; 20],
+) -> Result<(), String> {
+    if sender != &transaction.from {
         return Err("transaction sender does not match public key".to_string());
     }
 
@@ -475,12 +503,24 @@ fn verify_block_signature(crypto: &impl Crypto, block: &BlockBlueprint) -> Resul
 
 fn apply_block_blueprint(
     logger: &mut impl Logger,
-    crypto: &impl Crypto,
+    crypto: &(impl Crypto + AsyncKeccak),
     context: &mut impl ContextStore,
     payload: &[u8],
     processed_transactions: &mut usize,
 ) -> Result<(), String> {
     let block = parse_block_blueprint(payload).map_err(str::to_string)?;
+
+    // ── Phase 1: enqueue keccak requests for all public-key → address derivations ──
+    //
+    // By enqueuing before `verify_block_signature`, the background worker can begin
+    // computing hashes in Normal mode while the (synchronous) signature check runs,
+    // reducing or eliminating the blocking time of the subsequent dequeue calls.
+    for transaction in &block.transactions {
+        crypto.enqueue(&transaction.public_key[1..])?;
+    }
+
+    // Verify the block signature synchronously. This provides useful work for the
+    // main thread while the background worker processes the enqueued requests.
     verify_block_signature(crypto, &block)?;
 
     let current_head = read_block_head(context)?;
@@ -500,7 +540,30 @@ fn apply_block_blueprint(
         ));
     }
 
-    for (tx_index, transaction) in block.transactions.iter().enumerate() {
+    // ── Phase 2: dequeue addresses and process transactions ──
+    //
+    // Pre-compute all sender addresses by dequeuing the keccak results.
+    // In Normal mode these will often already be ready; in Prove/Verify mode they
+    // are computed synchronously by the PVM host function.
+    let mut sender_addresses: Vec<[u8; 20]> = Vec::with_capacity(block.transactions.len());
+    for transaction in &block.transactions {
+        let hash = crypto.dequeue()?;
+        if transaction.public_key[0] != 0x04 {
+            // Unsupported key format; record a dummy address that will fail the check below.
+            sender_addresses.push([0u8; 20]);
+        } else {
+            let mut address = [0u8; 20];
+            address.copy_from_slice(&hash[12..]);
+            sender_addresses.push(address);
+        }
+    }
+
+    for (tx_index, (transaction, sender)) in block
+        .transactions
+        .iter()
+        .zip(sender_addresses.iter())
+        .enumerate()
+    {
         let sample_tx = tx_index % TX_TIMING_SAMPLE_INTERVAL == 0;
         if sample_tx {
             logger.log(&format!(
@@ -509,7 +572,9 @@ fn apply_block_blueprint(
             ));
         }
 
-        let signature_ok = validate_transaction_signature(crypto, transaction).is_ok();
+        // Validate the signature using the pre-computed sender address.
+        let signature_ok =
+            validate_transaction_signature_with_sender(crypto, transaction, sender).is_ok();
         if sample_tx {
             logger.log(&format!(
                 "tx sample signature verified block={} tx_index={} total_processed={}\n",

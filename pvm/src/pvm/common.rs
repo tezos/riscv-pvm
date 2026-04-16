@@ -69,6 +69,8 @@ use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
+use crate::pvm::keccak_queue::KeccakWorkerMode;
+use crate::pvm::keccak_queue::KeccakWorkerTemplate;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -148,7 +150,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
         DS: RuntimeDurableStorage,
-        M: AtomMode + DataSpaceMode + VectorMode,
+        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
     {
         self.eval_max(hooks, Bound::Included(1));
     }
@@ -170,7 +172,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
         DS: RuntimeDurableStorage,
-        M: AtomMode + DataSpaceMode + VectorMode,
+        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
     {
         // Do nothing if step_bounds is less than 1
         if !less_than_bound(0, step_bounds) {
@@ -324,6 +326,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub fn try_clone(&self) -> Result<Self, OperationalError>
     where
         M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
+        M::Select<KeccakWorkerTemplate>: Clone,
     {
         Ok(Self {
             system_state: self.system_state.clone(),
@@ -337,7 +340,8 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Attempt to clone the persistent state of the PVM.
     pub fn try_clone_state(&self) -> Result<Self, OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode
+            + KeccakWorkerMode,
     {
         Ok(Self {
             system_state: self.system_state.clone_state(),
@@ -391,6 +395,7 @@ where
     PC: PageCache<MC, M>,
     DS: Default,
     M: AtomMode + DataSpaceMode + VectorMode,
+    M::Select<KeccakWorkerTemplate>: Default,
 {
     fn default() -> Self {
         Self {
@@ -408,6 +413,7 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     M: AtomMode + DataSpaceMode + VectorMode,
+    M::Select<KeccakWorkerTemplate>: Default,
 {
     /// Construct a PVM using the provided durable-storage backend.
     pub(crate) fn with_durable_storage(durable_storage: DS) -> Self {
@@ -596,7 +602,7 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: RuntimeDurableStorage,
-    M: AtomMode + DataSpaceMode + VectorMode,
+    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, durable_storage, tezos_state);
@@ -664,7 +670,7 @@ mod tests {
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
         where
-            M: AtomMode + DataSpaceMode + VectorMode,
+            M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
         {
             handle_system_call(
                 &mut self.machine_state,

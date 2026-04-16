@@ -7,6 +7,7 @@ mod common;
 pub mod durable_storage;
 pub mod errors;
 pub mod hooks;
+pub(crate) mod keccak_queue;
 pub(crate) mod linux;
 pub mod node_pvm;
 pub mod outbox;
@@ -14,4 +15,6 @@ mod reveals;
 mod tezos;
 
 pub use common::*;
+pub use keccak_queue::KeccakWorkerMode;
+pub(crate) use keccak_queue::KeccakWorkerTemplate;
 pub use tezos::Tezos;
