@@ -11,6 +11,7 @@ use octez_riscv_durable_storage::registry::Registry;
 use proptest::prelude::*;
 use proptest::proptest;
 use proptest::sample::Index;
+use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "rocksdb")] {
@@ -292,13 +293,22 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
 
                 let data = Bytes::copy_from_slice(&bytes);
 
-                registry
+                let result = registry
                     .database_mut(index)
                     .expect("The index is in bounds")
-                    .set(key.clone(), data)
-                    .expect("Setting should succeed");
+                    .set(key.clone(), data);
 
-                golden[index].seen.insert(key, bytes.clone());
+                if bytes.len() <= MAX_FILE_CHUNK_SIZE {
+                    assert!(
+                        result.is_ok(),
+                        "Set should have succeeded but failed: {:?}",
+                        result.err()
+                    );
+
+                    golden[index].seen.insert(key, bytes.clone());
+                } else {
+                    assert!(result.is_err(), "Set should have failed but succeeded");
+                }
             }
             Operation::Write(key, offset, bytes) => {
                 let data = Bytes::copy_from_slice(&bytes);
@@ -310,13 +320,16 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
                     .write(key.clone(), offset, data);
 
                 let should_succeed = if let Some(map_value) = golden[index].seen.get_mut(&key) {
-                    if offset > map_value.len() || offset.checked_add(bytes.len()).is_none() {
+                    if offset > map_value.len()
+                        || offset.checked_add(bytes.len()).is_none()
+                        || bytes.len() > MAX_FILE_CHUNK_SIZE
+                    {
                         false
                     } else {
                         update_value(map_value, offset, bytes);
                         true
                     }
-                } else if offset > 0 {
+                } else if offset > 0 || bytes.len() > MAX_FILE_CHUNK_SIZE {
                     false
                 } else {
                     golden[index].seen.insert(key, bytes);
@@ -355,7 +368,7 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
                 }
 
                 if let Some(map_value) = golden[index].seen.get(&key) {
-                    if offset > map_value.len() {
+                    if offset > map_value.len() || len > MAX_FILE_CHUNK_SIZE {
                         assert!(result.is_err());
                     } else {
                         let expected_len = std::cmp::min(len, map_value.len() - offset);

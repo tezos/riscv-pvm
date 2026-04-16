@@ -19,6 +19,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
@@ -149,6 +150,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Returns the number of bytes read.
     ///
     /// Fails if:
+    ///  - The number of bytes to read is larger than [`MAX_FILE_CHUNK_SIZE`].
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
     pub fn read(&self, key: &Key, offset: usize, mut output: impl BufMut) -> Result<usize, Error> {
@@ -163,6 +165,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// reading.
     ///
     /// Fails if:
+    ///  - The number of bytes to read is larger than [`MAX_FILE_CHUNK_SIZE`].
     ///  - The key does not exist.
     ///  - The offset is larger than the length of the associated value.
     pub fn read_bytes(
@@ -171,6 +174,10 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         offset: usize,
         max_bytes: usize,
     ) -> Result<impl AsRef<[u8]>, Error> {
+        if max_bytes > MAX_FILE_CHUNK_SIZE {
+            Err(InvalidArgumentError::IoRequestTooLarge)?;
+        }
+
         let value = self.get(key)?;
         let value_length = value.as_ref().len();
         if offset > value_length {
@@ -200,7 +207,14 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 
     /// Inserts the value associated with the provided key, replacing any data already associated
     /// with the key.
+    ///
+    /// Fails if:
+    ///  - The number of bytes to write is larger than [`MAX_FILE_CHUNK_SIZE`].
     pub fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
+        if data.len() > MAX_FILE_CHUNK_SIZE {
+            Err(InvalidArgumentError::IoRequestTooLarge)?;
+        }
+
         M::set(self, key, data)
     }
 
@@ -212,10 +226,15 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// them more expensive.
     ///
     /// Fails if:
+    ///  - The number of bytes to write is larger than [`MAX_FILE_CHUNK_SIZE`].
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
     ///  - The offset plus the length of the data would overflow.
     pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
+        if data.len() > MAX_FILE_CHUNK_SIZE {
+            Err(InvalidArgumentError::IoRequestTooLarge)?;
+        }
+
         M::write(self, key, offset, data)
     }
 
@@ -427,7 +446,7 @@ mod tests {
         use crate::errors::InvalidArgumentError;
 
         assert!(matches!(
-            database.read(key, 0, Vec::new()),
+            database.read_bytes(key, 0, 0),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
     }
@@ -896,7 +915,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_database_read_bytes_io_too_large() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -918,7 +936,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_database_read_io_too_large() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -1029,7 +1046,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_database_write_io_too_large() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -1118,7 +1134,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_database_set_io_too_large() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
