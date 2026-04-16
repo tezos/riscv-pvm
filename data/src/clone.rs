@@ -57,6 +57,10 @@ impl<T: CloneState> CloneState for Vec<T> {
     }
 }
 
+impl CloneState for () {
+    fn clone_state(&self) -> Self {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::CloneState;

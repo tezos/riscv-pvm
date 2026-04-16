@@ -884,11 +884,12 @@ mod tests {
     use crate::machine_state::memory::MemoryConfig;
     use crate::machine_state::page_cache::EmptyPageCache;
     use crate::machine_state::registers::sp;
+    use crate::pvm::KeccakWorkerMode;
     use crate::pvm::Pvm;
     use crate::pvm::durable_storage::DurableStorageDummy;
     use crate::pvm::linux::VirtAddr;
 
-    mode_test!(test_step_into_handler, F, {
+    mode_test!(test_step_into_handler, F: KeccakWorkerMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;
@@ -966,7 +967,7 @@ mod tests {
         );
     });
 
-    mode_test!(test_jump_to_restorer, F, {
+    mode_test!(test_jump_to_restorer, F: KeccakWorkerMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;

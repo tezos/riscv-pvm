@@ -61,7 +61,7 @@ impl<T, M: AtomMode + VectorMode> FifoQueue<T, M> {
     pub fn enqueue(&mut self, item: T) {
         let mut slot = Some(item);
         self.items
-            .try_resize_with::<_, Infallible>(self.items.len() + 1, || {
+            .try_resize_with::<Infallible>(self.items.len() + 1, || {
                 Ok(slot.take().expect("resize closure called exactly once"))
             })
             .unwrap();

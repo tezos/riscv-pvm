@@ -15,6 +15,5 @@ mod reveals;
 mod tezos;
 
 pub use common::*;
-pub use keccak_queue::KeccakWorkerMode;
-pub(crate) use keccak_queue::KeccakWorkerTemplate;
+pub(crate) use keccak_queue::KeccakWorkerMode;
 pub use tezos::Tezos;

@@ -89,8 +89,8 @@ use octez_riscv_data::components::atom::AtomMode;
 use super::PvmStatus;
 use super::keccak_queue::KeccakQueue;
 use super::keccak_queue::KeccakRequest;
+use super::keccak_queue::KeccakWorkerCell;
 use super::keccak_queue::KeccakWorkerMode;
-use super::keccak_queue::KeccakWorkerTemplate;
 use super::outbox::Outbox;
 use super::outbox::OutboxMessage;
 use super::reveals::RevealRequest;
@@ -120,15 +120,13 @@ pub struct Tezos<M: Mode> {
     pub(crate) status: Atom<PvmStatus, M>,
     /// Provable FIFO queue of pending keccak-256 requests.
     pub(crate) keccak_queue: KeccakQueue<M>,
-    /// Background keccak worker (Normal mode only; ZST in Prove/Verify).
-    /// Not part of provable state — excluded from Foldable/Encode/Decode impls.
-    pub(crate) keccak_worker: M::Select<KeccakWorkerTemplate>,
+    /// Background keccak worker. Not part of provable state — excluded from
+    /// Foldable/Encode/Decode. Present in all modes but only used in Normal mode;
+    /// Prove/Verify impls are no-ops that compute synchronously.
+    pub(crate) keccak_worker: KeccakWorkerCell,
 }
 
-impl<M: AtomMode + VectorMode> Default for Tezos<M>
-where
-    M::Select<KeccakWorkerTemplate>: Default,
-{
+impl<M: AtomMode + VectorMode> Default for Tezos<M> {
     fn default() -> Self {
         Self {
             outbox: Outbox::<M>::default(),
@@ -138,7 +136,7 @@ where
             level: Atom::default(),
             status: Atom::default(),
             keccak_queue: KeccakQueue::<M>::default(),
-            keccak_worker: Default::default(),
+            keccak_worker: KeccakWorkerCell::default(),
         }
     }
 }
@@ -155,15 +153,12 @@ impl<'normal> Provable<'normal> for Tezos<Normal> {
             level: self.level.start_proof(),
             status: self.status.start_proof(),
             keccak_queue: self.keccak_queue.start_proof(),
-            keccak_worker: (), // not provable; Prove mode uses () as the worker type
+            keccak_worker: KeccakWorkerCell::default(),
         }
     }
 }
 
-impl<M: CloneAtomMode + CloneVectorMode + KeccakWorkerMode> CloneState for Tezos<M>
-where
-    M::Select<KeccakWorkerTemplate>: Default,
-{
+impl<M: CloneAtomMode + CloneVectorMode> CloneState for Tezos<M> {
     fn clone_state(&self) -> Self {
         Self {
             outbox: self.outbox.clone_state(),
@@ -173,7 +168,7 @@ where
             level: self.level.clone_state(),
             status: self.status.clone_state(),
             keccak_queue: self.keccak_queue.clone_state(),
-            keccak_worker: Default::default(), // fresh worker on clone
+            keccak_worker: KeccakWorkerCell::default(),
         }
     }
 }
@@ -225,7 +220,7 @@ impl Unfoldable for Tezos<Normal> {
             level,
             status,
             keccak_queue,
-            keccak_worker: Default::default(),
+            keccak_worker: KeccakWorkerCell::default(),
         })
     }
 }
@@ -250,7 +245,7 @@ impl FromProof for Tezos<Verify> {
             level,
             status,
             keccak_queue,
-            keccak_worker: (),
+            keccak_worker: KeccakWorkerCell::default(),
         })
     }
 }
@@ -279,7 +274,7 @@ impl<C> Decode<C> for Tezos<Normal> {
             level: Decode::decode(decoder)?,
             status: Decode::decode(decoder)?,
             keccak_queue: Decode::decode(decoder)?,
-            keccak_worker: Default::default(),
+            keccak_worker: KeccakWorkerCell::default(),
         })
     }
 }

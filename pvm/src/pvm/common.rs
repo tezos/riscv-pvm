@@ -70,7 +70,6 @@ use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::keccak_queue::KeccakWorkerMode;
-use crate::pvm::keccak_queue::KeccakWorkerTemplate;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -326,7 +325,6 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub fn try_clone(&self) -> Result<Self, OperationalError>
     where
         M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
-        M::Select<KeccakWorkerTemplate>: Clone,
     {
         Ok(Self {
             system_state: self.system_state.clone(),
@@ -340,8 +338,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     /// Attempt to clone the persistent state of the PVM.
     pub fn try_clone_state(&self) -> Result<Self, OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode
-            + KeccakWorkerMode,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
     {
         Ok(Self {
             system_state: self.system_state.clone_state(),
@@ -395,7 +392,6 @@ where
     PC: PageCache<MC, M>,
     DS: Default,
     M: AtomMode + DataSpaceMode + VectorMode,
-    M::Select<KeccakWorkerTemplate>: Default,
 {
     fn default() -> Self {
         Self {
@@ -413,7 +409,6 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     M: AtomMode + DataSpaceMode + VectorMode,
-    M::Select<KeccakWorkerTemplate>: Default,
 {
     /// Construct a PVM using the provided durable-storage backend.
     pub(crate) fn with_durable_storage(durable_storage: DS) -> Self {
@@ -1007,7 +1002,7 @@ mod tests {
         );
     }
 
-    mode_test!(test_reveal, F, {
+    mode_test!(test_reveal, F: KeccakWorkerMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;
@@ -1077,7 +1072,7 @@ mod tests {
         assert_eq!(reveal_result_buffer, reveal_data);
     });
 
-    mode_test!(test_reveal_insufficient_buffer_size, F, {
+    mode_test!(test_reveal_insufficient_buffer_size, F: KeccakWorkerMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;

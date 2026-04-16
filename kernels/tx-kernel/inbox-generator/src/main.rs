@@ -26,6 +26,7 @@ use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_durable_storage::repo::DirectoryManager;
 use regex::Regex;
+use riscv_tx_kernel::AsyncKeccak;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -193,6 +194,11 @@ struct NativeKeySpaceLoader {
 }
 
 struct NativeCrypto;
+
+std::thread_local! {
+    static KECCAK_QUEUE: std::cell::RefCell<std::collections::VecDeque<[u8; 32]>> =
+        std::cell::RefCell::new(std::collections::VecDeque::new());
+}
 
 struct NativeLogger {
     start: Instant,
@@ -617,6 +623,19 @@ impl Crypto for NativeCrypto {
         let public_key =
             PublicKey::parse(public_key).expect("benchmark public keys must be valid");
         libsecp256k1::verify(&message, &signature, &public_key)
+    }
+}
+
+impl AsyncKeccak for NativeCrypto {
+    fn enqueue(&self, bytes: &[u8]) -> std::result::Result<(), String> {
+        KECCAK_QUEUE.with(|q| q.borrow_mut().push_back(keccak256(bytes)));
+        Ok(())
+    }
+
+    fn dequeue(&self) -> std::result::Result<[u8; 32], String> {
+        KECCAK_QUEUE
+            .with(|q| q.borrow_mut().pop_front())
+            .ok_or_else(|| "keccak queue is empty".to_string())
     }
 }
 

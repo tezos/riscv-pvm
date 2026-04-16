@@ -49,7 +49,6 @@ use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
 use crate::pvm::KeccakWorkerMode;
-use crate::pvm::keccak_queue::KeccakWorkerTemplate;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
@@ -369,9 +368,7 @@ impl<
     /// Re-bind the PVM type by cloning the underlying regions.
     pub fn rebind_via_clone(&mut self) -> Result<(), OperationalError>
     where
-        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode
-            + KeccakWorkerMode,
-        M::Select<KeccakWorkerTemplate>: Default,
+        M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
         DS: CloneState,
     {
         self.pvm = self.pvm.try_clone_state()?;

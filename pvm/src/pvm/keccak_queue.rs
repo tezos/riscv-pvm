@@ -19,7 +19,6 @@ use bincode::Encode;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::fifo_queue::FifoQueue;
-use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -175,83 +174,53 @@ impl fmt::Debug for KeccakWorkerCell {
     }
 }
 
-// ── CloneState for () ────────────────────────────────────────────────────────
-
-// The unit type is the worker representation in Prove/Verify mode.
-impl CloneState for () {
-    fn clone_state(&self) -> Self {}
-}
-
-// ── KeccakWorkerTemplate ─────────────────────────────────────────────────────
-
-/// Modal template selecting the worker cell in Normal mode and a ZST otherwise.
-pub(crate) enum KeccakWorkerTemplate {}
-
-impl Modal for KeccakWorkerTemplate {
-    type Normal = KeccakWorkerCell;
-    type Prove<'normal> = ();
-    type Verify = ();
-}
-
 // ── KeccakWorkerMode ─────────────────────────────────────────────────────────
 
 /// Mode-specific dispatch for the parallel keccak queue.
 ///
-/// In **Normal** mode, `keccak_enqueue` sends work to the background thread and
-/// `keccak_dequeue` blocks until the thread returns the result (falling back to
-/// synchronous computation if no worker is present, e.g. after a state clone).
+/// Both methods take a concrete `&mut KeccakWorkerCell` — there is no modal
+/// associated type involved, which means using this trait never cascades
+/// `M::Select<...>` bounds onto callers.
 ///
-/// In **Prove/Verify** mode both operations are synchronous: `keccak_enqueue` is a
-/// no-op and `keccak_dequeue` computes the hash immediately from the stored bytes.
-///
-/// The supertrait where clause guarantees that `Self::Select<KeccakWorkerTemplate>`
-/// satisfies the traits needed by `Tezos<M>`'s `Default`, `CloneState`, and
-/// `perfect_derive` impls.
-pub(crate) trait KeccakWorkerMode: Mode
-where
-    Self::Select<KeccakWorkerTemplate>: Default + Clone + CloneState + PartialEq + Eq,
-{
-    /// Called after enqueueing. In Normal mode, dispatches to the background worker.
-    fn keccak_enqueue(worker: &mut Self::Select<KeccakWorkerTemplate>, data: &[u8]);
+/// In **Normal** mode the worker is started lazily and requests are dispatched
+/// to it; dequeue blocks until the result arrives.  In **Prove/Verify** mode
+/// both operations are synchronous no-ops / compute-on-dequeue.
+pub(crate) trait KeccakWorkerMode: Mode {
+    /// Called on enqueue. In Normal mode, sends data to the background worker.
+    fn keccak_enqueue(cell: &mut KeccakWorkerCell, data: &[u8]);
 
-    /// Called on dequeue. Returns the keccak-256 hash of the message.
-    ///
-    /// `stored_data` is the raw message bytes stored in the queue entry; it is used as
-    /// a fallback when no pre-computed result is available.
-    fn keccak_dequeue(
-        worker: &mut Self::Select<KeccakWorkerTemplate>,
-        stored_data: &[u8],
-    ) -> [u8; 32];
+    /// Called on dequeue. Returns the keccak-256 hash of `stored_data`.
+    /// In Normal mode blocks until the worker returns a result; falls back to
+    /// synchronous computation if no worker is present (e.g. after a clone).
+    fn keccak_dequeue(cell: &mut KeccakWorkerCell, stored_data: &[u8]) -> [u8; 32];
 }
 
 impl KeccakWorkerMode for Normal {
     fn keccak_enqueue(cell: &mut KeccakWorkerCell, data: &[u8]) {
-        let worker = cell.worker.get_or_insert_with(KeccakWorker::spawn);
-        worker.send(data);
+        cell.worker.get_or_insert_with(KeccakWorker::spawn).send(data);
     }
 
     fn keccak_dequeue(cell: &mut KeccakWorkerCell, stored_data: &[u8]) -> [u8; 32] {
-        // Try to receive a pre-computed result from the background worker.
         let result = cell.worker.as_ref().and_then(|w| w.recv().ok());
         if let Some(hash) = result {
             return hash;
         }
-        // Worker not present (after clone) or dead: compute synchronously.
+        // Worker not present (after state clone) or dead: compute synchronously.
         cell.worker = None;
         Keccak256::digest(stored_data).into()
     }
 }
 
 impl<'a> KeccakWorkerMode for Prove<'a> {
-    fn keccak_enqueue(_: &mut (), _: &[u8]) {}
-    fn keccak_dequeue(_: &mut (), stored_data: &[u8]) -> [u8; 32] {
+    fn keccak_enqueue(_: &mut KeccakWorkerCell, _: &[u8]) {}
+    fn keccak_dequeue(_: &mut KeccakWorkerCell, stored_data: &[u8]) -> [u8; 32] {
         Keccak256::digest(stored_data).into()
     }
 }
 
 impl KeccakWorkerMode for Verify {
-    fn keccak_enqueue(_: &mut (), _: &[u8]) {}
-    fn keccak_dequeue(_: &mut (), stored_data: &[u8]) -> [u8; 32] {
+    fn keccak_enqueue(_: &mut KeccakWorkerCell, _: &[u8]) {}
+    fn keccak_dequeue(_: &mut KeccakWorkerCell, stored_data: &[u8]) -> [u8; 32] {
         Keccak256::digest(stored_data).into()
     }
 }

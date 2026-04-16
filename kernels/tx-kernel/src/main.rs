@@ -83,7 +83,7 @@ impl AsyncKeccak for SbiCrypto {
     fn dequeue(&self) -> Result<[u8; 32], String> {
         let mut out = [0u8; 32];
         unsafe { sbi_crypto::keccak256_dequeue(&mut out) }
-            .map_err(|_| "keccak dequeue host call failed".into())?;
+            .map_err(|_| "keccak dequeue host call failed".to_string())?;
         Ok(out)
     }
 }

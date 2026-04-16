@@ -45,7 +45,6 @@ use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::keccak_queue::KeccakWorkerMode;
-use crate::pvm::keccak_queue::KeccakWorkerTemplate;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::storage;
@@ -84,7 +83,6 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M> + Runtim
     pub fn try_clone(&self) -> Result<Self, super::errors::OperationalError>
     where
         M: CloneAtomMode + CloneDataSpaceMode + CloneRegistryMode + CloneVectorMode,
-        M::Select<KeccakWorkerTemplate>: Clone,
     {
         let cloned_pvm = self.state.try_clone()?;
         Ok(Self::wrap(cloned_pvm))
