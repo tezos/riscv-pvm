@@ -83,14 +83,22 @@ pub const SBI_TEZOS_DURABLE_DATABASE_HASH: u64 = 0x1016;
 pub const SBI_TEZOS_KECCAK256_ENQUEUE: u64 = 0x0c;
 /// Dequeue the oldest keccak-256 result; blocks in Normal mode until the result is ready.
 pub const SBI_TEZOS_KECCAK256_DEQUEUE: u64 = 0x0d;
+/// Enqueue a secp256k1 signature-verification request; returns immediately.
+pub const SBI_TEZOS_SECP256K1_ENQUEUE: u64 = 0x0e;
+/// Dequeue the oldest secp256k1 verification result (1 = valid, 0 = invalid).
+pub const SBI_TEZOS_SECP256K1_DEQUEUE: u64 = 0x0f;
 
 use octez_riscv_data::components::atom::AtomMode;
 
 use super::PvmStatus;
-use super::keccak_queue::KeccakQueue;
-use super::keccak_queue::KeccakRequest;
-use super::keccak_queue::KeccakWorkerCell;
-use super::keccak_queue::KeccakWorkerMode;
+use super::parallel_crypto::CryptoMode;
+use super::parallel_crypto::KeccakAlgorithm;
+use super::parallel_crypto::KeccakJobQueue;
+use super::parallel_crypto::KeccakRequest;
+use super::parallel_crypto::PvmCryptoMode;
+use super::parallel_crypto::Secp256k1Algorithm;
+use super::parallel_crypto::Secp256k1JobQueue;
+use super::parallel_crypto::Secp256k1Request;
 use super::outbox::Outbox;
 use super::outbox::OutboxMessage;
 use super::reveals::RevealRequest;
@@ -118,12 +126,10 @@ pub struct Tezos<M: Mode> {
     pub(crate) message_counter: Atom<u64, M>,
     pub(crate) level: Atom<Option<u32>, M>,
     pub(crate) status: Atom<PvmStatus, M>,
-    /// Provable FIFO queue of pending keccak-256 requests.
-    pub(crate) keccak_queue: KeccakQueue<M>,
-    /// Background keccak worker. Not part of provable state — excluded from
-    /// Foldable/Encode/Decode. Present in all modes but only used in Normal mode;
-    /// Prove/Verify impls are no-ops that compute synchronously.
-    pub(crate) keccak_worker: KeccakWorkerCell,
+    /// Parallel keccak-256 job queue (provable queue + background worker).
+    pub(crate) keccak_job: KeccakJobQueue<M>,
+    /// Parallel secp256k1-verify job queue (provable queue + background worker).
+    pub(crate) secp256k1_job: Secp256k1JobQueue<M>,
 }
 
 impl<M: AtomMode + VectorMode> Default for Tezos<M> {
@@ -135,8 +141,8 @@ impl<M: AtomMode + VectorMode> Default for Tezos<M> {
             message_counter: Atom::default(),
             level: Atom::default(),
             status: Atom::default(),
-            keccak_queue: KeccakQueue::<M>::default(),
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job: KeccakJobQueue::default(),
+            secp256k1_job: Secp256k1JobQueue::default(),
         }
     }
 }
@@ -152,8 +158,8 @@ impl<'normal> Provable<'normal> for Tezos<Normal> {
             message_counter: self.message_counter.start_proof(),
             level: self.level.start_proof(),
             status: self.status.start_proof(),
-            keccak_queue: self.keccak_queue.start_proof(),
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job: self.keccak_job.start_proof(),
+            secp256k1_job: self.secp256k1_job.start_proof(),
         }
     }
 }
@@ -167,8 +173,8 @@ impl<M: CloneAtomMode + CloneVectorMode> CloneState for Tezos<M> {
             message_counter: self.message_counter.clone_state(),
             level: self.level.clone_state(),
             status: self.status.clone_state(),
-            keccak_queue: self.keccak_queue.clone_state(),
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job: self.keccak_job.clone_state(),
+            secp256k1_job: self.secp256k1_job.clone_state(),
         }
     }
 }
@@ -182,7 +188,8 @@ where
     Atom<PvmStatus, M>: Foldable<F>,
     Atom<Option<u32>, M>: Foldable<F>,
     Atom<u64, M>: Foldable<F>,
-    KeccakQueue<M>: Foldable<F>,
+    KeccakJobQueue<M>: Foldable<F>,
+    Secp256k1JobQueue<M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
@@ -193,8 +200,9 @@ where
         builder.add(&self.message_counter);
         builder.add(&self.level);
         builder.add(&self.status);
-        builder.add(&self.keccak_queue);
-        // keccak_worker is not part of provable state and is excluded here.
+        builder.add(&self.keccak_job);
+        builder.add(&self.secp256k1_job);
+        // worker cells excluded from provable state.
 
         builder.done()
     }
@@ -210,7 +218,8 @@ impl Unfoldable for Tezos<Normal> {
         let message_counter = src.next_branch()?;
         let level = src.next_branch()?;
         let status = src.next_branch()?;
-        let keccak_queue = src.next_branch()?;
+        let keccak_job = src.next_branch()?;
+        let secp256k1_job = src.next_branch()?;
 
         src.done(Self {
             outbox,
@@ -219,8 +228,8 @@ impl Unfoldable for Tezos<Normal> {
             message_counter,
             level,
             status,
-            keccak_queue,
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job,
+            secp256k1_job,
         })
     }
 }
@@ -235,7 +244,8 @@ impl FromProof for Tezos<Verify> {
         let (proof, message_counter) = proof.next_branch()?;
         let (proof, level) = proof.next_branch()?;
         let (proof, status) = proof.next_branch()?;
-        let (proof, keccak_queue) = proof.next_branch()?;
+        let (proof, keccak_job) = proof.next_branch()?;
+        let (proof, secp256k1_job) = proof.next_branch()?;
 
         proof.done(Self {
             outbox,
@@ -244,8 +254,8 @@ impl FromProof for Tezos<Verify> {
             message_counter,
             level,
             status,
-            keccak_queue,
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job,
+            secp256k1_job,
         })
     }
 }
@@ -258,14 +268,15 @@ impl<M: EncodeAtomMode + EncodeVectorMode> Encode for Tezos<M> {
         self.message_counter.encode(encoder)?;
         self.level.encode(encoder)?;
         self.status.encode(encoder)?;
-        self.keccak_queue.encode(encoder)?;
-        // keccak_worker excluded from serialisation.
+        self.keccak_job.encode(encoder)?;
+        self.secp256k1_job.encode(encoder)?;
+        // worker cells excluded from serialisation.
         Ok(())
     }
 }
 
-impl<C> Decode<C> for Tezos<Normal> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl Decode<()> for Tezos<Normal> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             outbox: Decode::decode(decoder)?,
             reveal_request: Decode::decode(decoder)?,
@@ -273,8 +284,8 @@ impl<C> Decode<C> for Tezos<Normal> {
             message_counter: Decode::decode(decoder)?,
             level: Decode::decode(decoder)?,
             status: Decode::decode(decoder)?,
-            keccak_queue: Decode::decode(decoder)?,
-            keccak_worker: KeccakWorkerCell::default(),
+            keccak_job: Decode::decode(decoder)?,
+            secp256k1_job: Decode::decode(decoder)?,
         })
     }
 }
@@ -877,10 +888,6 @@ where
 }
 
 /// Handle a [SBI_TEZOS_KECCAK256_ENQUEUE] call.
-///
-/// Reads `msg_len` bytes from `msg_ptr` in PVM memory, stores them in the provable
-/// keccak queue, and (in Normal mode) dispatches the hash to the background worker
-/// so the result may be ready by the time the kernel calls dequeue.
 #[inline]
 fn handle_tezos_keccak256_enqueue<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
@@ -888,30 +895,19 @@ fn handle_tezos_keccak256_enqueue<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<KeccakAlgorithm>,
 {
     let msg_addr = machine.hart.xregisters.read(a0);
     let msg_len = machine.hart.xregisters.read(a1) as usize;
-
     let bytes = read_guest_bytes(machine, msg_addr, msg_len, MAX_PVM_MEMORY_ACCESS)?;
-
-    // Store in the provable queue.
-    let request = KeccakRequest::new(&bytes);
-    tezos.keccak_queue.enqueue(Atom::new(request));
-
-    // Dispatch to the background worker (no-op in Prove/Verify mode).
-    M::keccak_enqueue(&mut tezos.keccak_worker, &bytes);
-
+    tezos.keccak_job.push(KeccakRequest::new(&bytes));
     Ok(0)
 }
 
 /// Handle a [SBI_TEZOS_KECCAK256_DEQUEUE] call.
 ///
-/// Pops the oldest entry from the provable keccak queue, obtains its hash (from
-/// the background worker in Normal mode, or computed synchronously in Prove/Verify
-/// mode), and writes the 32-byte result to the output pointer supplied by the kernel.
-///
-/// Returns `SbiError::Failed` if the queue is empty.
+/// Writes the 32-byte result to the output pointer.  Returns `SbiError::Failed`
+/// if the queue is empty.
 #[inline]
 fn handle_tezos_keccak256_dequeue<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
@@ -919,30 +915,56 @@ fn handle_tezos_keccak256_dequeue<MC, M>(
 ) -> Result<u64, SbiError>
 where
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<KeccakAlgorithm>,
 {
     let out_addr = machine.hart.xregisters.read(a0);
-
-    if tezos.keccak_queue.is_empty() {
-        return Err(SbiError::Failed);
-    }
-
-    // Collect the stored message bytes for the fallback / Prove/Verify path.
-    // We use a block to end the immutable borrow before the mutable `advance`.
-    let stored_bytes = {
-        let front = tezos.keccak_queue.front().expect("queue non-empty");
-        // Deref: Atom<KeccakRequest, M> → KeccakRequest
-        front.as_bytes().to_vec()
-    };
-
-    // Logically consume the front entry from the provable queue.
-    tezos.keccak_queue.advance();
-
-    // Obtain the hash: pre-computed by the worker in Normal mode, or synchronous otherwise.
-    let hash: [u8; 32] = M::keccak_dequeue(&mut tezos.keccak_worker, &stored_bytes);
-
+    let hash = tezos.keccak_job.pop().ok_or(SbiError::Failed)?;
     machine.main_memory.write(out_addr, hash)?;
     Ok(hash.len() as u64)
+}
+
+/// Handle a [SBI_TEZOS_SECP256K1_ENQUEUE] call.
+///
+/// Reads `(public_key_ptr, signature_ptr, message_hash_ptr)` from registers and
+/// stores the request in the provable secp256k1 queue, dispatching to the
+/// background worker in Normal mode.
+#[inline]
+fn handle_tezos_secp256k1_enqueue<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+    tezos: &mut Tezos<M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<Secp256k1Algorithm>,
+{
+    let pk_addr = machine.hart.xregisters.read(a0);
+    let sig_addr = machine.hart.xregisters.read(a1);
+    let hash_addr = machine.hart.xregisters.read(a2);
+
+    let request = Secp256k1Request {
+        public_key: machine.main_memory.read(pk_addr)?,
+        signature: machine.main_memory.read(sig_addr)?,
+        message_hash: machine.main_memory.read(hash_addr)?,
+    };
+    tezos.secp256k1_job.push(request);
+    Ok(0)
+}
+
+/// Handle a [SBI_TEZOS_SECP256K1_DEQUEUE] call.
+///
+/// Returns `1` if the signature was valid, `0` if invalid.
+/// Returns `SbiError::Failed` if the queue is empty.
+#[inline]
+fn handle_tezos_secp256k1_dequeue<MC, M>(
+    _machine: &mut MachineCoreState<MC, M>,
+    tezos: &mut Tezos<M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<Secp256k1Algorithm>,
+{
+    let valid = tezos.secp256k1_job.pop().ok_or(SbiError::Failed)?;
+    Ok(valid as u64)
 }
 
 /// Handle a Tezos SBI call.
@@ -953,7 +975,7 @@ pub(super) fn handle_tezos<MC, M, DS>(
 ) where
     MC: MemoryConfig,
     DS: RuntimeDurableStorage,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
 {
     // TODO: RV-777: remove below and instead have each system call return a `ProgramCounterUpdate`
     let pc = machine.hart.pc.read().wrapping_add(4);
@@ -971,14 +993,16 @@ pub(super) fn handle_tezos<MC, M, DS>(
         SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
         SBI_TEZOS_KECCAK256_ENQUEUE => {
-            sbi_wrap(machine, |machine| {
-                handle_tezos_keccak256_enqueue(machine, tezos)
-            })
+            sbi_wrap(machine, |machine| handle_tezos_keccak256_enqueue(machine, tezos))
         }
         SBI_TEZOS_KECCAK256_DEQUEUE => {
-            sbi_wrap(machine, |machine| {
-                handle_tezos_keccak256_dequeue(machine, tezos)
-            })
+            sbi_wrap(machine, |machine| handle_tezos_keccak256_dequeue(machine, tezos))
+        }
+        SBI_TEZOS_SECP256K1_ENQUEUE => {
+            sbi_wrap(machine, |machine| handle_tezos_secp256k1_enqueue(machine, tezos))
+        }
+        SBI_TEZOS_SECP256K1_DEQUEUE => {
+            sbi_wrap(machine, |machine| handle_tezos_secp256k1_dequeue(machine, tezos))
         }
         SBI_TEZOS_REVEAL => {
             handle_tezos_reveal(machine, &mut tezos.reveal_request, &mut tezos.status)

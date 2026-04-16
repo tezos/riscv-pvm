@@ -43,20 +43,33 @@ pub trait Crypto {
 
 /// Asynchronous keccak-256 interface backed by the PVM parallel crypto queue.
 ///
-/// The two operations correspond directly to the `SBI_TEZOS_KECCAK256_ENQUEUE` and
-/// `SBI_TEZOS_KECCAK256_DEQUEUE` host functions.  In Normal (fast) mode the hash
-/// computation starts in a background thread as soon as `enqueue` is called, so that
-/// `dequeue` can return with minimal or no blocking.
+/// In Normal mode the hash computation starts in a background thread immediately,
+/// so that `dequeue` can return with minimal or no blocking.
 pub trait AsyncKeccak {
-    /// Submit a keccak-256 hash request.  Returns immediately; the result will be
-    /// available via [`dequeue`](AsyncKeccak::dequeue) in FIFO order.
+    /// Submit a keccak-256 hash request.  Returns immediately.
     fn enqueue(&self, bytes: &[u8]) -> Result<(), String>;
 
     /// Retrieve the oldest pending keccak-256 result.
-    ///
-    /// In Normal mode this may block briefly until the background thread finishes.
-    /// Returns an error if the queue is empty.
     fn dequeue(&self) -> Result<[u8; 32], String>;
+}
+
+/// Asynchronous secp256k1 signature-verification interface.
+///
+/// In Normal mode verification runs in a background thread started by `enqueue`,
+/// so that `dequeue` returns with minimal or no blocking.
+pub trait AsyncSecp256k1 {
+    /// Submit a secp256k1 verify request.  Returns immediately.
+    fn secp256k1_enqueue(
+        &self,
+        public_key: &[u8; 65],
+        signature: &[u8; 64],
+        message_hash: &[u8; 32],
+    ) -> Result<(), String>;
+
+    /// Retrieve the oldest pending secp256k1 result.
+    ///
+    /// Returns `true` if the signature was valid, `false` if invalid.
+    fn secp256k1_dequeue(&self) -> Result<bool, String>;
 }
 
 pub trait Logger {
@@ -252,7 +265,7 @@ impl<C: ContextStore> ChainKernel<C> {
     pub fn handle_external_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &(impl Crypto + AsyncKeccak),
+        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1),
         payload: &[u8],
     ) {
         if payload.starts_with(&BLOCK_CHUNK_MAGIC) {
@@ -277,7 +290,7 @@ impl<C: ContextStore> ChainKernel<C> {
     fn handle_block_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &(impl Crypto + AsyncKeccak),
+        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1),
         payload: &[u8],
     ) {
         if let Err(error) = apply_block_blueprint(
@@ -503,24 +516,32 @@ fn verify_block_signature(crypto: &impl Crypto, block: &BlockBlueprint) -> Resul
 
 fn apply_block_blueprint(
     logger: &mut impl Logger,
-    crypto: &(impl Crypto + AsyncKeccak),
+    crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1),
     context: &mut impl ContextStore,
     payload: &[u8],
     processed_transactions: &mut usize,
 ) -> Result<(), String> {
     let block = parse_block_blueprint(payload).map_err(str::to_string)?;
+    let n = block.transactions.len();
 
-    // ── Phase 1: enqueue keccak requests for all public-key → address derivations ──
+    // ── Phase 1: enqueue all keccak work upfront ──────────────────────────────
     //
-    // By enqueuing before `verify_block_signature`, the background worker can begin
-    // computing hashes in Normal mode while the (synchronous) signature check runs,
-    // reducing or eliminating the blocking time of the subsequent dequeue calls.
+    // Enqueue 2N keccak requests before any synchronous work so the background
+    // thread has maximum lead time:
+    //   – N hashes to derive sender addresses from public keys
+    //   – N hashes of the unsigned transaction data (for signature verification)
+    //
     for transaction in &block.transactions {
+        // Address derivation: keccak(public_key[1..])
         crypto.enqueue(&transaction.public_key[1..])?;
     }
+    for transaction in &block.transactions {
+        // Transaction hash: keccak(encode_unsigned_transaction(tx))
+        crypto.enqueue(&encode_unsigned_transaction(transaction))?;
+    }
 
-    // Verify the block signature synchronously. This provides useful work for the
-    // main thread while the background worker processes the enqueued requests.
+    // Verify the block signature synchronously while the background thread
+    // processes the enqueued keccak requests.
     verify_block_signature(crypto, &block)?;
 
     let current_head = read_block_head(context)?;
@@ -532,7 +553,6 @@ fn apply_block_blueprint(
         ));
     }
 
-    let mut receipts = Vec::with_capacity(block.transactions.len());
     if *processed_transactions == 0 && !block.transactions.is_empty() {
         logger.log(&format!(
             "first processed tx block={} tx_index=0 total_processed=0\n",
@@ -540,29 +560,57 @@ fn apply_block_blueprint(
         ));
     }
 
-    // ── Phase 2: dequeue addresses and process transactions ──
+    // ── Phase 2: dequeue keccak results; enqueue secp256k1 verifications ──────
     //
-    // Pre-compute all sender addresses by dequeuing the keccak results.
-    // In Normal mode these will often already be ready; in Prove/Verify mode they
-    // are computed synchronously by the PVM host function.
-    let mut sender_addresses: Vec<[u8; 20]> = Vec::with_capacity(block.transactions.len());
-    for transaction in &block.transactions {
-        let hash = crypto.dequeue()?;
-        if transaction.public_key[0] != 0x04 {
-            // Unsupported key format; record a dummy address that will fail the check below.
-            sender_addresses.push([0u8; 20]);
+    // Dequeue N address hashes and N tx hashes.  For each transaction with a
+    // valid sender address, enqueue a secp256k1 verification request so the
+    // background thread can start those while phase 3 applies earlier results.
+    //
+    // `sender_ok[i]` is true iff address derivation succeeded AND sender matches.
+    let mut sender_ok: Vec<bool> = Vec::with_capacity(n);
+
+    // First collect all N address hashes.
+    let mut addr_hashes: Vec<[u8; 32]> = Vec::with_capacity(n);
+    for _ in 0..n {
+        addr_hashes.push(crypto.dequeue()?);
+    }
+    // Then collect all N tx hashes and enqueue secp verifications.
+    let mut tx_hashes: Vec<[u8; 32]> = Vec::with_capacity(n);
+    for _ in 0..n {
+        tx_hashes.push(crypto.dequeue()?);
+    }
+
+    for (transaction, (addr_hash, tx_hash)) in block
+        .transactions
+        .iter()
+        .zip(addr_hashes.iter().zip(tx_hashes.iter()))
+    {
+        let valid_key = transaction.public_key[0] == 0x04;
+        let sender_addr = if valid_key {
+            let mut addr = [0u8; 20];
+            addr.copy_from_slice(&addr_hash[12..]);
+            addr
         } else {
-            let mut address = [0u8; 20];
-            address.copy_from_slice(&hash[12..]);
-            sender_addresses.push(address);
+            [0u8; 20]
+        };
+        let addr_matches = valid_key && sender_addr == transaction.from;
+        sender_ok.push(addr_matches);
+
+        if addr_matches {
+            crypto.secp256k1_enqueue(
+                &transaction.public_key,
+                &transaction.signature,
+                tx_hash,
+            )?;
         }
     }
 
-    for (tx_index, (transaction, sender)) in block
-        .transactions
-        .iter()
-        .zip(sender_addresses.iter())
-        .enumerate()
+    // ── Phase 3: dequeue secp256k1 results and apply transactions ─────────────
+    let mut receipts = Vec::with_capacity(n);
+
+    // secp dequeue index — only advance for transactions that had a valid sender.
+    for (tx_index, (transaction, &addr_ok)) in
+        block.transactions.iter().zip(sender_ok.iter()).enumerate()
     {
         let sample_tx = tx_index % TX_TIMING_SAMPLE_INTERVAL == 0;
         if sample_tx {
@@ -572,9 +620,8 @@ fn apply_block_blueprint(
             ));
         }
 
-        // Validate the signature using the pre-computed sender address.
-        let signature_ok =
-            validate_transaction_signature_with_sender(crypto, transaction, sender).is_ok();
+        let signature_ok = addr_ok && crypto.secp256k1_dequeue()?;
+
         if sample_tx {
             logger.log(&format!(
                 "tx sample signature verified block={} tx_index={} total_processed={}\n",
@@ -585,19 +632,18 @@ fn apply_block_blueprint(
         let receipt = if signature_ok {
             apply_valid_transaction(context, transaction)?
         } else {
-            TxReceipt {
-                status: TxStatus::Rejected,
-            }
+            TxReceipt { status: TxStatus::Rejected }
         };
         receipts.push(receipt);
         *processed_transactions += 1;
+
         if sample_tx {
             logger.log(&format!(
                 "tx sample complete block={} tx_index={} total_processed={}\n",
                 block.number, tx_index, *processed_transactions
             ));
         }
-        if tx_index + 1 == block.transactions.len() {
+        if tx_index + 1 == n {
             logger.log(&format!(
                 "last processed tx block={} tx_index={} total_processed={}\n",
                 block.number, tx_index, *processed_transactions

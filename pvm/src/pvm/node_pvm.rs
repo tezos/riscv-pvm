@@ -44,7 +44,7 @@ use crate::pvm::InputRequest;
 use crate::pvm::common::PvmInput;
 use crate::pvm::common::PvmStatus;
 use crate::pvm::hooks::PvmHooks;
-use crate::pvm::keccak_queue::KeccakWorkerMode;
+use crate::pvm::PvmCryptoMode;
 use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 use crate::storage;
@@ -151,14 +151,14 @@ impl<M: Mode, PC: PageCache<NodePvmMemConfig, M>, DS: DurableStorage<M> + Runtim
 
     pub fn compute_step(&mut self, pvm_hooks: impl PvmHooks)
     where
-        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+        M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_one(pvm_hooks))
     }
 
     pub fn compute_step_many(&mut self, pvm_hooks: impl PvmHooks, max_steps: usize) -> i64
     where
-        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+        M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
     {
         self.with_backend_mut(|pvm| pvm.eval_max(pvm_hooks, Bound::Included(max_steps))) as i64
     }

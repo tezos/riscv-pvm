@@ -15,6 +15,7 @@ use keyspace::KeySpace;
 use keyspace::KeySpaceLoader;
 use keyspace::Name;
 use riscv_tx_kernel::AsyncKeccak;
+use riscv_tx_kernel::AsyncSecp256k1;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -85,6 +86,23 @@ impl AsyncKeccak for SbiCrypto {
         unsafe { sbi_crypto::keccak256_dequeue(&mut out) }
             .map_err(|_| "keccak dequeue host call failed".to_string())?;
         Ok(out)
+    }
+}
+
+impl AsyncSecp256k1 for SbiCrypto {
+    fn secp256k1_enqueue(
+        &self,
+        public_key: &[u8; 65],
+        signature: &[u8; 64],
+        message_hash: &[u8; 32],
+    ) -> Result<(), String> {
+        unsafe { sbi_crypto::secp256k1_enqueue(public_key, signature, message_hash) }
+            .map_err(|_| "secp256k1 enqueue host call failed".into())
+    }
+
+    fn secp256k1_dequeue(&self) -> Result<bool, String> {
+        unsafe { sbi_crypto::secp256k1_dequeue() }
+            .map_err(|_| "secp256k1 dequeue host call failed".into())
     }
 }
 

@@ -48,7 +48,7 @@ use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::page_cache::PageCacheInterpreted;
 use crate::program::Program;
 use crate::pvm::InputRequest;
-use crate::pvm::KeccakWorkerMode;
+use crate::pvm::PvmCryptoMode;
 use crate::pvm::Pvm;
 use crate::pvm::PvmStatus;
 use crate::pvm::durable_storage::DurableStorage;
@@ -244,7 +244,7 @@ impl<
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M> + RuntimeDurableStorage,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
 > PvmStepper<H, MC, DS, PC, M>
 {
     /// Non-continuing variant of [`Stepper::step_max`]
@@ -491,7 +491,7 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
 impl<
     H: PvmHooks,
     MC: MemoryConfig,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
     PC: PageCache<MC, M>,
     DS: DurableStorage<M> + RuntimeDurableStorage,
 > PvmStepper<H, MC, DS, PC, M>

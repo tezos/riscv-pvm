@@ -69,7 +69,7 @@ use crate::machine_state::page_cache::EmptyPageCache;
 use crate::machine_state::page_cache::PageCache;
 use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
-use crate::pvm::keccak_queue::KeccakWorkerMode;
+use crate::pvm::PvmCryptoMode;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
 use crate::state_backend::proof_backend::proof::Proof;
@@ -149,7 +149,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub(crate) fn eval_one(&mut self, hooks: impl PvmHooks)
     where
         DS: RuntimeDurableStorage,
-        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+        M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
     {
         self.eval_max(hooks, Bound::Included(1));
     }
@@ -171,7 +171,7 @@ impl<MC: MemoryConfig, PC: PageCache<MC, M>, DS: DurableStorage<M>, M: Mode> Pvm
     pub(crate) fn eval_max(&mut self, mut hooks: impl PvmHooks, step_bounds: Bound<usize>) -> usize
     where
         DS: RuntimeDurableStorage,
-        M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+        M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
     {
         // Do nothing if step_bounds is less than 1
         if !less_than_bound(0, step_bounds) {
@@ -522,14 +522,14 @@ where
     }
 }
 
-impl<C, MC, PC, DS> Decode<C> for Pvm<MC, PC, DS, Normal>
+impl<MC, PC, DS> Decode<()> for Pvm<MC, PC, DS, Normal>
 where
     MC: MemoryConfig,
     PC: PageCache<MC, Normal>,
-    DS: Decode<C>,
-    MC::State<Normal>: Decode<C>,
+    DS: Decode<()>,
+    MC::State<Normal>: Decode<()>,
 {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         Ok(Self {
             system_state: Decode::decode(decoder)?,
             machine_state: Decode::decode(decoder)?,
@@ -597,7 +597,7 @@ where
     MC: MemoryConfig,
     PC: PageCache<MC, M>,
     DS: RuntimeDurableStorage,
-    M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+    M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
 {
     system_state.handle_system_call(machine, hooks, |core| {
         tezos::handle_tezos(core, durable_storage, tezos_state);
@@ -665,7 +665,7 @@ mod tests {
         // The conditional compilation below causes some warnings.
         fn handle_exception(&mut self, hooks: impl PvmHooks) -> bool
         where
-            M: AtomMode + DataSpaceMode + VectorMode + KeccakWorkerMode,
+            M: AtomMode + DataSpaceMode + VectorMode + PvmCryptoMode,
         {
             handle_system_call(
                 &mut self.machine_state,
@@ -1002,7 +1002,7 @@ mod tests {
         );
     }
 
-    mode_test!(test_reveal, F: KeccakWorkerMode, {
+    mode_test!(test_reveal, F: PvmCryptoMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;
@@ -1072,7 +1072,7 @@ mod tests {
         assert_eq!(reveal_result_buffer, reveal_data);
     });
 
-    mode_test!(test_reveal_insufficient_buffer_size, F: KeccakWorkerMode, {
+    mode_test!(test_reveal_insufficient_buffer_size, F: PvmCryptoMode, {
         type MC = M1M;
         type PC = EmptyPageCache;
         type DS = DurableStorageDummy;

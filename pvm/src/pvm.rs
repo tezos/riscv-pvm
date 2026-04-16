@@ -7,7 +7,7 @@ mod common;
 pub mod durable_storage;
 pub mod errors;
 pub mod hooks;
-pub(crate) mod keccak_queue;
+pub(crate) mod parallel_crypto;
 pub(crate) mod linux;
 pub mod node_pvm;
 pub mod outbox;
@@ -15,5 +15,5 @@ mod reveals;
 mod tezos;
 
 pub use common::*;
-pub(crate) use keccak_queue::KeccakWorkerMode;
+pub(crate) use parallel_crypto::PvmCryptoMode;
 pub use tezos::Tezos;

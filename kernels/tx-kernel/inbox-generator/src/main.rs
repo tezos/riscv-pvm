@@ -27,6 +27,7 @@ use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_durable_storage::repo::DirectoryManager;
 use regex::Regex;
 use riscv_tx_kernel::AsyncKeccak;
+use riscv_tx_kernel::AsyncSecp256k1;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -636,6 +637,34 @@ impl AsyncKeccak for NativeCrypto {
         KECCAK_QUEUE
             .with(|q| q.borrow_mut().pop_front())
             .ok_or_else(|| "keccak queue is empty".to_string())
+    }
+}
+
+std::thread_local! {
+    static SECP_QUEUE: std::cell::RefCell<std::collections::VecDeque<bool>> =
+        std::cell::RefCell::new(std::collections::VecDeque::new());
+}
+
+impl AsyncSecp256k1 for NativeCrypto {
+    fn secp256k1_enqueue(
+        &self,
+        public_key: &[u8; 65],
+        signature: &[u8; 64],
+        message_hash: &[u8; 32],
+    ) -> std::result::Result<(), String> {
+        let message = libsecp256k1::Message::parse(message_hash);
+        let sig = libsecp256k1::Signature::parse_standard(signature)
+            .expect("benchmark signatures must be canonical");
+        let pk = PublicKey::parse(public_key).expect("benchmark public keys must be valid");
+        let valid = libsecp256k1::verify(&message, &sig, &pk);
+        SECP_QUEUE.with(|q| q.borrow_mut().push_back(valid));
+        Ok(())
+    }
+
+    fn secp256k1_dequeue(&self) -> std::result::Result<bool, String> {
+        SECP_QUEUE
+            .with(|q| q.borrow_mut().pop_front())
+            .ok_or_else(|| "secp256k1 queue is empty".to_string())
     }
 }
 
