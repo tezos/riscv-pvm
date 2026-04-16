@@ -138,9 +138,20 @@ fn example_struct_read_write_serialise() {
         u64::from_le_bytes(serialise(instance.first).unwrap().try_into().unwrap());
     assert_eq!(first_value_read, first_value);
 
-    let second_value_read = unsafe {
+    let second_value_read = {
         let data = serialise(instance.second).unwrap();
-        data.as_ptr().cast::<[u32; 4]>().read().map(u32::from_le)
+        assert_eq!(data.len(), std::mem::size_of::<[u32; 4]>());
+
+        let (values, &[]) = data
+            .as_slice()
+            .as_chunks::<{ std::mem::size_of::<u32>() }>()
+        else {
+            panic!("Unexpected extra bytes in serialisation");
+        };
+
+        <[[u8; 4]; 4]>::try_from(values)
+            .expect("Expected exactly 16 bytes")
+            .map(u32::from_le_bytes)
     };
     assert_eq!(second_value_read, second_value);
 }
