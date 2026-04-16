@@ -184,10 +184,57 @@ impl<A: CryptoAlgorithm> CryptoWorker<A> {
         let (result_tx, result_rx) = mpsc::channel::<A::Output>();
 
         let thread = thread::spawn(move || {
+            let (request_tx_lhs, request_rx_lhs) = mpsc::channel::<A::Input>();
+            let (result_tx_lhs, result_rx_lhs) = mpsc::channel::<A::Output>();
+
+            let (request_tx_mid, request_rx_mid) = mpsc::channel::<A::Input>();
+            let (result_tx_mid, result_rx_mid) = mpsc::channel::<A::Output>();
+
+            let (request_tx_rhs, request_rx_rhs) = mpsc::channel::<A::Input>();
+            let (result_tx_rhs, result_rx_rhs) = mpsc::channel::<A::Output>();
+
+            let ordering = thread::spawn(move || {
+                loop {
+                    result_tx.send(result_rx_lhs.recv().unwrap()).unwrap();
+                    result_tx.send(result_rx_mid.recv().unwrap()).unwrap();
+                    result_tx.send(result_rx_rhs.recv().unwrap()).unwrap();
+                }
+            });
+
+            let lhs = thread::spawn(move || {
+                while let Ok(input) = request_rx_lhs.recv() {
+                    let output = A::execute(&input);
+                    if result_tx_lhs.send(output).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let mid = thread::spawn(move || {
+                while let Ok(input) = request_rx_mid.recv() {
+                    let output = A::execute(&input);
+                    if result_tx_mid.send(output).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let rhs = thread::spawn(move || {
+                while let Ok(input) = request_rx_rhs.recv() {
+                    let output = A::execute(&input);
+                    if result_tx_rhs.send(output).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let mut next = 0;
+
             while let Ok(input) = request_rx.recv() {
-                let output = A::execute(&input);
-                if result_tx.send(output).is_err() {
-                    break;
+                match next {
+                    0 => { next = 1; request_tx_lhs.send(input).unwrap() }
+                    1 => { next = 2; request_tx_mid.send(input).unwrap() }
+                    _ => { next = 0; request_tx_rhs.send(input).unwrap() }
                 }
             }
         });

@@ -524,6 +524,13 @@ fn apply_block_blueprint(
     let block = parse_block_blueprint(payload).map_err(str::to_string)?;
     let n = block.transactions.len();
 
+    if *processed_transactions == 0 && !block.transactions.is_empty() {
+        logger.log(&format!(
+            "first processed tx block={} tx_index=0 total_processed=0\n",
+            block.number
+        ));
+    }
+
     // ── Phase 1: enqueue all keccak work upfront ──────────────────────────────
     //
     // Enqueue 2N keccak requests before any synchronous work so the background
@@ -550,13 +557,6 @@ fn apply_block_blueprint(
             "unexpected block number {}, expected {}",
             block.number,
             current_head + 1
-        ));
-    }
-
-    if *processed_transactions == 0 && !block.transactions.is_empty() {
-        logger.log(&format!(
-            "first processed tx block={} tx_index=0 total_processed=0\n",
-            block.number
         ));
     }
 
@@ -612,22 +612,22 @@ fn apply_block_blueprint(
     for (tx_index, (transaction, &addr_ok)) in
         block.transactions.iter().zip(sender_ok.iter()).enumerate()
     {
-        let sample_tx = tx_index % TX_TIMING_SAMPLE_INTERVAL == 0;
-        if sample_tx {
-            logger.log(&format!(
-                "tx sample start block={} tx_index={} total_processed={}\n",
-                block.number, tx_index, *processed_transactions
-            ));
-        }
+        // let sample_tx = tx_index % TX_TIMING_SAMPLE_INTERVAL == 0;
+        // if sample_tx {
+        //     logger.log(&format!(
+        //         "tx sample start block={} tx_index={} total_processed={}\n",
+        //         block.number, tx_index, *processed_transactions
+        //     ));
+        // }
 
         let signature_ok = addr_ok && crypto.secp256k1_dequeue()?;
 
-        if sample_tx {
-            logger.log(&format!(
-                "tx sample signature verified block={} tx_index={} total_processed={}\n",
-                block.number, tx_index, *processed_transactions
-            ));
-        }
+        // if sample_tx {
+        //     logger.log(&format!(
+        //         "tx sample signature verified block={} tx_index={} total_processed={}\n",
+        //         block.number, tx_index, *processed_transactions
+        //     ));
+        // }
 
         let receipt = if signature_ok {
             apply_valid_transaction(context, transaction)?
@@ -637,12 +637,12 @@ fn apply_block_blueprint(
         receipts.push(receipt);
         *processed_transactions += 1;
 
-        if sample_tx {
-            logger.log(&format!(
-                "tx sample complete block={} tx_index={} total_processed={}\n",
-                block.number, tx_index, *processed_transactions
-            ));
-        }
+        // if sample_tx {
+        //     logger.log(&format!(
+        //         "tx sample complete block={} tx_index={} total_processed={}\n",
+        //         block.number, tx_index, *processed_transactions
+        //     ));
+        // }
         if tx_index + 1 == n {
             logger.log(&format!(
                 "last processed tx block={} tx_index={} total_processed={}\n",
