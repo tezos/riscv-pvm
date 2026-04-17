@@ -28,6 +28,7 @@
 //! [`Node`]: crate::avl::node::Node
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -44,7 +45,6 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::SuspendedResult;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -498,7 +498,6 @@ impl From<Node<ProveTreeId, Prove<'static>>> for ProveNodeId {
 /// Used by the `MerkleLayer`-level fold to extract per-field read flags from a node that
 /// was resolved during the proof step.
 impl ProveNodeId {
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn cached_node(&self) -> Option<&Node<ProveTreeId, Prove<'static>>> {
         self.inner.get().map(|rc| rc.as_ref())
     }
@@ -509,15 +508,6 @@ impl Foldable<HashFold> for ProveNodeId {
         match self.inner.get() {
             Some(inner) => *inner.hash(),
             None => self.node.fold(builder),
-        }
-    }
-}
-
-impl Foldable<MerkleProofFold> for ProveNodeId {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        match self.inner.get() {
-            Some(inner) => inner.as_ref().fold(builder),
-            None => builder.into_blind(Hash::from_foldable(&self.node)),
         }
     }
 }
@@ -553,15 +543,6 @@ impl Foldable<HashFold> for ProveTreeId {
     }
 }
 
-impl Foldable<MerkleProofFold> for ProveTreeId {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        match self.inner.get() {
-            Some(inner) => inner.fold(builder),
-            None => builder.into_blind(Hash::from_foldable(&self.tree)),
-        }
-    }
-}
-
 /// State of the [`ProveResolver`] that tracks which nodes and trees have been accessed via the
 /// corresponding resolution methods
 #[derive(Default, Debug)]
@@ -585,6 +566,13 @@ pub struct ProveResolver<R> {
 
     /// Inner state for access tracking
     accessed_items: RefCell<AccessedProveItems>,
+
+    /// Prove-mode projections of nodes that were unlinked from the working tree during the step.
+    ///
+    /// Keyed by the node's initial hash. The fold consults this map before searching the working
+    /// tree, so that a node which was deleted (or deleted then reinserted at the same key) still
+    /// contributes its correct per-field read flags to the proof.
+    deleted_nodes: RefCell<BTreeMap<Hash, ProveNodeId>>,
 }
 
 impl<R> ProveResolver<R> {
@@ -593,19 +581,31 @@ impl<R> ProveResolver<R> {
         Self {
             inner,
             accessed_items: RefCell::default(),
+            deleted_nodes: RefCell::default(),
         }
     }
 
+    /// The wrapped resolver used for [`LazyNodeId`] / [`LazyTreeId`] resolution.
+    ///
+    /// The fold uses this directly to walk the initial tree, bypassing the access-tracking
+    /// methods.
+    pub(crate) fn inner(&self) -> &R {
+        &self.inner
+    }
+
     /// Whether a node with the given hash was accessed during the proof step.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn was_node_accessed(&self, hash: &Hash) -> bool {
         self.accessed_items.borrow().nodes.contains(hash)
     }
 
     /// Whether a tree with the given hash was accessed during the proof step.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn was_tree_accessed(&self, hash: &Hash) -> bool {
         self.accessed_items.borrow().trees.contains(hash)
+    }
+
+    /// Look up a deleted prove-mode node by its initial hash.
+    pub(crate) fn deleted_node(&self, hash: &Hash) -> Option<ProveNodeId> {
+        self.deleted_nodes.borrow().get(hash).cloned()
     }
 
     /// Track a node as accessed.
@@ -618,6 +618,18 @@ impl<R> ProveResolver<R> {
     fn track_tree(&self, id: &LazyTreeId) {
         let hash = Hash::from_foldable(id);
         self.accessed_items.borrow_mut().trees.insert(hash);
+    }
+
+    /// Stash a [`ProveNodeId`] that is about to be unlinked from the working tree.
+    ///
+    /// Called from the four semantic deletion sites in [`Tree::delete`] via the
+    /// [`DeletionNotifier`] trait. The fold reads this map to recover the prove-mode projection
+    /// (and its accumulated read flags) for nodes that no longer live in the working tree.
+    ///
+    /// [`Tree::delete`]: crate::avl::tree::Tree::delete
+    fn track_deletion(&self, id: &ProveNodeId) {
+        let hash = Hash::from_foldable(&id.node);
+        self.deleted_nodes.borrow_mut().insert(hash, id.clone());
     }
 }
 
@@ -713,7 +725,11 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
     }
 }
 
-impl<R> DeletionNotifier<ProveNodeId> for ProveResolver<R> {}
+impl<R> DeletionNotifier<ProveNodeId> for ProveResolver<R> {
+    fn on_node_unlinked(&self, id: &ProveNodeId) {
+        self.track_deletion(id);
+    }
+}
 
 /// Identifier for a node resolved in [`Verify`] mode.
 ///
@@ -855,14 +871,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::components::bytes::BytesMode;
     use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::hash::PartialHash;
-    use octez_riscv_data::merkle_proof::FromProof;
-    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
@@ -889,10 +899,8 @@ mod tests {
     use crate::storage::KeyValueStore;
     use crate::storage::Storable;
     use crate::storage::StoreOptions;
-    use crate::storage::TestKeyValueStore;
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::storage::in_memory::InMemoryRepo;
-    use crate::storage::setup_repo;
 
     /// A wrapper around an in-memory key-value store that counts the number of `blob_get` calls.
     #[derive(Debug, Default)]
@@ -1565,128 +1573,5 @@ mod tests {
             .expect("should resolve to a verify tree");
 
         assert!(resolved.root().is_some(), "tree should have a root");
-    }
-
-    /// Read `key` from `tree`, assert the contents match `expected`, then overwrite at
-    /// `offset` with `new_data`.
-    ///
-    /// Shared across the Prove and Verify halves of
-    /// [`prove_verify_round_trip_get_and_write`] so both modes execute byte-for-byte
-    /// identical operations.
-    // TODO RV-969: rewrite in terms of an `OperationStream`.
-    fn run_read_then_write<NodeId, TreeId, M, Res>(
-        tree: &mut Tree<NodeId>,
-        resolver: &mut Res,
-        key: &Key,
-        expected: &[u8],
-        offset: usize,
-        new_data: &[u8],
-    ) where
-        NodeId: Clone + From<Node<TreeId, M>>,
-        TreeId: Default,
-        M: BytesMode + AtomMode,
-        Res: AvlResolver<NodeId, TreeId, M>,
-    {
-        let data: &Bytes<M> = tree
-            .get(key, resolver)
-            .expect("get should succeed")
-            .expect("key should exist");
-        let mut buf = vec![0u8; data.len()];
-        data.read(0, &mut buf);
-        assert_eq!(&buf, expected, "read should observe the expected bytes");
-
-        tree.write(key, offset, new_data, resolver)
-            .expect("write should succeed");
-    }
-
-    /// Build a three-node tree, persist it, then run a round-trip through Prove and Verify
-    /// modes using only read (`get`) and in-place write operations (no structural changes).
-    ///
-    /// TODO: RV-969: Rewrite operations to use OperationStream.
-    #[test]
-    fn prove_verify_round_trip_get_and_write() {
-        let key1 = Key::new(&[1]).expect("key should be valid");
-        let key2 = Key::new(&[2]).expect("key should be valid");
-        let key3 = Key::new(&[3]).expect("key should be valid");
-
-        // Shared operation parameters replayed across Prove and Verify modes.
-        let initial_data: &[u8] = b"beta";
-        let write_offset: usize = 0;
-        let overwrite_data: &[u8] = b"BETA";
-
-        // ---- Normal: build a three-node tree and persist ----
-        let mut tree: Tree<ArcNodeId> = Default::default();
-        let mut resolver = ArcResolver;
-        tree.set(&key1, b"alpha", &mut resolver)
-            .expect("set should succeed");
-        tree.set(&key2, b"beta", &mut resolver)
-            .expect("set should succeed");
-        tree.set(&key3, b"gamma", &mut resolver)
-            .expect("set should succeed");
-
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
-
-        let (_keepalive, repo) = setup_repo();
-        let persistence_layer = Arc::new(
-            TestKeyValueStore::new(&repo).expect("creating persistence layer should succeed"),
-        );
-        persist_tree(&tree, &resolver, persistence_layer.as_ref());
-
-        // ---- Prove: load, project, do get + write ----
-        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
-        let lazy_resolver = LazyResolver::new(persistence_layer);
-        let mut prove_tree: Tree<ProveNodeId> = lazy_tree.into_proof();
-        let mut prove_resolver = ProveResolver::start(lazy_resolver);
-
-        // Read key2, then overwrite in place (no structural change).
-        run_read_then_write(
-            &mut prove_tree,
-            &mut prove_resolver,
-            &key2,
-            initial_data,
-            write_offset,
-            overwrite_data,
-        );
-
-        // Expected final hash (from prove-mode tree after operations)
-        let expected_hash = prove_tree.hash();
-
-        // ---- Generate proof ----
-        let merkle_proof = MerkleProof::from_foldable(&prove_tree);
-
-        // ---- Verify: deserialize proof, replay operations ----
-        let proof_deser = ProofTree::Present(&merkle_proof);
-        let verify_tree_id = VerifyTreeId::from_proof(proof_deser)
-            .expect("proof deserialization should succeed")
-            .into_result();
-
-        let VerifyTreeId::Present(mut verify_tree) = verify_tree_id else {
-            panic!("expected Present tree from proof, got {verify_tree_id:#?}");
-        };
-        let mut verify_resolver = VerifyResolver;
-
-        let final_hash = catch_not_found(move || {
-            // Replay the identical read + write against the verify tree.
-            run_read_then_write(
-                &mut verify_tree,
-                &mut verify_resolver,
-                &key2,
-                initial_data,
-                write_offset,
-                overwrite_data,
-            );
-
-            // Compute verify hash
-            let verify_tree_id = VerifyTreeId::Present(verify_tree);
-            PartialHash::from_foldable(Some(merkle_proof), &verify_tree_id)
-                .to_hash()
-                .expect("verify hash should be computable")
-        })
-        .expect("verify operations should not trigger not_found");
-
-        assert_eq!(
-            expected_hash, final_hash,
-            "prove and verify hashes should match after identical get + write operations"
-        );
     }
 }

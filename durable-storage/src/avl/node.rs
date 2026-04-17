@@ -133,13 +133,11 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
     }
 
     /// Direct access to the raw left child identifier.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn left_id(&self) -> &TreeId {
         &self.left
     }
 
     /// Direct access to the raw right child identifier.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn right_id(&self) -> &TreeId {
         &self.right
     }
@@ -220,13 +218,11 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     }
 
     /// The metadata of this node.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn meta_atom(&self) -> &Atom<Meta, M> {
         &self.meta
     }
 
     /// The data stored in this node.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn data_bytes(&self) -> &Bytes<M> {
         &self.data
     }

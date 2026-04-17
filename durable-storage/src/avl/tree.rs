@@ -24,8 +24,6 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
-use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
@@ -110,19 +108,25 @@ impl<NodeId> Tree<NodeId> {
                 resolved_node.right_ref(resolver)?.root(),
             ) {
                 (None, None) => {
+                    resolver.on_node_unlinked(node);
                     self.take();
                     Ok(true)
                 }
                 (Some(left), None) => {
-                    *node = left.clone();
+                    let replacement = left.clone();
+                    resolver.on_node_unlinked(node);
+                    *node = replacement;
                     Ok(true)
                 }
                 (None, Some(right)) => {
-                    *node = right.clone();
+                    let replacement = right.clone();
+                    resolver.on_node_unlinked(node);
+                    *node = replacement;
                     Ok(true)
                 }
                 (Some(_), Some(_)) => {
                     let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
+                    resolver.on_node_unlinked(node);
                     *node = new_node;
                     Ok(shrank)
                 }
@@ -351,7 +355,6 @@ impl<NodeId> Tree<NodeId> {
     /// Find the `NodeId` for a given key by traversing the tree.
     ///
     /// Returns `None` if the key is not present.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn find_node<'a, TreeId, M: BytesMode + AtomMode + 'a>(
         &'a self,
         key: &Key,
@@ -390,23 +393,6 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
 
         let present = self.0.is_some();
         node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
-
-        if let Some(inner) = self.0.as_ref() {
-            node.add(inner);
-        }
-
-        node.done()
-    }
-}
-
-impl Foldable<MerkleProofFold> for Tree<ProveNodeId> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let mut node = builder.into_node_fold();
-
-        let present = self.0.is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should never fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node.add(&bool_leaf);
 
         if let Some(inner) = self.0.as_ref() {
             node.add(inner);
@@ -859,6 +845,8 @@ mod tests {
             ArcResolver.resolve_mut(id)
         }
     }
+
+    impl crate::avl::resolver::DeletionNotifier<ArcNodeId> for FailOnKeyResolver {}
 
     fn assert_iterator_failure_on_key(
         tree: &Tree<ArcNodeId>,
