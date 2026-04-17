@@ -278,10 +278,6 @@ impl MerkleLayerMode for Verify {
     }
 
     fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
-        // The wrapping `original_proof: None` is intentional: it lets each per-node sub-proof
-        // captured on `VerifyNodeId::Present` drive its own subtree fold (via
-        // `PartialHashFold::with_proof`), while the top-level `Some(proof)` we pass in is the
-        // fallback consumed by the root `into_node_fold` call.
         let tree_id = VerifyTreeId::Present {
             tree: this.inner.tree.clone(),
         };
@@ -628,6 +624,7 @@ mod tests {
     use proptest::proptest;
 
     use super::MerkleLayer;
+    use super::MerkleLayerMode;
     use super::ProveImpl;
     use super::new_merkle_layer;
     use super::new_verify_layer;
@@ -646,6 +643,7 @@ mod tests {
     use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
     use crate::storage::PersistentKeyValueStore;
+    use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
@@ -735,6 +733,119 @@ mod tests {
                 },
             })
         }
+    }
+
+    /// Operations executed during a prove step and replayed during verification.
+    #[derive(Debug, Clone)]
+    enum Operation {
+        /// Set (insert or overwrite) a key.
+        Set(Key, Vec<u8>),
+        /// Delete a key (may be absent — that is a no-op on both sides).
+        Delete(Key),
+        /// In-place write at the given offset.
+        /// Only applied to keys that are known to exist.
+        /// The offset must be `<= existing_data_len` for the write to succeed.
+        Write(Key, usize, Vec<u8>),
+    }
+
+    fn apply_operation<KV: KeyValueStore, M: MerkleLayerMode>(
+        ml: &mut MerkleLayer<KV, M>,
+        op: &Operation,
+    ) {
+        match op {
+            Operation::Set(key, data) => {
+                ml.set(key, data).expect("set should succeed");
+            }
+            Operation::Delete(key) => {
+                ml.delete(key).expect("delete should succeed");
+            }
+            Operation::Write(key, offset, data) => {
+                ml.write(key, *offset, data).expect("write should succeed");
+            } // TODO RV-895: add `get` to step op
+        }
+    }
+
+    /// Core assertion: prove-mode proof and hash are consistent with Normal mode and the proof
+    /// can be replayed under Verify mode to reach the same final hash.
+    ///
+    /// Checks three properties:
+    /// 1. The proof's initial root hash matches the initial Normal-mode hash (proof encodes initial
+    ///    state correctly).
+    /// 2. The prove-mode final hash matches Normal-mode after an identical operation (prove-mode
+    ///    mutations are faithful).
+    /// 3. Replaying the same operation against the Verify-mode tree decoded from the proof
+    ///    produces the same final hash as prove mode (the proof carries enough information for
+    ///    full verification).
+    fn assert_prove_mode_correct<KV: KeyValueStore + TestKeyValueStoreSetup>(
+        setup_keys: &[[u8; 2]],
+        operations: &[Operation],
+    ) {
+        // ---- Normal: build initial tree ----
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
+
+        for bytes in setup_keys {
+            let key = Key::new(bytes).expect("key should be valid");
+            let data = [bytes[0]; 10];
+            normal_ml.set(&key, &data).expect("set should succeed");
+        }
+
+        let initial_hash = normal_ml.hash();
+
+        // ---- Prove: start proof and execute operations ----
+        let mut prove_ml = normal_ml.start_proof();
+        for op in operations {
+            apply_operation(&mut prove_ml, op);
+        }
+        let prove_final_hash = prove_ml.hash();
+
+        // ---- Generate proof ----
+        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+
+        // Property 1: proof's root hash == initial Normal-mode hash.
+        assert_eq!(
+            initial_hash,
+            merkle_proof.root_hash(),
+            "proof root hash must match initial Normal-mode hash"
+        );
+
+        // ---- Normal: replay same operations for reference hash ----
+        for op in operations {
+            apply_operation(&mut normal_ml, op);
+        }
+        let normal_final_hash = normal_ml.hash();
+
+        // Property 2: prove-mode final hash == Normal-mode final hash.
+        assert_eq!(
+            normal_final_hash, prove_final_hash,
+            "prove-mode final hash must match Normal-mode final hash"
+        );
+
+        // ---- Verify: deserialise the proof and replay the same operations ----
+        let mut verify_ml: MerkleLayer<KV, Verify> = MerkleLayer::from_proof(merkle_proof.clone())
+            .expect("proof deserialisation should succeed");
+
+        // Property 3a: verify-mode initial hash matches.
+        let verify_initial_hash = verify_ml.hash();
+        assert_eq!(
+            initial_hash, verify_initial_hash,
+            "verify-mode initial hash must match Normal-mode initial hash"
+        );
+
+        let operations_for_verify = operations.to_vec();
+        let verify_final_hash = catch_not_found(move || {
+            for op in &operations_for_verify {
+                apply_operation(&mut verify_ml, op);
+            }
+            verify_ml.hash()
+        })
+        .expect("verify replay should not trigger not_found — proof must cover all accesses");
+
+        // Property 3b: verify-mode final hash matches.
+        assert_eq!(
+            prove_final_hash, verify_final_hash,
+            "verify-mode replay must reach the same final hash as prove mode"
+        );
     }
 
     kv_test!(test_mavl_cow, KV, {
@@ -1959,6 +2070,53 @@ mod tests {
         assert_eq!(normal_hash, prove_ml.hash());
     });
 
+    kv_test!(test_read_only_proof_hash_matches_hash_fold, KV, {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
+        normal_ml
+            .set(&keys[0], b"alpha")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[1], b"beta")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[2], b"gamma")
+            .expect("set should succeed");
+
+        let normal_hash = normal_ml.hash();
+
+        let prove_ml = normal_ml.start_proof();
+
+        // Read-only: access keys without any mutation.
+        let got = prove_ml
+            .get(&keys[0])
+            .expect("get should succeed")
+            .expect("key should exist");
+        assert_eq!(got, b"alpha");
+
+        let got = prove_ml
+            .get(&keys[2])
+            .expect("get should succeed")
+            .expect("key should exist");
+        assert_eq!(got, b"gamma");
+
+        assert_eq!(
+            normal_hash,
+            prove_ml.hash(),
+            "read-only prove step must not change the hash"
+        );
+
+        let proof = MerkleProof::from_foldable(&prove_ml);
+        assert_eq!(
+            normal_hash,
+            proof.root_hash(),
+            "read-only proof root hash must match the original HashFold"
+        );
+    });
+
     kv_test!(test_prove_verify_round_trip_write, KV, {
         let keys = [Key::new(&[1]), Key::new(&[2]), Key::new(&[3])]
             .map(|r| r.expect("key should be valid"));
@@ -2020,5 +2178,125 @@ mod tests {
             expected_hash, final_hash,
             "prove and verify hashes should match after identical get + write operations"
         );
+    });
+
+    kv_test!(prove_verify_round_trips_mixed, KV, {
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), seed in 0..100usize)| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let mut operations = Vec::new();
+            // TODO RV-985: Expand to more operations in each test.
+            // This is currently limited to one operation, as this is the minimum requirement,
+            // and proof semantics are not supported for more than one operation yet.
+            let ops_count = 1;
+            for i in 0..ops_count {
+                let key = keys[i % keys.len()].clone();
+                let data = vec![seed as u8; 5];
+                match (i + seed) % 3 {
+                    0 => operations.push(Operation::Set(key, data)),
+                    1 => operations.push(Operation::Delete(key)),
+                    _ => {
+                        // All setup keys have data set to 10 bytes long.
+                        // Data length is 5 bytes, so valid offsets are 0..=5.
+                        let offset = (i + seed) % 5;
+                        operations.push(Operation::Write(key, offset, data));
+                    }
+                }
+            }
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &operations);
+        });
+    });
+
+    kv_test!(prove_verify_round_trips_writes_only, KV, {
+        // no structural change as every key already exists.
+        proptest!(|(
+            setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
+            // Setup keys are written with their own 2-byte representation as data, so the only
+            // valid offsets for an in-place / appending write are 0..=2.
+            offsets in prop::collection::vec(0usize..=2, 1..30),
+        )| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let step_ops: Vec<Operation> = keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| {
+                    let offset = offsets[i % offsets.len()];
+                    Operation::Write(key.clone(), offset, vec![0xAA; 1 + (i % 8)])
+                })
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+    });
+
+    kv_test!(prove_verify_round_trips_deletes_only, KV, {
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), delete_indices in prop::collection::vec(any::<usize>(), 1..10))| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let step_ops: Vec<Operation> = delete_indices
+                .iter()
+                .map(|&i| Operation::Delete(keys[i % keys.len()].clone()))
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+    });
+
+    kv_test!(prove_verify_round_trips_insertions, KV, {
+        // prove_verify_insertions: sets on new keys (insertions + rotations)
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..20), new_keys in prop::collection::vec(any::<[u8; 2]>(), 1..10))| {
+            let step_ops: Vec<Operation> = new_keys
+                .iter()
+                .enumerate()
+                .map(|(i, bytes)| {
+                    let key = Key::new(bytes).expect("key should be valid");
+                    Operation::Set(key, vec![0xBB; 1 + (i % 8)])
+                })
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+    });
+
+    kv_test!(prove_verify_round_trip_reads_only, KV, {
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), read_indices in prop::collection::vec(any::<usize>(), 1..15))| {
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut normal_ml = new_merkle_layer::<KV>(&repo);
+
+            for bytes in &setup_keys {
+                let key = Key::new(bytes).expect("key should be valid");
+                normal_ml.set(&key, bytes).expect("set should succeed");
+            }
+
+            let normal_hash = normal_ml.hash();
+            let prove_ml = normal_ml.start_proof();
+
+            for &i in &read_indices {
+                let key = Key::new(&setup_keys[i % setup_keys.len()]).expect("key should be valid");
+                let _ = prove_ml.get(&key).expect("get should succeed");
+            }
+
+            prop_assert_eq!(
+                normal_hash,
+                prove_ml.hash(),
+            );
+
+            let proof = MerkleProof::from_foldable(&prove_ml);
+            prop_assert_eq!(
+                normal_hash,
+                proof.root_hash(),
+            );
+        });
     });
 }
