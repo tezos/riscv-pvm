@@ -365,6 +365,7 @@ mod tests {
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
+    use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
     use tokio::runtime::Handle;
 
     use super::Database;
@@ -894,6 +895,53 @@ mod tests {
         assert_eq!(read_data_before, read_data);
     }
 
+    #[test]
+    #[ignore]
+    fn test_database_read_bytes_io_too_large() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let database = new_database(handle, repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+
+        // The io request is too large - this takes priority
+        // even though the key does not exist
+        assert!(matches!(
+            database.read_bytes(&key, 5, MAX_FILE_CHUNK_SIZE + 1),
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::IoRequestTooLarge
+            ))
+        ));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_database_read_io_too_large() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let database = new_database(handle, repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let mut read_data: Vec<u8> = vec![42; MAX_FILE_CHUNK_SIZE + 1];
+        let read_data_before = read_data.clone();
+
+        // The io request is too large - this takes priority
+        // even though the key does not exist
+        assert!(matches!(
+            database.read(&key, 5, read_data.as_mut_slice()),
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::IoRequestTooLarge
+            ))
+        ));
+        assert_eq!(read_data_before, read_data);
+    }
+
     proptest! {
         #[test]
         fn test_database_value_length(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
@@ -981,6 +1029,30 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn test_database_write_io_too_large() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::copy_from_slice(vec![0; MAX_FILE_CHUNK_SIZE + 1].as_slice());
+
+        let res = database.write(key.clone(), 1, data);
+
+        // even though the offset is too large, the io error takes priority
+        assert!(matches!(
+            res,
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::IoRequestTooLarge
+            ))
+        ));
+    }
+
+    #[test]
     fn test_database_write_no_truncation() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -1043,5 +1115,28 @@ mod tests {
 
         assert!(database.set(key.clone(), data.clone()).is_ok());
         assert!(database.write(key.clone(), data.len() + 1, data).is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn test_database_set_io_too_large() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let data = Bytes::copy_from_slice(vec![0; MAX_FILE_CHUNK_SIZE + 1].as_slice());
+
+        let res = database.set(key.clone(), data);
+
+        assert!(matches!(
+            res,
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::IoRequestTooLarge
+            ))
+        ));
     }
 }
