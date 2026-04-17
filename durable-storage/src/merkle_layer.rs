@@ -96,9 +96,12 @@ impl<KV> MerkleLayer<KV, Normal> {
     /// [`MerkleProofFold`] that generates the proof.
     ///
     /// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
-    #[expect(
-        dead_code,
-        reason = "non-test callers wired in follow-up PVM integration (RV-957)"
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "non-test callers wired in follow-up PVM integration (RV-957)"
+        )
     )]
     pub fn start_proof(&self) -> MerkleLayer<KV, Prove<'_>> {
         let initial_tree = self.inner.tree.clone();
@@ -599,9 +602,11 @@ mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
+    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
@@ -624,10 +629,10 @@ mod tests {
     use crate::errors::OperationalError;
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
+    use crate::storage::setup_repo;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStore;
     use crate::storage::TestRepo;
-    use crate::storage::setup_repo;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
         fn tree(&self) -> &Tree<LazyNodeId> {
@@ -1964,5 +1969,89 @@ mod tests {
         };
 
         assert_eq!(normal_hash, prove_ml.hash());
+    }
+
+    // -----------------------------------------------------------------------
+    // Prove → Verify round-trip tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_prove_verify_round_trip_write() {
+        let key1 = Key::new(&[1]).expect("key should be valid");
+        let key2 = Key::new(&[2]).expect("key should be valid");
+        let key3 = Key::new(&[3]).expect("key should be valid");
+
+        // ---- Normal: build a three-node tree ----
+        let (_keepalive, repo) = setup_repo();
+        let mut normal_ml = new_merkle_layer(repo);
+        normal_ml.set(&key1, b"alpha").expect("set should succeed");
+        normal_ml.set(&key2, b"beta").expect("set should succeed");
+        normal_ml.set(&key3, b"gamma").expect("set should succeed");
+
+        let initial_hash = normal_ml.hash();
+
+        // ---- Prove: start proof, read key2, write key2 ----
+        let mut prove_ml = normal_ml.start_proof();
+
+        // Read key2 (triggers access tracking for meta + data along the search path).
+        let data = prove_ml
+            .get(&key2)
+            .expect("get should succeed")
+            .expect("key2 should exist");
+        let mut buf = vec![0u8; data.len()];
+        data.read(0, &mut buf);
+        assert_eq!(&buf, b"beta");
+
+        // Overwrite key2 in place (no structural change).
+        prove_ml
+            .write(&key2, 0, b"BETA")
+            .expect("write should succeed");
+
+        // Expected final-state hash from prove-mode working tree.
+        let expected_hash = prove_ml.hash();
+        assert_ne!(initial_hash, expected_hash, "write should change the hash");
+
+        // ---- Generate proof ----
+        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+
+        // ---- Verify: deserialize proof, replay identical ops ----
+        let proof_deser = ProofTree::Present(&merkle_proof);
+        let verify_tree_id = VerifyTreeId::from_proof(proof_deser)
+            .expect("proof deserialization should succeed")
+            .into_result();
+
+        let VerifyTreeId::Present(mut verify_tree) = verify_tree_id else {
+            panic!("expected Present tree from proof, got {verify_tree_id:#?}");
+        };
+        let mut verify_resolver = VerifyResolver;
+
+        let final_hash = catch_not_found(move || {
+            // Read key2.
+            let data = verify_tree
+                .get(&key2, &verify_resolver)
+                .expect("get should succeed")
+                .expect("key2 should be present in proof");
+            let mut buf = vec![0u8; data.len()];
+            data.read(0, &mut buf);
+            assert_eq!(&buf, b"beta", "verify should see initial data");
+
+            // Overwrite key2.
+            verify_tree
+                .write(&key2, 0, b"BETA", &mut verify_resolver)
+                .expect("write should succeed");
+
+            // Compute verify hash. For MAVL trees, blinded nodes already carry their
+            // hash, so we don't need the proof tree for hash recovery.
+            let verify_tree_id = VerifyTreeId::Present(verify_tree);
+            PartialHash::from_foldable(None, &verify_tree_id)
+                .to_hash()
+                .expect("verify hash should be computable")
+        })
+        .expect("verify operations should not trigger not_found");
+
+        assert_eq!(
+            expected_hash, final_hash,
+            "prove and verify hashes should match after identical get + write operations"
+        );
     }
 }
