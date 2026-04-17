@@ -67,6 +67,27 @@ pub trait Resolver<Id, Value> {
     fn resolve_mut<'a>(&mut self, id: &'a mut Id) -> Result<&'a mut Value, OperationalError>;
 }
 
+/// Notification hook invoked when a node is about to be unlinked from a [`Tree`] by
+/// [`Tree::delete`](crate::avl::tree::Tree::delete).
+///
+/// The default implementation is a no-op: resolvers that do not need to observe deletions can
+/// simply declare `impl DeletionNotifier<_> for MyResolver {}`. [`ProveResolver`] overrides this
+/// to stash the deleted prove-mode projection so that the [`MerkleProofFold`] implementation on
+/// [`MerkleLayer`] can still recover its read flags after the node leaves the working tree.
+///
+/// Hooks must only be triggered at the four semantic deletion sites in [`Tree::delete`]. Rotations
+/// and rebalancing reassign `NodeId` slots without removing any key, so invoking this hook from
+/// rotation paths would produce false-positive "deletions".
+///
+/// [`Tree`]: crate::avl::tree::Tree
+/// [`Tree::delete`]: crate::avl::tree::Tree::delete
+/// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
+/// [`MerkleLayer`]: crate::merkle_layer::MerkleLayer
+pub trait DeletionNotifier<NodeId> {
+    /// Called just before `id` is overwritten in (or taken out of) the tree.
+    fn on_node_unlinked(&self, _id: &NodeId) {}
+}
+
 trait_set! {
     /// Specialised [`Resolver`] for MAVL nodes
     pub trait NodeResolver<NodeId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, M>>;
@@ -75,7 +96,8 @@ trait_set! {
     pub trait TreeResolver<NodeId, TreeId> = Resolver<TreeId, Tree<NodeId>>;
 
     /// Specialised [`Resolver`] for MAVL nodes and trees
-    pub trait AvlResolver<NodeId, TreeId, M: Mode> = NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId>;
+    pub trait AvlResolver<NodeId, TreeId, M: Mode> =
+        NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId> + DeletionNotifier<NodeId>;
 }
 
 /// Identifier for a node that is always present.
@@ -166,6 +188,8 @@ impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
         Ok(&mut id.0)
     }
 }
+
+impl DeletionNotifier<ArcNodeId> for ArcResolver {}
 
 /// Identifier wrapper used by lazy resolution.
 ///
@@ -442,6 +466,8 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
     }
 }
 
+impl<KV> DeletionNotifier<LazyNodeId> for LazyResolver<KV> {}
+
 /// Identifier for a node resolved in [`Prove`] mode.
 ///
 /// This wrapper keeps the original [`LazyNodeId`] to allow delegating hash computation and
@@ -633,6 +659,8 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
     }
 }
 
+impl<R> DeletionNotifier<ProveNodeId> for ProveResolver<R> {}
+
 /// Identifier for a node resolved in [`Verify`] mode.
 ///
 /// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
@@ -763,6 +791,8 @@ impl Resolver<VerifyTreeId, Tree<VerifyNodeId>> for VerifyResolver {
         }
     }
 }
+
+impl DeletionNotifier<VerifyNodeId> for VerifyResolver {}
 
 #[cfg(test)]
 mod tests {
