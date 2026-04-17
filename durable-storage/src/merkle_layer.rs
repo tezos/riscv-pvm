@@ -201,7 +201,7 @@ impl MerkleLayerMode for Prove<'static> {
         MerkleLayer {
             inner: ProveImpl {
                 tree: this.inner.tree.clone(),
-                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         }
     }
@@ -1440,7 +1440,7 @@ mod tests {
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         };
         ml.delete(&key)
@@ -1468,7 +1468,7 @@ mod tests {
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         };
         for (key, datum) in keys.iter().zip(data.iter()) {
@@ -1494,7 +1494,7 @@ mod tests {
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         };
         let cow_data = "🐮<(prove a moo!)";
@@ -1536,7 +1536,7 @@ mod tests {
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::new(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         };
         ml.set(&key, b"partial")
@@ -1575,7 +1575,7 @@ mod tests {
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::new(LazyResolver::new(
+                resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
             },
@@ -1715,7 +1715,7 @@ mod tests {
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::new(LazyResolver::new(
+                resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
             },
@@ -1748,7 +1748,7 @@ mod tests {
         let mut prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::new(LazyResolver::new(
+                resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
             },
