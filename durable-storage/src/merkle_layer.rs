@@ -396,12 +396,14 @@ mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
+    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -1751,5 +1753,88 @@ mod tests {
         };
 
         assert_eq!(normal_hash, prove_ml.hash());
+    }
+
+    #[test]
+    fn test_prove_verify_round_trip_write() {
+        let keys = [Key::new(&[1]), Key::new(&[2]), Key::new(&[3])]
+            .map(|r| r.expect("key should be valid"));
+
+        // ---- Normal: build a three-node tree ----
+        let (_keepalive, repo) = setup_repo();
+        let mut normal_ml = new_merkle_layer(repo);
+        normal_ml
+            .set(&keys[0], b"alpha")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[1], b"beta")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[2], b"gamma")
+            .expect("set should succeed");
+
+        let initial_hash = normal_ml.hash();
+
+        // ---- Prove: read key then overwrite it ----
+        let prove_tree = normal_ml.inner.tree.into_proof();
+        let mut prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: prove_tree,
+                resolver: ProveResolver::new(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+            },
+        };
+
+        let data = prove_ml
+            .get(&keys[1])
+            .expect("get should succeed")
+            .expect("key should exist");
+        assert_eq!(data, b"beta");
+
+        prove_ml
+            .write(&keys[1], 0, b"BETA")
+            .expect("write should succeed");
+
+        let expected_hash = prove_ml.hash();
+        assert_ne!(initial_hash, expected_hash, "write should change the hash");
+
+        // ---- Generate proof ----
+        let merkle_proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
+
+        // ---- Verify: deserialize proof, replay identical ops ----
+        let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&merkle_proof))
+            .expect("proof deserialization should succeed")
+            .into_result();
+
+        let VerifyTreeId::Present(verify_tree) = verify_tree_id else {
+            panic!("expected Present tree from proof");
+        };
+
+        let mut verify_ml: MerkleLayer<TestKeyValueStore, Verify> =
+            MerkleLayer::from_verify_tree(verify_tree);
+
+        let final_hash = catch_not_found(move || {
+            let data = verify_ml
+                .get(&keys[1])
+                .expect("get should succeed")
+                .expect("key should be present in proof");
+            assert_eq!(data, b"beta", "verify should see initial data");
+
+            verify_ml
+                .write(&keys[1], 0, b"BETA")
+                .expect("write should succeed");
+
+            let verify_tree_id = VerifyTreeId::Present(verify_ml.inner.tree);
+            PartialHash::from_foldable(Some(merkle_proof), &verify_tree_id)
+                .to_hash()
+                .expect("verify hash should be computable")
+        })
+        .expect("verify operations should not trigger not_found");
+
+        assert_eq!(
+            expected_hash, final_hash,
+            "prove and verify hashes should match after identical get + write operations"
+        );
     }
 }
