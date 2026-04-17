@@ -2556,6 +2556,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tezos-smart-rollup-constants",
  "thiserror 2.0.18",
  "tokio",
  "trait-set",

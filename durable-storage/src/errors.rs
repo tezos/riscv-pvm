@@ -135,6 +135,9 @@ pub enum InvalidArgumentError {
     #[error("Key is too long")]
     KeyTooLong,
 
+    #[error("IO requests cannot be larger than MAX_FILE_CHUNK_SIZE")]
+    IoRequestTooLarge,
+
     #[error("Value offset too large")]
     OffsetTooLarge,
 
