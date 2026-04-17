@@ -867,7 +867,10 @@ mod tests {
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
 
         // The key doesn't exist
-        assert!(database.read_bytes(&key, 0, 1).is_err());
+        assert!(matches!(
+            database.read_bytes(&key, 0, 1),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
     }
 
     #[test]
@@ -884,7 +887,10 @@ mod tests {
         let read_data_before = read_data;
 
         // The key doesn't exist
-        assert!(database.read(&key, 0, read_data.as_mut_slice()).is_err());
+        assert!(matches!(
+            database.read(&key, 0, read_data.as_mut_slice()),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
         assert_eq!(read_data_before, read_data);
     }
 
