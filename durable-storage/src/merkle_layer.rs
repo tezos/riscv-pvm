@@ -648,6 +648,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
+    use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
@@ -1972,6 +1973,53 @@ mod tests {
         assert_eq!(normal_hash, prove_ml.hash());
     });
 
+    kv_test!(test_read_only_proof_hash_matches_hash_fold, KV, {
+        let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
+            .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
+        normal_ml
+            .set(&keys[0], b"alpha")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[1], b"beta")
+            .expect("set should succeed");
+        normal_ml
+            .set(&keys[2], b"gamma")
+            .expect("set should succeed");
+
+        let normal_hash = normal_ml.hash();
+
+        let prove_ml = normal_ml.start_proof();
+
+        // Read-only: access keys without any mutation.
+        let got = prove_ml
+            .get(&keys[0])
+            .expect("get should succeed")
+            .expect("key should exist");
+        assert_eq!(got, b"alpha");
+
+        let got = prove_ml
+            .get(&keys[2])
+            .expect("get should succeed")
+            .expect("key should exist");
+        assert_eq!(got, b"gamma");
+
+        assert_eq!(
+            normal_hash,
+            prove_ml.hash(),
+            "read-only prove step must not change the hash"
+        );
+
+        let proof = MerkleProof::from_foldable(&prove_ml);
+        assert_eq!(
+            normal_hash,
+            proof.root_hash(),
+            "read-only proof root hash must match the original HashFold"
+        );
+    });
+
     kv_test!(test_prove_verify_round_trip_write, KV, {
         let keys = [Key::new(&[1]), Key::new(&[2]), Key::new(&[3])]
             .map(|r| r.expect("key should be valid"));
@@ -2043,5 +2091,202 @@ mod tests {
             expected_hash, final_hash,
             "prove and verify hashes should match after identical get + write operations"
         );
+    });
+
+    /// Operations executed during a prove step and replayed during verification.
+    #[derive(Debug, Clone)]
+    enum StepOp {
+        /// Set (insert or overwrite) a key.
+        Set(Key, Vec<u8>),
+        /// Delete a key (may be absent — that is a no-op on both sides).
+        Delete(Key),
+        /// In-place write at offset 0. Only applied to keys that are known to exist; skipped
+        /// otherwise. This avoids creating new nodes (which would be a `set`, not a `write`).
+        Write(Key, Vec<u8>),
+    }
+
+    /// Execute a [`StepOp`] on a prove-mode [`MerkleLayer`].
+    fn apply_step_op_prove<KV: KeyValueStore>(ml: &mut MerkleLayer<KV, Prove<'_>>, op: &StepOp) {
+        match op {
+            StepOp::Set(key, data) => {
+                ml.set(key, data).expect("prove set should succeed");
+            }
+            StepOp::Delete(key) => {
+                ml.delete(key).expect("prove delete should succeed");
+            }
+            StepOp::Write(key, data) => {
+                if ml.get(key).expect("get should succeed").is_some() {
+                    ml.write(key, 0, data).expect("prove write should succeed");
+                }
+            }
+        }
+    }
+
+    /// Apply a [`StepOp`] to a Normal-mode [`MerkleLayer`].
+    fn apply_step_op_normal<KV: KeyValueStore>(ml: &mut MerkleLayer<KV, Normal>, op: &StepOp) {
+        match op {
+            StepOp::Set(key, data) => {
+                ml.set(key, data).expect("normal set should succeed");
+            }
+            StepOp::Delete(key) => {
+                ml.delete(key).expect("normal delete should succeed");
+            }
+            StepOp::Write(key, data) => {
+                if ml.get(key).expect("get should succeed").is_some() {
+                    ml.write(key, 0, data).expect("normal write should succeed");
+                }
+            }
+        }
+    }
+
+    /// Core assertion: prove-mode proof and hash are consistent with Normal mode.
+    ///
+    /// Checks two properties:
+    /// 1. The proof's initial root hash matches the initial Normal-mode hash (proof encodes initial
+    ///    state correctly).
+    /// 2. The prove-mode final hash matches Normal-mode after identical operations (prove-mode
+    ///    mutations are faithful).
+    fn assert_prove_mode_correct<KV: KeyValueStore + TestKeyValueStoreSetup>(
+        setup_keys: &[[u8; 2]],
+        step_ops: &[StepOp],
+    ) {
+        // ---- Normal: build initial tree ----
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
+
+        for bytes in setup_keys {
+            let key = Key::new(bytes).expect("key should be valid");
+            normal_ml.set(&key, bytes).expect("set should succeed");
+        }
+
+        let initial_hash = normal_ml.hash();
+
+        // ---- Prove: start proof and execute step operations ----
+        let mut prove_ml = normal_ml.start_proof();
+        for op in step_ops {
+            apply_step_op_prove(&mut prove_ml, op);
+        }
+        let prove_final_hash = prove_ml.hash();
+
+        // ---- Generate proof ----
+        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+
+        // Property 1: proof's root hash == initial Normal-mode hash.
+        assert_eq!(
+            initial_hash,
+            merkle_proof.root_hash(),
+            "proof root hash must match initial Normal-mode hash"
+        );
+
+        // ---- Normal: replay same operations for reference hash ----
+        for op in step_ops {
+            apply_step_op_normal(&mut normal_ml, op);
+        }
+        let normal_final_hash = normal_ml.hash();
+
+        // Property 2: prove-mode final hash == Normal-mode final hash.
+        assert_eq!(
+            normal_final_hash, prove_final_hash,
+            "prove-mode final hash must match Normal-mode final hash"
+        );
+    }
+
+    kv_test!(prove_verify_round_trips, KV, {
+        // prove_verify_round_trip: mixed set/delete/write operations
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), seed in 0..100usize)| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let mut step_ops = Vec::new();
+            let ops_count = 1 + (seed % 20);
+            for i in 0..ops_count {
+                let key = keys[i % keys.len()].clone();
+                let data = vec![(i as u8).wrapping_mul(37); 1 + (i % 16)];
+                match (i + seed) % 3 {
+                    0 => step_ops.push(StepOp::Set(key, data)),
+                    1 => step_ops.push(StepOp::Delete(key)),
+                    _ => step_ops.push(StepOp::Write(key, data)),
+                }
+            }
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+
+        // prove_verify_writes_only: write-only (no structural change)
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30))| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let step_ops: Vec<StepOp> = keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| StepOp::Write(key.clone(), vec![0xAA; 1 + (i % 8)]))
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+
+        // prove_verify_deletes_only: delete-only (structural changes)
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), delete_indices in prop::collection::vec(any::<usize>(), 1..10))| {
+            let keys: Vec<Key> = setup_keys
+                .iter()
+                .map(|b| Key::new(b).expect("key should be valid"))
+                .collect();
+
+            let step_ops: Vec<StepOp> = delete_indices
+                .iter()
+                .map(|&i| StepOp::Delete(keys[i % keys.len()].clone()))
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+
+        // prove_verify_insertions: sets on new keys (insertions + rotations)
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..20), new_keys in prop::collection::vec(any::<[u8; 2]>(), 1..10))| {
+            let step_ops: Vec<StepOp> = new_keys
+                .iter()
+                .enumerate()
+                .map(|(i, bytes)| {
+                    let key = Key::new(bytes).expect("key should be valid");
+                    StepOp::Set(key, vec![0xBB; 1 + (i % 8)])
+                })
+                .collect();
+
+            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+        });
+
+        // read_only_proof_hash_matches_hash_fold: read-only prove step root hash matches HashFold
+        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), read_indices in prop::collection::vec(any::<usize>(), 1..15))| {
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut normal_ml = new_merkle_layer::<KV>(&repo);
+
+            for bytes in &setup_keys {
+                let key = Key::new(bytes).expect("key should be valid");
+                normal_ml.set(&key, bytes).expect("set should succeed");
+            }
+
+            let normal_hash = normal_ml.hash();
+            let prove_ml = normal_ml.start_proof();
+
+            for &i in &read_indices {
+                let key = Key::new(&setup_keys[i % setup_keys.len()]).expect("key should be valid");
+                let _ = prove_ml.get(&key).expect("get should succeed");
+            }
+
+            prop_assert_eq!(
+                normal_hash,
+                prove_ml.hash(),
+            );
+
+            let proof = MerkleProof::from_foldable(&prove_ml);
+            prop_assert_eq!(
+                normal_hash,
+                proof.root_hash(),
+            );
+        });
     });
 }
