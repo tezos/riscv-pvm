@@ -311,7 +311,7 @@ impl<T> PartialVec<T> {
     /// Retrieve chunks that make up a continuous range.
     ///
     /// If there are gaps in the range, `None` is returned.
-    pub fn continuous_defined_range(&self, range: Range<usize>) -> Option<Vec<&[T]>> {
+    pub(crate) fn continuous_defined_range(&self, range: Range<usize>) -> Option<Vec<&[T]>> {
         self.range(range)
             .map(|chunk| match chunk {
                 RangeEntry::Undefined { .. } => None,
@@ -359,6 +359,21 @@ impl<T> PartialVec<T> {
     /// Is nothing in the partial vector defined?
     pub fn is_all_undefined(&self) -> bool {
         self.entries.iter().all(|entry| entry.data.is_empty())
+    }
+
+    /// Returns the given range as a contiguous slice if it is fully contained in a single
+    /// defined entry.
+    ///
+    /// Returns `None` if the range spans multiple entries, includes any undefined data, or is empty
+    /// and out-of-bounds.
+    pub fn contiguous_range(&self, range: Range<usize>) -> Option<&[T]> {
+        let idx = self
+            .entries
+            .partition_point(|entry| entry.end() < range.end);
+        let entry = self.entries.get(idx).filter(|e| e.start <= range.start)?;
+        let offset = range.start - entry.start;
+        let end = range.end - entry.start;
+        Some(&entry.data[offset..end])
     }
 }
 

@@ -20,6 +20,25 @@ fn data_vec() -> impl Strategy<Value = Vec<u8>> {
 }
 
 proptest! {
+    /// `contiguous_range` returns the correct slice for any subrange of a single defined write.
+    #[test]
+    fn contiguous_range_single_write(
+        offset in 0usize..1000,
+        data in vec(any::<u8>(), 1..128),
+        a in any::<proptest::sample::Index>(),
+        b in any::<proptest::sample::Index>(),
+    ) {
+        let mut vec = PartialVec::empty();
+        vec.define(offset, data.clone());
+
+        let a = a.index(data.len() + 1);
+        let b = b.index(data.len() + 1);
+        let (lo, hi) = (a.min(b), a.max(b));
+
+        let result = vec.contiguous_range((offset + lo)..(offset + hi));
+        assert_eq!(result, Some(&data[lo..hi]));
+    }
+
     /// Defining a range anywhere should never fail.
     #[test]
     fn insert_randomly(init_data in vec((any::<usize>(), data_vec()), ..1024)) {
@@ -614,4 +633,24 @@ fn define_empty_data() {
         .copied()
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1, 2, 3, 4, 5]);
+}
+
+/// Check that `contiguous_range` returns `None` for an empty range that falls outside any
+/// defined entry, and returns `Some(&[])` for an empty range that sits within a defined entry.
+#[test]
+fn contiguous_range_empty() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(5, vec![1, 2, 3, 4, 5]);
+
+    // Empty and out-of-bounds: before, after, and in a gap between entries.
+    assert_eq!(vec.contiguous_range(0..0), None);
+    assert_eq!(vec.contiguous_range(20..20), None);
+
+    vec.define(20, vec![6, 7, 8]);
+    assert_eq!(vec.contiguous_range(15..15), None);
+
+    // Empty but contained in a defined entry: returns an empty slice.
+    assert_eq!(vec.contiguous_range(5..5), Some(&[][..]));
+    assert_eq!(vec.contiguous_range(7..7), Some(&[][..]));
+    assert_eq!(vec.contiguous_range(10..10), Some(&[][..]));
 }
