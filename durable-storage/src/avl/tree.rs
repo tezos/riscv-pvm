@@ -110,25 +110,19 @@ impl<NodeId> Tree<NodeId> {
                 resolved_node.right_ref(resolver)?.root(),
             ) {
                 (None, None) => {
-                    resolver.on_node_unlinked(node);
                     self.take();
                     Ok(true)
                 }
                 (Some(left), None) => {
-                    let replacement = left.clone();
-                    resolver.on_node_unlinked(node);
-                    *node = replacement;
+                    *node = left.clone();
                     Ok(true)
                 }
                 (None, Some(right)) => {
-                    let replacement = right.clone();
-                    resolver.on_node_unlinked(node);
-                    *node = replacement;
+                    *node = right.clone();
                     Ok(true)
                 }
                 (Some(_), Some(_)) => {
                     let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
-                    resolver.on_node_unlinked(node);
                     *node = new_node;
                     Ok(shrank)
                 }
@@ -865,8 +859,6 @@ mod tests {
             ArcResolver.resolve_mut(id)
         }
     }
-
-    impl crate::avl::resolver::DeletionNotifier<ArcNodeId> for FailOnKeyResolver {}
 
     fn assert_iterator_failure_on_key(
         tree: &Tree<ArcNodeId>,

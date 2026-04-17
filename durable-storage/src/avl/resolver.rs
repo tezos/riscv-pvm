@@ -27,6 +27,8 @@
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
 
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -560,18 +562,62 @@ impl Foldable<MerkleProofFold> for ProveTreeId {
     }
 }
 
+/// State of the [`ProveResolver`] that tracks which nodes and trees have been accessed via the
+/// corresponding resolution methods
+#[derive(Default, Debug)]
+struct AccessedProveItems {
+    /// Hashes of nodes that have been accessed
+    nodes: BTreeSet<Hash>,
+
+    /// Hashes of trees that have been accessed
+    trees: BTreeSet<Hash>,
+}
+
 /// Adapter that projects lazy AVL identifiers into prove-mode values on demand.
 ///
 /// [`ProveResolver`] wraps another resolver for [`LazyNodeId`] and [`LazyTreeId`]. It preserves the
 /// lazy resolver's hash behaviour, but caches prove-mode nodes and trees inside [`ProveNodeId`]
 /// and [`ProveTreeId`] once they are resolved.
 #[derive(Debug)]
-pub struct ProveResolver<R>(R);
+pub struct ProveResolver<R> {
+    /// Inner resolver that is used for [`LazyNodeId`] and [`LazyTreeId`]
+    inner: R,
+
+    /// Inner state for access tracking
+    accessed_items: RefCell<AccessedProveItems>,
+}
 
 impl<R> ProveResolver<R> {
-    /// Create a new prove-mode resolver wrapping the given resolver.
-    pub(crate) fn new(resolver: R) -> Self {
-        Self(resolver)
+    /// Start the prove resolution process.
+    pub fn start(inner: R) -> Self {
+        Self {
+            inner,
+            accessed_items: RefCell::default(),
+        }
+    }
+
+    /// Whether a node with the given hash was accessed during the proof step.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn was_node_accessed(&self, hash: &Hash) -> bool {
+        self.accessed_items.borrow().nodes.contains(hash)
+    }
+
+    /// Whether a tree with the given hash was accessed during the proof step.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn was_tree_accessed(&self, hash: &Hash) -> bool {
+        self.accessed_items.borrow().trees.contains(hash)
+    }
+
+    /// Track a node as accessed.
+    fn track_node(&self, id: &LazyNodeId) {
+        let hash = Hash::from_foldable(id);
+        self.accessed_items.borrow_mut().nodes.insert(hash);
+    }
+
+    /// Track a tree as accessed.
+    fn track_tree(&self, id: &LazyTreeId) {
+        let hash = Hash::from_foldable(id);
+        self.accessed_items.borrow_mut().trees.insert(hash);
     }
 }
 
@@ -582,11 +628,13 @@ impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tr
         &self,
         id: &'b ProveNodeId,
     ) -> Result<&'b Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        self.track_node(&id.node);
+
         if let Some(inner) = id.inner.get() {
             return Ok(inner);
         }
 
-        let resolved: &Node<LazyTreeId, Normal> = self.0.resolve(&id.node)?;
+        let resolved: &Node<LazyTreeId, Normal> = self.inner.resolve(&id.node)?;
         let result_node: Node<ProveTreeId, Prove<'static>> = resolved.clone().into_proof();
         id.inner
             .set(Rc::new(result_node))
@@ -599,6 +647,8 @@ impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tr
         &mut self,
         id: &'b mut ProveNodeId,
     ) -> Result<&'b mut Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        self.track_node(&id.node);
+
         {
             // SAFETY: Rust doesn't understand that the reference on `id.inner` is dropped on return.
             let inner_mut = unsafe { &mut *(&mut id.inner as *mut OnceLock<_>) };
@@ -608,7 +658,7 @@ impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tr
             }
         }
 
-        let resolved: &Node<LazyTreeId, Normal> = self.0.resolve(&id.node)?;
+        let resolved: &Node<LazyTreeId, Normal> = self.inner.resolve(&id.node)?;
         let result_node: Node<ProveTreeId, Prove<'static>> = resolved.clone().into_proof();
         id.inner
             .set(Rc::new(result_node))
@@ -624,11 +674,13 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
     for ProveResolver<R>
 {
     fn resolve<'b>(&self, id: &'b ProveTreeId) -> Result<&'b Tree<ProveNodeId>, OperationalError> {
+        self.track_tree(&id.tree);
+
         if let Some(inner) = id.inner.get() {
             return Ok(inner);
         }
 
-        let resolved: &Tree<LazyNodeId> = self.0.resolve(&id.tree)?;
+        let resolved: &Tree<LazyNodeId> = self.inner.resolve(&id.tree)?;
         let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
         id.inner
             .set(result_tree)
@@ -641,6 +693,8 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
         &mut self,
         id: &'b mut ProveTreeId,
     ) -> Result<&'b mut Tree<ProveNodeId>, OperationalError> {
+        self.track_tree(&id.tree);
+
         {
             // SAFETY: Rust doesn't understand that the reference on `id.inner` is dropped on return.
             let inner_mut = unsafe { &mut *(&mut id.inner as *mut OnceLock<_>) };
@@ -649,7 +703,7 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
             }
         }
 
-        let resolved: &Tree<LazyNodeId> = self.0.resolve(&id.tree)?;
+        let resolved: &Tree<LazyNodeId> = self.inner.resolve(&id.tree)?;
         let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
         id.inner
             .set(result_tree)
@@ -1254,7 +1308,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let lazy_node_id = lazy_tree.root().expect("tree should have a root");
 
         let prove_id = lazy_node_id.clone().into_proof();
@@ -1273,7 +1327,7 @@ mod tests {
 
         let expected_hash = Hash::from_foldable(lazy_root);
 
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_root.clone().into_proof();
 
         // Hash before resolve (delegates to lazy path).
@@ -1301,7 +1355,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_root_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1338,7 +1392,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1366,7 +1420,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let mut prove_resolver = ProveResolver(lazy_resolver);
+        let mut prove_resolver = ProveResolver::start(lazy_resolver);
         let mut prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1403,7 +1457,7 @@ mod tests {
         let lazy_left_node_hash = Hash::from_foldable(lazy_left_id);
 
         // Now get the same hash via the prove resolver path.
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_root_id = lazy_root.clone().into_proof();
         let prove_node = prove_resolver
             .resolve(&prove_root_id)
@@ -1433,7 +1487,7 @@ mod tests {
         let empty_lazy_tree: LazyTreeId = LazyTreeId::default();
         let prove_tree_id = empty_lazy_tree.clone().into_proof();
 
-        let prove_resolver = ProveResolver(lazy_resolver);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let tree = prove_resolver
             .resolve(&prove_tree_id)
             .expect("resolving empty prove tree should succeed");
@@ -1582,7 +1636,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
         let mut prove_tree: Tree<ProveNodeId> = lazy_tree.into_proof();
-        let mut prove_resolver = ProveResolver(lazy_resolver);
+        let mut prove_resolver = ProveResolver::start(lazy_resolver);
 
         // Read key2, then overwrite in place (no structural change).
         run_read_then_write(
