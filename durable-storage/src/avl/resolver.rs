@@ -465,6 +465,17 @@ impl From<Node<ProveTreeId, Prove<'static>>> for ProveNodeId {
     }
 }
 
+/// Access the cached prove-mode node, if populated.
+///
+/// Used by the `MerkleLayer`-level fold to extract per-field read flags from a node that
+/// was resolved during the proof step.
+impl ProveNodeId {
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn cached_node(&self) -> Option<&Node<ProveTreeId, Prove<'static>>> {
+        self.inner.get().map(|rc| rc.as_ref())
+    }
+}
+
 impl Foldable<HashFold> for ProveNodeId {
     fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
         match self.inner.get() {

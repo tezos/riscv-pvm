@@ -206,7 +206,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&NodeId> {
+    pub(crate) fn root(&self) -> Option<&NodeId> {
         self.0.as_ref()
     }
 
@@ -344,6 +344,36 @@ impl<NodeId> Tree<NodeId> {
             Some(node) => Node::rebalance(node, resolver),
             None => Ok(()),
         }
+    }
+}
+
+impl<NodeId> Tree<NodeId> {
+    /// Find the `NodeId` for a given key by traversing the tree.
+    ///
+    /// Returns `None` if the key is not present.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn find_node<'a, TreeId, M: BytesMode + AtomMode + 'a>(
+        &'a self,
+        key: &Key,
+        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+    ) -> Result<Option<&'a NodeId>, OperationalError>
+    where
+        TreeId: 'a,
+    {
+        let mut current = self.root();
+        while let Some(node) = current {
+            let resolved_node = resolver.resolve(node)?;
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Ok(Some(node)),
+                Ordering::Greater => {
+                    current = resolved_node.left_ref(resolver)?.root();
+                }
+                Ordering::Less => {
+                    current = resolved_node.right_ref(resolver)?.root();
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
