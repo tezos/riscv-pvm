@@ -238,12 +238,17 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     ///
     /// Fails if:
     ///  - The number of bytes to write is larger than [`MAX_FILE_CHUNK_SIZE`].
+    ///  - The size of the value after the write would exceed [`MAX_VALUE_SIZE]`.
     ///  - The offset is non-zero and the key does not exist.
     ///  - The offset is larger than the length of the associated value.
     ///  - The offset plus the length of the data would overflow.
     pub fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
         if data.len() > MAX_FILE_CHUNK_SIZE {
             Err(InvalidArgumentError::IoRequestTooLarge)?;
+        }
+
+        if offset.saturating_add(data.len()) > MAX_VALUE_SIZE {
+            Err(InvalidArgumentError::ValueSizeTooLarge)?;
         }
 
         M::write(self, key, offset, data)
@@ -1168,7 +1173,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_database_write_value_too_large() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
