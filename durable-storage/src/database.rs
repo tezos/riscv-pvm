@@ -35,6 +35,10 @@ use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::StoreOptions;
 
+/// The maximum possible length of a value in durable storage.
+pub const MAX_VALUE_SIZE: usize =
+    const { 64_usize.checked_shl(20).expect("usize overflow on 64MiB") };
+
 /// An isolated key-space, independent from other [`Database`]s, on which database operations can
 /// be performed, e.g. read, write, delete.
 ///
@@ -215,6 +219,13 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
             Err(InvalidArgumentError::IoRequestTooLarge)?;
         }
 
+        const {
+            assert!(
+                MAX_FILE_CHUNK_SIZE <= MAX_VALUE_SIZE,
+                "It must not be possible to set a value larger than MAX_VALUE_SIZE in one go."
+            )
+        };
+
         M::set(self, key, data)
     }
 
@@ -388,6 +399,7 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
+    use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
@@ -1153,5 +1165,92 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_database_write_value_too_large() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = setup_repo();
+        let mut database = new_database(handle, repo);
+
+        let can_write = 100;
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let bytes = Bytes::from(vec![42; MAX_VALUE_SIZE - can_write]);
+
+        <Normal as super::DatabaseMode>::set(&mut database, key.clone(), bytes)
+            .expect("Setting should succeed (bypassing API layer)");
+
+        let value_len = database
+            .value_length(&key)
+            .expect("The key was written to previously");
+
+        // Check all writes that would cause the value size to grow too large fail
+        // the choice of '50' is arbitrary - mainly just chose something to prevent
+        // the test running too long
+        for buffer_size in ((can_write + 1)..MAX_FILE_CHUNK_SIZE)
+            .step_by(50)
+            .chain([MAX_FILE_CHUNK_SIZE])
+        {
+            let bytes = Bytes::from(vec![15; buffer_size]);
+            let result = database.write(key.clone(), value_len, bytes);
+
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::InvalidArgument(
+                        InvalidArgumentError::ValueSizeTooLarge
+                    ))
+                ),
+                "Write would cause value to exceed MAX_VALUE_SIZE"
+            );
+
+            assert_eq!(
+                value_len,
+                database.value_length(&key).unwrap(),
+                "Value size must not have changed"
+            );
+        }
+
+        // Double check writing more than MAX_FILE_CHUNK_SIZE triggers IoRequestTooLarge
+        let bytes = Bytes::from(vec![15; MAX_FILE_CHUNK_SIZE + 1]);
+        let result = database.write(key.clone(), value_len, bytes);
+
+        assert!(
+            matches!(
+                result,
+                Err(Error::InvalidArgument(
+                    InvalidArgumentError::IoRequestTooLarge
+                ))
+            ),
+            "Write would cause value to exceed MAX_VALUE_SIZE"
+        );
+
+        // Check that writing up to MAX_VALUE_SIZE is ok
+        let bytes = Bytes::from(vec![15; can_write]);
+        let wrote = database
+            .write(key.clone(), value_len, bytes)
+            .expect("Writing up to allowed value size succeeds");
+
+        assert_eq!(
+            wrote, can_write,
+            "Write increasing value_length up to MAX_VALUE_SIZE succeeds"
+        );
+        assert_eq!(MAX_VALUE_SIZE, database.value_length(&key).unwrap());
+
+        // Ensure we can still append 'zero bytes' to end of value
+        let wrote = database
+            .write(key.clone(), MAX_VALUE_SIZE, Bytes::new())
+            .expect("Appending zero bytes to value of max allowed size should succeed");
+
+        assert_eq!(
+            wrote, 0,
+            "Appending zero bytes to maximum length value does not change size"
+        );
+        assert_eq!(MAX_VALUE_SIZE, database.value_length(&key).unwrap());
     }
 }
