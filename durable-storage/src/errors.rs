@@ -141,6 +141,9 @@ pub enum InvalidArgumentError {
     #[error("Value offset too large")]
     OffsetTooLarge,
 
+    #[error("Maximum value size exceeded")]
+    ValueSizeTooLarge,
+
     #[error("Registry resize can only change size by one")]
     RegistryResizeTooLarge,
 
