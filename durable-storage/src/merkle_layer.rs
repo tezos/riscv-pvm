@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025-2026 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -422,9 +423,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
-    use crate::storage::TestKeyValueStore;
-    use crate::storage::TestRepo;
-    use crate::storage::setup_repo;
+    use crate::storage::kv_test;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
         fn tree(&self) -> &Tree<LazyNodeId> {
@@ -464,23 +463,21 @@ mod tests {
         }
     }
 
-    fn new_merkle_layer(repo: TestRepo) -> MerkleLayer<TestKeyValueStore, Normal> {
-        let persistence_layer = TestKeyValueStore::new(&repo)
+    fn new_merkle_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Normal> {
+        let persistence_layer = KV::new(repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-
         MerkleLayer::new(persistence_layer)
     }
 
-    #[test]
-    fn test_mavl_cow() {
+    kv_test!(test_mavl_cow, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
         let data = [vec![0; 0], vec![13; 5], vec![42; 129]];
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for i in 0..keys.len() {
             ml.set(&keys[i], &data[i])
@@ -554,16 +551,15 @@ mod tests {
         ml2.tree()
             .check(&ml.inner.resolver)
             .expect("the tree should be retrieved successfully.");
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_mavl_cow_prop(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+    kv_test!(test_mavl_cow_prop, KV, {
+        proptest!(|(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
             let data1 = bytes::Bytes::from("property");
             let data2 = bytes::Bytes::from("cow");
 
-            let (_keepalive, repo) = setup_repo();
-            let mut ml = new_merkle_layer(repo);
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut ml = new_merkle_layer::<KV>(&repo);
 
             // Set all the keys in the tree
             for bytes in &keys1 {
@@ -608,15 +604,14 @@ mod tests {
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
             ml2.tree().check(&ml2.inner.resolver).expect("the tree should be retrieved successfully.");
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_mavl_create() {
+    kv_test!(test_mavl_create, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("create");
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         let empty_hash = ml.hash();
         ml.set(&key, &data).expect("setting node should succeed");
         assert_ne!(empty_hash, ml.hash());
@@ -631,15 +626,14 @@ mod tests {
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("the tree should be retrieved successfully.");
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_existing() {
+    kv_test!(test_mavl_create_existing, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("old");
         let data2 = bytes::Bytes::from("new");
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash();
 
@@ -669,10 +663,9 @@ mod tests {
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("the tree should be retrieved successfully.");
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_heterogenous_key() {
+    kv_test!(test_mavl_create_heterogenous_key, KV, {
         let keys = [
             Key::new(&[255, 0]),
             Key::new(&[0]),
@@ -688,8 +681,8 @@ mod tests {
             bytes::Bytes::from("0, 0, 0"),
         ];
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for (key, data) in keys.iter().zip(data.iter()) {
             let old_hash = ml.hash();
@@ -705,10 +698,9 @@ mod tests {
                 data
             );
         }
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_imbalanced() {
+    kv_test!(test_mavl_create_imbalanced, KV, {
         let keys = [
             Key::new(&[6]),
             Key::new(&[5]),
@@ -720,8 +712,8 @@ mod tests {
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         let empty_hash = ml.hash();
 
         // Left imbalance
@@ -754,17 +746,16 @@ mod tests {
                 .check(&ml.inner.resolver)
                 .expect("the tree should be retrieved successfully.");
         }
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_left_right() {
+    kv_test!(test_mavl_create_left_right, KV, {
         let keys = [Key::new(&[2]), Key::new(&[0]), Key::new(&[1])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
         let data = bytes::Bytes::from("left_right");
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for key in keys.iter() {
             let old_hash = ml.hash();
@@ -780,17 +771,16 @@ mod tests {
                 &data
             );
         }
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_right_left() {
+    kv_test!(test_mavl_create_right_left, KV, {
         let keys = [Key::new(&[0]), Key::new(&[2]), Key::new(&[1])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for key in keys.iter() {
             let old_hash = ml.hash();
@@ -806,10 +796,9 @@ mod tests {
                 &data
             );
         }
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_right_left_nonzero_node_bf() {
+    kv_test!(test_mavl_create_right_left_nonzero_node_bf, KV, {
         let keys = [
             Key::new(&[0]),
             Key::new(&[9]),
@@ -826,8 +815,8 @@ mod tests {
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for key in keys.iter() {
             let old_hash = ml.hash();
@@ -843,10 +832,9 @@ mod tests {
                 &data
             );
         }
-    }
+    });
 
-    #[test]
-    fn test_mavl_create_left_right_nonzero_node_bf() {
+    kv_test!(test_mavl_create_left_right_nonzero_node_bf, KV, {
         let keys = [
             Key::new(&[10]),
             Key::new(&[7]),
@@ -863,8 +851,8 @@ mod tests {
 
         let data = bytes::Bytes::from("right_left");
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
 
         for key in keys.iter() {
             let old_hash = ml.hash();
@@ -880,14 +868,13 @@ mod tests {
                 &data
             );
         }
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_mavl_create_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+    kv_test!(test_mavl_create_prop, KV, {
+        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
             let data = bytes::Bytes::from("property");
-            let (_keepalive, repo) = setup_repo();
-            let mut ml = new_merkle_layer(repo);
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut ml = new_merkle_layer::<KV>(&repo);
             let old_hash = ml.hash();
 
             for bytes in &keys {
@@ -905,15 +892,14 @@ mod tests {
             }
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_mavl_delete() {
+    kv_test!(test_mavl_delete, KV, {
         let key = Key::new(&[1]).expect("Sizes less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("delete");
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         let empty_hash = ml.hash();
         ml.set(&key, &data).expect("setting node should succeed");
         let full_hash = ml.hash();
@@ -930,14 +916,13 @@ mod tests {
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("the tree should be retrieved successfully.");
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_mavl_delete_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500)) {
+    kv_test!(test_mavl_delete_prop, KV, {
+        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
             let data = bytes::Bytes::from("delete_prop");
-            let (_keepalive, repo) = setup_repo();
-            let mut ml = new_merkle_layer(repo);
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut ml = new_merkle_layer::<KV>(&repo);
             let empty_hash = ml.hash();
 
             for bytes in &keys {
@@ -958,14 +943,13 @@ mod tests {
             prop_assert_eq!(empty_hash, ml.hash());
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        }
-    }
+        });
+    });
 
-    fn test_mavl_delete_keys(keys: &[Key]) {
+    fn test_mavl_delete_keys<KV: KeyValueStore>(repo: &KV::Repo, keys: &[Key]) {
         let data = bytes::Bytes::from("delete");
 
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let mut ml = new_merkle_layer::<KV>(repo);
         let empty_hash = ml.hash();
 
         for key in keys.iter() {
@@ -1007,8 +991,7 @@ mod tests {
     //        1 3   5       4    6
     //               \
     //                6
-    #[test]
-    fn test_mavl_delete_rebalance_needed() {
+    kv_test!(test_mavl_delete_rebalance_needed, KV, {
         let keys = [
             Key::new(&[2]),
             Key::new(&[0]),
@@ -1019,8 +1002,9 @@ mod tests {
             Key::new(&[6]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
     // Requires replacing a deleted node with a successor that is its right child.
     //
@@ -1030,8 +1014,7 @@ mod tests {
     //      0   2        0   3
     //           \
     //            3
-    #[test]
-    fn test_mavl_delete_right_successor() {
+    kv_test!(test_mavl_delete_right_successor, KV, {
         let keys = [
             Key::new(&[1]),
             Key::new(&[2]),
@@ -1039,8 +1022,9 @@ mod tests {
             Key::new(&[3]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
     // Requires replacing a deleted node with a successor that is its right child and has a right
     // child of its own.
@@ -1051,8 +1035,7 @@ mod tests {
     //      1   5        1   6
     //     /     \      /
     //    0       6    0
-    #[test]
-    fn test_mavl_delete_successor_right_child() {
+    kv_test!(test_mavl_delete_successor_right_child, KV, {
         let keys = [
             Key::new(&[4]),
             Key::new(&[5]),
@@ -1061,8 +1044,9 @@ mod tests {
             Key::new(&[0]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
     // Requires replacing a deleted node with a successor that isn't its right child.
     //
@@ -1072,8 +1056,7 @@ mod tests {
     //      0   3     0   3
     //         /
     //        2
-    #[test]
-    fn test_mavl_delete_take_min() {
+    kv_test!(test_mavl_delete_take_min, KV, {
         let keys = [
             Key::new(&[1]),
             Key::new(&[3]),
@@ -1081,8 +1064,9 @@ mod tests {
             Key::new(&[2]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
     // Requires replacing a deleted node with a successor that isn't its right child and isn't the
     // right child's left child.
@@ -1095,8 +1079,7 @@ mod tests {
     //        1  4   6     1  4   6
     //          /
     //         3
-    #[test]
-    fn test_mavl_delete_take_min_recursive() {
+    kv_test!(test_mavl_delete_take_min_recursive, KV, {
         let keys = [
             Key::new(&[2]),
             Key::new(&[4]),
@@ -1107,8 +1090,9 @@ mod tests {
             Key::new(&[3]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
     // Requires rebalancing a node where the balance factor is -2 and the left child's balance
     // factor is 0:
@@ -1118,8 +1102,7 @@ mod tests {
     //      1   5        1           3    5
     //     / \          / \         /
     //    0   3        0   3       0
-    #[test]
-    fn test_mavl_delete_zero_double_rotation_balance_factor() {
+    kv_test!(test_mavl_delete_zero_double_rotation_balance_factor, KV, {
         let keys = [
             Key::new(&[4]),
             Key::new(&[0]),
@@ -1128,15 +1111,15 @@ mod tests {
             Key::new(&[3]),
         ]
         .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
-        test_mavl_delete_keys(&keys);
-    }
+        let (_keepalive, repo) = KV::setup_repo();
+        test_mavl_delete_keys::<KV>(&repo, &keys);
+    });
 
-    #[test]
-    fn test_mavl_write_new_value() {
+    kv_test!(test_mavl_write_new_value, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("write_new_value");
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         let old_hash = ml.hash();
         ml.write(&key, 0, &data).expect("write should succeed.");
 
@@ -1151,15 +1134,14 @@ mod tests {
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("The tree should be retrieved successfully.");
-    }
+    });
 
-    #[test]
-    fn test_mavl_write_no_truncation() {
+    kv_test!(test_mavl_write_no_truncation, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let data = bytes::Bytes::from("a long value");
         let data2 = bytes::Bytes::from("good");
-        let (_keepalive, repo) = setup_repo();
-        let mut ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml = new_merkle_layer::<KV>(&repo);
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash();
 
@@ -1193,11 +1175,10 @@ mod tests {
         ml.tree()
             .check(&ml.inner.resolver)
             .expect("the tree should be retrieved successfully.");
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_mavl_write_prop(keys in prop::collection::vec(any::<[u8; 2]>(), 0..10)) {
+    kv_test!(test_mavl_write_prop, KV, {
+        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..10))| {
             let data = bytes::Bytes::from(vec![0; 500]);
             let alternating = bytes::Bytes::from([1, 0]
                 .iter()
@@ -1206,8 +1187,8 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>());
 
-            let (_keepalive, repo) = setup_repo();
-            let mut ml = new_merkle_layer(repo);
+            let (_keepalive, repo) = KV::setup_repo();
+            let mut ml = new_merkle_layer::<KV>(&repo);
             let old_hash = ml.hash();
 
             for bytes in &keys {
@@ -1231,8 +1212,8 @@ mod tests {
             }
 
             ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        }
-    }
+        });
+    });
 
     #[cfg(feature = "rocksdb")]
     #[derive(Debug, Clone)]
@@ -1288,7 +1269,7 @@ mod tests {
             use std::collections::BTreeSet;
             use octez_riscv_test_utils::TestableTmpdir;
             use crate::repo::DirectoryManager;
-
+            use crate::storage::TestKeyValueStore;
 
             let tmpdir = TestableTmpdir::new();
             let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
@@ -1383,12 +1364,14 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn test_merkle_layer_commit_persists_nodes() {
+        use crate::persistence_layer::PersistenceLayer;
         use crate::storage::Loadable;
         use crate::storage::Storable;
         use crate::storage::StoreOptions;
+        use crate::storage::TestKeyValueStoreSetup;
 
-        let (_keepalive, repo) = setup_repo();
-        let mut merkle_layer = new_merkle_layer(repo);
+        let (_keepalive, repo) = PersistenceLayer::setup_repo();
+        let mut merkle_layer = new_merkle_layer::<PersistenceLayer>(&repo);
 
         let keys = [
             Key::new(&[12]).unwrap(),
@@ -1445,15 +1428,14 @@ mod tests {
         assert_eq!(*commit_id.as_hash(), root_hash);
     }
 
-    #[test]
-    fn test_prove_delete() {
+    kv_test!(test_prove_delete, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let (_keepalive, repo) = setup_repo();
-        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::new(LazyResolver::new(persistence)),
@@ -1470,19 +1452,18 @@ mod tests {
             .get(&key)
             .expect("The node should be retrieved successfully.");
         assert!(got.is_none(), "data should not exist after deletion");
-    }
+    });
 
-    #[test]
-    fn test_prove_multiple_keys() {
+    kv_test!(test_prove_multiple_keys, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
         let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
 
-        let (_keepalive, repo) = setup_repo();
-        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::new(LazyResolver::new(persistence)),
@@ -1499,17 +1480,16 @@ mod tests {
                 .expect("data should exist");
             assert_eq!(got, datum);
         }
-    }
+    });
 
-    #[test]
-    fn test_prove_try_clone_with_cow() {
+    kv_test!(test_prove_try_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let (_keepalive, repo) = setup_repo();
-        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::new(LazyResolver::new(persistence)),
@@ -1519,8 +1499,8 @@ mod tests {
         ml.set(&key, cow_data.as_bytes())
             .expect("setting node should succeed");
 
-        let (_keepalive, repo) = setup_repo();
-        let kv: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let kv: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
 
@@ -1542,17 +1522,16 @@ mod tests {
             .expect("The node should be retrieved successfully.")
             .expect("data should exist");
         assert_eq!(got_clone, &cow_data2.as_bytes().to_vec());
-    }
+    });
 
-    #[test]
-    fn test_prove_write_partial() {
+    kv_test!(test_prove_write_partial, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let (_keepalive, repo) = setup_repo();
-        let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::new(LazyResolver::new(persistence)),
@@ -1568,16 +1547,15 @@ mod tests {
             .expect("The data should exist");
 
         assert_eq!(got, b"partying");
-    }
+    });
 
-    #[test]
-    fn test_prove_verify_round_trip() {
+    kv_test!(test_prove_verify_round_trip, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
 
         // `Normal` mode
-        let (_keepalive, repo) = setup_repo();
-        let mut normal_ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
         normal_ml
             .set(&keys[0], &[])
             .expect("setting node should succeed");
@@ -1592,7 +1570,7 @@ mod tests {
 
         // `Prove` mode
         let prove_tree = normal_ml.inner.tree.into_proof();
-        let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
                 resolver: ProveResolver::new(LazyResolver::new(
@@ -1619,21 +1597,19 @@ mod tests {
             _ => panic!("Should be present"),
         };
 
-        let verify_ml: MerkleLayer<TestKeyValueStore, Verify> = MerkleLayer::from_verify_tree(tree);
+        let verify_ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(tree);
 
         let node = verify_ml
             .get(&keys[1])
             .expect("The node should be retrieved successfully.")
             .expect("The data should exist");
         assert_eq!(node, b"prove to verify");
-    }
+    });
 
-    #[test]
-    fn test_verify_delete() {
+    kv_test!(test_verify_delete, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
-            MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
         ml.delete(&key)
             .expect("deleting a key that doesn't exist should succeed");
 
@@ -1645,16 +1621,14 @@ mod tests {
             .get(&key)
             .expect("The node should be retrieved successfully.");
         assert!(got.is_none(), "data should not exist after deletion");
-    }
+    });
 
-    #[test]
-    fn test_verify_multiple_keys() {
+    kv_test!(test_verify_multiple_keys, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
         let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
 
-        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
-            MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
         for (key, datum) in keys.iter().zip(data.iter()) {
             ml.set(key, datum).expect("setting node should succeed");
         }
@@ -1666,20 +1640,18 @@ mod tests {
                 .expect("data should exist");
             assert_eq!(got, datum);
         }
-    }
+    });
 
-    #[test]
-    fn test_verify_try_clone_with_cow() {
+    kv_test!(test_verify_try_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
-            MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
         let cow_data = "🐮<(verify a moo!)";
         ml.set(&key, cow_data.as_bytes())
             .expect("setting node should succeed");
 
-        let (_keepalive, repo) = setup_repo();
-        let kv: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
+        let (_keepalive, repo) = KV::setup_repo();
+        let kv: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
 
@@ -1701,14 +1673,12 @@ mod tests {
             .expect("The node should be retrieved successfully.")
             .expect("data should exist");
         assert_eq!(got_clone, &cow_data2.as_bytes().to_vec());
-    }
+    });
 
-    #[test]
-    fn test_verify_write_partial() {
+    kv_test!(test_verify_write_partial, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<TestKeyValueStore, Verify> =
-            MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
         ml.set(&key, b"partial")
             .expect("setting node should succeed");
         ml.write(&key, 4, b"ying").expect("write should succeed");
@@ -1719,15 +1689,14 @@ mod tests {
             .expect("The data should exist");
 
         assert_eq!(got, b"partying");
-    }
+    });
 
-    #[test]
-    fn test_prove_hash() {
+    kv_test!(test_prove_hash, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
 
-        let (_keepalive, repo) = setup_repo();
-        let mut normal_ml = new_merkle_layer(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
         normal_ml
             .set(&keys[0], &[])
             .expect("setting node should succeed");
@@ -1741,7 +1710,7 @@ mod tests {
         let normal_hash = normal_ml.hash();
 
         let prove_tree = normal_ml.inner.tree.into_proof();
-        let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+        let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
                 resolver: ProveResolver::new(LazyResolver::new(
@@ -1751,5 +1720,5 @@ mod tests {
         };
 
         assert_eq!(normal_hash, prove_ml.hash());
-    }
+    });
 }
