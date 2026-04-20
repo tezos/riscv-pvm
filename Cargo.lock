@@ -2551,6 +2551,7 @@ dependencies = [
  "log",
  "octez-riscv-data",
  "octez-riscv-test-utils",
+ "paste",
  "perfect-derive",
  "proptest",
  "rand 0.10.1",

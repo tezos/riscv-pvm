@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -145,6 +146,72 @@ cfg_if::cfg_if! {
         pub(crate) fn setup_repo() -> ((), TestRepo) {
             ((), in_memory::InMemoryRepo)
         }
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        // TODO: This trait currently duplicates the functionality of the `TestKeyValueStore` mechanism defined above.
+        // Tests which use the `kv_test!` macro will be refactored to use `TestKeyValueStoreSetup`, which can supersede
+        // `KeyValueStore` once all tests have been rewritten.
+        pub(crate) trait TestKeyValueStoreSetup: KeyValueStore + std::fmt::Debug {
+            /// Temporary directory handle that must stay in scope for the lifetime of the repo
+            type Keepalive;
+
+            /// Create a test repository
+            fn setup_repo() -> (Self::Keepalive, Self::Repo);
+        }
+
+        impl TestKeyValueStoreSetup for in_memory::InMemoryKeyValueStore {
+            type Keepalive = ();
+
+            fn setup_repo() -> ((), in_memory::InMemoryRepo) {
+                ((), in_memory::InMemoryRepo)
+            }
+        }
+
+        #[cfg(feature = "rocksdb")]
+        impl TestKeyValueStoreSetup for crate::persistence_layer::PersistenceLayer {
+            type Keepalive = octez_riscv_test_utils::TestableTmpdir;
+
+            fn setup_repo() -> (Self::Keepalive, Self::Repo) {
+                use crate::repo::DirectoryManager;
+
+                let tmpdir = octez_riscv_test_utils::TestableTmpdir::new();
+                let dir_manager =
+                    DirectoryManager::new(tmpdir.path()).expect("creating manager should succeed.");
+
+                (tmpdir, dir_manager)
+            }
+        }
+
+        /// Macro that runs a test against every available KV backend.
+        ///
+        /// Without the `rocksdb` feature this expands to a single `#[test]` using the in-memory store.
+        /// With the `rocksdb` feature it expands to 2 tests, one using the in-memory store and one
+        /// using the persistence layer.
+        macro_rules! kv_test {
+            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?, $body:block) => {
+                paste::paste! {
+                    $(#[$attr])*
+                    #[test]
+                    fn [<$fun_name _in_memory>]() {
+                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>() $body
+                        inner::<$crate::storage::in_memory::InMemoryKeyValueStore>();
+                    }
+
+                    #[cfg(feature = "rocksdb")]
+                    $(#[$attr])*
+                    #[test]
+                    fn [<$fun_name _rocksdb>]() {
+                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>() $body
+                        inner::<$crate::persistence_layer::PersistenceLayer>();
+                    }
+                }
+            };
+        }
+
+        pub(crate) use kv_test;
     }
 }
 
