@@ -9,6 +9,7 @@
 use std::borrow::Borrow;
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::ops::Index;
 use std::ops::Range;
 
 use bincode::BorrowDecode;
@@ -266,6 +267,14 @@ impl Bytes<Normal> {
 impl Borrow<[u8]> for Bytes<Normal> {
     fn borrow(&self) -> &[u8] {
         &self.bytes
+    }
+}
+
+impl Index<Range<usize>> for Bytes<Normal> {
+    type Output = [u8];
+
+    fn index(&self, range: Range<usize>) -> &[u8] {
+        &self.bytes[range]
     }
 }
 
