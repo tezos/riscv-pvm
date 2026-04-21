@@ -8,6 +8,8 @@
 //! This module provides a database type to unify operations between the Merkle layer and the
 //! key-value store.
 
+pub(crate) mod value_ref;
+
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -24,6 +26,8 @@ use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
+use crate::database::value_ref::AsRefValueRef;
+use crate::database::value_ref::ValueRef;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -181,7 +185,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         }
 
         let value = self.get(key)?;
-        let value_length = value.as_ref().len();
+        let value_length = value.len();
         if offset > value_length {
             Err(InvalidArgumentError::OffsetTooLarge)?;
         }
@@ -194,9 +198,9 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
             inner: T,
         }
 
-        impl<T: AsRef<[u8]>> AsRef<[u8]> for Wrapper<T> {
+        impl<T: ValueRef> AsRef<[u8]> for Wrapper<T> {
             fn as_ref(&self) -> &[u8] {
-                &self.inner.as_ref()[self.offset..self.end]
+                &self.inner[self.offset..self.end]
             }
         }
 
@@ -257,14 +261,14 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Fails if:
     ///  - The key does not exist in the database.
     pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
-        Ok(self.get(key)?.as_ref().len())
+        Ok(self.get(key)?.len())
     }
 
     /// Retrieve the value associated with the provided key.
     ///
     /// Fails if:
     ///  - The key does not exist in the database.
-    fn get(&self, key: &Key) -> Result<impl AsRef<[u8]>, Error> {
+    fn get(&self, key: &Key) -> Result<impl ValueRef, Error> {
         M::get(self, key)
     }
 }
@@ -320,15 +324,16 @@ pub trait DatabaseMode: Mode {
     fn get<KV: BackgroundKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
-    ) -> Result<impl AsRef<[u8]>, Error>;
+    ) -> Result<impl ValueRef, Error>;
 }
 
 impl DatabaseMode for Normal {
     fn get<KV: BackgroundKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
-    ) -> Result<impl AsRef<[u8]>, Error> {
-        this.inner.persistent.get(key.as_ref())
+    ) -> Result<impl ValueRef, Error> {
+        let as_ref = this.inner.persistent.get(key.as_ref())?;
+        Ok(AsRefValueRef(as_ref))
     }
 
     fn set<KV: BackgroundKeyValueStore>(
