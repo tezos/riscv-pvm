@@ -93,8 +93,6 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
             .expect("Hit error on setting a value in setup.");
     }
 
-    // We use a channel for deletions in the AVL tree, but we don't care about the deleted nodes
-    // in this bench, so we can just ignore them.
     let (deletion_tx, _) = std::sync::mpsc::channel();
     c.bench_function("Bench AVL tree with operations", |b| {
         b.iter_batched(

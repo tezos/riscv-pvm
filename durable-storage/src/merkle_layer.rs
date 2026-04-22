@@ -20,26 +20,18 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use octez_riscv_data::foldable::Fold;
-use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
-use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::LazyResolver;
 use crate::avl::resolver::ProveNodeId;
 use crate::avl::resolver::ProveResolver;
-use crate::avl::resolver::Resolver;
 use crate::avl::resolver::VerifyNodeId;
 use crate::avl::resolver::VerifyResolver;
 use crate::avl::tree::Tree;
@@ -87,40 +79,6 @@ impl<KV> MerkleLayer<KV, Normal> {
         KV: PersistentKeyValueStore,
     {
         self.inner.commit(options)
-    }
-
-    /// Snapshot the current tree and enter prove mode.
-    ///
-    /// The returned layer holds two trees: an immutable `initial_tree` (a cheap `Clone` of the
-    /// Normal-mode tree) and a `working_tree` derived from it via [`Tree::into_proof`]. Mutations
-    /// during the proof step run against the working tree; the initial tree drives the
-    /// [`MerkleProofFold`] that generates the proof.
-    ///
-    /// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "non-test callers wired in follow-up PVM integration (RV-957)"
-        )
-    )]
-    pub fn start_proof(&self) -> MerkleLayer<KV, Prove<'_>> {
-        let initial_tree = self.inner.tree.clone();
-        let working_tree = initial_tree.clone().into_proof();
-        let root_tree_hash = initial_tree.hash();
-        let (resolver, deletion_tx) = ProveResolver::start(
-            LazyResolver::new(self.inner.persistence.clone()),
-            Some(root_tree_hash),
-        );
-
-        MerkleLayer {
-            inner: ProveImpl {
-                initial_tree,
-                working_tree,
-                resolver,
-                deletion_tx,
-            },
-        }
     }
 }
 
@@ -235,38 +193,29 @@ impl MerkleLayerMode for Normal {
     }
 }
 
-impl MerkleLayerMode for Prove<'_> {
+impl MerkleLayerMode for Prove<'static> {
     fn try_clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
-        // TODO RV-985: This requires work for supporting under multi-step proofs.
-        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         MerkleLayer {
             inner: ProveImpl {
-                initial_tree: this.inner.initial_tree.clone(),
-                working_tree: this.inner.working_tree.clone(),
-                resolver,
-                deletion_tx,
+                tree: this.inner.tree.clone(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         }
     }
 
     fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
-        this.inner.working_tree.hash()
+        this.inner.tree.hash()
     }
 
     fn delete<KV: KeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
-        let ProveImpl {
-            working_tree,
-            resolver,
-            deletion_tx,
-            ..
-        } = &mut this.inner;
-        working_tree.delete(key, resolver, deletion_tx)?;
+        this.inner.tree.delete(key, &mut this.inner.resolver, &this.inner.deletion_tx)?;
         Ok(())
     }
 
@@ -275,9 +224,7 @@ impl MerkleLayerMode for Prove<'_> {
         key: &Key,
         data: &[u8],
     ) -> Result<(), OperationalError> {
-        this.inner
-            .working_tree
-            .set(key, data, &mut this.inner.resolver)?;
+        this.inner.tree.set(key, data, &mut this.inner.resolver)?;
         Ok(())
     }
 
@@ -288,7 +235,7 @@ impl MerkleLayerMode for Prove<'_> {
         data: &[u8],
     ) -> Result<(), Error> {
         this.inner
-            .working_tree
+            .tree
             .write(key, offset, data, &mut this.inner.resolver)?;
         Ok(())
     }
@@ -362,7 +309,7 @@ struct NormalImpl<KV> {
     deletion_tx: mpsc::Sender<LazyNodeId>,
 }
 
-/// Create a sender with a dropped receiver
+/// Create a sender with a dropped receiver.
 ///
 /// Sends through this sender fail silently, making it suitable for callers that do not need to
 /// observe deletions.
@@ -452,171 +399,17 @@ impl<KV> NormalImpl<KV> {
 }
 
 #[derive(Debug)]
-struct VerifyImpl {
-    tree: Tree<VerifyNodeId>,
-    resolver: VerifyResolver,
-    deletion_tx: mpsc::Sender<VerifyNodeId>,
-}
-
-/// Prove-mode backing state for a [`MerkleLayer`].
-///
-/// A proof is generated against the `initial` state that the step read from, not against the
-/// post-step state: AVL rotations on `set`/`delete`/`write` rewrite subtree structure, so folding
-/// the working tree would produce a proof with a shape that does not match the initial root.
-///
-/// - `initial_tree`: an immutable snapshot of the Normal-mode tree, captured at `start_proof`
-///   time. This is what the [`MerkleProofFold`] implementation on [`MerkleLayer`] walks.
-/// - `working_tree`: a Prove-mode projection that the step mutates. Its root hash is the
-///   final-state hash and its per-node read flags are the source of truth for
-///   deciding which fields of an initial node were actually read.
-/// - `resolver`: a [`ProveResolver`] wrapping a [`LazyResolver`]. Its access set tells the fold
-///   which initial-tree nodes can be blinded, and its `deleted_nodes` map preserves the
-///   prove-mode projection of any node that was unlinked from the working tree during the step.
-///
-/// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
-/// [`Cell<bool>`]: std::cell::Cell
-#[derive(Debug)]
 struct ProveImpl<KV> {
-    initial_tree: Tree<LazyNodeId>,
-    working_tree: Tree<ProveNodeId>,
+    tree: Tree<ProveNodeId>,
     resolver: ProveResolver<LazyResolver<KV>>,
     deletion_tx: mpsc::Sender<ProveNodeId>,
 }
 
-impl<KV: KeyValueStore> Foldable<HashFold> for MerkleLayer<KV, Prove<'_>> {
-    fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
-        self.inner.working_tree.hash()
-    }
-}
-
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for MerkleLayer<KV, Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        self.inner.resolver.drain_deletions();
-        let wrapper = InitialTreeFold {
-            tree: &self.inner.initial_tree,
-            prove_impl: &self.inner,
-        };
-        wrapper.fold(builder)
-    }
-}
-
-/// Wrapper that folds an initial-tree [`Tree<LazyNodeId>`] into a [`MerkleProofFold`].
-///
-/// Drives the tree-level structure (occupied-bool + optional node) off the initial tree, then
-/// delegates node-level folding to [`InitialNodeFold`].
-struct InitialTreeFold<'a, KV> {
-    tree: &'a Tree<LazyNodeId>,
-    prove_impl: &'a ProveImpl<KV>,
-}
-
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialTreeFold<'_, KV> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let tree_hash = self.tree.hash();
-
-        if !self.prove_impl.resolver.was_tree_accessed(&tree_hash) {
-            return builder.into_blind(tree_hash);
-        }
-
-        let mut node_fold = builder.into_node_fold();
-
-        // Bool leaf: true if the initial tree is occupied.
-        let present = self.tree.root().is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should not fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node_fold.add(&bool_leaf);
-
-        if let Some(lazy_node_id) = self.tree.root() {
-            let child = InitialNodeFold {
-                node_id: lazy_node_id,
-                prove_impl: self.prove_impl,
-            };
-            node_fold.add(&child);
-        }
-
-        node_fold.done()
-    }
-}
-
-/// Wrapper that folds an initial-node [`LazyNodeId`] into a [`MerkleProofFold`].
-///
-/// If the node was not accessed during the step, it is blinded.  Otherwise, per-field presence
-/// (meta, data) is taken from the prove-mode `Node`'s read flags, and the children are folded
-/// recursively off the **initial tree**'s structure (not the working tree's).
-struct InitialNodeFold<'a, KV> {
-    node_id: &'a LazyNodeId,
-    prove_impl: &'a ProveImpl<KV>,
-}
-
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let hash = Hash::from_foldable(self.node_id);
-
-        if !self.prove_impl.resolver.was_node_accessed(&hash) {
-            return builder.into_blind(hash);
-        }
-
-        // Resolve the initial node to get its key and children.
-        let initial_node = self
-            .prove_impl
-            .resolver
-            .inner()
-            .resolve(self.node_id)
-            .expect("Accessed node should be cached in LazyResolver");
-
-        // Find the prove-mode projection carrying the read flags.
-        //
-        // 1. Check `deleted_nodes` first (covers delete and delete-reinsert-same-key).
-        //    For delete-then-reinsert-same-key: the deleted node's flags are correct because
-        //    this fold walks the *initial* tree — the initial node was read/deleted during the
-        //    step, so its flags reflect that access. The newly inserted node at the same key
-        //    is a different node in the working tree and is irrelevant to the initial fold.
-        // 2. Otherwise search the working tree by key.
-        let deleted = self.prove_impl.resolver.deleted_node(&hash);
-        let prove_node = if let Some(deleted_id) = &deleted {
-            deleted_id
-                .cached_node()
-                .expect("Deleted ProveNodeId should have a cached prove-mode node")
-        } else {
-            let key = initial_node.key();
-            self.prove_impl
-                .working_tree
-                .get_resolved(key)
-                .expect("Working-tree lookup should not fail for an accessed node")
-                .expect("Accessed node should still be present in the working tree")
-                .cached_node()
-                .expect("Working-tree ProveNodeId should have a cached prove-mode node")
-        };
-
-        // Fold meta + data from the prove-mode node (they carry per-field read flags).
-        let mut node_fold = builder.into_node_fold();
-        node_fold.add(prove_node.meta());
-        node_fold.add(prove_node.data());
-
-        // Fold left + right from the **initial** tree's children.
-        let left = InitialTreeFold {
-            tree: self
-                .prove_impl
-                .resolver
-                .inner()
-                .resolve(initial_node.left_id())
-                .expect("Accessed subtree should be cached in LazyResolver"),
-            prove_impl: self.prove_impl,
-        };
-        node_fold.add(&left);
-
-        let right = InitialTreeFold {
-            tree: self
-                .prove_impl
-                .resolver
-                .inner()
-                .resolve(initial_node.right_id())
-                .expect("Accessed subtree should be cached in LazyResolver"),
-            prove_impl: self.prove_impl,
-        };
-        node_fold.add(&right);
-
-        node_fold.done()
-    }
+#[derive(Debug)]
+struct VerifyImpl {
+    tree: Tree<VerifyNodeId>,
+    resolver: VerifyResolver,
+    deletion_tx: mpsc::Sender<VerifyNodeId>,
 }
 
 #[cfg(test)]
@@ -673,9 +466,9 @@ mod tests {
         }
     }
 
-    impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'_>> {
+    impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
         fn get(&self, key: &Key) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
-            self.inner.working_tree.get(key, &self.inner.resolver)
+            self.inner.tree.get(key, &self.inner.resolver)
         }
     }
 
@@ -1685,13 +1478,11 @@ mod tests {
         let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree: Tree::default(),
-                working_tree: Tree::default(),
-                resolver,
-                deletion_tx,
+                tree: Tree::default(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         ml.delete(&key)
@@ -1717,13 +1508,11 @@ mod tests {
         let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree: Tree::default(),
-                working_tree: Tree::default(),
-                resolver,
-                deletion_tx,
+                tree: Tree::default(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         for (key, datum) in keys.iter().zip(data.iter()) {
@@ -1747,13 +1536,11 @@ mod tests {
         let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree: Tree::default(),
-                working_tree: Tree::default(),
-                resolver,
-                deletion_tx,
+                tree: Tree::default(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         let cow_data = "🐮<(prove a moo!)";
@@ -1793,13 +1580,11 @@ mod tests {
         let persistence: Arc<TestKeyValueStore> = TestKeyValueStore::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree: Tree::default(),
-                working_tree: Tree::default(),
-                resolver,
-                deletion_tx,
+                tree: Tree::default(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         ml.set(&key, b"partial")
@@ -1835,19 +1620,14 @@ mod tests {
             .expect("setting node should succeed");
 
         // `Prove` mode
-        let initial_tree = normal_ml.inner.tree.clone();
-        let working_tree = initial_tree.clone().into_proof();
-        let root_tree_hash = initial_tree.hash();
-        let (resolver, deletion_tx) = ProveResolver::start(
-            LazyResolver::new(normal_ml.inner.persistence.clone()),
-            Some(root_tree_hash),
-        );
+        let prove_tree = normal_ml.inner.tree.into_proof();
         let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree,
-                working_tree,
-                resolver,
-                deletion_tx,
+                tree: prove_tree,
+                resolver: ProveResolver::start(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+                deletion_tx: dead_sender(),
             },
         };
 
@@ -1859,7 +1639,7 @@ mod tests {
         assert_eq!(node, b"prove to verify");
 
         // Verify mode
-        let proof = MerkleProof::from_foldable(&prove_ml);
+        let proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
         let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&proof))
             .expect("The proof should be deserialisable")
             .into_result();
@@ -1990,19 +1770,14 @@ mod tests {
 
         let normal_hash = normal_ml.hash();
 
-        let initial_tree = normal_ml.inner.tree.clone();
-        let working_tree = initial_tree.clone().into_proof();
-        let root_tree_hash = initial_tree.hash();
-        let (resolver, deletion_tx) = ProveResolver::start(
-            LazyResolver::new(normal_ml.inner.persistence.clone()),
-            Some(root_tree_hash),
-        );
+        let prove_tree = normal_ml.inner.tree.into_proof();
         let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
-                initial_tree,
-                working_tree,
-                resolver,
-                deletion_tx,
+                tree: prove_tree,
+                resolver: ProveResolver::start(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+                deletion_tx: dead_sender(),
             },
         };
 
@@ -2029,8 +1804,17 @@ mod tests {
 
         let initial_hash = normal_ml.hash();
 
-        // ---- Prove: start proof, read key2, write key2 ----
-        let mut prove_ml = normal_ml.start_proof();
+        // ---- Prove: read key then overwrite it ----
+        let prove_tree = normal_ml.inner.tree.into_proof();
+        let mut prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
+            inner: ProveImpl {
+                tree: prove_tree,
+                resolver: ProveResolver::start(LazyResolver::new(
+                    normal_ml.inner.persistence.clone(),
+                )),
+                deletion_tx: dead_sender(),
+            },
+        };
 
         let data = prove_ml
             .get(&keys[1])
@@ -2046,7 +1830,7 @@ mod tests {
         assert_ne!(initial_hash, expected_hash, "write should change the hash");
 
         // ---- Generate proof ----
-        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+        let merkle_proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
 
         // ---- Verify: deserialize proof, replay identical ops ----
         let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&merkle_proof))
