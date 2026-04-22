@@ -14,6 +14,7 @@ use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use rand::rng;
 use serde::Deserialize;
+use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
 use crate::random::generate_keys;
@@ -192,11 +193,8 @@ pub fn build_template(
     ) {
         match operation {
             Operation::Read { key, size } => {
-                database
-                    .set(
-                        key.clone(),
-                        Bytes::from(generate_random_bytes(&mut rng, *size)),
-                    )
+                let value = generate_random_bytes(&mut rng, *size);
+                database_write_all(&mut database, key.clone(), &value)
                     .expect("The write should succeed");
                 read_max_size = std::cmp::max(read_max_size, *size);
             }
@@ -265,27 +263,78 @@ pub fn bench_run(mut state: BenchmarkState<'_>) {
                 black_box(state.database.hash().expect("Hash should be calculated"));
             }
             Operation::Read { key, size } => {
-                match state
-                    .database
-                    .read(&key, 0, &mut state.read_buffer[0..size])
-                {
+                state.read_buffer.truncate(0);
+                match database_read(&mut state.database, key, size, &mut state.read_buffer) {
                     Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The read should succeed: {e:?}"),
                 }
+                assert_eq!(
+                    state.read_buffer.len(),
+                    size,
+                    "Failed to read exactly {size} bytes from storage"
+                );
             }
             Operation::ValueLength { key } => match state.database.value_length(&key) {
                 Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                 Err(e) => panic!("The value length calculation should succeed: {e:?}"),
             },
             Operation::Write { key, size } => {
-                match state
-                    .database
-                    .set(key, Bytes::copy_from_slice(&state.random_data[0..size]))
-                {
-                    Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
+                match database_write_all(&mut state.database, key, &state.random_data[..size]) {
+                    Ok(()) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The write should succeed: {e:?}"),
                 }
             }
         }
     }
+}
+
+/// Read an entire value (possibly larger than [`MAX_FILE_CHUNK_SIZE`]) from the given database.
+///
+/// The database API only supports reading chunks less than `MAX_FILE_CHUNK_SIZE` in length in one
+/// go, for proof safety. This helper exists to read larger values from storage, similarly to how
+/// a kernel might.
+fn database_read(
+    database: &mut Database<PersistenceLayer, Normal>,
+    key: Key,
+    size: usize,
+    buffer: &mut [u8],
+) -> Result<(), Error> {
+    let mut offset = 0;
+    let mut remaining = size;
+
+    while remaining > 0 {
+        let chunk = remaining.min(MAX_FILE_CHUNK_SIZE);
+        database.read(&key, offset, &mut buffer[offset..(offset + chunk)])?;
+
+        offset += chunk;
+        remaining -= chunk;
+    }
+
+    Ok(())
+}
+
+/// Write an entire value (possibly larger than [`MAX_FILE_CHUNK_SIZE`]) to the given database.
+///
+/// The database API only supports writing chunks less than `MAX_FILE_CHUNK_SIZE` in length in one
+/// go, for proof safety. This helper exists to write larger values to storage, similarly to how
+/// a kernel might.
+fn database_write_all(
+    database: &mut Database<PersistenceLayer, Normal>,
+    key: Key,
+    data: &[u8],
+) -> Result<(), Error> {
+    if data.is_empty() {
+        return database.set(key, Bytes::new());
+    }
+    let mut offset = 0;
+    while offset < data.len() {
+        let end = (offset + MAX_FILE_CHUNK_SIZE).min(data.len());
+        database.write(
+            key.clone(),
+            offset,
+            Bytes::copy_from_slice(&data[offset..end]),
+        )?;
+        offset = end;
+    }
+    Ok(())
 }
