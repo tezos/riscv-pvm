@@ -4,4 +4,5 @@ ignore = [
   # `kernel-bench-utils`. We don't make use of them in the main PVM library.
   "RUSTSEC-2026-0098",
   "RUSTSEC-2026-0099",
+  "RUSTSEC-2026-0104",
 ]
