@@ -199,10 +199,14 @@ impl MerkleLayerMode for Prove<'static> {
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
         MerkleLayer {
-            inner: ProveImpl {
-                tree: this.inner.tree.clone(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+            inner: {
+                let (resolver, deletion_tx) =
+                    ProveResolver::start(LazyResolver::new(persistence), None);
+                ProveImpl {
+                    tree: this.inner.tree.clone(),
+                    resolver,
+                    deletion_tx,
+                }
             },
         }
     }
@@ -1481,7 +1485,7 @@ mod tests {
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence), None).0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1511,7 +1515,7 @@ mod tests {
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence), None).0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1539,7 +1543,7 @@ mod tests {
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence), None).0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1583,7 +1587,7 @@ mod tests {
         let mut ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                resolver: ProveResolver::start(LazyResolver::new(persistence), None).0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1624,9 +1628,11 @@ mod tests {
         let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver: ProveResolver::start(
+                    LazyResolver::new(normal_ml.inner.persistence.clone()),
+                    None,
+                )
+                .0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1774,9 +1780,11 @@ mod tests {
         let prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver: ProveResolver::start(
+                    LazyResolver::new(normal_ml.inner.persistence.clone()),
+                    None,
+                )
+                .0,
                 deletion_tx: dead_sender(),
             },
         };
@@ -1809,9 +1817,11 @@ mod tests {
         let mut prove_ml: MerkleLayer<TestKeyValueStore, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver: ProveResolver::start(
+                    LazyResolver::new(normal_ml.inner.persistence.clone()),
+                    None,
+                )
+                .0,
                 deletion_tx: dead_sender(),
             },
         };

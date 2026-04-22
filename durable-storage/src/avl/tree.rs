@@ -33,7 +33,9 @@ use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+use super::resolver::CachedOnlyResolver;
 use super::resolver::ProveNodeId;
+use super::resolver::Resolver;
 use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
@@ -222,7 +224,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&NodeId> {
+    pub(crate) fn root(&self) -> Option<&NodeId> {
         self.0.as_ref()
     }
 
@@ -360,6 +362,33 @@ impl<NodeId> Tree<NodeId> {
             Some(node) => Node::rebalance(node, resolver),
             None => Ok(()),
         }
+    }
+}
+
+impl Tree<ProveNodeId> {
+    /// Find the `ProveNodeId` for a given key by traversing the tree.
+    ///
+    /// Returns `None` if the key is not present.
+    ///
+    /// Only traverses already-resolved nodes. Returns an error if an
+    /// unresolved node or tree is encountered.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn get_resolved(&self, key: &Key) -> Result<Option<&ProveNodeId>, OperationalError> {
+        let resolver = CachedOnlyResolver;
+        let mut current = self.root();
+        while let Some(node) = current {
+            let resolved_node = resolver.resolve(node)?;
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Ok(Some(node)),
+                Ordering::Greater => {
+                    current = resolved_node.left_ref(&resolver)?.root();
+                }
+                Ordering::Less => {
+                    current = resolved_node.right_ref(&resolver)?.root();
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
