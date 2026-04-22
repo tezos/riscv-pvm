@@ -6,6 +6,7 @@
 
 use std::cmp::Ordering;
 use std::sync::LazyLock;
+use std::sync::mpsc;
 
 use bincode::Decode;
 use bincode::de::Decoder;
@@ -24,15 +25,15 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
-use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+use super::resolver::CachedOnlyResolver;
 use super::resolver::ProveNodeId;
+use super::resolver::Resolver;
 use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
@@ -87,11 +88,15 @@ impl<NodeId: FromProof> Tree<NodeId> {
 impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
+    /// Each node unlinked from the tree is sent through `deletion_tx`. When no observer is
+    /// needed the receiver can simply be dropped.
+    ///
     /// Returns true if the [`Tree`] has shrunk in size.
     pub fn delete<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        deletion_tx: &mpsc::Sender<NodeId>,
     ) -> Result<bool, OperationalError>
     where
         NodeId: Clone,
@@ -99,7 +104,6 @@ impl<NodeId> Tree<NodeId> {
     {
         let old_balance_factor = self.balance_factor(resolver)?;
         let Some(node) = self.root_mut() else {
-            // The key does not exist so nothing will happen.
             return Ok(false);
         };
 
@@ -110,33 +114,45 @@ impl<NodeId> Tree<NodeId> {
                 resolved_node.right_ref(resolver)?.root(),
             ) {
                 (None, None) => {
+                    let _ = deletion_tx.send(node.clone());
                     self.take();
                     Ok(true)
                 }
                 (Some(left), None) => {
-                    *node = left.clone();
+                    let replacement = left.clone();
+                    let _ = deletion_tx.send(node.clone());
+                    *node = replacement;
                     Ok(true)
                 }
                 (None, Some(right)) => {
-                    *node = right.clone();
+                    let replacement = right.clone();
+                    let _ = deletion_tx.send(node.clone());
+                    *node = replacement;
                     Ok(true)
                 }
                 (Some(_), Some(_)) => {
                     let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
+                    let _ = deletion_tx.send(node.clone());
                     *node = new_node;
                     Ok(shrank)
                 }
             },
             Ordering::Greater => {
                 let node_mut = resolver.resolve_mut(node)?;
-                let left_shrank = node_mut.left_mut(resolver)?.delete(key, resolver)?;
+                let left_shrank =
+                    node_mut
+                        .left_mut(resolver)?
+                        .delete(key, resolver, deletion_tx)?;
                 *node_mut.balance_factor_mut() += if left_shrank { 1 } else { 0 };
                 self.rebalance(resolver)?;
                 Ok(old_balance_factor.abs() == 1 && self.balance_factor(resolver)? == 0)
             }
             Ordering::Less => {
                 let node_mut = resolver.resolve_mut(node)?;
-                let right_shrank = node_mut.right_mut(resolver)?.delete(key, resolver)?;
+                let right_shrank =
+                    node_mut
+                        .right_mut(resolver)?
+                        .delete(key, resolver, deletion_tx)?;
                 *node_mut.balance_factor_mut() -= if right_shrank { 1 } else { 0 };
                 self.rebalance(resolver)?;
                 Ok(old_balance_factor.abs() == 1 && self.balance_factor(resolver)? == 0)
@@ -206,7 +222,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&NodeId> {
+    pub(crate) fn root(&self) -> Option<&NodeId> {
         self.0.as_ref()
     }
 
@@ -347,6 +363,32 @@ impl<NodeId> Tree<NodeId> {
     }
 }
 
+impl Tree<ProveNodeId> {
+    /// Find the `ProveNodeId` for a given key by traversing the tree.
+    ///
+    /// Returns `None` if the key is not present.
+    ///
+    /// Only traverses already-resolved nodes. Returns an error if an
+    /// unresolved node or tree is encountered.
+    pub(crate) fn get_resolved(&self, key: &Key) -> Result<Option<&ProveNodeId>, OperationalError> {
+        let resolver = CachedOnlyResolver;
+        let mut current = self.root();
+        while let Some(node) = current {
+            let resolved_node = resolver.resolve(node)?;
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Ok(Some(node)),
+                Ordering::Greater => {
+                    current = resolved_node.left_ref(&resolver)?.root();
+                }
+                Ordering::Less => {
+                    current = resolved_node.right_ref(&resolver)?.root();
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
 impl<C> Decode<C> for Tree<LazyNodeId> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let root_hash: Option<Hash> = Decode::decode(decoder)?;
@@ -360,23 +402,6 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
 
         let present = self.0.is_some();
         node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
-
-        if let Some(inner) = self.0.as_ref() {
-            node.add(inner);
-        }
-
-        node.done()
-    }
-}
-
-impl Foldable<MerkleProofFold> for Tree<ProveNodeId> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let mut node = builder.into_node_fold();
-
-        let present = self.0.is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should never fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node.add(&bool_leaf);
 
         if let Some(inner) = self.0.as_ref() {
             node.add(inner);
@@ -968,6 +993,7 @@ mod tests {
             let mut tree: Tree<ArcNodeId> = Default::default();
             let mut reference: BTreeMap<Key, bytes::Bytes> = BTreeMap::new();
             let mut resolver = ArcResolver;
+            let (deletion_tx, _) = std::sync::mpsc::channel();
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
@@ -994,7 +1020,7 @@ mod tests {
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
-                        tree.delete(&key, &mut resolver)?;
+                        tree.delete(&key, &mut resolver, &deletion_tx)?;
                         reference.remove(&key);
                     }
                 }
