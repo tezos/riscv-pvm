@@ -25,8 +25,6 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
-use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
@@ -372,7 +370,6 @@ impl Tree<ProveNodeId> {
     ///
     /// Only traverses already-resolved nodes. Returns an error if an
     /// unresolved node or tree is encountered.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn get_resolved(&self, key: &Key) -> Result<Option<&ProveNodeId>, OperationalError> {
         let resolver = CachedOnlyResolver;
         let mut current = self.root();
@@ -405,23 +402,6 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
 
         let present = self.0.is_some();
         node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
-
-        if let Some(inner) = self.0.as_ref() {
-            node.add(inner);
-        }
-
-        node.done()
-    }
-}
-
-impl Foldable<MerkleProofFold> for Tree<ProveNodeId> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let mut node = builder.into_node_fold();
-
-        let present = self.0.is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should never fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node.add(&bool_leaf);
 
         if let Some(inner) = self.0.as_ref() {
             node.add(inner);
