@@ -156,12 +156,12 @@ impl<NodeId> Tree<NodeId> {
     }
 
     #[inline]
-    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-    pub(crate) fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
+    /// Find the id of the [`Node`] in the [`Tree`] with a given [`Key`].
+    pub(crate) fn get<'a, TreeId: 'a, M: BytesMode + AtomMode + 'a>(
         &'a self,
         key: &Key,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<Option<&'a Bytes<M>>, OperationalError> {
+    ) -> Result<Option<&'a NodeId>, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(None);
         };
@@ -983,7 +983,10 @@ mod tests {
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
-                        let tree_value = tree.get(&key, &resolver)?;
+                        let tree_value = match tree.get(&key, &resolver)? {
+                            Some(node_id) => Some(resolver.resolve(node_id)?.data()),
+                            None => None,
+                        };
 
                         // The values in the Options are comparable, but the Options themselves are
                         // not. So we need to awkwardly match on both Options to compare them.
@@ -1081,10 +1084,14 @@ mod tests {
             Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
         ));
 
-        let value = tree
+        let node_id = tree
             .get(&existing, &resolver)
             .expect("Resolver failure not expected.")
             .expect("Pre-existing key should still be present.");
+        let value = resolver
+            .resolve(node_id)
+            .expect("Resolver failure not expected.")
+            .data();
         let mut buf = [0u8; 11];
         value.read(0, &mut buf);
         assert_eq!(&buf, b"zero offset");
@@ -1092,10 +1099,14 @@ mod tests {
 
         tree.write(&existing, 1, b"o", &mut resolver)
             .expect("Writing to an existing key with a non-zero offset should succeed.");
-        let value = tree
+        let node_id = tree
             .get(&existing, &resolver)
             .expect("Resolver failure not expected.")
             .expect("Pre-existing key should still be present.");
+        let value = resolver
+            .resolve(node_id)
+            .expect("Resolver failure not expected.")
+            .data();
         let mut buf = [0u8; 11];
         value.read(0, &mut buf);
         assert_eq!(&buf, b"zoro offset");

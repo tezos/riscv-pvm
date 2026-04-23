@@ -134,20 +134,21 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
 }
 
 impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
-    /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
+    /// Find the id of the [`Node`] within the subtree of this [`Node`] with a given [`Key`].
     pub(super) fn get<'a, NodeId>(
         mut node: &'a NodeId,
         key: &Key,
         resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<Option<&'a Bytes<M>>, OperationalError>
+    ) -> Result<Option<&'a NodeId>, OperationalError>
     where
         NodeId: 'a,
         TreeId: 'a,
+        M: 'a,
     {
         loop {
             let resolved_node = resolver.resolve(node)?;
             match resolved_node.key().cmp(key) {
-                Ordering::Equal => return Ok(Some(&resolved_node.data)),
+                Ordering::Equal => return Ok(Some(node)),
                 Ordering::Greater => {
                     let Some(left) = resolved_node.left_ref(resolver)?.root() else {
                         return Ok(None);
