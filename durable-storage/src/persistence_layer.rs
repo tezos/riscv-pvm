@@ -39,6 +39,7 @@ use rocksdb::MergeOperands;
 use rocksdb::checkpoint::Checkpoint;
 use tempfile::TempDir;
 
+use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -423,6 +424,25 @@ impl PersistentKeyValueStore for PersistenceLayer {
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })
     }
 
+    fn commit(&self, repo: &DirectoryManager, id: &CommitId) -> Result<(), OperationalError> {
+        let checkpoint_path = repo.database_commit_dir(id);
+
+        // If the path already exists, we overwrite the existing commit. This is highly unlikely to
+        // happen anyway if the commits are a hash of the content.
+        if Path::exists(&checkpoint_path) {
+            std::fs::remove_dir_all(&checkpoint_path).map_err(|error| {
+                OperationalError::DirRemovalFailed {
+                    path: checkpoint_path.clone(),
+                    error,
+                }
+            })?;
+
+            log::warn!("Overwriting existing commit: {}", id.hex_encode());
+        }
+
+        self.commit_to_path(&checkpoint_path)
+    }
+
     fn checkout_from_path(
         commit_path: &Path,
         working_path: TempDir,
@@ -464,6 +484,13 @@ impl PersistentKeyValueStore for PersistenceLayer {
             db_instance: ManuallyDrop::new(database),
             _tempdir: working_path,
         })
+    }
+
+    fn checkout(repo: &DirectoryManager, id: &CommitId) -> Result<Self, OperationalError> {
+        let commit_path = repo.database_commit_dir(id);
+        let working_path = repo.temp_database_dir()?;
+
+        Self::checkout_from_path(&commit_path, working_path)
     }
 }
 
