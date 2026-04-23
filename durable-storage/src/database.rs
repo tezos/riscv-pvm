@@ -76,7 +76,7 @@ impl<KV> Database<KV, Normal> {
     /// applied to a working copy, not to the committed state on disk.
     pub fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error>
     where
-        KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>,
+        KV: BackgroundPersistentKeyValueStore,
     {
         let persistent = KV::checkout(repo, &commit_id)?;
         let persistent = Arc::new(persistent);
@@ -111,10 +111,7 @@ impl<KV> Database<KV, Normal> {
     ///
     /// The returned [`CommitId`] is derived from the Merkle root hash of the current working
     /// state. The commit can later be restored with [`Database::checkout`].
-    pub fn commit(
-        &self,
-        repo: &DirectoryManager,
-    ) -> Result<crate::commit::CommitId, OperationalError>
+    pub fn commit(&self, repo: &KV::Repo) -> Result<crate::commit::CommitId, OperationalError>
     where
         KV: PersistentKeyValueStore,
     {
@@ -379,7 +376,6 @@ struct NormalImpl<KV> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "rocksdb")]
 impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Assert that a database contains the expected value for a given key.
     pub(crate) fn assert_database_value(&self, key: &Key, expected: &[u8]) {
@@ -405,7 +401,6 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
-    #[cfg(feature = "rocksdb")]
     use super::DatabaseMode;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
@@ -413,11 +408,9 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_worker::BackgroundKeyValueStore;
-    #[cfg(feature = "rocksdb")]
-    use crate::storage::TestRepo;
+    use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+    use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
-    #[cfg(feature = "rocksdb")]
-    use crate::storage::setup_repo;
 
     fn new_database<KV: BackgroundKeyValueStore>(
         handle: &Handle,
@@ -426,29 +419,27 @@ mod tests {
         Database::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
-    #[cfg(feature = "rocksdb")]
-    type PersistentDatabase = Database<crate::persistence_layer::PersistenceLayer, Normal>;
-
-    #[cfg(feature = "rocksdb")]
-    fn new_persistent_database() -> (
+    fn new_persistent_database<KV>() -> (
         tokio::runtime::Runtime,
-        octez_riscv_test_utils::TestableTmpdir,
-        TestRepo,
-        PersistentDatabase,
-    ) {
+        KV::Keepalive,
+        KV::Repo,
+        Database<KV, Normal>,
+    )
+    where
+        KV: BackgroundKeyValueStore + TestKeyValueStoreSetup,
+    {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (keepalive, repo) = setup_repo();
+        let (keepalive, repo) = KV::setup_repo();
         let database =
             Database::try_new(handle, &repo).expect("Creating a test database should succeed");
 
         (runtime, keepalive, repo, database)
     }
 
-    #[cfg(feature = "rocksdb")]
     fn insert_entries<KV: BackgroundKeyValueStore, M: DatabaseMode>(
         database: &mut Database<KV, M>,
         entries: Vec<(Vec<u8>, Vec<u8>)>,
@@ -466,37 +457,33 @@ mod tests {
         expected
     }
 
-    #[cfg(feature = "rocksdb")]
-    fn assert_database_missing(database: &PersistentDatabase, key: &Key) {
-        use crate::errors::Error;
-        use crate::errors::InvalidArgumentError;
-
+    fn assert_database_missing<KV: BackgroundKeyValueStore, M: DatabaseMode>(
+        database: &Database<KV, M>,
+        key: &Key,
+    ) {
         assert!(matches!(
             database.read_bytes(key, 0, 0),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
     }
 
-    #[cfg(feature = "rocksdb")]
-    proptest! {
-        #[test]
-        fn test_database_commit_and_checkout(
+    kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore, {
+        let (runtime, _keepalive, repo, _database) = new_persistent_database::<KV>();
+        let handle = runtime.handle();
+        proptest!(|(
             entries in prop::collection::vec(
                 (prop::collection::vec(any::<u8>(), 1..=KEY_MAX_SIZE),
                  prop::collection::vec(any::<u8>(), 0..200)),
                 1..50,
             ),
-        ) {
-            use crate::persistence_layer::PersistenceLayer;
-
-            let (runtime, _keepalive, repo, mut database) = new_persistent_database();
-            let handle = runtime.handle();
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
             let expected = insert_entries(&mut database, entries);
 
             let expected_hash = database.hash().expect("Hash should be calculated");
             let commit_id = database.commit(&repo).expect("Commit should succeed");
 
-            let checked_out = Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id)
+            let checked_out = Database::<KV, _>::checkout(handle, &repo, commit_id)
                 .expect("Checkout should succeed");
 
             prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
@@ -504,8 +491,8 @@ mod tests {
             for (key, value) in expected {
                 checked_out.assert_database_value(&key, value.as_ref());
             }
-        }
-    }
+        });
+    });
 
     kv_test!(test_database_delete, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -569,13 +556,15 @@ mod tests {
         assert_eq!(before, after);
     });
 
-    #[cfg(feature = "rocksdb")]
-    #[test]
-    fn test_database_checkout_commit_creates_new_snapshot() {
-        use crate::persistence_layer::PersistenceLayer;
-
-        let (runtime, _keepalive, repo, mut original) = new_persistent_database();
+    kv_test!(test_database_checkout_commit_creates_new_snapshot, KV: BackgroundPersistentKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut original = new_database::<KV>(handle, &repo);
 
         let persisted_key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let derived_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
@@ -586,7 +575,7 @@ mod tests {
         let original_commit = original.commit(&repo).expect("Commit should succeed");
 
         let mut checked_out =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+            Database::<KV, _>::checkout(handle, &repo, original_commit)
                 .expect("Checkout should succeed");
         checked_out
             .set(persisted_key.clone(), Bytes::from_static(b"after"))
@@ -599,17 +588,17 @@ mod tests {
         assert_ne!(derived_commit, original_commit);
 
         let original_reloaded =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, original_commit)
+            Database::<KV, _>::checkout(handle, &repo, original_commit)
                 .expect("Checkout should succeed");
         original_reloaded.assert_database_value(&persisted_key, b"before");
         assert_database_missing(&original_reloaded, &derived_key);
 
         let derived_reloaded =
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, derived_commit)
+            Database::<KV, _>::checkout(handle, &repo, derived_commit)
                 .expect("Checkout should succeed");
         derived_reloaded.assert_database_value(&persisted_key, b"after");
         derived_reloaded.assert_database_value(&derived_key, b"new");
-    }
+    });
 
     #[cfg(feature = "rocksdb")]
     #[test]
@@ -621,7 +610,8 @@ mod tests {
         use crate::persistence_layer::PersistenceLayer;
         use crate::persistence_layer::rocksdb_checkpoint_options;
 
-        let (runtime, _keepalive, repo, mut database) = new_persistent_database();
+        let (runtime, _keepalive, repo, mut database) =
+            new_persistent_database::<PersistenceLayer>();
         let handle = runtime.handle();
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -657,26 +647,27 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "rocksdb")]
-    #[test]
-    fn test_database_checkout_unknown_commit_fails() {
+    kv_test!(test_database_checkout_unknown_commit_fails, KV: BackgroundPersistentKeyValueStore, {
         use octez_riscv_data::hash::Hash;
 
         use crate::commit::CommitId;
-        use crate::errors::Error;
         use crate::errors::OperationalError;
-        use crate::persistence_layer::PersistenceLayer;
 
-        let (runtime, _keepalive, repo, _database) = new_persistent_database();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        let _database = new_database::<KV>(handle, &repo);
 
         let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-commit"));
 
         assert!(matches!(
-            Database::<PersistenceLayer, _>::checkout(handle, &repo, missing_commit),
+            Database::<KV, _>::checkout(handle, &repo, missing_commit),
             Err(Error::Operational(OperationalError::CommitNotFound))
         ));
-    }
+    });
 
     kv_test!(test_database_exists, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
