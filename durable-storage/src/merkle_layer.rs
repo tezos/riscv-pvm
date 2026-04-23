@@ -425,6 +425,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
+    use crate::storage::PersistentKeyValueStore;
     use crate::storage::kv_test;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
@@ -1217,7 +1218,6 @@ mod tests {
         });
     });
 
-    #[cfg(feature = "rocksdb")]
     #[derive(Debug, Clone)]
     enum GeneratedOperation {
         // Key, Value
@@ -1228,7 +1228,6 @@ mod tests {
         Delete([u8; 2]),
     }
 
-    #[cfg(feature = "rocksdb")]
     fn generated_operations_strategy(
         length: usize,
     ) -> impl Strategy<Value = Vec<GeneratedOperation>> {
@@ -1261,23 +1260,15 @@ mod tests {
             })
     }
 
-    #[cfg(feature = "rocksdb")]
-    proptest! {
-        #[test]
-        fn test_merkle_layer_checkout_lazy_from_commit(
-            operations in (1usize..100usize).prop_flat_map(generated_operations_strategy)
-        ) {
+    kv_test!(test_merkle_layer_checkout_lazy_from_commit, KV: PersistentKeyValueStore, {
+        proptest!(|(operations in (1usize..100usize).prop_flat_map(generated_operations_strategy))| {
             use std::collections::BTreeMap;
             use std::collections::BTreeSet;
-            use octez_riscv_test_utils::TestableTmpdir;
-            use crate::repo::DirectoryManager;
-            use crate::storage::TestKeyValueStore;
 
-            let tmpdir = TestableTmpdir::new();
-            let repo = DirectoryManager::new(tmpdir.path()).expect("Failed to create directory manager");
-            let persistence = TestKeyValueStore::new(&repo)
-                .expect("Creating a persistence layer should succeed");
-            let persistence = std::sync::Arc::new(persistence);
+            let (_keepalive, repo) = KV::setup_repo();
+            let persistence: Arc<KV> = KV::new(&repo)
+                .expect("Creating a persistence layer should succeed")
+                .into();
 
             let mut merkle_layer = MerkleLayer::new(persistence.clone());
             let mut reference: BTreeMap<Key, Vec<u8>> = BTreeMap::new();
@@ -1355,25 +1346,21 @@ mod tests {
                     (None, Some(_)) => panic!("Expected a missing key in lazy-loaded tree: {key:?}"),
                 }
             }
-        }
-    }
+        });
+    });
 
-    /// - Add some data to the Merkle layer.
-    /// - Commit the data to relevant column family
-    /// - Check whether the data is persisted.
-    /// - Check whether the hash contained in the commit id
-    ///   is the same as the root hash
-    #[cfg(feature = "rocksdb")]
-    #[test]
-    fn test_merkle_layer_commit_persists_nodes() {
-        use crate::persistence_layer::PersistenceLayer;
+    // - Add some data to the Merkle layer.
+    // - Commit the data to relevant column family
+    // - Check whether the data is persisted.
+    // - Check whether the hash contained in the commit id
+    //   is the same as the root hash
+    kv_test!(test_merkle_layer_commit_persists_nodes, KV: PersistentKeyValueStore, {
         use crate::storage::Loadable;
         use crate::storage::Storable;
         use crate::storage::StoreOptions;
-        use crate::storage::TestKeyValueStoreSetup;
 
-        let (_keepalive, repo) = PersistenceLayer::setup_repo();
-        let mut merkle_layer = new_merkle_layer::<PersistenceLayer>(&repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut merkle_layer = new_merkle_layer::<KV>(&repo);
 
         let keys = [
             Key::new(&[12]).unwrap(),
@@ -1428,7 +1415,7 @@ mod tests {
 
         let root_hash = merkle_layer.hash();
         assert_eq!(*commit_id.as_hash(), root_hash);
-    }
+    });
 
     kv_test!(test_prove_delete, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
