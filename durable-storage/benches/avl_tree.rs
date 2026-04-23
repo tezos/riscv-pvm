@@ -67,7 +67,7 @@ cfg_if::cfg_if! {
         type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
 
         fn setup_repo() -> ((), TestRepo) {
-            ((), InMemoryRepo)
+            ((), InMemoryRepo::default())
         }
     }
 }
