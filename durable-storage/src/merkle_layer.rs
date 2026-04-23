@@ -199,11 +199,13 @@ impl MerkleLayerMode for Prove<'static> {
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
+        // TODO RV-985: This requires work for supporting under multi-step proofs.
+        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         MerkleLayer {
             inner: ProveImpl {
                 tree: this.inner.tree.clone(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         }
     }
@@ -1462,11 +1464,12 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
+        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
         ml.delete(&key)
@@ -1491,11 +1494,12 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
+        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
         for (key, datum) in keys.iter().zip(data.iter()) {
@@ -1518,11 +1522,12 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
+        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
         let cow_data = "🐮<(prove a moo!)";
@@ -1561,11 +1566,12 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
+        let (resolver, deletion_tx) = ProveResolver::start(LazyResolver::new(persistence), None);
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence)),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
         ml.set(&key, b"partial")
@@ -1601,13 +1607,13 @@ mod tests {
 
         // `Prove` mode
         let prove_tree = normal_ml.inner.tree.into_proof();
+        let (resolver, deletion_tx) =
+            ProveResolver::start(LazyResolver::new(normal_ml.inner.persistence.clone()), None);
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
 
@@ -1742,13 +1748,13 @@ mod tests {
         let normal_hash = normal_ml.hash();
 
         let prove_tree = normal_ml.inner.tree.into_proof();
+        let (resolver, deletion_tx) =
+            ProveResolver::start(LazyResolver::new(normal_ml.inner.persistence.clone()), None);
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
 
@@ -1776,13 +1782,13 @@ mod tests {
 
         // ---- Prove: read key then overwrite it ----
         let prove_tree = normal_ml.inner.tree.into_proof();
+        let (resolver, deletion_tx) =
+            ProveResolver::start(LazyResolver::new(normal_ml.inner.persistence.clone()), None);
         let mut prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
-                deletion_tx: dead_sender(),
+                resolver,
+                deletion_tx,
             },
         };
 

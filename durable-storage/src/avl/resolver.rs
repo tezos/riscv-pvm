@@ -28,10 +28,12 @@
 //! [`Node`]: crate::avl::node::Node
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::mpsc;
 
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -467,14 +469,18 @@ impl From<Node<ProveTreeId, Prove<'static>>> for ProveNodeId {
     }
 }
 
-/// Access the cached prove-mode node, if populated.
-///
-/// Used by the `MerkleLayer`-level fold to extract per-field read flags from a node that
-/// was resolved during the proof step.
 impl ProveNodeId {
+    /// Access the cached prove-mode node, if populated.
+    ///
+    /// Used by the `MerkleLayer`-level fold to extract per-field read flags from a node that
+    /// was resolved during the proof step.
     #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn cached_node(&self) -> Option<&Node<ProveTreeId, Prove<'static>>> {
         self.inner.get().map(|rc| rc.as_ref())
+    }
+
+    pub(crate) fn lazy_node_id(&self) -> &LazyNodeId {
+        &self.node
     }
 }
 
@@ -527,6 +533,13 @@ impl Foldable<HashFold> for ProveTreeId {
     }
 }
 
+impl ProveTreeId {
+    #[expect(dead_code, reason = "used by CachedOnlyResolver in follow-up commit")]
+    pub(crate) fn get_inner(&self) -> Option<&Tree<ProveNodeId>> {
+        self.inner.get()
+    }
+}
+
 impl Foldable<MerkleProofFold> for ProveTreeId {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         match self.inner.get() {
@@ -552,6 +565,13 @@ struct AccessedItems {
 /// [`ProveResolver`] wraps another resolver for [`LazyNodeId`] and [`LazyTreeId`]. It preserves the
 /// lazy resolver's hash behaviour, but caches prove-mode nodes and trees inside [`ProveNodeId`]
 /// and [`ProveTreeId`] once they are resolved.
+///
+/// Deleted nodes are communicated via an [`mpsc`] channel: the caller holds the
+/// [`mpsc::Sender`] and sends each [`ProveNodeId`] that is unlinked from the working tree.
+/// Before the fold, [`drain_deletions`] reads all pending items from the
+/// receiver into the `deleted_nodes` map so the fold can recover their per-field read flags.
+///
+/// [`drain_deletions`]: Self::drain_deletions
 #[derive(Debug)]
 pub(crate) struct ProveResolver<R> {
     /// Inner resolver that is used for [`LazyNodeId`] and [`LazyTreeId`]
@@ -559,15 +579,61 @@ pub(crate) struct ProveResolver<R> {
 
     /// Inner state for access tracking
     accessed_items: RefCell<AccessedItems>,
+
+    /// Prove-mode projections of nodes that were unlinked from the working tree during the step.
+    ///
+    /// Populated by [`drain_deletions`] before the fold begins.
+    ///
+    /// [`drain_deletions`]: Self::drain_deletions
+    deleted_nodes: RefCell<BTreeMap<Hash, ProveNodeId>>,
+
+    deletion_rx: mpsc::Receiver<ProveNodeId>,
 }
 
 impl<R> ProveResolver<R> {
     /// Start the prove resolution process.
-    pub(crate) fn start(inner: R) -> Self {
-        Self {
-            inner,
-            accessed_items: RefCell::default(),
+    ///
+    /// When `root_tree_hash` is `Some`, the hash is inserted into
+    /// `accessed_items.trees` immediately, ensuring the root tree is folded
+    /// in the proof whenever any child is touched.
+    ///
+    /// Entries are keyed by each node's [`LazyNodeId`] hash — i.e. the hash the
+    /// node had in the *initial* tree.
+    ///
+    /// Nodes created during the step (via `From<Node<..>>`) carry a dummy
+    /// `LazyNodeId` hash; if such a node is deleted in the same step it will
+    /// be stored under that dummy key. This is harmless because the
+    /// initial-tree fold only looks up hashes that actually appear in the
+    /// initial tree.
+    ///
+    /// Returns the resolver and an [`mpsc::Sender`] that the caller uses to report deleted nodes.
+    pub(crate) fn start(
+        inner: R,
+        root_tree_hash: Option<Hash>,
+    ) -> (Self, mpsc::Sender<ProveNodeId>) {
+        let (tx, rx) = mpsc::channel();
+
+        let mut accessed_items = AccessedItems::default();
+        if let Some(root_hash) = root_tree_hash {
+            accessed_items.trees.insert(root_hash);
         }
+
+        let resolver = Self {
+            inner,
+            accessed_items: RefCell::new(accessed_items),
+            deleted_nodes: RefCell::default(),
+            deletion_rx: rx,
+        };
+        (resolver, tx)
+    }
+
+    /// The wrapped resolver used for [`LazyNodeId`] / [`LazyTreeId`] resolution.
+    ///
+    /// The fold uses this directly to walk the initial tree, bypassing the access-tracking
+    /// methods.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn inner(&self) -> &R {
+        &self.inner
     }
 
     /// Whether a node with the given hash was accessed during the proof step.
@@ -580,6 +646,27 @@ impl<R> ProveResolver<R> {
     #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn was_tree_accessed(&self, hash: &Hash) -> bool {
         self.accessed_items.borrow().trees.contains(hash)
+    }
+
+    /// Drain the deletion channel, populating the `deleted_nodes` map.
+    ///
+    /// Must be called before the fold begins so that [`deleted_node`] returns
+    /// correct results.
+    ///
+    /// [`deleted_node`]: Self::deleted_node
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn drain_deletions(&self) {
+        let mut map = self.deleted_nodes.borrow_mut();
+        while let Ok(id) = self.deletion_rx.try_recv() {
+            let hash = Hash::from_foldable(id.lazy_node_id());
+            map.insert(hash, id);
+        }
+    }
+
+    /// Look up a deleted prove-mode node by its initial hash.
+    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
+    pub(crate) fn deleted_node(&self, hash: &Hash) -> Option<ProveNodeId> {
+        self.deleted_nodes.borrow().get(hash).cloned()
     }
 
     /// Track node access and resolve the underlying lazy node in one step.
@@ -1279,7 +1366,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let lazy_node_id = lazy_tree.root().expect("tree should have a root");
 
         let prove_id = lazy_node_id.clone().into_proof();
@@ -1298,7 +1385,7 @@ mod tests {
 
         let expected_hash = Hash::from_foldable(lazy_root);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let prove_id = lazy_root.clone().into_proof();
 
         // Hash before resolve (delegates to lazy path).
@@ -1326,7 +1413,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let prove_root_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1363,7 +1450,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1391,7 +1478,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let mut prove_resolver = ProveResolver::start(lazy_resolver);
+        let (mut prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let mut prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1428,7 +1515,7 @@ mod tests {
         let lazy_left_node_hash = Hash::from_foldable(lazy_left_id);
 
         // Now get the same hash via the prove resolver path.
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let prove_root_id = lazy_root.clone().into_proof();
         let prove_node = prove_resolver
             .resolve(&prove_root_id)
@@ -1458,7 +1545,7 @@ mod tests {
         let empty_lazy_tree: LazyTreeId = LazyTreeId::default();
         let prove_tree_id = empty_lazy_tree.clone().into_proof();
 
-        let prove_resolver = ProveResolver::start(lazy_resolver);
+        let (prove_resolver, _deletion_tx) = ProveResolver::start(lazy_resolver, None);
         let tree = prove_resolver
             .resolve(&prove_tree_id)
             .expect("resolving empty prove tree should succeed");
