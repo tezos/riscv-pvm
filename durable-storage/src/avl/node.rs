@@ -94,8 +94,8 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         self.hash = OnceLock::new();
     }
 
-    #[inline]
     /// A mutable reference to the left branch.
+    #[inline]
     pub(super) fn left_mut<NodeId>(
         &mut self,
         resolver: &mut impl TreeResolver<NodeId, TreeId>,
@@ -104,8 +104,8 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         resolver.resolve_mut(&mut self.left)
     }
 
-    #[inline]
     /// An immutable reference to the left branch.
+    #[inline]
     pub(super) fn left_ref<NodeId>(
         &self,
         resolver: &impl TreeResolver<NodeId, TreeId>,
@@ -113,8 +113,8 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         resolver.resolve(&self.left)
     }
 
-    #[inline]
     /// A mutable reference to the right branch.
+    #[inline]
     pub(super) fn right_mut<NodeId>(
         &mut self,
         resolver: &mut impl TreeResolver<NodeId, TreeId>,
@@ -123,8 +123,8 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         resolver.resolve_mut(&mut self.right)
     }
 
-    #[inline]
     /// An immutable reference to the right branch.
+    #[inline]
     pub(super) fn right_ref<NodeId>(
         &self,
         resolver: &impl TreeResolver<NodeId, TreeId>,
@@ -189,27 +189,33 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
         self.hash.get_or_init(|| Hash::from_foldable(self))
     }
 
+    /// The metadata of this [`Node`].
     #[inline]
+    pub(crate) fn meta(&self) -> &Atom<Meta, M> {
+        &self.meta
+    }
+
     /// The difference in heights between child branches.
+    #[inline]
     pub(crate) fn balance_factor(&self) -> i64 {
         self.meta.balance_factor
     }
 
-    #[inline]
     /// A mutable reference to the difference in heights between child branches.
+    #[inline]
     pub(super) fn balance_factor_mut(&mut self) -> &mut i64 {
         &mut self.meta.balance_factor
     }
 
-    #[inline]
     /// The [`Key`] used for determining the [`Node`].
+    #[inline]
     pub(crate) fn key(&self) -> &Key {
         &self.meta.key
     }
 
     /// Retrieve the value associated with this node.
-    #[cfg(test)]
-    pub(crate) fn value(&self) -> &Bytes<M> {
+    #[inline]
+    pub(crate) fn data(&self) -> &Bytes<M> {
         &self.data
     }
 
@@ -706,12 +712,6 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
 #[cfg(test)]
 impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
-    #[inline]
-    /// The data stored in the [`Node`].
-    pub(crate) fn data(&self) -> &Bytes<M> {
-        &self.data
-    }
-
     /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
     pub(super) fn get<'a, NodeId>(
         mut node: &'a NodeId,
