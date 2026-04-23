@@ -35,6 +35,7 @@ use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::LazyResolver;
 use crate::avl::resolver::ProveNodeId;
 use crate::avl::resolver::ProveResolver;
+use crate::avl::resolver::Resolver;
 use crate::avl::resolver::VerifyNodeId;
 use crate::avl::resolver::VerifyResolver;
 use crate::avl::resolver::VerifyTreeId;
@@ -412,7 +413,14 @@ struct VerifyImpl {
 impl<KV> MerkleLayer<KV, Verify> {
     /// Returns an immutable reference to the data stored for a given [Key].
     pub(crate) fn get(&self, key: &Key) -> Result<Option<&Bytes<Verify>>, OperationalError> {
-        self.inner.tree.get(key, &self.inner.resolver)
+        let node = self.inner.tree.get(key, &self.inner.resolver)?;
+        match node {
+            Some(node_id) => {
+                let resolved_node = self.inner.resolver.resolve(node_id)?;
+                Ok(Some(resolved_node.data()))
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -450,6 +458,7 @@ mod tests {
     use crate::avl::resolver::LazyResolver;
     use crate::avl::resolver::LazyTreeId;
     use crate::avl::resolver::ProveResolver;
+    use crate::avl::resolver::Resolver;
     use crate::avl::resolver::VerifyResolver;
     use crate::avl::resolver::VerifyTreeId;
     use crate::avl::tree::Tree;
@@ -472,13 +481,27 @@ mod tests {
 
         /// Returns an immutable reference to the data stored for a given [Key].
         pub fn get(&mut self, key: &Key) -> Result<Option<&Bytes<Normal>>, OperationalError> {
-            self.inner.tree.get(key, &self.inner.resolver)
+            let node = self.inner.tree.get(key, &self.inner.resolver)?;
+            match node {
+                Some(node_id) => {
+                    let resolved_node = self.inner.resolver.resolve(node_id)?;
+                    Ok(Some(resolved_node.data()))
+                }
+                None => Ok(None),
+            }
         }
     }
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
         fn get(&self, key: &Key) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
-            self.inner.tree.get(key, &self.inner.resolver)
+            let node = self.inner.tree.get(key, &self.inner.resolver)?;
+            match node {
+                Some(node_id) => {
+                    let resolved_node = self.inner.resolver.resolve(node_id)?;
+                    Ok(Some(resolved_node.data()))
+                }
+                None => Ok(None),
+            }
         }
     }
 
