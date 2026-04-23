@@ -503,10 +503,10 @@ mod tests {
         Database::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
-    fn new_verify_database<KV>() -> Database<KV, Verify> {
+    fn new_verify_database<KV: TestKeyValueStoreSetup>() -> Database<KV, Verify> {
         Database {
             inner: super::VerifyImpl {
-                merkle: new_verify_layer(),
+                merkle: new_verify_layer::<KV>(),
             },
         }
     }
