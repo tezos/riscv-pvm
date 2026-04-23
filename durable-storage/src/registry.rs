@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -403,16 +404,19 @@ pub(super) mod tests {
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::Key;
-    use crate::storage::TestKeyValueStore;
-    use crate::storage::TestRepo;
-    use crate::storage::setup_repo;
+    use crate::merkle_worker::BackgroundKeyValueStore;
+    use crate::storage::kv_test;
 
-    pub(super) fn setup_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
+    pub(super) fn setup_registry<KV: BackgroundKeyValueStore>(
+        repo: KV::Repo,
+    ) -> Registry<KV, Normal> {
         Registry::new(repo).expect("Registry should be created")
     }
 
-    pub(super) fn setup_size_2_registry(repo: TestRepo) -> Registry<TestKeyValueStore, Normal> {
-        let mut registry = setup_registry(repo);
+    pub(super) fn setup_size_2_registry<KV: BackgroundKeyValueStore>(
+        repo: KV::Repo,
+    ) -> Registry<KV, Normal> {
+        let mut registry = setup_registry::<KV>(repo);
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
@@ -424,8 +428,8 @@ pub(super) mod tests {
         registry
     }
 
-    fn seed_copy_move(
-        registry: &mut Registry<TestKeyValueStore, Normal>,
+    fn seed_copy_move<KV: BackgroundKeyValueStore>(
+        registry: &mut Registry<KV, Normal>,
         src_index: usize,
         dst_index: usize,
     ) -> ([(Key, &'static [u8]); 2], Key) {
@@ -456,8 +460,8 @@ pub(super) mod tests {
         (src_pairs, key_c)
     }
 
-    fn assert_pairs_present(
-        registry: &Registry<TestKeyValueStore, Normal>,
+    fn assert_pairs_present<KV: BackgroundKeyValueStore>(
+        registry: &Registry<KV, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
@@ -475,8 +479,8 @@ pub(super) mod tests {
         }
     }
 
-    fn assert_pairs_absent(
-        registry: &Registry<TestKeyValueStore, Normal>,
+    fn assert_pairs_absent<KV: BackgroundKeyValueStore>(
+        registry: &Registry<KV, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
     ) {
@@ -490,8 +494,8 @@ pub(super) mod tests {
         }
     }
 
-    pub(super) fn populate_database_with_key_value(
-        registry: &mut Registry<TestKeyValueStore, Normal>,
+    pub(super) fn populate_database_with_key_value<KV: BackgroundKeyValueStore>(
+        registry: &mut Registry<KV, Normal>,
         db_index: usize,
         key_bytes: &[u8],
         value: &[u8],
@@ -502,17 +506,15 @@ pub(super) mod tests {
             .expect("Writing to database should succeed");
     }
 
-    #[test]
-    fn test_new() {
-        let (_keepalive, repo) = setup_repo();
-        let registry = setup_registry(repo);
+    kv_test!(test_new, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_registry::<KV>(repo);
         assert!(registry.is_empty());
-    }
+    });
 
-    #[test]
-    fn test_resize() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo);
+    kv_test!(test_resize, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo);
 
         while registry.len() < 4 {
             registry
@@ -529,12 +531,11 @@ pub(super) mod tests {
         assert_eq!(registry.len(), 1);
 
         assert!(registry.resize_tick(5).is_err());
-    }
+    });
 
-    #[test]
-    fn test_get_database() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo);
+    kv_test!(test_get_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo);
 
         while registry.len() < 3 {
             registry
@@ -545,23 +546,22 @@ pub(super) mod tests {
         for i in 0..3 {
             registry.database(i).expect("Database should exist.");
         }
-    }
+    });
 
-    #[test]
-    fn test_copy_database() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+    kv_test!(test_copy_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
         let src_index = 0;
         let dst_index = 1;
 
-        let (src_pairs, key_c) = seed_copy_move(&mut registry, src_index, dst_index);
+        let (src_pairs, key_c) = seed_copy_move::<KV>(&mut registry, src_index, dst_index);
 
         registry
             .copy_database(src_index, dst_index)
             .expect("Copying should succeed");
 
-        assert_pairs_present(&registry, dst_index, &src_pairs);
+        assert_pairs_present::<KV>(&registry, dst_index, &src_pairs);
 
         assert!(
             !registry.databases[dst_index]
@@ -569,10 +569,9 @@ pub(super) mod tests {
                 .expect("Checking destination should succeed"),
             "Key C should not exist in destination after copy."
         );
-    }
+    });
 
-    #[test]
-    fn test_database_operations_invalid_index() {
+    kv_test!(test_database_operations_invalid_index, KV: BackgroundKeyValueStore, {
         macro_rules! assert_invalid_index_error {
             ($result:expr, $operation:expr, $direction:expr) => {
                 assert!(
@@ -589,8 +588,8 @@ pub(super) mod tests {
             };
         }
 
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
         // Test copy operations with invalid indices
         assert_invalid_index_error!(registry.copy_database(0, 2), "copy", "to");
@@ -604,56 +603,53 @@ pub(super) mod tests {
 
         // Test clear operation with invalid index
         assert_invalid_index_error!(registry.clear_database(2), "clear", "");
-    }
+    });
 
-    #[test]
-    fn test_move_database() {
+    kv_test!(test_move_database, KV: BackgroundKeyValueStore, {
         // Test that the source database is emptied and the destination database
         // has all the data, and any data previously in the destination is lost.
 
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
         let src_index = 1;
         let dst_index = 0;
 
-        let (src_pairs, _key_c) = seed_copy_move(&mut registry, src_index, dst_index);
+        let (src_pairs, _key_c) = seed_copy_move::<KV>(&mut registry, src_index, dst_index);
 
         registry
             .move_database(src_index, dst_index)
             .expect("Moving should succeed");
 
-        assert_pairs_present(&registry, dst_index, &src_pairs);
-        assert_pairs_absent(&registry, src_index, &src_pairs);
-    }
+        assert_pairs_present::<KV>(&registry, dst_index, &src_pairs);
+        assert_pairs_absent::<KV>(&registry, src_index, &src_pairs);
+    });
 
-    #[test]
-    fn test_database_operations_same_index() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+    kv_test!(test_database_operations_same_index, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
-        let (src_pairs, _key_c) = seed_copy_move(&mut registry, 0, 1);
+        let (src_pairs, _key_c) = seed_copy_move::<KV>(&mut registry, 0, 1);
 
         // Test copy with same index
         registry
             .copy_database(0, 0)
             .expect("Copying to same index should succeed");
-        assert_pairs_present(&registry, 0, &src_pairs);
+        assert_pairs_present::<KV>(&registry, 0, &src_pairs);
 
         // Test move with same index
         registry
             .move_database(0, 0)
             .expect("Moving to same index should succeed");
-        assert_pairs_present(&registry, 0, &src_pairs);
-    }
+        assert_pairs_present::<KV>(&registry, 0, &src_pairs);
+    });
 
-    #[test]
-    fn test_clear_database() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+    kv_test!(test_clear_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
         let db_index = 0;
-        populate_database_with_key_value(&mut registry, db_index, &[1], b"some_value");
+        populate_database_with_key_value::<KV>(&mut registry, db_index, &[1], b"some_value");
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
         registry
@@ -666,7 +662,7 @@ pub(super) mod tests {
                 .expect("Checking database should succeed"),
             "Key should not exist after clearing the database."
         );
-    }
+    });
 }
 
 #[cfg(feature = "rocksdb")]
@@ -707,7 +703,7 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_commit_empty() {
         let (_keepalive, repo) = setup_repo();
-        let registry = setup_registry(repo);
+        let registry = setup_registry::<TestKeyValueStore>(repo);
 
         let expected_db_hashes: Vec<CommitId> = Vec::new();
         let expected_root = CommitId::from(Hash::hash_bytes(&[]));
@@ -721,12 +717,12 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_commit_size_1() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo);
+        let mut registry = setup_registry::<TestKeyValueStore>(repo);
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"singleton");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
             .databases
@@ -744,12 +740,12 @@ mod rocksdb_tests {
     #[test]
     fn test_committing_identical_registry_succeeds() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo);
+        let mut registry = setup_registry::<TestKeyValueStore>(repo);
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"singleton");
 
         let first_commit = registry.commit().expect("First commit should succeed");
         let second_commit = registry.commit().expect("Second commit should succeed");
@@ -763,10 +759,10 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_commit_writes_manifest() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo);
+        let mut registry = setup_size_2_registry::<TestKeyValueStore>(repo);
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"alpha");
-        populate_database_with_key_value(&mut registry, 1, &[2], b"beta");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 1, &[2], b"beta");
 
         let expected_db_hashes: Vec<super::CommitId> = registry
             .databases
@@ -786,7 +782,7 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_checkout_roundtrip_empty() {
         let (_keepalive, repo) = setup_repo();
-        let registry = setup_registry(repo.clone());
+        let registry = setup_registry::<TestKeyValueStore>(repo.clone());
 
         let root_commit = registry.commit().expect("Commit should succeed");
         let checked_out = Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit)
@@ -802,10 +798,10 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_checkout_roundtrip_populated() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry(repo.clone());
+        let mut registry = setup_size_2_registry::<TestKeyValueStore>(repo.clone());
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"alpha");
-        populate_database_with_key_value(&mut registry, 1, &[2], b"beta");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 1, &[2], b"beta");
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
@@ -837,12 +833,12 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_checkout_missing_database_commit_fails() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo.clone());
+        let mut registry = setup_registry::<TestKeyValueStore>(repo.clone());
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"singleton");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"singleton");
 
         let root_commit = registry.commit().expect("Commit should succeed");
         let manifest_path = repo.registry_commit_file(&root_commit);
@@ -861,12 +857,12 @@ mod rocksdb_tests {
     #[test]
     fn test_registry_checkout_detects_manifest_root_mismatch() {
         let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry(repo.clone());
+        let mut registry = setup_registry::<TestKeyValueStore>(repo.clone());
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value(&mut registry, 0, &[1], b"value");
+        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"value");
 
         let root_commit = registry.commit().expect("Commit should succeed");
         let manifest_path = repo.registry_commit_file(&root_commit);
