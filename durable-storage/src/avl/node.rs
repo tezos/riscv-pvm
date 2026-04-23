@@ -208,7 +208,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     }
 
     /// Retrieve the value associated with this node.
-    #[cfg(all(test, feature = "rocksdb"))]
+    #[cfg(test)]
     pub(crate) fn value(&self) -> &Bytes<M> {
         &self.data
     }

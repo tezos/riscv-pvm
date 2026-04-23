@@ -110,19 +110,6 @@ cfg_if::cfg_if! {
 
             (tmpdir, dir_manager)
         }
-    } else {
-        /// Test key-value store backend used when the `rocksdb` feature is disabled.
-        pub(crate) type TestKeyValueStore = crate::storage::in_memory::InMemoryKeyValueStore;
-
-        /// Repository type required to initialise [`TestKeyValueStore`].
-        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
-
-        /// Create a test repository for [`TestKeyValueStore`].
-        ///
-        /// Returns `((), repo)` for signature compatibility with the `rocksdb` branch.
-        pub(crate) fn setup_repo() -> ((), TestRepo) {
-            ((), in_memory::InMemoryRepo::default())
-        }
     }
 }
 
