@@ -94,6 +94,11 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         self.hash = OnceLock::new();
     }
 
+    /// Direct access to the left child identifier.
+    pub(crate) fn left_id(&self) -> &TreeId {
+        &self.left
+    }
+
     /// A mutable reference to the left branch.
     #[inline]
     pub(super) fn left_mut<NodeId>(
@@ -111,6 +116,11 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         resolver: &impl TreeResolver<NodeId, TreeId>,
     ) -> Result<&Tree<NodeId>, OperationalError> {
         resolver.resolve(&self.left)
+    }
+
+    /// Direct access to the right child identifier.
+    pub(crate) fn right_id(&self) -> &TreeId {
+        &self.right
     }
 
     /// A mutable reference to the right branch.
