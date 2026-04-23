@@ -95,6 +95,18 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
     }
 
     #[inline]
+    /// Direct access to the left child identifier.
+    pub(crate) fn left_id(&self) -> &TreeId {
+        &self.left
+    }
+
+    #[inline]
+    /// Direct access to the right child identifier.
+    pub(crate) fn right_id(&self) -> &TreeId {
+        &self.right
+    }
+
+    #[inline]
     /// A mutable reference to the left branch.
     pub(super) fn left_mut<NodeId>(
         &mut self,
@@ -202,9 +214,21 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     }
 
     #[inline]
+    /// The metadata of this node.
+    pub(crate) fn meta(&self) -> &Atom<Meta, M> {
+        &self.meta
+    }
+
+    #[inline]
     /// The [`Key`] used for determining the [`Node`].
     pub(crate) fn key(&self) -> &Key {
         &self.meta.key
+    }
+
+    #[inline]
+    /// The data stored in this node.
+    pub(crate) fn data(&self) -> &Bytes<M> {
+        &self.data
     }
 
     /// Retrieve the value associated with this node.
@@ -706,12 +730,6 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
 #[cfg(test)]
 impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
-    #[inline]
-    /// The data stored in the [`Node`].
-    pub(crate) fn data(&self) -> &Bytes<M> {
-        &self.data
-    }
-
     /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
     pub(super) fn get<'a, NodeId>(
         mut node: &'a NodeId,

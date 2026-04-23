@@ -46,7 +46,6 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::SuspendedResult;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
@@ -446,6 +445,43 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
     }
 }
 
+/// Resolver that only accesses already-cached prove-mode values.
+///
+/// Returns [`OperationalError::ResolverInvariantViolated`] if a node or tree has not been
+/// resolved yet, since callers are expected to only traverse pre-resolved subtrees.
+pub(crate) struct CachedOnlyResolver;
+
+impl Resolver<ProveNodeId, Node<ProveTreeId, Prove<'static>>> for CachedOnlyResolver {
+    fn resolve<'a>(
+        &self,
+        id: &'a ProveNodeId,
+    ) -> Result<&'a Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        id.cached_node()
+            .ok_or(OperationalError::ResolverInvariantViolated)
+    }
+
+    fn resolve_mut<'a>(
+        &mut self,
+        _id: &'a mut ProveNodeId,
+    ) -> Result<&'a mut Node<ProveTreeId, Prove<'static>>, OperationalError> {
+        Err(OperationalError::ResolverInvariantViolated)
+    }
+}
+
+impl Resolver<ProveTreeId, Tree<ProveNodeId>> for CachedOnlyResolver {
+    fn resolve<'a>(&self, id: &'a ProveTreeId) -> Result<&'a Tree<ProveNodeId>, OperationalError> {
+        id.get_inner()
+            .ok_or(OperationalError::ResolverInvariantViolated)
+    }
+
+    fn resolve_mut<'a>(
+        &mut self,
+        _id: &'a mut ProveTreeId,
+    ) -> Result<&'a mut Tree<ProveNodeId>, OperationalError> {
+        Err(OperationalError::ResolverInvariantViolated)
+    }
+}
+
 /// Identifier for a node resolved in [`Prove`] mode.
 ///
 /// This wrapper keeps the original [`LazyNodeId`] to allow delegating hash computation and
@@ -474,7 +510,6 @@ impl ProveNodeId {
     ///
     /// Used by the `MerkleLayer`-level fold to extract per-field read flags from a node that
     /// was resolved during the proof step.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn cached_node(&self) -> Option<&Node<ProveTreeId, Prove<'static>>> {
         self.inner.get().map(|rc| rc.as_ref())
     }
@@ -489,15 +524,6 @@ impl Foldable<HashFold> for ProveNodeId {
         match self.inner.get() {
             Some(inner) => *inner.hash(),
             None => self.node.fold(builder),
-        }
-    }
-}
-
-impl Foldable<MerkleProofFold> for ProveNodeId {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        match self.inner.get() {
-            Some(inner) => inner.as_ref().fold(builder),
-            None => builder.into_blind(Hash::from_foldable(&self.node)),
         }
     }
 }
@@ -534,18 +560,8 @@ impl Foldable<HashFold> for ProveTreeId {
 }
 
 impl ProveTreeId {
-    #[expect(dead_code, reason = "used by CachedOnlyResolver in follow-up commit")]
     pub(crate) fn get_inner(&self) -> Option<&Tree<ProveNodeId>> {
         self.inner.get()
-    }
-}
-
-impl Foldable<MerkleProofFold> for ProveTreeId {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        match self.inner.get() {
-            Some(inner) => inner.fold(builder),
-            None => builder.into_blind(Hash::from_foldable(&self.tree)),
-        }
     }
 }
 
@@ -631,19 +647,16 @@ impl<R> ProveResolver<R> {
     ///
     /// The fold uses this directly to walk the initial tree, bypassing the access-tracking
     /// methods.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn inner(&self) -> &R {
         &self.inner
     }
 
     /// Whether a node with the given hash was accessed during the proof step.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn was_node_accessed(&self, hash: &Hash) -> bool {
         self.accessed_items.borrow().nodes.contains(hash)
     }
 
     /// Whether a tree with the given hash was accessed during the proof step.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn was_tree_accessed(&self, hash: &Hash) -> bool {
         self.accessed_items.borrow().trees.contains(hash)
     }
@@ -654,7 +667,6 @@ impl<R> ProveResolver<R> {
     /// correct results.
     ///
     /// [`deleted_node`]: Self::deleted_node
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn drain_deletions(&self) {
         let mut map = self.deleted_nodes.borrow_mut();
         while let Ok(id) = self.deletion_rx.try_recv() {
@@ -664,7 +676,6 @@ impl<R> ProveResolver<R> {
     }
 
     /// Look up a deleted prove-mode node by its initial hash.
-    #[expect(dead_code, reason = "used by MerkleLayer fold in follow-up commit")]
     pub(crate) fn deleted_node(&self, hash: &Hash) -> Option<ProveNodeId> {
         self.deleted_nodes.borrow().get(hash).cloned()
     }

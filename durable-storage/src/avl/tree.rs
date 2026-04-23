@@ -25,15 +25,15 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
-use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
+use super::resolver::CachedOnlyResolver;
 use super::resolver::ProveNodeId;
+use super::resolver::Resolver;
 use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
@@ -223,7 +223,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// A reference to the root [`Node`].
-    pub(super) fn root(&self) -> Option<&NodeId> {
+    pub(crate) fn root(&self) -> Option<&NodeId> {
         self.0.as_ref()
     }
 
@@ -364,6 +364,32 @@ impl<NodeId> Tree<NodeId> {
     }
 }
 
+impl Tree<ProveNodeId> {
+    /// Find the `ProveNodeId` for a given key by traversing the tree.
+    ///
+    /// Returns `None` if the key is not present.
+    ///
+    /// Only traverses already-resolved nodes. Returns an error if an
+    /// unresolved node or tree is encountered.
+    pub(crate) fn get_resolved(&self, key: &Key) -> Result<Option<&ProveNodeId>, OperationalError> {
+        let resolver = CachedOnlyResolver;
+        let mut current = self.root();
+        while let Some(node) = current {
+            let resolved_node = resolver.resolve(node)?;
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Ok(Some(node)),
+                Ordering::Greater => {
+                    current = resolved_node.left_ref(&resolver)?.root();
+                }
+                Ordering::Less => {
+                    current = resolved_node.right_ref(&resolver)?.root();
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
 impl<C> Decode<C> for Tree<LazyNodeId> {
     fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
         let root_hash: Option<Hash> = Decode::decode(decoder)?;
@@ -377,23 +403,6 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
 
         let present = self.0.is_some();
         node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
-
-        if let Some(inner) = self.0.as_ref() {
-            node.add(inner);
-        }
-
-        node.done()
-    }
-}
-
-impl Foldable<MerkleProofFold> for Tree<ProveNodeId> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let mut node = builder.into_node_fold();
-
-        let present = self.0.is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should never fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node.add(&bool_leaf);
 
         if let Some(inner) = self.0.as_ref() {
             node.add(inner);
