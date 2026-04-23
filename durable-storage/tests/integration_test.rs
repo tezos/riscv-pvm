@@ -276,7 +276,7 @@ fn test_durable_storage_inner(operations: Vec<Operation>) {
             let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
         } else {
             use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
-            let repo = InMemoryRepo;
+            let repo = InMemoryRepo::default();
         }
     }
 

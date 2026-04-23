@@ -11,7 +11,7 @@ use octez_riscv_data::hash::Hash;
 
 /// [`CommitId`]'s are used to generate commits & to checkout specific commits
 /// from a `DirectoryManager`.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Hash)]
 pub struct CommitId(Hash);
 
 impl CommitId {

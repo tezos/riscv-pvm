@@ -121,7 +121,7 @@ cfg_if::cfg_if! {
         ///
         /// Returns `((), repo)` for signature compatibility with the `rocksdb` branch.
         pub(crate) fn setup_repo() -> ((), TestRepo) {
-            ((), in_memory::InMemoryRepo)
+            ((), in_memory::InMemoryRepo::default())
         }
     }
 }
@@ -143,7 +143,7 @@ cfg_if::cfg_if! {
             type Keepalive = ();
 
             fn setup_repo() -> ((), in_memory::InMemoryRepo) {
-                ((), in_memory::InMemoryRepo)
+                ((), in_memory::InMemoryRepo::default())
             }
         }
 

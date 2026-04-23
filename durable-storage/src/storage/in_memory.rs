@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -18,8 +19,11 @@ use crate::errors::OperationalError;
 /// Repository used by [`InMemoryKeyValueStore`].
 ///
 /// Will never write to disk.
-#[derive(Debug, Copy, Clone)]
-pub struct InMemoryRepo;
+#[derive(Debug, Default)]
+pub struct InMemoryRepo {
+    #[cfg(test)]
+    commits: RwLock<HashMap<crate::commit::CommitId, InMemorySnapshot>>,
+}
 
 /// In-memory key-value store
 #[derive(Debug, Default)]
@@ -185,5 +189,64 @@ impl KeyValueStore for InMemoryKeyValueStore {
         store.remove(key.as_ref());
 
         Ok(())
+    }
+}
+
+/// Test-only snapshot repository for [`InMemoryRepo`]
+#[cfg(test)]
+#[derive(Debug)]
+struct InMemorySnapshot {
+    blobs: HashMap<Bytes, Bytes>,
+    values: HashMap<Bytes, BytesMut>,
+}
+
+#[cfg(test)]
+impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
+    fn commit_to_path(&self, _path: &std::path::Path) -> Result<(), OperationalError> {
+        unimplemented!("In-memory store cannot commit to disk")
+    }
+
+    fn commit(
+        &self,
+        repo: &InMemoryRepo,
+        id: &crate::commit::CommitId,
+    ) -> Result<(), OperationalError> {
+        let blobs = self
+            .blobs
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .clone();
+        let values = self
+            .values
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .clone();
+        repo.commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .insert(*id, InMemorySnapshot { blobs, values });
+        Ok(())
+    }
+
+    fn checkout_from_path(
+        _source_path: &std::path::Path,
+        _working_path: tempfile::TempDir,
+    ) -> Result<Self, OperationalError> {
+        unimplemented!("In-memory store cannot check out from disk")
+    }
+
+    fn checkout(
+        repo: &InMemoryRepo,
+        id: &crate::commit::CommitId,
+    ) -> Result<Self, OperationalError> {
+        let commits = repo
+            .commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+        let snapshot = commits.get(id).ok_or(OperationalError::CommitNotFound)?;
+        Ok(Self {
+            blobs: RwLock::new(snapshot.blobs.clone()),
+            values: RwLock::new(snapshot.values.clone()),
+        })
     }
 }
