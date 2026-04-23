@@ -37,6 +37,7 @@ use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
+use crate::avl::resolver::ProveResolver;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -55,8 +56,8 @@ impl Tree<LazyNodeId> {
     /// Converts the [`Tree`] to [`Prove`] mode.
     ///
     /// [`Prove`]: octez_riscv_data::mode::Prove
-    pub fn into_proof(self) -> Tree<ProveNodeId> {
-        Tree(self.0.map(|id| id.into_proof()))
+    pub(crate) fn into_proof<R>(self, resolver: &ProveResolver<R>) -> Tree<ProveNodeId> {
+        Tree(self.0.map(|id| id.into_proof(resolver)))
     }
 }
 

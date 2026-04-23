@@ -1410,7 +1410,7 @@ mod tests {
             assert_eq!(node.hash(), loaded_node.hash());
             assert_eq!(node.balance_factor(), loaded_node.balance_factor());
             assert_eq!(node.key(), loaded_node.key());
-            assert_eq!(node.value(), loaded_node.value());
+            assert_eq!(node.data(), loaded_node.data());
         }
 
         let root_hash = merkle_layer.hash();
@@ -1558,13 +1558,14 @@ mod tests {
             .expect("setting node should succeed");
 
         // `Prove` mode
-        let prove_tree = normal_ml.inner.tree.into_proof();
+        let resolver = LazyResolver::new(normal_ml.inner.persistence.clone());
+        let resolver = ProveResolver::start(resolver);
+        let prove_tree = normal_ml.inner.tree.into_proof(&resolver);
+
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver,
             },
         };
 
@@ -1698,13 +1699,14 @@ mod tests {
 
         let normal_hash = normal_ml.hash();
 
-        let prove_tree = normal_ml.inner.tree.into_proof();
+        let resolver = LazyResolver::new(normal_ml.inner.persistence.clone());
+        let resolver = ProveResolver::start(resolver);
+        let prove_tree = normal_ml.inner.tree.into_proof(&resolver);
+
         let prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver,
             },
         };
 
@@ -1731,13 +1733,14 @@ mod tests {
         let initial_hash = normal_ml.hash();
 
         // ---- Prove: read key then overwrite it ----
-        let prove_tree = normal_ml.inner.tree.into_proof();
+        let resolver = LazyResolver::new(normal_ml.inner.persistence.clone());
+        let resolver = ProveResolver::start(resolver);
+        let prove_tree = normal_ml.inner.tree.into_proof(&resolver);
+
         let mut prove_ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 tree: prove_tree,
-                resolver: ProveResolver::start(LazyResolver::new(
-                    normal_ml.inner.persistence.clone(),
-                )),
+                resolver,
             },
         };
 
