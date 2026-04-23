@@ -93,6 +93,9 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
             .expect("Hit error on setting a value in setup.");
     }
 
+    // A channel is needed for deletions in the AVL tree during Proof mode.
+    // This is not needed for benchmarking, so we can ignore the receiver.
+    let (deletion_tx, _) = std::sync::mpsc::channel();
     c.bench_function("Bench AVL tree with operations", |b| {
         b.iter_batched(
             || get_operations_batch(&mut rng, keys.as_slice(), OPERATIONS_PER_SAMPLE),
@@ -104,7 +107,7 @@ fn bench_avl_tree_operations(c: &mut Criterion) {
                                 .expect("Hit error on setting a value in bench.");
                         }
                         Operation::Delete(key) => {
-                            tree.delete(&key, &mut resolver)
+                            tree.delete(&key, &mut resolver, &deletion_tx)
                                 .expect("Hit error on deleting a value in bench.");
                         }
                     }

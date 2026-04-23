@@ -19,6 +19,7 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
@@ -202,6 +203,7 @@ impl MerkleLayerMode for Prove<'static> {
             inner: ProveImpl {
                 tree: this.inner.tree.clone(),
                 resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         }
     }
@@ -214,7 +216,9 @@ impl MerkleLayerMode for Prove<'static> {
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
-        this.inner.tree.delete(key, &mut this.inner.resolver)?;
+        this.inner
+            .tree
+            .delete(key, &mut this.inner.resolver, &this.inner.deletion_tx)?;
         Ok(())
     }
 
@@ -249,6 +253,7 @@ impl MerkleLayerMode for Verify {
             inner: VerifyImpl {
                 tree: this.inner.tree.clone(),
                 resolver: VerifyResolver,
+                deletion_tx: dead_sender(),
             },
         }
     }
@@ -261,7 +266,9 @@ impl MerkleLayerMode for Verify {
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
-        this.inner.tree.delete(key, &mut this.inner.resolver)?;
+        this.inner
+            .tree
+            .delete(key, &mut this.inner.resolver, &this.inner.deletion_tx)?;
         Ok(())
     }
 
@@ -302,6 +309,16 @@ struct NormalImpl<KV> {
     tree: Tree<LazyNodeId>,
     persistence: Arc<KV>,
     resolver: LazyResolver<KV>,
+    deletion_tx: mpsc::Sender<LazyNodeId>,
+}
+
+/// Create a sender with a dropped receiver.
+///
+/// Sends through this sender fail silently, making it suitable for callers that do not need to
+/// observe deletions.
+fn dead_sender<T>() -> mpsc::Sender<T> {
+    let (tx, _) = mpsc::channel();
+    tx
 }
 
 impl<KV> NormalImpl<KV> {
@@ -311,6 +328,7 @@ impl<KV> NormalImpl<KV> {
             tree: Tree::default(),
             persistence: persistence.clone(),
             resolver: LazyResolver::new(persistence),
+            deletion_tx: dead_sender(),
         }
     }
 
@@ -320,6 +338,7 @@ impl<KV> NormalImpl<KV> {
             tree: self.tree.clone(),
             persistence: persistence.clone(),
             resolver: LazyResolver::new(persistence),
+            deletion_tx: dead_sender(),
         }
     }
 
@@ -333,7 +352,8 @@ impl<KV> NormalImpl<KV> {
     where
         KV: KeyValueStore,
     {
-        self.tree.delete(key, &mut self.resolver)?;
+        self.tree
+            .delete(key, &mut self.resolver, &self.deletion_tx)?;
         Ok(())
     }
 
@@ -367,6 +387,7 @@ impl<KV> NormalImpl<KV> {
             tree,
             persistence,
             resolver,
+            deletion_tx: dead_sender(),
         })
     }
 
@@ -384,12 +405,14 @@ impl<KV> NormalImpl<KV> {
 struct ProveImpl<KV> {
     tree: Tree<ProveNodeId>,
     resolver: ProveResolver<LazyResolver<KV>>,
+    deletion_tx: mpsc::Sender<ProveNodeId>,
 }
 
 #[derive(Debug)]
 struct VerifyImpl {
     tree: Tree<VerifyNodeId>,
     resolver: VerifyResolver,
+    deletion_tx: mpsc::Sender<VerifyNodeId>,
 }
 
 #[cfg(test)]
@@ -411,6 +434,7 @@ mod tests {
 
     use super::MerkleLayer;
     use super::ProveImpl;
+    use super::dead_sender;
     use crate::avl::node::Node;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::LazyNodeId;
@@ -460,6 +484,7 @@ mod tests {
                 inner: VerifyImpl {
                     tree,
                     resolver: VerifyResolver,
+                    deletion_tx: dead_sender(),
                 },
             }
         }
@@ -1441,6 +1466,7 @@ mod tests {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         ml.delete(&key)
@@ -1469,6 +1495,7 @@ mod tests {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         for (key, datum) in keys.iter().zip(data.iter()) {
@@ -1495,6 +1522,7 @@ mod tests {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         let cow_data = "🐮<(prove a moo!)";
@@ -1537,6 +1565,7 @@ mod tests {
             inner: ProveImpl {
                 tree: Tree::default(),
                 resolver: ProveResolver::start(LazyResolver::new(persistence)),
+                deletion_tx: dead_sender(),
             },
         };
         ml.set(&key, b"partial")
@@ -1578,6 +1607,7 @@ mod tests {
                 resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
+                deletion_tx: dead_sender(),
             },
         };
 
@@ -1718,6 +1748,7 @@ mod tests {
                 resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
+                deletion_tx: dead_sender(),
             },
         };
 
@@ -1751,6 +1782,7 @@ mod tests {
                 resolver: ProveResolver::start(LazyResolver::new(
                     normal_ml.inner.persistence.clone(),
                 )),
+                deletion_tx: dead_sender(),
             },
         };
 

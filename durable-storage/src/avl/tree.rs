@@ -6,6 +6,7 @@
 
 use std::cmp::Ordering;
 use std::sync::LazyLock;
+use std::sync::mpsc;
 
 use bincode::Decode;
 use bincode::de::Decoder;
@@ -87,11 +88,15 @@ impl<NodeId: FromProof> Tree<NodeId> {
 impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
+    /// Each node unlinked from the tree is sent through `deletion_tx`. When no observer is
+    /// needed the receiver can simply be dropped. This field is only relevant for `Proof` mode.
+    ///
     /// Returns true if the [`Tree`] has shrunk in size.
     pub fn delete<TreeId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        deletion_tx: &mpsc::Sender<NodeId>,
     ) -> Result<bool, OperationalError>
     where
         NodeId: Clone,
@@ -110,33 +115,45 @@ impl<NodeId> Tree<NodeId> {
                 resolved_node.right_ref(resolver)?.root(),
             ) {
                 (None, None) => {
+                    let _ = deletion_tx.send(node.clone());
                     self.take();
                     Ok(true)
                 }
                 (Some(left), None) => {
-                    *node = left.clone();
+                    let replacement = left.clone();
+                    let _ = deletion_tx.send(node.clone());
+                    *node = replacement;
                     Ok(true)
                 }
                 (None, Some(right)) => {
-                    *node = right.clone();
+                    let replacement = right.clone();
+                    let _ = deletion_tx.send(node.clone());
+                    *node = replacement;
                     Ok(true)
                 }
                 (Some(_), Some(_)) => {
                     let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
+                    let _ = deletion_tx.send(node.clone());
                     *node = new_node;
                     Ok(shrank)
                 }
             },
             Ordering::Greater => {
                 let node_mut = resolver.resolve_mut(node)?;
-                let left_shrank = node_mut.left_mut(resolver)?.delete(key, resolver)?;
+                let left_shrank =
+                    node_mut
+                        .left_mut(resolver)?
+                        .delete(key, resolver, deletion_tx)?;
                 *node_mut.balance_factor_mut() += if left_shrank { 1 } else { 0 };
                 self.rebalance(resolver)?;
                 Ok(old_balance_factor.abs() == 1 && self.balance_factor(resolver)? == 0)
             }
             Ordering::Less => {
                 let node_mut = resolver.resolve_mut(node)?;
-                let right_shrank = node_mut.right_mut(resolver)?.delete(key, resolver)?;
+                let right_shrank =
+                    node_mut
+                        .right_mut(resolver)?
+                        .delete(key, resolver, deletion_tx)?;
                 *node_mut.balance_factor_mut() -= if right_shrank { 1 } else { 0 };
                 self.rebalance(resolver)?;
                 Ok(old_balance_factor.abs() == 1 && self.balance_factor(resolver)? == 0)
@@ -968,6 +985,7 @@ mod tests {
             let mut tree: Tree<ArcNodeId> = Default::default();
             let mut reference: BTreeMap<Key, bytes::Bytes> = BTreeMap::new();
             let mut resolver = ArcResolver;
+            let (deletion_tx, _) = std::sync::mpsc::channel();
             for operation in operations {
                 match operation {
                     Operation::Get(key) => {
@@ -994,7 +1012,7 @@ mod tests {
                         reference.insert(key, value);
                     }
                     Operation::Delete(key) => {
-                        tree.delete(&key, &mut resolver)?;
+                        tree.delete(&key, &mut resolver, &deletion_tx)?;
                         reference.remove(&key);
                     }
                 }
