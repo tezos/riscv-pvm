@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -404,17 +405,25 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
+    #[cfg(feature = "rocksdb")]
+    use super::DatabaseMode;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
-    use crate::storage::TestKeyValueStore;
+    use crate::merkle_worker::BackgroundKeyValueStore;
+    #[cfg(feature = "rocksdb")]
     use crate::storage::TestRepo;
+    use crate::storage::kv_test;
+    #[cfg(feature = "rocksdb")]
     use crate::storage::setup_repo;
 
-    fn new_database(handle: &Handle, repo: TestRepo) -> Database<TestKeyValueStore, Normal> {
-        Database::try_new(handle, &repo).expect("Creating a test database should succeed")
+    fn new_database<KV: BackgroundKeyValueStore>(
+        handle: &Handle,
+        repo: &KV::Repo,
+    ) -> Database<KV, Normal> {
+        Database::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
     #[cfg(feature = "rocksdb")]
@@ -440,8 +449,8 @@ mod tests {
     }
 
     #[cfg(feature = "rocksdb")]
-    fn insert_entries(
-        database: &mut PersistentDatabase,
+    fn insert_entries<KV: BackgroundKeyValueStore, M: DatabaseMode>(
+        database: &mut Database<KV, M>,
         entries: Vec<(Vec<u8>, Vec<u8>)>,
     ) -> std::collections::HashMap<Key, Bytes> {
         let mut expected = std::collections::HashMap::new();
@@ -496,19 +505,19 @@ mod tests {
                 checked_out.assert_database_value(&key, value.as_ref());
             }
         }
+    }
 
-        #[test]
-        fn test_database_delete(
+    kv_test!(test_database_delete, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
             keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
-        ) {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -523,11 +532,10 @@ mod tests {
                 assert_ne!(before, after);
                 prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
             }
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_database_delete_nonexistent() {
+    kv_test!(test_database_delete_nonexistent, KV: BackgroundKeyValueStore, {
         // Receiving the hash requires a separate worker thread
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -535,8 +543,8 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         database
             .set(
@@ -559,7 +567,7 @@ mod tests {
         // Ensure the root hash is unchanged
         let after = database.hash().expect("Hash should be calculated");
         assert_eq!(before, after);
-    }
+    });
 
     #[cfg(feature = "rocksdb")]
     #[test]
@@ -670,17 +678,17 @@ mod tests {
         ));
     }
 
-    proptest! {
-        #[test]
-        fn test_database_exists(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_exists, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             let mut seen = HashSet::new();
 
@@ -697,20 +705,22 @@ mod tests {
                     .expect("Writing should succeed");
                 prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
             }
-        }
+        });
+    });
 
-        #[test]
-        fn test_database_hash(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100), ) {
-
-            // Needs a thread for sending and a thread for receiving
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_hash, KV: BackgroundKeyValueStore, {
+        // Needs a thread for sending and a thread for receiving
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             let mut seen = HashSet::new();
 
@@ -733,19 +743,18 @@ mod tests {
                     prop_assert_ne!(before, after);
                 }
             }
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_database_hash_revert() {
+    kv_test!(test_database_hash_revert, KV: BackgroundKeyValueStore, {
         // Needs a thread for sending and a thread for receiving
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
         let original_data = [1, 2, 3];
@@ -772,18 +781,19 @@ mod tests {
             .expect("Writing should succeed");
         let reverted = database.hash().expect("Hash should be calculated");
         assert_eq!(before, reverted);
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_database_read(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                              data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100), ) {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_read, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -846,19 +856,20 @@ mod tests {
                 prop_assert_eq!(read, small_buffer.len());
                 prop_assert_eq!(&small_buffer, &data[0..3]);
             }
-        }
-    }
+        });
+    });
 
-    proptest! {
-        #[test]
-        fn test_database_read_bytes(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                    data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100), ) {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_read_bytes, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -889,17 +900,16 @@ mod tests {
                     .expect("A partial read should succeed");
                 prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
             }
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_database_read_bytes_no_key() {
+    kv_test!(test_database_read_bytes_no_key, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
 
@@ -908,16 +918,15 @@ mod tests {
             database.read_bytes(&key, 0, 1),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
-    }
+    });
 
-    #[test]
-    fn test_database_read_no_key() {
+    kv_test!(test_database_read_no_key, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let mut read_data: [u8; 100] = [42; 100];
@@ -929,16 +938,15 @@ mod tests {
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
         assert_eq!(read_data_before, read_data);
-    }
+    });
 
-    #[test]
-    fn test_database_read_bytes_io_too_large() {
+    kv_test!(test_database_read_bytes_io_too_large, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
 
@@ -950,16 +958,15 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
-    }
+    });
 
-    #[test]
-    fn test_database_read_io_too_large() {
+    kv_test!(test_database_read_io_too_large, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let mut read_data: Vec<u8> = vec![42; MAX_FILE_CHUNK_SIZE + 1];
@@ -974,19 +981,19 @@ mod tests {
             ))
         ));
         assert_eq!(read_data_before, read_data);
-    }
+    });
 
-    proptest! {
-        #[test]
-        fn test_database_value_length(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-                                      data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_value_length, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             for (key, data) in keys.iter().zip(data.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -1002,22 +1009,22 @@ mod tests {
                     data.len()
                 );
             }
-        }
-    }
+        });
+    });
 
-    proptest! {
-        #[test]
-        fn test_database_write(keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..10),
-                               offsets in prop::collection::vec(0..10usize, 0..10),
-                               initial_data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
-                               patch in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10), ) {
-
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("Creating a Tokio runtime should succeed");
-            let handle = runtime.handle();
-            let (_keepalive, repo) = setup_repo();
-            let mut database = new_database(handle, repo);
+    kv_test!(test_database_write, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        proptest!(|(
+            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..10),
+            offsets in prop::collection::vec(0..10usize, 0..10),
+            initial_data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
+            patch in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10)
+        )| {
+            let mut database = new_database::<KV>(handle, &repo);
 
             for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
                 let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
@@ -1036,17 +1043,16 @@ mod tests {
                     prop_assert_eq!(database.value_length(&key).unwrap(), expected_length);
                 }
             }
-        }
-    }
+        });
+    });
 
-    #[test]
-    fn test_database_write_new_nonzero_offset() {
+    kv_test!(test_database_write_new_nonzero_offset, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[]);
@@ -1060,16 +1066,15 @@ mod tests {
             ),
             "Values that don't exist are implicitly zero in size when written. Got {res:?}"
         );
-    }
+    });
 
-    #[test]
-    fn test_database_write_io_too_large() {
+    kv_test!(test_database_write_io_too_large, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(vec![0; MAX_FILE_CHUNK_SIZE + 1].as_slice());
@@ -1083,16 +1088,15 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
-    }
+    });
 
-    #[test]
-    fn test_database_write_no_truncation() {
+    kv_test!(test_database_write_no_truncation, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::from("a long value");
@@ -1109,16 +1113,15 @@ mod tests {
         let mut output = vec![0; data.len()];
         assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
         assert_eq!(output.as_slice(), "nother value".as_bytes());
-    }
+    });
 
-    #[test]
-    fn test_database_write_offset_append() {
+    kv_test!(test_database_write_offset_append, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[1, 2, 3]);
@@ -1132,32 +1135,30 @@ mod tests {
         let mut output = vec![0; 2 * data.len()];
         assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
         assert_eq!(output.as_slice(), [1, 2, 3, 1, 2, 3]);
-    }
+    });
 
-    #[test]
-    fn test_database_write_oversized_offset() {
+    kv_test!(test_database_write_oversized_offset, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(&[]);
 
         assert!(database.set(key.clone(), data.clone()).is_ok());
         assert!(database.write(key.clone(), data.len() + 1, data).is_err());
-    }
+    });
 
-    #[test]
-    fn test_database_set_io_too_large() {
+    kv_test!(test_database_set_io_too_large, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let data = Bytes::copy_from_slice(vec![0; MAX_FILE_CHUNK_SIZE + 1].as_slice());
@@ -1170,16 +1171,15 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
-    }
+    });
 
-    #[test]
-    fn test_database_write_value_too_large() {
+    kv_test!(test_database_write_value_too_large, KV: BackgroundKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
-        let (_keepalive, repo) = setup_repo();
-        let mut database = new_database(handle, repo);
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
 
         let can_write = 100;
 
@@ -1256,5 +1256,5 @@ mod tests {
             "Appending zero bytes to maximum length value does not change size"
         );
         assert_eq!(MAX_VALUE_SIZE, database.value_length(&key).unwrap());
-    }
+    });
 }
