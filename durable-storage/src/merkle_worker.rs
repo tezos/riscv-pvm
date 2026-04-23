@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025 Trilitech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -311,8 +312,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
-    use crate::storage::KeyValueStore;
-    use crate::storage::TestKeyValueStore;
+    use crate::storage::kv_test;
 
     fn key_strategy() -> impl Strategy<Value = Key> {
         proptest::collection::vec(proptest::arbitrary::any::<u8>(), 1..KEY_MAX_SIZE).prop_map(
@@ -347,12 +347,12 @@ mod tests {
     }
 
     impl TestCommand {
-        fn run(
+        fn run<KV: super::BackgroundPersistentKeyValueStore>(
             self,
             handle: &Handle,
-            repo: &<TestKeyValueStore as KeyValueStore>::Repo,
-            worker: &mut MerkleWorker<TestKeyValueStore>,
-            layer: &mut MerkleLayer<TestKeyValueStore, Normal>,
+            repo: &KV::Repo,
+            worker: &mut MerkleWorker<KV>,
+            layer: &mut MerkleLayer<KV, Normal>,
         ) {
             match self {
                 Self::Write { key, offset, value } => {
@@ -389,13 +389,13 @@ mod tests {
                 }
 
                 Self::Clone => {
-                    let persistence_layer = TestKeyValueStore::new(repo)
-                        .expect("Creating a persistence layer should succeed");
+                    let persistence_layer =
+                        KV::new(repo).expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
                     *layer = layer.try_clone_with(persistence_layer);
 
-                    let persistence_worker = TestKeyValueStore::new(repo)
-                        .expect("Creating a persistence layer should succeed");
+                    let persistence_worker =
+                        KV::new(repo).expect("Creating a persistence layer should succeed");
                     let persistence_worker = Arc::new(persistence_worker);
                     *worker = worker
                         .clone_with(handle, persistence_worker)
@@ -451,32 +451,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn commands() {
+    kv_test!(commands, KV: super::BackgroundPersistentKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
 
-        let (_keepalive, repo) = crate::storage::setup_repo();
+        let (_keepalive, repo) = KV::setup_repo();
 
         proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
-            let persistence_layer = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
+            let persistence_layer = KV::new(&repo).expect("Creating a persistence layer should succeed");
             let persistence_layer = Arc::new(persistence_layer);
             let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
-            let persistence_worker = TestKeyValueStore::new(&repo).expect("Creating a persistence layer should succeed");
+            let persistence_worker = KV::new(&repo).expect("Creating a persistence layer should succeed");
             let persistence_worker = Arc::new(persistence_worker);
             let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
             for command in commands {
-                command.run(handle, &repo, &mut merkle_worker, &mut merkle_layer);
+                command.run::<KV>(handle, &repo, &mut merkle_worker, &mut merkle_layer);
             }
 
             let layer_hash = merkle_layer.hash();
             let worker_hash = merkle_worker.hash().unwrap();
             prop_assert_eq!(layer_hash, worker_hash);
         });
-    }
+    });
 }
