@@ -25,13 +25,12 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::mode::Prove;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::resolver::LazyTreeId;
-use super::resolver::ProveTreeId;
+use super::resolver::ProveNode;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
@@ -76,8 +75,8 @@ pub struct Node<TreeId, M: Mode> {
 }
 
 impl Node<LazyTreeId, Normal> {
-    /// Converts the [`Node`] to [`Prove`] mode.
-    pub fn into_proof(self) -> Node<ProveTreeId, Prove<'static>> {
+    /// Converts the [`Node`] to prove mode.
+    pub fn into_proof(self) -> ProveNode {
         Node {
             meta: self.meta.into_proof(),
             data: self.data.into_proof(),
@@ -92,6 +91,11 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
     /// Mark the hash of this node as dirty.
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
+    }
+
+    /// Direct access to the left child identifier.
+    pub(crate) fn left_id(&self) -> &TreeId {
+        &self.left
     }
 
     /// A mutable reference to the left branch.
@@ -111,6 +115,11 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
         resolver: &impl TreeResolver<NodeId, TreeId>,
     ) -> Result<&Tree<NodeId>, OperationalError> {
         resolver.resolve(&self.left)
+    }
+
+    /// Direct access to the right child identifier.
+    pub(crate) fn right_id(&self) -> &TreeId {
+        &self.right
     }
 
     /// A mutable reference to the right branch.
