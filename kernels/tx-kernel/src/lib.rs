@@ -2,6 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
+mod world_state;
+
+pub use world_state::*;
+
 pub const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";
 pub const BLOCK_CHUNK_MAGIC: [u8; 4] = *b"TXC1";
 pub const ACCOUNT_KEY_PREFIX: &[u8] = b"/acct/";
@@ -70,6 +74,27 @@ pub trait AsyncSecp256k1 {
     ///
     /// Returns `true` if the signature was valid, `false` if invalid.
     fn secp256k1_dequeue(&self) -> Result<bool, String>;
+}
+
+/// Asynchronous secp256k1 public-key recovery interface.
+///
+/// This is needed for Ethereum-style transactions, where the sender is derived
+/// from the signature recovery result rather than provided explicitly.
+pub trait AsyncSecp256k1Recover {
+    /// Submit a secp256k1 recovery request. Returns immediately.
+    fn secp256k1_recover_enqueue(
+        &self,
+        signature: &[u8; 64],
+        recovery_id: u8,
+        message_hash: &[u8; 32],
+    ) -> Result<(), String>;
+
+    /// Retrieve the oldest pending secp256k1 recovery result.
+    ///
+    /// Returns `Ok(Some(public_key))` on successful recovery, `Ok(None)` if the
+    /// signature/recovery id pair is invalid, and `Err(...)` if the queue is
+    /// empty or the host call failed.
+    fn secp256k1_recover_dequeue(&self) -> Result<Option<[u8; 65]>, String>;
 }
 
 pub trait Logger {
@@ -374,6 +399,20 @@ fn bootstrap_context(context: &mut impl ContextStore, crypto: &impl Crypto) -> R
         },
     )?;
     write_block_head(context, 0)?;
+
+    let mut world_state = EvmWorldState::new(context);
+    world_state.write_account(
+        &funded_address,
+        &EvmAccountState::with_balance_u64(BOOTSTRAP_BALANCE),
+    )?;
+    world_state.write_meta_u64(EVM_META_HEAD_KEY, 0)?;
+    world_state.write_meta_u64(EVM_META_CHAIN_ID_KEY, DEFAULT_EVM_CHAIN_ID)?;
+    world_state.write_meta_u64(EVM_META_BASE_FEE_KEY, DEFAULT_EVM_BASE_FEE)?;
+    world_state.write_meta_u64(EVM_META_BLOCK_GAS_LIMIT_KEY, DEFAULT_EVM_BLOCK_GAS_LIMIT)?;
+    world_state.write_meta_u64(EVM_META_TIMESTAMP_KEY, DEFAULT_EVM_TIMESTAMP)?;
+    world_state.write_meta_bytes(EVM_META_SPEC_ID_KEY, DEFAULT_EVM_SPEC_ID)?;
+    world_state.write_meta_bytes(EVM_META_BOOTSTRAPPED_KEY, &[1u8])?;
+
     context.set(META_BOOTSTRAPPED_KEY, &[1u8])?;
     Ok(())
 }
@@ -597,11 +636,7 @@ fn apply_block_blueprint(
         sender_ok.push(addr_matches);
 
         if addr_matches {
-            crypto.secp256k1_enqueue(
-                &transaction.public_key,
-                &transaction.signature,
-                tx_hash,
-            )?;
+            crypto.secp256k1_enqueue(&transaction.public_key, &transaction.signature, tx_hash)?;
         }
     }
 
@@ -632,7 +667,9 @@ fn apply_block_blueprint(
         let receipt = if signature_ok {
             apply_valid_transaction(context, transaction)?
         } else {
-            TxReceipt { status: TxStatus::Rejected }
+            TxReceipt {
+                status: TxStatus::Rejected,
+            }
         };
         receipts.push(receipt);
         *processed_transactions += 1;

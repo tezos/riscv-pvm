@@ -16,6 +16,7 @@ use keyspace::KeySpaceLoader;
 use keyspace::Name;
 use riscv_tx_kernel::AsyncKeccak;
 use riscv_tx_kernel::AsyncSecp256k1;
+use riscv_tx_kernel::AsyncSecp256k1Recover;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -103,6 +104,25 @@ impl AsyncSecp256k1 for SbiCrypto {
     fn secp256k1_dequeue(&self) -> Result<bool, String> {
         unsafe { sbi_crypto::secp256k1_dequeue() }
             .map_err(|_| "secp256k1 dequeue host call failed".into())
+    }
+}
+
+impl AsyncSecp256k1Recover for SbiCrypto {
+    fn secp256k1_recover_enqueue(
+        &self,
+        signature: &[u8; 64],
+        recovery_id: u8,
+        message_hash: &[u8; 32],
+    ) -> Result<(), String> {
+        unsafe { sbi_crypto::secp256k1_recover_enqueue(signature, recovery_id, message_hash) }
+            .map_err(|_| "secp256k1 recover enqueue host call failed".into())
+    }
+
+    fn secp256k1_recover_dequeue(&self) -> Result<Option<[u8; 65]>, String> {
+        let mut out = [0u8; 65];
+        let recovered = unsafe { sbi_crypto::secp256k1_recover_dequeue(&mut out) }
+            .map_err(|_| "secp256k1 recover dequeue host call failed".to_string())?;
+        Ok(recovered.then_some(out))
     }
 }
 

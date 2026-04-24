@@ -20,6 +20,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
+use libsecp256k1::RecoveryId;
 use libsecp256k1::Signature as SecpSig;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::components::atom::Atom;
@@ -57,15 +58,7 @@ use crate::pvm::tezos::MAX_PVM_MEMORY_ACCESS;
 /// the computation itself via [`execute`](CryptoAlgorithm::execute).
 pub(crate) trait CryptoAlgorithm: Send + Sync + 'static {
     /// The request type stored in the provable queue.
-    type Input: Clone
-        + Encode
-        + Decode<()>
-        + Default
-        + PartialEq
-        + Eq
-        + CloneState
-        + Send
-        + 'static;
+    type Input: Clone + Encode + Decode<()> + Default + PartialEq + Eq + CloneState + Send + 'static;
     /// The result type produced by the background thread.
     type Output: Copy + Send + 'static;
 
@@ -88,7 +81,10 @@ impl KeccakRequest {
         debug_assert!(bytes.len() <= MAX_PVM_MEMORY_ACCESS);
         let mut data = Box::new([0u8; MAX_PVM_MEMORY_ACCESS]);
         data[..bytes.len()].copy_from_slice(bytes);
-        Self { len: bytes.len() as u64, data }
+        Self {
+            len: bytes.len() as u64,
+            data,
+        }
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
@@ -98,17 +94,24 @@ impl KeccakRequest {
 
 impl Default for KeccakRequest {
     fn default() -> Self {
-        Self { len: 0, data: Box::new([0u8; MAX_PVM_MEMORY_ACCESS]) }
+        Self {
+            len: 0,
+            data: Box::new([0u8; MAX_PVM_MEMORY_ACCESS]),
+        }
     }
 }
 
 impl CloneState for KeccakRequest {
-    fn clone_state(&self) -> Self { self.clone() }
+    fn clone_state(&self) -> Self {
+        self.clone()
+    }
 }
 
 impl fmt::Debug for KeccakRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("KeccakRequest").field("len", &self.len).finish_non_exhaustive()
+        f.debug_struct("KeccakRequest")
+            .field("len", &self.len)
+            .finish_non_exhaustive()
     }
 }
 
@@ -131,12 +134,45 @@ impl Default for Secp256k1Request {
 }
 
 impl CloneState for Secp256k1Request {
-    fn clone_state(&self) -> Self { self.clone() }
+    fn clone_state(&self) -> Self {
+        self.clone()
+    }
 }
 
 impl fmt::Debug for Secp256k1Request {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Secp256k1Request").finish_non_exhaustive()
+    }
+}
+
+/// Pending secp256k1 public-key recovery request.
+#[derive(Clone, PartialEq, Eq, Encode, Decode)]
+pub(crate) struct Secp256k1RecoverRequest {
+    pub(crate) signature: [u8; 64],
+    pub(crate) recovery_id: u8,
+    pub(crate) message_hash: [u8; 32],
+}
+
+impl Default for Secp256k1RecoverRequest {
+    fn default() -> Self {
+        Self {
+            signature: [0u8; 64],
+            recovery_id: 0,
+            message_hash: [0u8; 32],
+        }
+    }
+}
+
+impl CloneState for Secp256k1RecoverRequest {
+    fn clone_state(&self) -> Self {
+        self.clone()
+    }
+}
+
+impl fmt::Debug for Secp256k1RecoverRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Secp256k1RecoverRequest")
+            .finish_non_exhaustive()
     }
 }
 
@@ -162,10 +198,35 @@ impl CryptoAlgorithm for Secp256k1Algorithm {
     type Output = bool;
 
     fn execute(input: &Secp256k1Request) -> bool {
-        let Ok(pk) = PublicKey::parse(&input.public_key) else { return false };
-        let Ok(sig) = SecpSig::parse_standard(&input.signature) else { return false };
+        let Ok(pk) = PublicKey::parse(&input.public_key) else {
+            return false;
+        };
+        let Ok(sig) = SecpSig::parse_standard(&input.signature) else {
+            return false;
+        };
         let msg = Message::parse(&input.message_hash);
         libsecp256k1::verify(&msg, &sig, &pk)
+    }
+}
+
+/// secp256k1-recover: `Input = Secp256k1RecoverRequest`, `Output = Option<[u8; 65]>`.
+pub(crate) struct Secp256k1RecoverAlgorithm;
+
+impl CryptoAlgorithm for Secp256k1RecoverAlgorithm {
+    type Input = Secp256k1RecoverRequest;
+    type Output = Option<[u8; 65]>;
+
+    fn execute(input: &Secp256k1RecoverRequest) -> Option<[u8; 65]> {
+        let Ok(sig) = SecpSig::parse_standard(&input.signature) else {
+            return None;
+        };
+        let Ok(recovery_id) = RecoveryId::parse(input.recovery_id) else {
+            return None;
+        };
+        let msg = Message::parse(&input.message_hash);
+        libsecp256k1::recover(&msg, &sig, &recovery_id)
+            .ok()
+            .map(|public_key| public_key.serialize())
     }
 }
 
@@ -232,14 +293,27 @@ impl<A: CryptoAlgorithm> CryptoWorker<A> {
 
             while let Ok(input) = request_rx.recv() {
                 match next {
-                    0 => { next = 1; request_tx_lhs.send(input).unwrap() }
-                    1 => { next = 2; request_tx_mid.send(input).unwrap() }
-                    _ => { next = 0; request_tx_rhs.send(input).unwrap() }
+                    0 => {
+                        next = 1;
+                        request_tx_lhs.send(input).unwrap()
+                    }
+                    1 => {
+                        next = 2;
+                        request_tx_mid.send(input).unwrap()
+                    }
+                    _ => {
+                        next = 0;
+                        request_tx_rhs.send(input).unwrap()
+                    }
                 }
             }
         });
 
-        Self { request_tx, result_rx, _thread: thread }
+        Self {
+            request_tx,
+            result_rx,
+            _thread: thread,
+        }
     }
 
     fn send(&self, input: A::Input) {
@@ -258,27 +332,37 @@ pub(crate) struct CryptoWorkerCell<A: CryptoAlgorithm> {
 }
 
 impl<A: CryptoAlgorithm> Default for CryptoWorkerCell<A> {
-    fn default() -> Self { Self { worker: None } }
+    fn default() -> Self {
+        Self { worker: None }
+    }
 }
 
 impl<A: CryptoAlgorithm> Clone for CryptoWorkerCell<A> {
-    fn clone(&self) -> Self { Self { worker: None } }
+    fn clone(&self) -> Self {
+        Self { worker: None }
+    }
 }
 
 impl<A: CryptoAlgorithm> CloneState for CryptoWorkerCell<A> {
-    fn clone_state(&self) -> Self { Self { worker: None } }
+    fn clone_state(&self) -> Self {
+        Self { worker: None }
+    }
 }
 
 impl<A: CryptoAlgorithm> PartialEq for CryptoWorkerCell<A> {
     /// The worker is non-observable state; always equal.
-    fn eq(&self, _: &Self) -> bool { true }
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl<A: CryptoAlgorithm> Eq for CryptoWorkerCell<A> {}
 
 impl<A: CryptoAlgorithm> fmt::Debug for CryptoWorkerCell<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CryptoWorkerCell").field("active", &self.worker.is_some()).finish()
+        f.debug_struct("CryptoWorkerCell")
+            .field("active", &self.worker.is_some())
+            .finish()
     }
 }
 
@@ -302,7 +386,9 @@ pub(crate) trait CryptoMode<A: CryptoAlgorithm>: Mode {
 
 impl<A: CryptoAlgorithm> CryptoMode<A> for Normal {
     fn dispatch(cell: &mut CryptoWorkerCell<A>, input: A::Input) {
-        cell.worker.get_or_insert_with(CryptoWorker::spawn).send(input);
+        cell.worker
+            .get_or_insert_with(CryptoWorker::spawn)
+            .send(input);
     }
 
     fn receive(cell: &mut CryptoWorkerCell<A>, fallback: &A::Input) -> A::Output {
@@ -336,7 +422,10 @@ impl<A: CryptoAlgorithm> CryptoMode<A> for Verify {
 /// Used in `handle_tezos`, `eval_max`, etc. instead of repeating each
 /// `CryptoMode<…>` bound individually.
 pub(crate) trait PvmCryptoMode:
-    Mode + CryptoMode<KeccakAlgorithm> + CryptoMode<Secp256k1Algorithm>
+    Mode
+    + CryptoMode<KeccakAlgorithm>
+    + CryptoMode<Secp256k1Algorithm>
+    + CryptoMode<Secp256k1RecoverAlgorithm>
 {
 }
 
@@ -406,7 +495,10 @@ impl<A: CryptoAlgorithm, M: AtomMode + VectorMode> CryptoJobQueue<A, M> {
 
 impl<A: CryptoAlgorithm, M: AtomMode + VectorMode> Default for CryptoJobQueue<A, M> {
     fn default() -> Self {
-        Self { queue: FifoQueue::default(), worker: CryptoWorkerCell::default() }
+        Self {
+            queue: FifoQueue::default(),
+            worker: CryptoWorkerCell::default(),
+        }
     }
 }
 
@@ -430,15 +522,19 @@ where
     Atom<A::Input, M>: Clone,
 {
     fn clone(&self) -> Self {
-        Self { queue: self.queue.clone(), worker: CryptoWorkerCell::default() }
+        Self {
+            queue: self.queue.clone(),
+            worker: CryptoWorkerCell::default(),
+        }
     }
 }
 
-impl<A: CryptoAlgorithm, M: CloneAtomMode + CloneVectorMode> CloneState
-    for CryptoJobQueue<A, M>
-{
+impl<A: CryptoAlgorithm, M: CloneAtomMode + CloneVectorMode> CloneState for CryptoJobQueue<A, M> {
     fn clone_state(&self) -> Self {
-        Self { queue: self.queue.clone_state(), worker: CryptoWorkerCell::default() }
+        Self {
+            queue: self.queue.clone_state(),
+            worker: CryptoWorkerCell::default(),
+        }
     }
 }
 
@@ -460,7 +556,10 @@ where
 {
     fn unfold<U: Unfold>(src: U) -> Result<Self, UnfoldError> {
         let queue = FifoQueue::unfold(src)?;
-        Ok(Self { queue, worker: CryptoWorkerCell::default() })
+        Ok(Self {
+            queue,
+            worker: CryptoWorkerCell::default(),
+        })
     }
 }
 
@@ -470,7 +569,10 @@ where
 {
     fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
         let suspended = FifoQueue::<Atom<A::Input, Verify>, Verify>::from_proof(proof)?;
-        Ok(suspended.map(|queue| Self { queue, worker: CryptoWorkerCell::default() }))
+        Ok(suspended.map(|queue| Self {
+            queue,
+            worker: CryptoWorkerCell::default(),
+        }))
     }
 }
 
@@ -488,9 +590,7 @@ where
     }
 }
 
-impl<A: CryptoAlgorithm, M: EncodeAtomMode + EncodeVectorMode> Encode
-    for CryptoJobQueue<A, M>
-{
+impl<A: CryptoAlgorithm, M: EncodeAtomMode + EncodeVectorMode> Encode for CryptoJobQueue<A, M> {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         self.queue.encode(encoder)
         // worker excluded
@@ -499,7 +599,10 @@ impl<A: CryptoAlgorithm, M: EncodeAtomMode + EncodeVectorMode> Encode
 
 impl<A: CryptoAlgorithm> Decode<()> for CryptoJobQueue<A, Normal> {
     fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        Ok(Self { queue: FifoQueue::decode(decoder)?, worker: CryptoWorkerCell::default() })
+        Ok(Self {
+            queue: FifoQueue::decode(decoder)?,
+            worker: CryptoWorkerCell::default(),
+        })
     }
 }
 
@@ -507,3 +610,4 @@ impl<A: CryptoAlgorithm> Decode<()> for CryptoJobQueue<A, Normal> {
 
 pub(crate) type KeccakJobQueue<M> = CryptoJobQueue<KeccakAlgorithm, M>;
 pub(crate) type Secp256k1JobQueue<M> = CryptoJobQueue<Secp256k1Algorithm, M>;
+pub(crate) type Secp256k1RecoverJobQueue<M> = CryptoJobQueue<Secp256k1RecoverAlgorithm, M>;

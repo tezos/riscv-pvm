@@ -12,6 +12,8 @@ const SBI_TEZOS_KECCAK256_ENQUEUE: u64 = 0x0c;
 const SBI_TEZOS_KECCAK256_DEQUEUE: u64 = 0x0d;
 const SBI_TEZOS_SECP256K1_ENQUEUE: u64 = 0x0e;
 const SBI_TEZOS_SECP256K1_DEQUEUE: u64 = 0x0f;
+const SBI_TEZOS_SECP256K1_RECOVER_ENQUEUE: u64 = 0x10;
+const SBI_TEZOS_SECP256K1_RECOVER_DEQUEUE: u64 = 0x11;
 
 pub unsafe fn secp256k1_verify(
     public_key: &[u8; 65],
@@ -133,6 +135,52 @@ pub unsafe fn secp256k1_dequeue() -> Result<bool, SbiError> {
         "ecall",
         in("a6") SBI_TEZOS_SECP256K1_DEQUEUE,
         in("a7") SBI_FIRMWARE_TEZOS,
+        lateout("a0") result,
+    );
+
+    match SbiError::from_result(result) {
+        Some(error) => Err(error),
+        None => Ok(result == 1),
+    }
+}
+
+/// Enqueue a secp256k1 public-key recovery request. Returns immediately.
+pub unsafe fn secp256k1_recover_enqueue(
+    signature: &[u8; 64],
+    recovery_id: u8,
+    message_hash: &[u8; 32],
+) -> Result<(), SbiError> {
+    let result: isize;
+
+    core::arch::asm!(
+        "ecall",
+        in("a6") SBI_TEZOS_SECP256K1_RECOVER_ENQUEUE,
+        in("a7") SBI_FIRMWARE_TEZOS,
+        in("a0") signature.as_ptr(),
+        in("a1") recovery_id as usize,
+        in("a2") message_hash.as_ptr(),
+        lateout("a0") result,
+    );
+
+    match SbiError::from_result(result) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// Dequeue the oldest secp256k1 recovery result.
+///
+/// Returns `Ok(true)` and writes the recovered uncompressed public key into
+/// `out` if recovery succeeded, `Ok(false)` if the signature/recovery id was
+/// invalid, and an error if the queue is empty.
+pub unsafe fn secp256k1_recover_dequeue(out: &mut [u8; 65]) -> Result<bool, SbiError> {
+    let result: isize;
+
+    core::arch::asm!(
+        "ecall",
+        in("a6") SBI_TEZOS_SECP256K1_RECOVER_DEQUEUE,
+        in("a7") SBI_FIRMWARE_TEZOS,
+        in("a0") out.as_mut_ptr(),
         lateout("a0") result,
     );
 

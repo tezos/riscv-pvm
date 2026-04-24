@@ -28,6 +28,7 @@ use octez_riscv_durable_storage::repo::DirectoryManager;
 use regex::Regex;
 use riscv_tx_kernel::AsyncKeccak;
 use riscv_tx_kernel::AsyncSecp256k1;
+use riscv_tx_kernel::AsyncSecp256k1Recover;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::ContextStore;
@@ -198,6 +199,8 @@ struct NativeCrypto;
 
 std::thread_local! {
     static KECCAK_QUEUE: std::cell::RefCell<std::collections::VecDeque<[u8; 32]>> =
+        std::cell::RefCell::new(std::collections::VecDeque::new());
+    static SECP_RECOVER_QUEUE: std::cell::RefCell<std::collections::VecDeque<Option<[u8; 65]>>> =
         std::cell::RefCell::new(std::collections::VecDeque::new());
 }
 
@@ -665,6 +668,32 @@ impl AsyncSecp256k1 for NativeCrypto {
         SECP_QUEUE
             .with(|q| q.borrow_mut().pop_front())
             .ok_or_else(|| "secp256k1 queue is empty".to_string())
+    }
+}
+
+impl AsyncSecp256k1Recover for NativeCrypto {
+    fn secp256k1_recover_enqueue(
+        &self,
+        signature: &[u8; 64],
+        recovery_id: u8,
+        message_hash: &[u8; 32],
+    ) -> std::result::Result<(), String> {
+        let message = libsecp256k1::Message::parse(message_hash);
+        let sig = libsecp256k1::Signature::parse_standard(signature)
+            .expect("benchmark signatures must be canonical");
+        let recovery_id = libsecp256k1::RecoveryId::parse(recovery_id)
+            .map_err(|_| "invalid secp256k1 recovery id".to_string())?;
+        let recovered = libsecp256k1::recover(&message, &sig, &recovery_id)
+            .ok()
+            .map(|public_key| public_key.serialize());
+        SECP_RECOVER_QUEUE.with(|q| q.borrow_mut().push_back(recovered));
+        Ok(())
+    }
+
+    fn secp256k1_recover_dequeue(&self) -> std::result::Result<Option<[u8; 65]>, String> {
+        SECP_RECOVER_QUEUE
+            .with(|q| q.borrow_mut().pop_front())
+            .ok_or_else(|| "secp256k1 recover queue is empty".to_string())
     }
 }
 

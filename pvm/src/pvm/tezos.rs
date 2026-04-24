@@ -87,10 +87,16 @@ pub const SBI_TEZOS_KECCAK256_DEQUEUE: u64 = 0x0d;
 pub const SBI_TEZOS_SECP256K1_ENQUEUE: u64 = 0x0e;
 /// Dequeue the oldest secp256k1 verification result (1 = valid, 0 = invalid).
 pub const SBI_TEZOS_SECP256K1_DEQUEUE: u64 = 0x0f;
+/// Enqueue a secp256k1 public-key recovery request; returns immediately.
+pub const SBI_TEZOS_SECP256K1_RECOVER_ENQUEUE: u64 = 0x10;
+/// Dequeue the oldest secp256k1 recovery result (1 = recovered, 0 = invalid).
+pub const SBI_TEZOS_SECP256K1_RECOVER_DEQUEUE: u64 = 0x11;
 
 use octez_riscv_data::components::atom::AtomMode;
 
 use super::PvmStatus;
+use super::outbox::Outbox;
+use super::outbox::OutboxMessage;
 use super::parallel_crypto::CryptoMode;
 use super::parallel_crypto::KeccakAlgorithm;
 use super::parallel_crypto::KeccakJobQueue;
@@ -98,9 +104,10 @@ use super::parallel_crypto::KeccakRequest;
 use super::parallel_crypto::PvmCryptoMode;
 use super::parallel_crypto::Secp256k1Algorithm;
 use super::parallel_crypto::Secp256k1JobQueue;
+use super::parallel_crypto::Secp256k1RecoverAlgorithm;
+use super::parallel_crypto::Secp256k1RecoverJobQueue;
+use super::parallel_crypto::Secp256k1RecoverRequest;
 use super::parallel_crypto::Secp256k1Request;
-use super::outbox::Outbox;
-use super::outbox::OutboxMessage;
 use super::reveals::RevealRequest;
 use crate::machine_state::MachineCoreState;
 use crate::machine_state::memory::Memory;
@@ -130,6 +137,8 @@ pub struct Tezos<M: Mode> {
     pub(crate) keccak_job: KeccakJobQueue<M>,
     /// Parallel secp256k1-verify job queue (provable queue + background worker).
     pub(crate) secp256k1_job: Secp256k1JobQueue<M>,
+    /// Parallel secp256k1-recover job queue (provable queue + background worker).
+    pub(crate) secp256k1_recover_job: Secp256k1RecoverJobQueue<M>,
 }
 
 impl<M: AtomMode + VectorMode> Default for Tezos<M> {
@@ -143,6 +152,7 @@ impl<M: AtomMode + VectorMode> Default for Tezos<M> {
             status: Atom::default(),
             keccak_job: KeccakJobQueue::default(),
             secp256k1_job: Secp256k1JobQueue::default(),
+            secp256k1_recover_job: Secp256k1RecoverJobQueue::default(),
         }
     }
 }
@@ -160,6 +170,7 @@ impl<'normal> Provable<'normal> for Tezos<Normal> {
             status: self.status.start_proof(),
             keccak_job: self.keccak_job.start_proof(),
             secp256k1_job: self.secp256k1_job.start_proof(),
+            secp256k1_recover_job: self.secp256k1_recover_job.start_proof(),
         }
     }
 }
@@ -175,6 +186,7 @@ impl<M: CloneAtomMode + CloneVectorMode> CloneState for Tezos<M> {
             status: self.status.clone_state(),
             keccak_job: self.keccak_job.clone_state(),
             secp256k1_job: self.secp256k1_job.clone_state(),
+            secp256k1_recover_job: self.secp256k1_recover_job.clone_state(),
         }
     }
 }
@@ -190,6 +202,7 @@ where
     Atom<u64, M>: Foldable<F>,
     KeccakJobQueue<M>: Foldable<F>,
     Secp256k1JobQueue<M>: Foldable<F>,
+    Secp256k1RecoverJobQueue<M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut builder = builder.into_node_fold();
@@ -202,6 +215,7 @@ where
         builder.add(&self.status);
         builder.add(&self.keccak_job);
         builder.add(&self.secp256k1_job);
+        builder.add(&self.secp256k1_recover_job);
         // worker cells excluded from provable state.
 
         builder.done()
@@ -220,6 +234,7 @@ impl Unfoldable for Tezos<Normal> {
         let status = src.next_branch()?;
         let keccak_job = src.next_branch()?;
         let secp256k1_job = src.next_branch()?;
+        let secp256k1_recover_job = src.next_branch()?;
 
         src.done(Self {
             outbox,
@@ -230,6 +245,7 @@ impl Unfoldable for Tezos<Normal> {
             status,
             keccak_job,
             secp256k1_job,
+            secp256k1_recover_job,
         })
     }
 }
@@ -246,6 +262,7 @@ impl FromProof for Tezos<Verify> {
         let (proof, status) = proof.next_branch()?;
         let (proof, keccak_job) = proof.next_branch()?;
         let (proof, secp256k1_job) = proof.next_branch()?;
+        let (proof, secp256k1_recover_job) = proof.next_branch()?;
 
         proof.done(Self {
             outbox,
@@ -256,6 +273,7 @@ impl FromProof for Tezos<Verify> {
             status,
             keccak_job,
             secp256k1_job,
+            secp256k1_recover_job,
         })
     }
 }
@@ -270,6 +288,7 @@ impl<M: EncodeAtomMode + EncodeVectorMode> Encode for Tezos<M> {
         self.status.encode(encoder)?;
         self.keccak_job.encode(encoder)?;
         self.secp256k1_job.encode(encoder)?;
+        self.secp256k1_recover_job.encode(encoder)?;
         // worker cells excluded from serialisation.
         Ok(())
     }
@@ -286,6 +305,7 @@ impl Decode<()> for Tezos<Normal> {
             status: Decode::decode(decoder)?,
             keccak_job: Decode::decode(decoder)?,
             secp256k1_job: Decode::decode(decoder)?,
+            secp256k1_recover_job: Decode::decode(decoder)?,
         })
     }
 }
@@ -967,6 +987,57 @@ where
     Ok(valid as u64)
 }
 
+/// Handle a [SBI_TEZOS_SECP256K1_RECOVER_ENQUEUE] call.
+///
+/// Reads `(signature_ptr, recovery_id, message_hash_ptr)` from registers and
+/// stores the request in the provable secp256k1 recovery queue, dispatching to
+/// the background worker in Normal mode.
+#[inline]
+fn handle_tezos_secp256k1_recover_enqueue<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+    tezos: &mut Tezos<M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<Secp256k1RecoverAlgorithm>,
+{
+    let sig_addr = machine.hart.xregisters.read(a0);
+    let recovery_id = machine.hart.xregisters.read(a1) as u8;
+    let hash_addr = machine.hart.xregisters.read(a2);
+
+    let request = Secp256k1RecoverRequest {
+        signature: machine.main_memory.read(sig_addr)?,
+        recovery_id,
+        message_hash: machine.main_memory.read(hash_addr)?,
+    };
+    tezos.secp256k1_recover_job.push(request);
+    Ok(0)
+}
+
+/// Handle a [SBI_TEZOS_SECP256K1_RECOVER_DEQUEUE] call.
+///
+/// Writes the recovered uncompressed public key to `a0`'s pointed-to buffer and
+/// returns `1` if recovery succeeded, `0` if the signature/recovery id pair was
+/// invalid. Returns `SbiError::Failed` if the queue is empty.
+#[inline]
+fn handle_tezos_secp256k1_recover_dequeue<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+    tezos: &mut Tezos<M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: AtomMode + DataSpaceMode + VectorMode + CryptoMode<Secp256k1RecoverAlgorithm>,
+{
+    let out_addr = machine.hart.xregisters.read(a0);
+    let recovered = tezos.secp256k1_recover_job.pop().ok_or(SbiError::Failed)?;
+    if let Some(public_key) = recovered {
+        machine.main_memory.write(out_addr, public_key)?;
+        Ok(1)
+    } else {
+        Ok(0)
+    }
+}
+
 /// Handle a Tezos SBI call.
 pub(super) fn handle_tezos<MC, M, DS>(
     machine: &mut MachineCoreState<MC, M>,
@@ -992,18 +1063,24 @@ pub(super) fn handle_tezos<MC, M, DS>(
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
         SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
-        SBI_TEZOS_KECCAK256_ENQUEUE => {
-            sbi_wrap(machine, |machine| handle_tezos_keccak256_enqueue(machine, tezos))
-        }
-        SBI_TEZOS_KECCAK256_DEQUEUE => {
-            sbi_wrap(machine, |machine| handle_tezos_keccak256_dequeue(machine, tezos))
-        }
-        SBI_TEZOS_SECP256K1_ENQUEUE => {
-            sbi_wrap(machine, |machine| handle_tezos_secp256k1_enqueue(machine, tezos))
-        }
-        SBI_TEZOS_SECP256K1_DEQUEUE => {
-            sbi_wrap(machine, |machine| handle_tezos_secp256k1_dequeue(machine, tezos))
-        }
+        SBI_TEZOS_KECCAK256_ENQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_keccak256_enqueue(machine, tezos)
+        }),
+        SBI_TEZOS_KECCAK256_DEQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_keccak256_dequeue(machine, tezos)
+        }),
+        SBI_TEZOS_SECP256K1_ENQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_secp256k1_enqueue(machine, tezos)
+        }),
+        SBI_TEZOS_SECP256K1_DEQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_secp256k1_dequeue(machine, tezos)
+        }),
+        SBI_TEZOS_SECP256K1_RECOVER_ENQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_secp256k1_recover_enqueue(machine, tezos)
+        }),
+        SBI_TEZOS_SECP256K1_RECOVER_DEQUEUE => sbi_wrap(machine, |machine| {
+            handle_tezos_secp256k1_recover_dequeue(machine, tezos)
+        }),
         SBI_TEZOS_REVEAL => {
             handle_tezos_reveal(machine, &mut tezos.reveal_request, &mut tezos.status)
         }
