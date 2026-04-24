@@ -27,6 +27,8 @@ use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
+use crate::mode::utils::assert_eq_found;
+use crate::mode::utils::assert_not_found;
 use crate::mode_test;
 use crate::serialisation::serialise;
 
@@ -546,6 +548,102 @@ fn proof_round_trip() {
             prop_assert_eq!(after_normal_hash, after_verify_hash);
         }
     });
+}
+
+// `partial_slice` of an empty range, even when the underlying region is undefined.
+#[test]
+fn partial_slice_empty_range() {
+    let bytes = Bytes::<Verify>::absent(10);
+    assert_eq_found!(bytes.partial_slice(0..0), [].as_slice());
+    assert_eq_found!(bytes.partial_slice(5..5), [].as_slice());
+}
+
+// `partial_slice` at the exact boundaries of a defined entry within a partial state.
+#[test]
+fn partial_slice_entry_boundaries() {
+    let mut bytes = Bytes::<Verify>::absent(20);
+    bytes.write(5, &[1, 2, 3, 4, 5]);
+
+    // Exact match for the entry's range.
+    assert_eq_found!(bytes.partial_slice(5..10), [1, 2, 3, 4, 5].as_slice());
+    // Sub-ranges fully contained inside the entry.
+    assert_eq_found!(bytes.partial_slice(6..9), [2, 3, 4].as_slice());
+    assert_eq_found!(bytes.partial_slice(5..6), [1].as_slice());
+    assert_eq_found!(bytes.partial_slice(9..10), [5].as_slice());
+}
+
+// `partial_slice` when the range is fully contained within a single defined entry.
+#[test]
+fn partial_slice_fully_defined() {
+    // `Bytes::<Verify>::new` lays out the whole length as a single contiguous defined entry.
+    let mut bytes = Bytes::<Verify>::new(20);
+    bytes.write(
+        0,
+        &[
+            10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11,
+        ],
+    );
+
+    assert_eq_found!(
+        bytes.partial_slice(0..20),
+        [
+            10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11
+        ]
+        .as_slice()
+    );
+    assert_eq_found!(bytes.partial_slice(5..10), [60, 70, 80, 90, 100].as_slice());
+    assert_eq_found!(bytes.partial_slice(0..1), [10].as_slice());
+    assert_eq_found!(bytes.partial_slice(19..20), [11].as_slice());
+}
+
+// `partial_slice` when the requested range extends past the byte array's length.
+#[test]
+fn partial_slice_range_exceeds_length() {
+    let bytes = Bytes::<Verify>::new(10);
+    assert_not_found!(bytes.partial_slice(0..11));
+    assert_not_found!(bytes.partial_slice(5..15));
+    assert_not_found!(bytes.partial_slice(10..11));
+    // Empty ranges always succeed, even when out-of-bounds: this matches `slice[len..len]` in std
+    // and lets callers that already validated their bounds (e.g. via `min(len, ..)`) ask for a
+    // zero-length read at the end without tripping `not_found`.
+    assert_eq_found!(bytes.partial_slice(11..11), [].as_slice());
+}
+
+// `partial_slice` when the range crosses a gap between two separately defined entries.
+#[test]
+fn partial_slice_range_spans_gap() {
+    let mut bytes = Bytes::<Verify>::absent(20);
+    // Define [0, 3) and [10, 13), leaving an undefined gap at [3, 10).
+    bytes.write(0, &[1, 2, 3]);
+    bytes.write(10, &[4, 5, 6]);
+
+    assert_not_found!(bytes.partial_slice(2..11));
+    assert_not_found!(bytes.partial_slice(0..13));
+    assert_not_found!(bytes.partial_slice(3..10));
+}
+
+// `partial_slice` when the range straddles a defined/undefined boundary.
+#[test]
+fn partial_slice_range_straddles_boundary() {
+    let mut bytes = Bytes::<Verify>::absent(20);
+    bytes.write(5, &[1, 2, 3, 4, 5]);
+
+    // Starts in undefined, ends in defined.
+    assert_not_found!(bytes.partial_slice(3..7));
+    // Starts in defined, ends in undefined.
+    assert_not_found!(bytes.partial_slice(7..12));
+    // Starts before and ends after the defined region.
+    assert_not_found!(bytes.partial_slice(0..15));
+}
+
+// `partial_slice` when no part of the requested range is defined.
+#[test]
+fn partial_slice_range_undefined() {
+    // `absent` leaves the underlying `PartialVec` empty, so any non-empty range is undefined.
+    let bytes = Bytes::<Verify>::absent(10);
+    assert_not_found!(bytes.partial_slice(0..1));
+    assert_not_found!(bytes.partial_slice(0..10));
+    assert_not_found!(bytes.partial_slice(3..7));
 }
 
 #[test]
