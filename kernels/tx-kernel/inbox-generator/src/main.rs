@@ -59,7 +59,6 @@ use serde::Serialize;
 use sha3::Digest;
 use sha3::Keccak256;
 
-const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";
 const BLOCK_CHUNK_MAGIC: [u8; 4] = *b"TXC1";
 const KEYSPACE_INDEX_PREFIX: &[u8] = b"/keyspaces/";
 const KEYSPACE_INDEX_DATABASE: usize = 0;
@@ -71,11 +70,16 @@ const ROOT_TX_KERNEL_DIR_COMPONENTS: usize = 3;
 const BLOCK_CHUNK_HEADER_SIZE: usize = 4 + 8 + 2 + 2;
 const MAX_INPUT_MESSAGE_SIZE: usize = 4096;
 const EXTERNAL_FRAME_SIZE: usize = 21;
-const ERC20_RUNTIME_BYTECODE_HEX: &str = "600160005260206000f3";
+// ERC-20 benchmark contract init code (22 bytes).
+//
+// A 12-byte constructor CODECOPYs the 10-byte runtime into memory and RETURNs it.
+// Runtime: `600160005260206000f3` — a stub that always returns 1 (32 bytes).
+// This exercises the contract-call path without real ERC-20 storage logic.
+const ERC20_INIT_BYTECODE_HEX: &str = "600a600c600039600a6000f3600160005260206000f3";
 const ERC20_MINT_SELECTOR: [u8; 4] = [0x42, 0x96, 0x6c, 0x68];
 const ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
-const ERC20_CONTRACT_ADDRESS: [u8; 20] = [0x12; 20];
 const ERC20_INITIAL_MINT: u64 = 1_000_000_000;
+const ERC20_DEPLOY_GAS_LIMIT: u64 = 300_000;
 const ERC20_TRANSFER_GAS_LIMIT: u64 = 120_000;
 const ERC20_MINT_GAS_LIMIT: u64 = 200_000;
 
@@ -180,18 +184,7 @@ impl Elapsed {
 #[derive(Clone, Copy)]
 struct Account {
     secret_key: SecretKey,
-    public_key: [u8; 65],
     address: [u8; 20],
-}
-
-#[derive(Clone, Copy)]
-struct SignedTransaction {
-    from: [u8; 20],
-    to: [u8; 20],
-    amount: u64,
-    nonce: u64,
-    public_key: [u8; 65],
-    signature: [u8; 64],
 }
 
 struct BenchmarkOutcome {
@@ -258,13 +251,8 @@ fn sequencer_secret_key(index: usize) -> SecretKey {
 
 fn make_account(index: usize) -> Account {
     let secret_key = sequencer_secret_key(index);
-    let public_key = PublicKey::from_secret_key(&secret_key).serialize();
-    let address = address_from_public_key(&public_key);
-    Account {
-        secret_key,
-        public_key,
-        address,
-    }
+    let address = address_from_public_key(&PublicKey::from_secret_key(&secret_key).serialize());
+    Account { secret_key, address }
 }
 
 fn address_from_public_key(public_key: &[u8; 65]) -> [u8; 20] {
@@ -278,74 +266,6 @@ fn sign_hash(secret_key: &SecretKey, hash: &[u8; 32]) -> [u8; 64] {
     let message = Message::parse(hash);
     let (signature, _) = libsecp256k1::sign(&message, secret_key);
     signature.serialize()
-}
-
-fn encode_unsigned_transaction(transaction: &SignedTransaction) -> [u8; 56] {
-    let mut bytes = [0u8; 56];
-    bytes[..20].copy_from_slice(&transaction.from);
-    bytes[20..40].copy_from_slice(&transaction.to);
-    bytes[40..48].copy_from_slice(&transaction.amount.to_le_bytes());
-    bytes[48..56].copy_from_slice(&transaction.nonce.to_le_bytes());
-    bytes
-}
-
-fn encode_transaction(transaction: &SignedTransaction, out: &mut Vec<u8>) {
-    out.extend_from_slice(&transaction.from);
-    out.extend_from_slice(&transaction.to);
-    out.extend_from_slice(&transaction.amount.to_le_bytes());
-    out.extend_from_slice(&transaction.nonce.to_le_bytes());
-    out.extend_from_slice(&transaction.public_key);
-    out.extend_from_slice(&transaction.signature);
-}
-
-fn transaction_hash(transaction: &SignedTransaction) -> [u8; 32] {
-    keccak256(&encode_unsigned_transaction(transaction))
-}
-
-fn block_hash(number: u64, transactions: &[SignedTransaction]) -> [u8; 32] {
-    let mut header = [0u8; 14];
-    header[..4].copy_from_slice(&BLOCK_BLUEPRINT_MAGIC);
-    header[4..12].copy_from_slice(&number.to_le_bytes());
-    header[12..14].copy_from_slice(&(transactions.len() as u16).to_le_bytes());
-
-    let mut acc = keccak256(&header);
-    for transaction in transactions {
-        let tx_hash = transaction_hash(transaction);
-        let mut bytes = [0u8; 64];
-        bytes[..32].copy_from_slice(&acc);
-        bytes[32..].copy_from_slice(&tx_hash);
-        acc = keccak256(&bytes);
-    }
-
-    acc
-}
-
-fn build_transaction(from: Account, to: Account, amount: u64, nonce: u64) -> SignedTransaction {
-    let mut unsigned = SignedTransaction {
-        from: from.address,
-        to: to.address,
-        amount,
-        nonce,
-        public_key: from.public_key,
-        signature: [0u8; 64],
-    };
-    let tx_hash = keccak256(&encode_unsigned_transaction(&unsigned));
-    unsigned.signature = sign_hash(&from.secret_key, &tx_hash);
-    unsigned
-}
-
-fn build_block(number: u64, transactions: &[SignedTransaction], sequencer: &Account) -> Vec<u8> {
-    let mut block = Vec::with_capacity(4 + 8 + 2 + transactions.len() * 185 + 64);
-    block.extend_from_slice(&BLOCK_BLUEPRINT_MAGIC);
-    block.extend_from_slice(&number.to_le_bytes());
-    block.extend_from_slice(&(transactions.len() as u16).to_le_bytes());
-    for transaction in transactions {
-        encode_transaction(transaction, &mut block);
-    }
-    let block_hash = block_hash(number, transactions);
-    let signature = sign_hash(&sequencer.secret_key, &block_hash);
-    block.extend_from_slice(&signature);
-    block
 }
 
 fn build_eip1559_transaction(
@@ -495,9 +415,22 @@ fn build_inbox_with_state(
     InboxFile(levels)
 }
 
-fn erc20_runtime_bytecode() -> Vec<u8> {
-    hex::decode(ERC20_RUNTIME_BYTECODE_HEX)
-        .expect("embedded ERC20 runtime bytecode must be valid hex")
+fn erc20_init_bytecode() -> Vec<u8> {
+    hex::decode(ERC20_INIT_BYTECODE_HEX)
+        .expect("embedded ERC-20 init code must be valid hex")
+}
+
+/// Compute the address where CREATE will deploy a contract.
+///
+/// Ethereum CREATE address: `keccak256(RLP([sender, nonce]))[12..]`
+fn compute_create_address(deployer: &[u8; 20], nonce: u64) -> [u8; 20] {
+    let mut stream = rlp::RlpStream::new_list(2);
+    stream.append(&deployer.as_slice());
+    stream.append(&nonce);
+    let hash = keccak256(&stream.out());
+    let mut address = [0u8; 20];
+    address.copy_from_slice(&hash[12..]);
+    address
 }
 
 fn erc20_mint_call_data(amount: u64) -> Vec<u8> {
@@ -522,11 +455,27 @@ fn build_erc20_transactions(
     nonces: &mut [u64],
 ) -> Vec<Vec<u8>> {
     let deployer = accounts[0];
-    let mut transactions = Vec::with_capacity(transfers + 1);
+    let deploy_nonce = nonces[0];
+    let contract_address = compute_create_address(&deployer.address, deploy_nonce);
 
+    let mut transactions = Vec::with_capacity(transfers + 2);
+
+    // 1. Deploy the ERC-20 contract via CREATE (to = None).
     transactions.push(build_eip1559_transaction(
         deployer,
-        Some(ERC20_CONTRACT_ADDRESS),
+        None,
+        0,
+        deploy_nonce,
+        DEFAULT_EVM_CHAIN_ID,
+        ERC20_DEPLOY_GAS_LIMIT,
+        erc20_init_bytecode(),
+    ));
+    nonces[0] += 1;
+
+    // 2. Mint initial supply into the deployer's balance.
+    transactions.push(build_eip1559_transaction(
+        deployer,
+        Some(contract_address),
         0,
         nonces[0],
         DEFAULT_EVM_CHAIN_ID,
@@ -535,6 +484,7 @@ fn build_erc20_transactions(
     ));
     nonces[0] += 1;
 
+    // 3. Transfer txs — the benchmark payload proper.
     for transfer_index in 0..transfers {
         let recipient = if accounts.len() == 1 {
             deployer.address
@@ -543,7 +493,7 @@ fn build_erc20_transactions(
         };
         transactions.push(build_eip1559_transaction(
             deployer,
-            Some(ERC20_CONTRACT_ADDRESS),
+            Some(contract_address),
             0,
             nonces[0],
             DEFAULT_EVM_CHAIN_ID,
@@ -584,13 +534,6 @@ fn account_code_hash_key_bytes(address: &[u8; 20]) -> Vec<u8> {
     key.extend_from_slice(b"/evm/accounts/");
     key.extend_from_slice(address);
     key.extend_from_slice(b"/code_hash");
-    key
-}
-
-fn code_by_hash_key_bytes(code_hash: &[u8; 32]) -> Vec<u8> {
-    let mut key = Vec::with_capacity(b"/evm/code_by_hash/".len() + code_hash.len());
-    key.extend_from_slice(b"/evm/code_by_hash/");
-    key.extend_from_slice(code_hash);
     key
 }
 
@@ -728,20 +671,9 @@ fn prepare_context(
         }
     }
 
-    if scenario == BenchmarkScenario::Erc20 {
-        let runtime = erc20_runtime_bytecode();
-        let code_hash = keccak256(&runtime);
-        let nonce_key = Key::new(&account_nonce_key(&ERC20_CONTRACT_ADDRESS))?;
-        context.set(nonce_key, Bytes::copy_from_slice(&1u64.to_le_bytes()))?;
-        let balance_key = Key::new(&account_balance_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
-        context.set(balance_key, Bytes::copy_from_slice(&[0u8; 32]))?;
-        let code_hash_key = Key::new(&account_code_hash_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
-        context.set(code_hash_key, Bytes::copy_from_slice(&code_hash))?;
-        let code_key = Key::new(&account_code_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
-        context.set(code_key, Bytes::copy_from_slice(&runtime))?;
-        let code_by_hash_key = Key::new(&code_by_hash_key_bytes(&code_hash))?;
-        context.set(code_by_hash_key, Bytes::copy_from_slice(&runtime))?;
-    }
+    // ERC-20 scenario: the contract is deployed via a CREATE transaction in the inbox.
+    // No contract bootstrapping is needed here.
+    let _ = scenario;
 
     let commit = registry.commit()?;
     write_registry_head(durable_storage_dir, commit)?;
@@ -1442,4 +1374,110 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Run a pre-built inbox against a prepared durable-storage dir and return the outcome.
+    fn run_native_with_inbox(durable_dir: &Path, inbox: &InboxFile) -> Result<BenchmarkOutcome> {
+        let (stdout, _) = run_native_benchmark(inbox, durable_dir)?;
+        parse_benchmark_logs(&stdout)
+    }
+
+    /// Create a fresh (empty) temporary directory for a test.
+    fn fresh_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tx-kernel-test-{name}"));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).expect("failed to remove stale test directory");
+        }
+        dir
+    }
+
+    /// Wrap transactions in a single block and return an inbox ready for replay.
+    fn make_inbox(block_number: u64, transactions: &[Vec<u8>]) -> InboxFile {
+        let sequencer = make_account(0);
+        let block = build_ethereum_block(block_number, transactions, &sequencer);
+        let msgs = chunk_block(block_number, &block)
+            .into_iter()
+            .map(|c| InboxMessageFile::External { external: c })
+            .collect();
+        InboxFile(vec![msgs])
+    }
+
+    #[test]
+    fn eth_transfer_applies() {
+        let dir = fresh_test_dir("eth-transfer");
+        prepare_context(
+            &dir,
+            2,
+            DEFAULT_INITIAL_BALANCE,
+            BenchmarkScenario::EthTransfer,
+            false,
+        )
+        .expect("prepare_context failed");
+
+        let accounts: Vec<_> = (0..2).map(make_account).collect();
+        let mut nonces = vec![0u64; 2];
+        let txs = build_eth_transfer_transactions(&accounts, 1, &mut nonces);
+        let inbox = make_inbox(1, &txs);
+
+        let outcome = run_native_with_inbox(&dir, &inbox).expect("run failed");
+        assert_eq!(outcome.tx_count, 1);
+        assert_eq!(outcome.applied_count, 1, "ETH transfer should be applied");
+    }
+
+    #[test]
+    fn contract_creation_applies() {
+        let dir = fresh_test_dir("contract-creation");
+        prepare_context(
+            &dir,
+            1,
+            DEFAULT_INITIAL_BALANCE,
+            BenchmarkScenario::EthTransfer,
+            false,
+        )
+        .expect("prepare_context failed");
+
+        let deployer = make_account(0);
+        let create_tx = build_eip1559_transaction(
+            deployer,
+            None, // CREATE
+            0,
+            0, // nonce 0
+            DEFAULT_EVM_CHAIN_ID,
+            ERC20_DEPLOY_GAS_LIMIT,
+            erc20_init_bytecode(),
+        );
+        let inbox = make_inbox(1, &[create_tx]);
+
+        let outcome = run_native_with_inbox(&dir, &inbox).expect("run failed");
+        assert_eq!(outcome.tx_count, 1);
+        assert_eq!(outcome.applied_count, 1, "contract creation should succeed");
+    }
+
+    #[test]
+    fn erc20_deploy_and_call_applies() {
+        let dir = fresh_test_dir("erc20-deploy-and-call");
+        prepare_context(
+            &dir,
+            2,
+            DEFAULT_INITIAL_BALANCE,
+            BenchmarkScenario::EthTransfer,
+            false,
+        )
+        .expect("prepare_context failed");
+
+        let accounts: Vec<_> = (0..2).map(make_account).collect();
+        let mut nonces = vec![0u64; 2];
+        // deploy + mint + 1 transfer = 3 transactions
+        let txs = build_erc20_transactions(&accounts, 1, &mut nonces);
+        assert_eq!(txs.len(), 3);
+        let inbox = make_inbox(1, &txs);
+
+        let outcome = run_native_with_inbox(&dir, &inbox).expect("run failed");
+        assert_eq!(outcome.tx_count, 3, "deploy + mint + 1 transfer");
+        assert_eq!(outcome.applied_count, 3, "all three transactions should succeed");
+    }
 }

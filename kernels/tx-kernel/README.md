@@ -50,14 +50,18 @@ make -C kernels/tx-kernel benchmark-native \
 - `TRANSACTIONS`
   Total number of benchmark transactions in the selected scenario.
   - `eth-transfer`: total number of EIP-1559 ETH transfers.
-  - `erc20`: total number of ERC-20-style transfer calls; the generator also prepends one setup call.
+  - `erc20`: total number of ERC-20-style transfer calls. The first block also contains a
+    contract-creation transaction (CREATE) and a mint call, so the actual transaction count
+    is `TRANSACTIONS + 2`.
 
 - `BENCHMARK_SCENARIO`
   Benchmark workload to generate.
   - `eth-transfer` (default)
   - `erc20`
 
-The current `erc20` path bootstraps a fixed benchmark contract into durable state during `prepare-context` and then drives it with EIP-1559 contract calls.
+The `erc20` scenario deploys the benchmark contract via a CREATE transaction in the first inbox
+block, then drives it with EIP-1559 contract calls. No contract bootstrapping is done in
+`prepare-context`; the full deploy → call flow runs through the kernel.
 
 - `BLOCK_FREQUENCY`
   Number of transactions per block.

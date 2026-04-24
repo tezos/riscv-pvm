@@ -471,33 +471,6 @@ fn block_hash(
     Ok(acc)
 }
 
-fn validate_transaction_signature(
-    crypto: &impl Crypto,
-    transaction: &SignedTransaction,
-) -> Result<(), String> {
-    let sender = address_from_public_key(crypto, &transaction.public_key)?;
-    validate_transaction_signature_with_sender(crypto, transaction, &sender)
-}
-
-/// Like [`validate_transaction_signature`] but accepts a pre-computed sender address,
-/// avoiding the redundant keccak call in the parallel-crypto two-pass path.
-fn validate_transaction_signature_with_sender(
-    crypto: &impl Crypto,
-    transaction: &SignedTransaction,
-    sender: &[u8; 20],
-) -> Result<(), String> {
-    if sender != &transaction.from {
-        return Err("transaction sender does not match public key".to_string());
-    }
-
-    let hash = transaction_hash(crypto, transaction)?;
-    if !crypto.verify_signature(&transaction.public_key, &transaction.signature, &hash) {
-        return Err("invalid transaction signature".to_string());
-    }
-
-    Ok(())
-}
-
 fn apply_valid_transaction(
     context: &mut impl ContextStore,
     transaction: &SignedTransaction,

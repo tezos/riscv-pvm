@@ -172,13 +172,19 @@ The current ERC-20 benchmark bootstraps the contract directly into durable state
 
 But the "deploy contract in the inbox, then benchmark calls" flow is not yet exercised.
 
-### Remaining work (commit 10)
+### Completed in commit 10
 
-Commit 10 should complete the following before closing out the plan:
+1. Added three focused e2e tests in `inbox-generator/src/main.rs` covering ETH transfer,
+   contract creation, and full ERC-20 deploy + call (all pass, 0 warnings).
+2. Switched the ERC-20 scenario from prebootstrapped state to a real CREATE transaction in
+   the first inbox block. The deployer address is derived deterministically via the Ethereum
+   CREATE formula (keccak256(RLP([sender, nonce]))[12:]).
+3. Native flow verified: 12/12 applied (deploy + mint + 10 transfers across 3 blocks).
+4. README updated; dead legacy transaction code removed from both lib.rs and main.rs.
 
-1. Add focused end-to-end tests for contract creation + call behavior.
-2. Switch the ERC-20 scenario from prebootstrapped code to an actual deployment tx in the inbox.
-3. Validate native + sandbox flows after the deploy-in-inbox change.
+### Remaining open item
+
+- [ ] RISC-V/sandbox path validation (requires a riscv-sandbox binary build)
 
 ## Commit plan
 
@@ -310,10 +316,10 @@ The final stack should satisfy all of the following:
 - [x] host/native benchmark path works
 - [ ] RISC-V/sandbox benchmark path works
 - [x] ETH transfer TPS benchmark works
-- [x] ERC-20 TPS benchmark works (bootstrap path; deploy-in-inbox pending)
-- [ ] ERC-20 scenario uses deploy-in-inbox flow
-- [ ] README updated
-- [ ] tests/smoke coverage added for contract creation + call
+- [x] ERC-20 TPS benchmark works
+- [x] ERC-20 scenario uses deploy-in-inbox flow
+- [x] README updated
+- [x] tests/smoke coverage added for contract creation + call
 
 ## Next step to resume from
 
