@@ -2,8 +2,10 @@
 //
 // SPDX-License-Identifier: MIT
 
+mod ethereum;
 mod world_state;
 
+pub use ethereum::*;
 pub use world_state::*;
 
 pub const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";
@@ -152,8 +154,8 @@ struct TxReceipt {
 }
 
 struct Reader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
+    pub(crate) bytes: &'a [u8],
+    pub(crate) offset: usize,
 }
 
 pub struct BlockChunkAccumulator {
@@ -242,15 +244,15 @@ impl Default for BlockChunkAccumulator {
 }
 
 impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
 
-    fn offset(&self) -> usize {
+    pub(crate) fn offset(&self) -> usize {
         self.offset
     }
 
-    fn take<const N: usize>(&mut self) -> Result<[u8; N], &'static str> {
+    pub(crate) fn take<const N: usize>(&mut self) -> Result<[u8; N], &'static str> {
         let end = self.offset.checked_add(N).ok_or("offset overflow")?;
         let slice = self
             .bytes
@@ -260,15 +262,15 @@ impl<'a> Reader<'a> {
         slice.try_into().map_err(|_| "invalid fixed-size field")
     }
 
-    fn read_u16(&mut self) -> Result<u16, &'static str> {
+    pub(crate) fn read_u16(&mut self) -> Result<u16, &'static str> {
         Ok(u16::from_le_bytes(self.take()?))
     }
 
-    fn read_u64(&mut self) -> Result<u64, &'static str> {
+    pub(crate) fn read_u64(&mut self) -> Result<u64, &'static str> {
         Ok(u64::from_le_bytes(self.take()?))
     }
 
-    fn is_eof(&self) -> bool {
+    pub(crate) fn is_eof(&self) -> bool {
         self.offset == self.bytes.len()
     }
 }

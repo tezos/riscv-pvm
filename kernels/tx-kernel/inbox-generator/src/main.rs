@@ -31,6 +31,9 @@ use riscv_tx_kernel::AsyncSecp256k1;
 use riscv_tx_kernel::AsyncSecp256k1Recover;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
+use riscv_tx_kernel::Eip1559Transaction;
+use riscv_tx_kernel::build_ethereum_block_blueprint;
+use riscv_tx_kernel::u64_to_be_u256;
 use riscv_tx_kernel::ContextStore;
 use riscv_tx_kernel::Crypto;
 use riscv_tx_kernel::Logger;
@@ -311,6 +314,55 @@ fn build_block(number: u64, transactions: &[SignedTransaction], sequencer: &Acco
     let signature = sign_hash(&sequencer.secret_key, &block_hash);
     block.extend_from_slice(&signature);
     block
+}
+
+fn build_eip1559_transaction(
+    from: Account,
+    to: Option<[u8; 20]>,
+    value: u64,
+    nonce: u64,
+    chain_id: u64,
+    gas_limit: u64,
+    data: Vec<u8>,
+) -> Vec<u8> {
+    let tx = Eip1559Transaction {
+        chain_id,
+        nonce,
+        max_priority_fee_per_gas: 1_000_000_000,
+        max_fee_per_gas: 1_000_000_000,
+        gas_limit,
+        to,
+        value: u64_to_be_u256(value),
+        data,
+        access_list: vec![],
+        signature_y_parity: 0,
+        signature_r: [0u8; 32],
+        signature_s: [0u8; 32],
+    };
+
+    let sighash: [u8; 32] = keccak256(&tx.signing_payload());
+    let message = Message::parse(&sighash);
+    let (signature, recovery_id) = libsecp256k1::sign(&message, &from.secret_key);
+    let compact = signature.serialize();
+
+    let mut signed = tx;
+    signed.signature_y_parity = Into::<u8>::into(recovery_id);
+    signed.signature_r.copy_from_slice(&compact[..32]);
+    signed.signature_s.copy_from_slice(&compact[32..]);
+    signed.encode()
+}
+
+fn build_ethereum_block(number: u64, transactions: &[Vec<u8>], sequencer: &Account) -> Vec<u8> {
+    let mut preimage = Vec::new();
+    preimage.extend_from_slice(b"TXE1");
+    preimage.extend_from_slice(&number.to_le_bytes());
+    preimage.extend_from_slice(&(transactions.len() as u16).to_le_bytes());
+    for transaction in transactions {
+        preimage.extend_from_slice(&(transaction.len() as u32).to_le_bytes());
+        preimage.extend_from_slice(transaction);
+    }
+    let signature = sign_hash(&sequencer.secret_key, &keccak256(&preimage));
+    build_ethereum_block_blueprint(number, transactions, &signature)
 }
 
 fn chunk_block(block_number: u64, block: &[u8]) -> Vec<Vec<u8>> {
