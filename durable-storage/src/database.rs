@@ -12,6 +12,8 @@ pub(crate) mod value_ref;
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
+use std::ops::Index;
+use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::BufMut;
@@ -22,6 +24,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Verify;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
@@ -32,6 +35,7 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
+use crate::merkle_layer::MerkleLayer;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::merkle_worker::MerkleWorker;
@@ -289,7 +293,7 @@ impl<KV> Modal for DatabaseTemplate<KV> {
 
     type Prove<'normal> = Infallible;
 
-    type Verify = Infallible;
+    type Verify = VerifyImpl<KV>;
 }
 
 /// Modes that support the operational API exposed by [`Database`].
@@ -380,6 +384,79 @@ struct NormalImpl<KV> {
     merkle: MerkleWorker<KV>,
 }
 
+/// Verify-mode implementation for the [`Database`].
+struct VerifyImpl<KV> {
+    merkle: MerkleLayer<KV, Verify>,
+}
+
+impl DatabaseMode for Verify {
+    fn get<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<impl ValueRef, Error> {
+        // Wraps the return type of [`MerkleLayer::get`] to allow returning the data as an
+        // [`impl ValueRef`] without allocating.
+        struct Wrapper<'a>(&'a octez_riscv_data::components::bytes::Bytes<Verify>);
+
+        impl Index<Range<usize>> for Wrapper<'_> {
+            type Output = [u8];
+
+            fn index(&self, range: Range<usize>) -> &[u8] {
+                // TODO RV-993: Reading data which is contained in multiple adjacent entries will
+                // yield `not_found`.
+                self.0.partial_slice(range)
+            }
+        }
+
+        impl ValueRef for Wrapper<'_> {
+            fn len(&self) -> usize {
+                self.0.len()
+            }
+        }
+
+        let value = this
+            .inner
+            .merkle
+            .get(key)?
+            .ok_or(InvalidArgumentError::KeyNotFound)?;
+
+        Ok(Wrapper(value))
+    }
+
+    fn set<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        data: Bytes,
+    ) -> Result<(), Error> {
+        this.inner.merkle.set(&key, &data)?;
+        Ok(())
+    }
+
+    fn write<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        offset: usize,
+        data: Bytes,
+    ) -> Result<usize, Error> {
+        let written = data.len();
+        this.inner.merkle.write(&key, offset, &data)?;
+        Ok(written)
+    }
+
+    fn delete<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+    ) -> Result<(), OperationalError> {
+        this.inner.merkle.delete(&key)
+    }
+
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+    ) -> Result<Hash, OperationalError> {
+        Ok(this.inner.merkle.hash())
+    }
+}
+
 #[cfg(test)]
 impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Assert that a database contains the expected value for a given key.
@@ -399,6 +476,7 @@ mod tests {
 
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Verify;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use proptest::proptest;
@@ -407,11 +485,13 @@ mod tests {
 
     use super::Database;
     use super::DatabaseMode;
+    use crate::avl::tree::Tree;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
@@ -422,6 +502,14 @@ mod tests {
         repo: &KV::Repo,
     ) -> Database<KV, Normal> {
         Database::try_new(handle, repo).expect("Creating a test database should succeed")
+    }
+
+    fn new_verify_database<KV>() -> Database<KV, Verify> {
+        Database {
+            inner: super::VerifyImpl {
+                merkle: MerkleLayer::from_verify_tree(Tree::default()),
+            },
+        }
     }
 
     fn new_persistent_database<KV>() -> (
@@ -1252,5 +1340,105 @@ mod tests {
             "Appending zero bytes to maximum length value does not change size"
         );
         assert_eq!(MAX_VALUE_SIZE, database.value_length(&key).unwrap());
+    });
+
+    kv_test!(test_verify_database_delete, KV: BackgroundKeyValueStore, {
+        let mut database = new_verify_database::<KV>();
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[]))
+            .expect("Verify mode does not return `OperationError`s");
+        assert!(
+            database
+                .exists(&key)
+                .expect("Verify mode does not return `OperationError`s")
+        );
+
+        database
+            .delete(key.clone())
+            .expect("Verify mode does not return `OperationError`s");
+        assert!(
+            !database
+                .exists(&key)
+                .expect("Verify mode does not return `OperationError`s")
+        );
+
+        // Deleting a non-existent key should also succeed.
+        let nonexistent_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        assert!(
+            !database
+                .exists(&nonexistent_key)
+                .expect("Verify mode does not return `OperationError`s")
+        );
+        database
+            .delete(nonexistent_key)
+            .expect("Verify mode does not return `OperationError`s");
+    });
+
+    kv_test!(test_verify_database_set_and_read, KV: BackgroundKeyValueStore, {
+        proptest!(|(data in prop::collection::vec(any::<u8>(), 0..200))| {
+            let mut database = new_verify_database::<KV>();
+            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+            database
+                .set(key.clone(), Bytes::copy_from_slice(&data))
+                .expect("Verify mode does not return `OperationError`s");
+
+            let result = database
+                .read_bytes(&key, 0, data.len())
+                .expect("Verify mode does not return `OperationError`s");
+            prop_assert_eq!(result.as_ref(), data.as_slice());
+        });
+    });
+
+    kv_test!(test_verify_database_value_length, KV: BackgroundKeyValueStore, {
+        proptest!(|(data in prop::collection::vec(any::<u8>(), 0..200))| {
+            let mut database = new_verify_database::<KV>();
+            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+            database
+                .set(key.clone(), Bytes::copy_from_slice(&data))
+                .expect("Verify mode does not return `OperationError`s");
+
+            prop_assert_eq!(
+                database
+                    .value_length(&key)
+                    .expect("Verify mode does not return `OperationError`s"),
+                data.len()
+            );
+        });
+    });
+
+    kv_test!(test_verify_database_write_partial, KV: BackgroundKeyValueStore, {
+        proptest!(|(
+            initial in prop::collection::vec(any::<u8>(), 1..200),
+            patch in prop::collection::vec(any::<u8>(), 0..200),
+            offset_frac in 0_usize..=100,
+        )| {
+            let offset = offset_frac * initial.len() / 100;
+            let patch_len = patch.len().min(initial.len() - offset);
+            let patch = &patch[..patch_len];
+
+            let mut database = new_verify_database::<KV>();
+            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+            database
+                .set(key.clone(), Bytes::copy_from_slice(&initial))
+                .expect("Verify mode does not return `OperationError`s");
+
+            let written = database
+                .write(key.clone(), offset, Bytes::copy_from_slice(patch))
+                .expect("Verify mode does not return `OperationError`s");
+            prop_assert_eq!(written, patch_len);
+
+            let result = database
+                .read_bytes(&key, 0, initial.len())
+                .expect("Verify mode does not return `OperationError`s");
+
+            let mut expected = initial.clone();
+            expected[offset..offset + patch_len].copy_from_slice(patch);
+            prop_assert_eq!(result.as_ref(), expected.as_slice());
+        });
     });
 }

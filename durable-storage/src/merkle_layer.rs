@@ -20,6 +20,7 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
@@ -392,6 +393,13 @@ struct VerifyImpl {
     resolver: VerifyResolver,
 }
 
+impl<KV> MerkleLayer<KV, Verify> {
+    /// Returns an immutable reference to the data stored for a given [Key].
+    pub(crate) fn get(&self, key: &Key) -> Result<Option<&Bytes<Verify>>, OperationalError> {
+        self.inner.tree.get(key, &self.inner.resolver)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -451,10 +459,6 @@ mod tests {
     }
 
     impl<KV> MerkleLayer<KV, Verify> {
-        fn get(&self, key: &Key) -> Result<Option<&Bytes<Verify>>, OperationalError> {
-            self.inner.tree.get(key, &self.inner.resolver)
-        }
-
         /// Construct a Verify-mode MerkleLayer from a deserialised tree.
         pub(crate) fn from_verify_tree(tree: Tree<VerifyNodeId>) -> Self {
             MerkleLayer {
