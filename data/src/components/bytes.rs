@@ -214,6 +214,28 @@ impl Bytes<Verify> {
         }
     }
 
+    /// Returns the given range as a contiguous byte slice.
+    ///
+    /// Panics (via [`not_found`]) if the range extends beyond the length, or is not fully
+    /// contained within a single defined entry, indicating the Merkle proof did not include the
+    /// data required for this access.
+    pub fn partial_slice(&self, range: Range<usize>) -> &[u8] {
+        if range.is_empty() {
+            return &[];
+        }
+        if range.start >= self.len() {
+            // SAFETY: called only in `Verify` mode
+            unsafe { not_found() }
+        }
+        match self.bytes.data.contiguous_range(range) {
+            Some(slice) => slice,
+            None => {
+                // SAFETY: called only in `Verify` mode
+                unsafe { not_found() }
+            }
+        }
+    }
+
     /// Zero-initialise all undefined bytes in the given range.
     pub(crate) fn zero_init_range(&mut self, range: Range<usize>) {
         let mut offset = range.start;
