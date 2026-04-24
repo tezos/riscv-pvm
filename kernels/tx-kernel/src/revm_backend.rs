@@ -76,7 +76,9 @@ impl<C: ContextStore> Database for RevmContextDb<C> {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let world = EvmWorldState::new(&mut self.context);
         let address_bytes: [u8; 20] = address.into();
-        let account = world.read_account(&address_bytes).map_err(RevmDbError::from)?;
+        let account = world
+            .read_account(&address_bytes)
+            .map_err(RevmDbError::from)?;
         let code_hash_bytes = world
             .read_code_hash(&address_bytes)
             .map_err(RevmDbError::from)?;

@@ -814,8 +814,8 @@ fn apply_ethereum_block_blueprint(
     }
 
     let mut derived_index = 0usize;
-    let mut valid_transactions = 0usize;
-    for tx_index in 0..n {
+    let mut applied_transactions = 0usize;
+    for (tx_index, transaction) in transactions.iter().enumerate() {
         let valid = if recovery_ok[tx_index] {
             let hash = derived_addresses[derived_index];
             derived_index += 1;
@@ -825,13 +825,13 @@ fn apply_ethereum_block_blueprint(
                 "ethereum tx prevalidated block={} tx_index={} sender={:02x?}\n",
                 block.number, tx_index, address
             ));
-            true
+            execute_ethereum_transaction(context, address, transaction, block.number)?
         } else {
             false
         };
 
         if valid {
-            valid_transactions += 1;
+            applied_transactions += 1;
         }
         *processed_transactions += 1;
         if tx_index + 1 == n {
@@ -841,6 +841,9 @@ fn apply_ethereum_block_blueprint(
             ));
         }
     }
+
+    let mut world_state = EvmWorldState::new(context);
+    world_state.write_meta_u64(EVM_META_HEAD_KEY, block.number)?;
 
     logger.log(&format!(
         "block finalization start block={} total_processed={}\n",
@@ -852,9 +855,52 @@ fn apply_ethereum_block_blueprint(
         "applied block {} with {} txs ({} applied), state root {:02x?}\n",
         block.number,
         block.transactions.len(),
-        valid_transactions,
+        applied_transactions,
         state_root
     ));
 
     Ok(())
+}
+
+fn execute_ethereum_transaction(
+    context: &mut impl ContextStore,
+    caller: [u8; 20],
+    transaction: &EthereumTransaction,
+    block_number: u64,
+) -> Result<bool, String> {
+    use revm::Context;
+    use revm::ExecuteCommitEvm;
+    use revm::MainBuilder;
+    use revm::MainContext;
+    use revm::context_interface::journaled_state::JournalTr;
+    use revm::context_interface::result::EVMError;
+    use revm::context_interface::result::ExecutionResult;
+
+    let spec_id = revm_spec_id(context)?;
+    let chain_id = evm_chain_id(context)?;
+    let mut block_env = build_revm_block_env(context)?;
+    block_env.number = revm::primitives::U256::from(block_number);
+    let tx_env = build_revm_tx_env(caller, transaction)?;
+
+    let db = RevmContextDb::new(context.clone());
+    let ctx = Context::mainnet()
+        .modify_cfg_chained(|cfg| {
+            cfg.spec = spec_id;
+            cfg.chain_id = chain_id;
+        })
+        .with_db(db)
+        .with_block(block_env);
+
+    let mut evm = ctx.build_mainnet();
+    let result = evm.transact_commit(tx_env);
+    *context = evm.ctx.journaled_state.db().context().clone();
+
+    match result {
+        Ok(ExecutionResult::Success { .. }) => Ok(true),
+        Ok(ExecutionResult::Revert { .. }) | Ok(ExecutionResult::Halt { .. }) => Ok(false),
+        Err(EVMError::Transaction(_))
+        | Err(EVMError::Header(_))
+        | Err(EVMError::Custom(_))
+        | Err(EVMError::Database(_)) => Ok(false),
+    }
 }
