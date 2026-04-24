@@ -292,7 +292,7 @@ impl<C: ContextStore> ChainKernel<C> {
     pub fn handle_external_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1),
+        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1 + AsyncSecp256k1Recover),
         payload: &[u8],
     ) {
         if payload.starts_with(&BLOCK_CHUNK_MAGIC) {
@@ -317,16 +317,28 @@ impl<C: ContextStore> ChainKernel<C> {
     fn handle_block_payload(
         &mut self,
         logger: &mut impl Logger,
-        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1),
+        crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1 + AsyncSecp256k1Recover),
         payload: &[u8],
     ) {
-        if let Err(error) = apply_block_blueprint(
-            logger,
-            crypto,
-            &mut self.context,
-            payload,
-            &mut self.processed_transactions,
-        ) {
+        let result = if payload.starts_with(&ETH_BLOCK_BLUEPRINT_MAGIC) {
+            apply_ethereum_block_blueprint(
+                logger,
+                crypto,
+                &mut self.context,
+                payload,
+                &mut self.processed_transactions,
+            )
+        } else {
+            apply_block_blueprint(
+                logger,
+                crypto,
+                &mut self.context,
+                payload,
+                &mut self.processed_transactions,
+            )
+        };
+
+        if let Err(error) = result {
             logger.log(&format!("rejected block blueprint: {error}\n"));
         }
     }
@@ -705,6 +717,140 @@ fn apply_block_blueprint(
         block.number,
         receipts.len(),
         applied,
+        state_root
+    ));
+
+    Ok(())
+}
+
+fn verify_ethereum_block_signature(
+    crypto: &impl Crypto,
+    block: &EthereumBlockBlueprint,
+) -> Result<(), String> {
+    let digest = crypto.keccak256(&ethereum_block_preimage(block.number, &block.transactions))?;
+    if crypto.verify_signature(&SEQUENCER_PUBLIC_KEY, &block.signature, &digest) {
+        Ok(())
+    } else {
+        Err("invalid sequencer signature".to_string())
+    }
+}
+
+fn apply_ethereum_block_blueprint(
+    logger: &mut impl Logger,
+    crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1Recover),
+    context: &mut impl ContextStore,
+    payload: &[u8],
+    processed_transactions: &mut usize,
+) -> Result<(), String> {
+    let block = parse_ethereum_block_blueprint(payload).map_err(str::to_string)?;
+    let n = block.transactions.len();
+
+    if *processed_transactions == 0 && !block.transactions.is_empty() {
+        logger.log(&format!(
+            "first processed tx block={} tx_index=0 total_processed=0\n",
+            block.number
+        ));
+    }
+
+    let mut transactions = Vec::with_capacity(n);
+    for transaction_bytes in &block.transactions {
+        transactions.push(EthereumTransaction::parse(transaction_bytes)?);
+    }
+
+    for transaction in &transactions {
+        crypto.enqueue(&transaction.signing_payload())?;
+    }
+
+    verify_ethereum_block_signature(crypto, &block)?;
+
+    let current_head = read_block_head(context)?;
+    if block.number != current_head + 1 {
+        return Err(format!(
+            "unexpected block number {}, expected {}",
+            block.number,
+            current_head + 1
+        ));
+    }
+
+    let mut sighashes = Vec::with_capacity(n);
+    for _ in 0..n {
+        sighashes.push(crypto.dequeue()?);
+    }
+
+    for (transaction, sighash) in transactions.iter().zip(sighashes.iter()) {
+        match transaction {
+            EthereumTransaction::Eip1559(tx) => {
+                crypto.secp256k1_recover_enqueue(
+                    &tx.signature(),
+                    tx.signature_y_parity,
+                    sighash,
+                )?;
+            }
+        }
+    }
+
+    let mut recovered_public_keys = Vec::with_capacity(n);
+    for _ in 0..n {
+        recovered_public_keys.push(crypto.secp256k1_recover_dequeue()?);
+    }
+
+    let mut recovery_ok = Vec::with_capacity(n);
+    for public_key in &recovered_public_keys {
+        match public_key {
+            Some(public_key) if public_key[0] == 0x04 => {
+                crypto.enqueue(&public_key[1..])?;
+                recovery_ok.push(true);
+            }
+            _ => recovery_ok.push(false),
+        }
+    }
+
+    let expected_hashes = recovery_ok.iter().filter(|ok| **ok).count();
+    let mut derived_addresses = Vec::with_capacity(expected_hashes);
+    for _ in 0..expected_hashes {
+        derived_addresses.push(crypto.dequeue()?);
+    }
+
+    let mut derived_index = 0usize;
+    let mut valid_transactions = 0usize;
+    for tx_index in 0..n {
+        let valid = if recovery_ok[tx_index] {
+            let hash = derived_addresses[derived_index];
+            derived_index += 1;
+            let mut address = [0u8; 20];
+            address.copy_from_slice(&hash[12..]);
+            logger.log(&format!(
+                "ethereum tx prevalidated block={} tx_index={} sender={:02x?}\n",
+                block.number, tx_index, address
+            ));
+            true
+        } else {
+            false
+        };
+
+        if valid {
+            valid_transactions += 1;
+        }
+        *processed_transactions += 1;
+        if tx_index + 1 == n {
+            logger.log(&format!(
+                "last processed tx block={} tx_index={} total_processed={}\n",
+                block.number, tx_index, *processed_transactions
+            ));
+        }
+    }
+
+    logger.log(&format!(
+        "block finalization start block={} total_processed={}\n",
+        block.number, *processed_transactions
+    ));
+    write_block_head(context, block.number)?;
+    let state_root = context.hash()?;
+    logger.log(&format!(
+        "applied block {} with {} txs ({} applied), state root {:02x?}\n",
+        block.number,
+        block.transactions.len(),
+        valid_transactions,
         state_root
     ));
 

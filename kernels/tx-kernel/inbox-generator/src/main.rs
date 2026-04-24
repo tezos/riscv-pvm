@@ -33,6 +33,7 @@ use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
 use riscv_tx_kernel::Eip1559Transaction;
 use riscv_tx_kernel::build_ethereum_block_blueprint;
+use riscv_tx_kernel::ethereum_block_preimage;
 use riscv_tx_kernel::u64_to_be_u256;
 use riscv_tx_kernel::ContextStore;
 use riscv_tx_kernel::Crypto;
@@ -353,14 +354,7 @@ fn build_eip1559_transaction(
 }
 
 fn build_ethereum_block(number: u64, transactions: &[Vec<u8>], sequencer: &Account) -> Vec<u8> {
-    let mut preimage = Vec::new();
-    preimage.extend_from_slice(b"TXE1");
-    preimage.extend_from_slice(&number.to_le_bytes());
-    preimage.extend_from_slice(&(transactions.len() as u16).to_le_bytes());
-    for transaction in transactions {
-        preimage.extend_from_slice(&(transaction.len() as u32).to_le_bytes());
-        preimage.extend_from_slice(transaction);
-    }
+    let preimage = ethereum_block_preimage(number, transactions);
     let signature = sign_hash(&sequencer.secret_key, &keccak256(&preimage));
     build_ethereum_block_blueprint(number, transactions, &signature)
 }

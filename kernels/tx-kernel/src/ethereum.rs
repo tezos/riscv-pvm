@@ -119,11 +119,7 @@ impl EthereumTransaction {
     }
 }
 
-pub fn build_ethereum_block_blueprint(
-    number: u64,
-    transactions: &[Vec<u8>],
-    signature: &[u8; 64],
-) -> Vec<u8> {
+pub fn ethereum_block_preimage(number: u64, transactions: &[Vec<u8>]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&ETH_BLOCK_BLUEPRINT_MAGIC);
     out.extend_from_slice(&number.to_le_bytes());
@@ -132,6 +128,15 @@ pub fn build_ethereum_block_blueprint(
         out.extend_from_slice(&(transaction.len() as u32).to_le_bytes());
         out.extend_from_slice(transaction);
     }
+    out
+}
+
+pub fn build_ethereum_block_blueprint(
+    number: u64,
+    transactions: &[Vec<u8>],
+    signature: &[u8; 64],
+) -> Vec<u8> {
+    let mut out = ethereum_block_preimage(number, transactions);
     out.extend_from_slice(signature);
     out
 }
