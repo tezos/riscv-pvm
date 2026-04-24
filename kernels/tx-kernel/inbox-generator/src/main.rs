@@ -16,6 +16,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::SecretKey;
@@ -70,6 +71,19 @@ const ROOT_TX_KERNEL_DIR_COMPONENTS: usize = 3;
 const BLOCK_CHUNK_HEADER_SIZE: usize = 4 + 8 + 2 + 2;
 const MAX_INPUT_MESSAGE_SIZE: usize = 4096;
 const EXTERNAL_FRAME_SIZE: usize = 21;
+const ERC20_RUNTIME_BYTECODE_HEX: &str = "600160005260206000f3";
+const ERC20_MINT_SELECTOR: [u8; 4] = [0x42, 0x96, 0x6c, 0x68];
+const ERC20_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
+const ERC20_CONTRACT_ADDRESS: [u8; 20] = [0x12; 20];
+const ERC20_INITIAL_MINT: u64 = 1_000_000_000;
+const ERC20_TRANSFER_GAS_LIMIT: u64 = 120_000;
+const ERC20_MINT_GAS_LIMIT: u64 = 200_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum BenchmarkScenario {
+    EthTransfer,
+    Erc20,
+}
 
 #[derive(Parser)]
 #[command(long_about = None)]
@@ -88,6 +102,8 @@ enum Commands {
         block_frequency: usize,
         #[arg(long, default_value_t = 1024)]
         accounts: usize,
+        #[arg(long, value_enum, default_value_t = BenchmarkScenario::EthTransfer)]
+        scenario: BenchmarkScenario,
         #[arg(long, default_value = "tx-kernel-inbox.json")]
         inbox_file: PathBuf,
     },
@@ -99,6 +115,8 @@ enum Commands {
         accounts: usize,
         #[arg(long, default_value_t = DEFAULT_INITIAL_BALANCE)]
         initial_balance: u64,
+        #[arg(long, value_enum, default_value_t = BenchmarkScenario::EthTransfer)]
+        scenario: BenchmarkScenario,
         #[arg(long, default_value_t = false)]
         rebuild: bool,
     },
@@ -114,6 +132,8 @@ enum Commands {
         accounts: usize,
         #[arg(long, default_value_t = DEFAULT_INITIAL_BALANCE)]
         initial_balance: u64,
+        #[arg(long, value_enum, default_value_t = BenchmarkScenario::EthTransfer)]
+        scenario: BenchmarkScenario,
         #[arg(long, default_value_t = false)]
         rebuild_context: bool,
         #[arg(long)]
@@ -396,8 +416,14 @@ fn chunk_block(block_number: u64, block: &[u8]) -> Vec<Vec<u8>> {
     chunks
 }
 
-fn build_inbox(transactions: usize, block_frequency: usize, account_count: usize) -> InboxFile {
+fn build_inbox(
+    scenario: BenchmarkScenario,
+    transactions: usize,
+    block_frequency: usize,
+    account_count: usize,
+) -> InboxFile {
     build_inbox_with_state(
+        scenario,
         transactions,
         block_frequency,
         account_count,
@@ -406,7 +432,33 @@ fn build_inbox(transactions: usize, block_frequency: usize, account_count: usize
     )
 }
 
+fn build_eth_transfer_transactions(
+    accounts: &[Account],
+    transactions: usize,
+    nonces: &mut [u64],
+) -> Vec<Vec<u8>> {
+    let account_count = accounts.len();
+    let mut block_transactions = Vec::with_capacity(transactions);
+    for tx_index in 0..transactions {
+        let sender_idx = tx_index % account_count;
+        let recipient_idx = (sender_idx + 1) % account_count;
+        let nonce = nonces[sender_idx];
+        nonces[sender_idx] += 1;
+        block_transactions.push(build_eip1559_transaction(
+            accounts[sender_idx],
+            Some(accounts[recipient_idx].address),
+            1,
+            nonce,
+            DEFAULT_EVM_CHAIN_ID,
+            21_000,
+            vec![],
+        ));
+    }
+    block_transactions
+}
+
 fn build_inbox_with_state(
+    scenario: BenchmarkScenario,
     transactions: usize,
     block_frequency: usize,
     account_count: usize,
@@ -418,31 +470,20 @@ fn build_inbox_with_state(
     let accounts: Vec<_> = (0..account_count).map(make_account).collect();
     let sequencer = accounts[0];
     nonces.resize(account_count, 0);
+    let all_transactions = match scenario {
+        BenchmarkScenario::EthTransfer => {
+            build_eth_transfer_transactions(&accounts, transactions, &mut nonces)
+        }
+        BenchmarkScenario::Erc20 => build_erc20_transactions(&accounts, transactions, &mut nonces),
+    };
     let mut levels = Vec::new();
     let mut messages = Vec::new();
 
     let mut block_number = first_block_number;
     let mut start = 0usize;
-    while start < transactions {
-        let end = (start + block_frequency).min(transactions);
-        let mut block_transactions = Vec::with_capacity(end - start);
-        for tx_index in start..end {
-            let sender_idx = tx_index % account_count;
-            let recipient_idx = (sender_idx + 1) % account_count;
-            let nonce = nonces[sender_idx];
-            nonces[sender_idx] += 1;
-            block_transactions.push(build_eip1559_transaction(
-                accounts[sender_idx],
-                Some(accounts[recipient_idx].address),
-                1,
-                nonce,
-                DEFAULT_EVM_CHAIN_ID,
-                21_000,
-                vec![],
-            ));
-        }
-
-        let block = build_ethereum_block(block_number, &block_transactions, &sequencer);
+    while start < all_transactions.len() {
+        let end = (start + block_frequency).min(all_transactions.len());
+        let block = build_ethereum_block(block_number, &all_transactions[start..end], &sequencer);
         for chunk in chunk_block(block_number, &block) {
             messages.push(InboxMessageFile::External { external: chunk });
         }
@@ -452,6 +493,67 @@ fn build_inbox_with_state(
 
     levels.push(messages);
     InboxFile(levels)
+}
+
+fn erc20_runtime_bytecode() -> Vec<u8> {
+    hex::decode(ERC20_RUNTIME_BYTECODE_HEX)
+        .expect("embedded ERC20 runtime bytecode must be valid hex")
+}
+
+fn erc20_mint_call_data(amount: u64) -> Vec<u8> {
+    let mut data = Vec::with_capacity(4 + 32);
+    data.extend_from_slice(&ERC20_MINT_SELECTOR);
+    data.extend_from_slice(&u64_to_be_u256(amount));
+    data
+}
+
+fn erc20_transfer_call_data(recipient: [u8; 20], amount: u64) -> Vec<u8> {
+    let mut data = Vec::with_capacity(4 + 32 + 32);
+    data.extend_from_slice(&ERC20_TRANSFER_SELECTOR);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(&recipient);
+    data.extend_from_slice(&u64_to_be_u256(amount));
+    data
+}
+
+fn build_erc20_transactions(
+    accounts: &[Account],
+    transfers: usize,
+    nonces: &mut [u64],
+) -> Vec<Vec<u8>> {
+    let deployer = accounts[0];
+    let mut transactions = Vec::with_capacity(transfers + 1);
+
+    transactions.push(build_eip1559_transaction(
+        deployer,
+        Some(ERC20_CONTRACT_ADDRESS),
+        0,
+        nonces[0],
+        DEFAULT_EVM_CHAIN_ID,
+        ERC20_MINT_GAS_LIMIT,
+        erc20_mint_call_data(ERC20_INITIAL_MINT),
+    ));
+    nonces[0] += 1;
+
+    for transfer_index in 0..transfers {
+        let recipient = if accounts.len() == 1 {
+            deployer.address
+        } else {
+            accounts[(transfer_index % (accounts.len() - 1)) + 1].address
+        };
+        transactions.push(build_eip1559_transaction(
+            deployer,
+            Some(ERC20_CONTRACT_ADDRESS),
+            0,
+            nonces[0],
+            DEFAULT_EVM_CHAIN_ID,
+            ERC20_TRANSFER_GAS_LIMIT,
+            erc20_transfer_call_data(recipient, 1),
+        ));
+        nonces[0] += 1;
+    }
+
+    transactions
 }
 
 fn legacy_account_key_bytes(address: &[u8; 20]) -> [u8; 26] {
@@ -482,6 +584,13 @@ fn account_code_hash_key_bytes(address: &[u8; 20]) -> Vec<u8> {
     key.extend_from_slice(b"/evm/accounts/");
     key.extend_from_slice(address);
     key.extend_from_slice(b"/code_hash");
+    key
+}
+
+fn code_by_hash_key_bytes(code_hash: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(b"/evm/code_by_hash/".len() + code_hash.len());
+    key.extend_from_slice(b"/evm/code_by_hash/");
+    key.extend_from_slice(code_hash);
     key
 }
 
@@ -527,6 +636,7 @@ fn prepare_context(
     durable_storage_dir: &Path,
     accounts: usize,
     initial_balance: u64,
+    scenario: BenchmarkScenario,
     rebuild: bool,
 ) -> Result<()> {
     if rebuild && durable_storage_dir.exists() {
@@ -616,6 +726,21 @@ fn prepare_context(
                 populated, remaining, percent
             );
         }
+    }
+
+    if scenario == BenchmarkScenario::Erc20 {
+        let runtime = erc20_runtime_bytecode();
+        let code_hash = keccak256(&runtime);
+        let nonce_key = Key::new(&account_nonce_key(&ERC20_CONTRACT_ADDRESS))?;
+        context.set(nonce_key, Bytes::copy_from_slice(&1u64.to_le_bytes()))?;
+        let balance_key = Key::new(&account_balance_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
+        context.set(balance_key, Bytes::copy_from_slice(&[0u8; 32]))?;
+        let code_hash_key = Key::new(&account_code_hash_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
+        context.set(code_hash_key, Bytes::copy_from_slice(&code_hash))?;
+        let code_key = Key::new(&account_code_key_bytes(&ERC20_CONTRACT_ADDRESS))?;
+        context.set(code_key, Bytes::copy_from_slice(&runtime))?;
+        let code_by_hash_key = Key::new(&code_by_hash_key_bytes(&code_hash))?;
+        context.set(code_by_hash_key, Bytes::copy_from_slice(&runtime))?;
     }
 
     let commit = registry.commit()?;
@@ -1109,6 +1234,7 @@ fn run_benchmark(
     accounts: usize,
     durable_storage_dir: PathBuf,
     initial_balance: u64,
+    scenario: BenchmarkScenario,
     rebuild_context: bool,
     inbox_file: Option<PathBuf>,
     kernel: Option<PathBuf>,
@@ -1120,6 +1246,7 @@ fn run_benchmark(
             &durable_storage_dir,
             accounts,
             initial_balance,
+            scenario,
             rebuild_context,
         )?;
     }
@@ -1128,13 +1255,14 @@ fn run_benchmark(
         inbox_file.unwrap_or_else(|| std::env::temp_dir().join("tx-kernel-benchmark-inbox.json"));
     let inbox = match read_existing_context_state(&durable_storage_dir, accounts)? {
         Some((first_block_number, nonces)) => build_inbox_with_state(
+            scenario,
             transactions,
             block_frequency,
             accounts,
             first_block_number,
             nonces,
         ),
-        None => build_inbox(transactions, block_frequency, accounts),
+        None => build_inbox(scenario, transactions, block_frequency, accounts),
     };
     write_inbox(&inbox_path, &inbox)?;
 
@@ -1257,9 +1385,10 @@ fn main() -> Result<()> {
             transactions,
             block_frequency,
             accounts,
+            scenario,
             inbox_file,
         } => {
-            let inbox = build_inbox(transactions, block_frequency, accounts);
+            let inbox = build_inbox(scenario, transactions, block_frequency, accounts);
             write_inbox(&inbox_file, &inbox)?;
             println!("Wrote {}", inbox_file.display());
         }
@@ -1267,9 +1396,16 @@ fn main() -> Result<()> {
             durable_storage_dir,
             accounts,
             initial_balance,
+            scenario,
             rebuild,
         } => {
-            prepare_context(&durable_storage_dir, accounts, initial_balance, rebuild)?;
+            prepare_context(
+                &durable_storage_dir,
+                accounts,
+                initial_balance,
+                scenario,
+                rebuild,
+            )?;
             println!(
                 "Prepared durable-storage context with {} accounts in {}",
                 accounts.max(1),
@@ -1282,6 +1418,7 @@ fn main() -> Result<()> {
             durable_storage_dir,
             accounts,
             initial_balance,
+            scenario,
             rebuild_context,
             inbox_file,
             kernel,
@@ -1294,6 +1431,7 @@ fn main() -> Result<()> {
                 accounts,
                 durable_storage_dir,
                 initial_balance,
+                scenario,
                 rebuild_context,
                 inbox_file,
                 kernel,

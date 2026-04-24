@@ -17,7 +17,7 @@ make -C kernels/tx-kernel prepare-context \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
 ```
 
-This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs for the ETH-transfer benchmark.
+This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs. By default this prepares the `eth-transfer` benchmark scenario; set `BENCHMARK_SCENARIO=erc20` to prepare the ERC-20 benchmark scenario instead.
 
 Run the benchmark in `riscv-sandbox` against that database:
 
@@ -48,7 +48,16 @@ make -C kernels/tx-kernel benchmark-native \
   Directory containing the persistent RocksDB durable-storage state.
 
 - `TRANSACTIONS`
-  Total number of EIP-1559 ETH-transfer transactions in the benchmark run.
+  Total number of benchmark transactions in the selected scenario.
+  - `eth-transfer`: total number of EIP-1559 ETH transfers.
+  - `erc20`: total number of ERC-20-style transfer calls; the generator also prepends one setup call.
+
+- `BENCHMARK_SCENARIO`
+  Benchmark workload to generate.
+  - `eth-transfer` (default)
+  - `erc20`
+
+The current `erc20` path bootstraps a fixed benchmark contract into durable state during `prepare-context` and then drives it with EIP-1559 contract calls.
 
 - `BLOCK_FREQUENCY`
   Number of transactions per block.
@@ -74,6 +83,22 @@ make -C kernels/tx-kernel benchmark-native \
   BLOCK_FREQUENCY=100 \
   PREPOPULATED_ACCOUNTS=100 \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
+```
+
+ERC-20 smoke test:
+
+```bash
+make -C kernels/tx-kernel prepare-context \
+  BENCHMARK_SCENARIO=erc20 \
+  PREPOPULATED_ACCOUNTS=100 \
+  DURABLE_STORAGE_DIR=/tmp/tx-kernel-erc20-smoke-db
+
+make -C kernels/tx-kernel benchmark-native \
+  BENCHMARK_SCENARIO=erc20 \
+  TRANSACTIONS=1000 \
+  BLOCK_FREQUENCY=100 \
+  PREPOPULATED_ACCOUNTS=100 \
+  DURABLE_STORAGE_DIR=/tmp/tx-kernel-erc20-smoke-db
 ```
 
 ## Measuring Context Size Impact

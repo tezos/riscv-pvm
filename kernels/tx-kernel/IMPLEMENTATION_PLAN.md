@@ -140,265 +140,133 @@ The benchmark tool in `kernels/tx-kernel/inbox-generator` will be extended with 
 
 ### Scenario B: ERC-20
 
-- deploy a simple ERC-20 contract
+- deploy or bootstrap a simple ERC-20 benchmark contract
 - mint/initialize balances deterministically
 - generate `transfer` calls as EIP-1559 txs
 - report TPS and apply/success count
+
+## Progress notes
+
+### Completed (commits 1–9)
+
+All planned commits through commit 9 are done and smoke-tested:
+
+```bash
+cargo run --manifest-path kernels/tx-kernel/inbox-generator/Cargo.toml -- \
+  prepare-context --scenario erc20 --durable-storage-dir /tmp/tx-kernel-erc20-smoke --accounts 10 --rebuild
+
+cargo run --manifest-path kernels/tx-kernel/inbox-generator/Cargo.toml -- \
+  benchmark --native --scenario erc20 --transactions 10 --block-frequency 4 --accounts 10 \
+  --durable-storage-dir /tmp/tx-kernel-erc20-smoke
+```
+
+Result: 11/11 applied. Native ERC-20 benchmark path works end-to-end.
+
+### Known caveat
+
+The current ERC-20 benchmark bootstraps the contract directly into durable state during `prepare-context`. It does **not** yet deploy via a transaction in the inbox. This means:
+
+- contract-call benchmark plumbing is working
+- durable-state bootstrap and scenario switching work
+- native smoke path works
+
+But the "deploy contract in the inbox, then benchmark calls" flow is not yet exercised.
+
+### Remaining work (commit 10)
+
+Commit 10 should complete the following before closing out the plan:
+
+1. Add focused end-to-end tests for contract creation + call behavior.
+2. Switch the ERC-20 scenario from prebootstrapped code to an actual deployment tx in the inbox.
+3. Validate native + sandbox flows after the deploy-in-inbox change.
 
 ## Commit plan
 
 The work should be split into self-contained commits so it is easy to review and to bisect.
 
-### Commit 1: Planning and scaffolding
+### ~~Commit 1: Planning and scaffolding~~ ✓ DONE
 
-**Scope**
-- add this implementation plan
-- add TODO markers / module stubs if useful
-- no functional behavior change
-
-**Expected result**
-- repository contains a stable plan to return to
-
-**Suggested `jj` flow**
-- update this file
-- `jj describe -m "tx-kernel: add Ethereum/REVM implementation plan"`
+`tx-kernel: add Ethereum/REVM implementation plan`
 
 ---
 
-### Commit 2: Extend crypto traits for async sender recovery
+### ~~Commit 2: Extend crypto traits for async sender recovery~~ ✓ DONE
 
-**Scope**
-- extend `riscv-tx-kernel` crypto traits with async secp256k1 recovery
-- update kernel-side SBI wrappers in `src/main.rs`
-- update `src/sbi_crypto.rs` host call bindings
-- update native benchmark crypto implementation to support the new async recovery queue
-
-**Expected result**
-- host and native code can enqueue/dequeue secp256k1 recovery jobs
-- no REVM/world-state integration yet
-
-**Files likely touched**
-- `kernels/tx-kernel/src/lib.rs`
-- `kernels/tx-kernel/src/main.rs`
-- `kernels/tx-kernel/src/sbi_crypto.rs`
-- `kernels/tx-kernel/inbox-generator/src/main.rs`
-
-**Validation**
-- host build passes
-- native benchmark path compiles
-
-**Suggested `jj` flow**
-- `jj new`
-- implement recovery API end-to-end
-- `jj describe -m "tx-kernel: add async secp256k1 recovery support"`
+`tx-kernel: add async secp256k1 recovery support`
 
 ---
 
-### Commit 3: Introduce Ethereum world-state keyspace model
+### ~~Commit 3: Introduce Ethereum world-state keyspace model~~ ✓ DONE
 
-**Scope**
-- replace the current account model abstraction with Ethereum world-state helpers
-- add durable key helpers for nonce/balance/code/storage/meta
-- update bootstrap logic to initialize EVM metadata
-- preserve durable context loader behavior
-
-**Expected result**
-- tx-kernel has a reusable world-state abstraction over `ContextStore`
-- old custom `/acct/...` state path is no longer the primary model
-
-**Files likely touched**
-- `kernels/tx-kernel/src/lib.rs`
-- possibly new modules under `kernels/tx-kernel/src/`
-
-**Validation**
-- unit tests for key encoding / storage roundtrips if feasible
-- host/native compile still passes
-
-**Suggested `jj` flow**
-- `jj new`
-- implement world-state storage helpers
-- `jj describe -m "tx-kernel: add Ethereum world-state durable storage"`
+`tx-kernel: add Ethereum world-state durable storage`
 
 ---
 
-### Commit 4: Add Ethereum transaction/block payload parsing
+### ~~Commit 4: Add Ethereum transaction/block payload parsing~~ ✓ DONE
 
-**Scope**
-- define new inner block payload format carrying raw Ethereum tx bytes
-- implement parser for sequenced block payloads
-- add EIP-1559 decoding
-- remove dependency on the old custom transfer tx parser in the execution path
-
-**Expected result**
-- kernel can parse blocks containing Ethereum transactions
-- sender recovery/execution may still be stubbed or partial
-
-**Files likely touched**
-- `kernels/tx-kernel/src/lib.rs`
-- possibly new parser/types modules
-- `kernels/tx-kernel/inbox-generator/src/main.rs`
-
-**Validation**
-- parser unit tests for EIP-1559 transfer and contract-creation txs
-
-**Suggested `jj` flow**
-- `jj new`
-- add tx/block parsing and serialization support
-- `jj describe -m "tx-kernel: parse sequenced EIP-1559 Ethereum transactions"`
+`tx-kernel: parse sequenced EIP-1559 Ethereum transactions`
 
 ---
 
-### Commit 5: Build async Ethereum prevalidation pipeline
+### ~~Commit 5: Build async Ethereum prevalidation pipeline~~ ✓ DONE
 
-**Scope**
-- enqueue keccak sighash work for parsed Ethereum txs
-- enqueue async secp256k1 recovery
-- derive sender addresses
-- validate decoded/recovered tx data before execution
-- keep block signature verification and block-number checks
-
-**Expected result**
-- txs are prevalidated using the same enqueue/dequeue pattern as the current tx-kernel
-- sender extraction is standard Ethereum recovery, not non-standard metadata
-
-**Files likely touched**
-- `kernels/tx-kernel/src/lib.rs`
-- benchmark/native crypto code as needed
-
-**Validation**
-- end-to-end native tests for sender recovery and tx validation
-
-**Suggested `jj` flow**
-- `jj new`
-- implement async prevalidation pipeline
-- `jj describe -m "tx-kernel: prevalidate Ethereum txs with async crypto pipeline"`
+`tx-kernel: prevalidate Ethereum txs with async crypto pipeline`
 
 ---
 
-### Commit 6: Introduce REVM durable DB adapter
+### ~~Commit 6: Introduce REVM durable DB adapter~~ ✓ DONE
 
-**Scope**
-- add `revm` and supporting dependencies
-- implement REVM database access over `ContextStore`
-- map account/code/storage reads and writes to the durable keyspace
-- define block env / tx env builders
-
-**Expected result**
-- a reusable REVM adapter exists and compiles for host + riscv
-- execution plumbing may still be minimally integrated
-
-**Files likely touched**
-- `kernels/tx-kernel/Cargo.toml`
-- new REVM/db modules under `kernels/tx-kernel/src/`
-- possibly inbox-generator dependencies for signing/encoding
-
-**Validation**
-- host compile
-- riscv compile if possible early
-
-**Suggested `jj` flow**
-- `jj new`
-- add REVM and DB adapter
-- `jj describe -m "tx-kernel: add REVM durable-storage backend"`
+`tx-kernel: add REVM durable-storage backend`
 
 ---
 
-### Commit 7: Execute Ethereum txs through REVM
+### ~~Commit 7: Execute Ethereum txs through REVM~~ ✓ DONE
 
-**Scope**
-- wire validated txs into REVM execution
-- commit account/code/storage changes back to durable storage
-- support:
-  - ETH transfers
-  - contract creation
-  - contract calls
-- preserve block finalization logging
-
-**Expected result**
-- kernel executes Ethereum txs end-to-end in native mode
-
-**Validation**
-- native end-to-end test: ETH transfer
-- native end-to-end test: contract creation
-- native end-to-end test: ERC-20 transfer call
-
-**Suggested `jj` flow**
-- `jj new`
-- connect pipeline to REVM execution
-- `jj describe -m "tx-kernel: execute Ethereum transactions with REVM"`
+`tx-kernel: execute Ethereum transactions with REVM`
 
 ---
 
-### Commit 8: Migrate benchmark generator to Ethereum ETH-transfer scenario
+### ~~Commit 8: Migrate benchmark generator to Ethereum ETH-transfer scenario~~ ✓ DONE
 
-**Scope**
-- update context preparation for world state
-- generate EIP-1559 transfer txs
-- preserve native and sandbox benchmark flows
-- keep benchmark output parsing compatible or update it consistently
-
-**Expected result**
-- ETH-transfer TPS benchmark works in native mode and sandbox mode
-
-**Files likely touched**
-- `kernels/tx-kernel/inbox-generator/src/main.rs`
-- `kernels/tx-kernel/README.md`
-- `kernels/tx-kernel/Makefile` if needed
-
-**Validation**
-- prepare context
-- run native ETH transfer benchmark
-- run sandbox ETH transfer benchmark
-
-**Suggested `jj` flow**
-- `jj new`
-- migrate benchmark generator for ETH transfers
-- `jj describe -m "tx-kernel-bench: add EIP-1559 ETH transfer benchmark"`
+`tx-kernel-bench: add EIP-1559 ETH transfer benchmark`
 
 ---
 
-### Commit 9: Add ERC-20 benchmark scenario
+### ~~Commit 9: Add ERC-20 benchmark scenario~~ ✓ DONE (bootstrap path)
+
+`tx-kernel-bench: add ERC-20 benchmark scenario`
+
+Native ERC-20 benchmark smoke-tested end-to-end (11/11 applied). Current implementation bootstraps
+the contract into durable state rather than deploying via an inbox transaction.
+
+---
+
+### Commit 10: End-to-end tests, deploy-in-inbox ERC-20, and cleanup
 
 **Scope**
-- add ERC-20 deployment/call scenario
-- add deterministic contract bytecode / ABI call generation
-- optionally predeploy during context preparation or deploy in the first benchmark block
+- add focused end-to-end tests for contract creation + call behavior
+- switch ERC-20 scenario from prebootstrapped contract to a real deployment tx in the inbox
+- validate native + sandbox flows after deploy-in-inbox change
+- update README with final usage and scenarios
+- remove any remaining dead code from the old custom tx path
+- clean up logs and benchmark parsing as needed
 
 **Expected result**
-- ERC-20 TPS benchmark works in native mode and sandbox mode
+- ERC-20 scenario exercises the full deploy → call path through the inbox
+- contract creation is covered by tests, not just benchmarks
+- acceptance checklist fully satisfied
 
 **Validation**
-- native ERC-20 benchmark
+- end-to-end test: contract creation via inbox tx
+- end-to-end test: ERC-20 deploy + transfer via inbox
+- native ERC-20 benchmark with deploy-in-inbox flow
 - sandbox ERC-20 benchmark
-
-**Suggested `jj` flow**
-- `jj new`
-- add ERC-20 scenario
-- `jj describe -m "tx-kernel-bench: add ERC-20 benchmark scenario"`
-
----
-
-### Commit 10: Docs, smoke tests, and cleanup
-
-**Scope**
-- update README with new usage and scenarios
-- add/adjust tests
-- remove dead code from old custom tx path
-- clean up logs and benchmark parsing
-
-**Expected result**
-- final user-facing workflow documented
-- acceptance criteria covered
-
-**Validation**
 - host + riscv build
-- native + sandbox smoke benchmarks
-- transfer/deploy/call tests
 
 **Suggested `jj` flow**
 - `jj new`
-- cleanup and document
-- `jj describe -m "tx-kernel: document Ethereum/REVM workflow and finalize migration"`
+- add e2e tests, switch ERC-20 to deploy-in-inbox, validate sandbox
+- `jj describe -m "tx-kernel: e2e tests and ERC-20 deploy-in-inbox flow"`
 
 ## Recommended `jj` workflow during implementation
 
@@ -433,23 +301,26 @@ When ready to publish stacked work, use the repo's normal `jj`/git export flow.
 
 The final stack should satisfy all of the following:
 
-- [ ] standard Ethereum EIP-1559 transactions accepted by tx-kernel
-- [ ] contract creation supported
-- [ ] contract calls supported
-- [ ] sender recovery uses async enqueue/dequeue host crypto path
-- [ ] durable world-state stored in keyspace
-- [ ] REVM executes txs against durable storage
-- [ ] host/native benchmark path works
+- [x] standard Ethereum EIP-1559 transactions accepted by tx-kernel
+- [x] contract creation supported
+- [x] contract calls supported
+- [x] sender recovery uses async enqueue/dequeue host crypto path
+- [x] durable world-state stored in keyspace
+- [x] REVM executes txs against durable storage
+- [x] host/native benchmark path works
 - [ ] RISC-V/sandbox benchmark path works
-- [ ] ETH transfer TPS benchmark works
-- [ ] ERC-20 TPS benchmark works
+- [x] ETH transfer TPS benchmark works
+- [x] ERC-20 TPS benchmark works (bootstrap path; deploy-in-inbox pending)
+- [ ] ERC-20 scenario uses deploy-in-inbox flow
 - [ ] README updated
-- [ ] tests/smoke coverage added
+- [ ] tests/smoke coverage added for contract creation + call
 
-## First implementation step to resume from later
+## Next step to resume from
 
-When returning to this work, start with:
+Commits 1–9 are complete. When returning to this work, go straight to commit 10:
 
-1. inspect current crypto traits and SBI bindings
-2. add async secp256k1 recovery support end-to-end
-3. only after that, begin Ethereum tx parsing and REVM integration
+1. Add an integration test that sends a contract-creation tx through the inbox and asserts the contract is callable afterward.
+2. Add an integration test that deploys the ERC-20 contract via an inbox tx and then calls `transfer`.
+3. Update the ERC-20 `prepare-context` path to emit a deployment tx instead of bootstrapping durable state directly.
+4. Verify sandbox (`--no-native`) still passes for both scenarios.
+5. Update README with final CLI usage.
