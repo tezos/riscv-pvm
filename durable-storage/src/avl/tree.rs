@@ -146,6 +146,19 @@ impl<NodeId> Tree<NodeId> {
     }
 
     #[inline]
+    /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
+    pub(crate) fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
+        &'a self,
+        key: &Key,
+        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+    ) -> Result<Option<&'a Bytes<M>>, OperationalError> {
+        let Some(node) = self.root() else {
+            return Ok(None);
+        };
+        Node::get(node, key, resolver)
+    }
+
+    #[inline]
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
@@ -481,19 +494,6 @@ mod tests {
     use crate::key::Key;
 
     impl<NodeId> Tree<NodeId> {
-        #[inline]
-        /// The data stored in a [`Node`] in the [`Tree`] with a given [`Key`].
-        pub fn get<'a, TreeId: 'a, M: BytesMode + AtomMode>(
-            &'a self,
-            key: &Key,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
-        ) -> Result<Option<&'a Bytes<M>>, OperationalError> {
-            let Some(node) = self.root() else {
-                return Ok(None);
-            };
-            Node::get(node, key, resolver)
-        }
-
         /// Asserts that the [`Tree`] is a valid AVL tree
         pub(crate) fn check<TreeId, M: BytesMode + AtomMode>(
             &self,

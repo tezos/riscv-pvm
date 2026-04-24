@@ -134,6 +134,36 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
 }
 
 impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
+    /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
+    pub(super) fn get<'a, NodeId>(
+        mut node: &'a NodeId,
+        key: &Key,
+        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+    ) -> Result<Option<&'a Bytes<M>>, OperationalError>
+    where
+        NodeId: 'a,
+        TreeId: 'a,
+    {
+        loop {
+            let resolved_node = resolver.resolve(node)?;
+            match resolved_node.key().cmp(key) {
+                Ordering::Equal => return Ok(Some(&resolved_node.data)),
+                Ordering::Greater => {
+                    let Some(left) = resolved_node.left_ref(resolver)?.root() else {
+                        return Ok(None);
+                    };
+                    node = left;
+                }
+                Ordering::Less => {
+                    let Some(right) = resolved_node.right_ref(resolver)?.root() else {
+                        return Ok(None);
+                    };
+                    node = right;
+                }
+            }
+        }
+    }
+
     /// Create a new leaf [`Node`] from the given key and data.
     pub(crate) fn new(key: Key, data: impl Into<Bytes<M>>) -> Self
     where
@@ -712,36 +742,6 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
 #[cfg(test)]
 impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
-    /// The data stored in a [`Node`] within the subtree of this [`Node`] with a given [`Key`] .
-    pub(super) fn get<'a, NodeId>(
-        mut node: &'a NodeId,
-        key: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
-    ) -> Result<Option<&'a Bytes<M>>, OperationalError>
-    where
-        NodeId: 'a,
-        TreeId: 'a,
-    {
-        loop {
-            let resolved_node = resolver.resolve(node)?;
-            match resolved_node.key().cmp(key) {
-                Ordering::Equal => return Ok(Some(resolved_node.data())),
-                Ordering::Greater => {
-                    let Some(left) = resolved_node.left_ref(resolver)?.root() else {
-                        return Ok(None);
-                    };
-                    node = left;
-                }
-                Ordering::Less => {
-                    let Some(right) = resolved_node.right_ref(resolver)?.root() else {
-                        return Ok(None);
-                    };
-                    node = right;
-                }
-            }
-        }
-    }
-
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors<NodeId>(
         &self,
