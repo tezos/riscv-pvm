@@ -3,9 +3,11 @@
 // SPDX-License-Identifier: MIT
 
 mod ethereum;
+mod revm_backend;
 mod world_state;
 
 pub use ethereum::*;
+pub use revm_backend::*;
 pub use world_state::*;
 
 pub const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";

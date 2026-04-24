@@ -11,6 +11,7 @@ pub const EVM_NONCE_SUFFIX: &[u8] = b"/nonce";
 pub const EVM_BALANCE_SUFFIX: &[u8] = b"/balance";
 pub const EVM_CODE_SUFFIX: &[u8] = b"/code";
 pub const EVM_CODE_HASH_SUFFIX: &[u8] = b"/code_hash";
+pub const EVM_CODE_BY_HASH_PREFIX: &[u8] = b"/evm/code_by_hash/";
 
 pub const EVM_META_BOOTSTRAPPED_KEY: &[u8] = b"/evm/meta/bootstrapped";
 pub const EVM_META_HEAD_KEY: &[u8] = b"/evm/meta/head";
@@ -129,6 +130,17 @@ impl<'a, C: ContextStore> EvmWorldState<'a, C> {
         self.context.set(&account_code_hash_key(address), code_hash)
     }
 
+    pub fn read_code_by_hash(&self, code_hash: &[u8; 32]) -> Result<Vec<u8>, String> {
+        Ok(self
+            .context
+            .get(&code_by_hash_key(code_hash))?
+            .unwrap_or_default())
+    }
+
+    pub fn write_code_by_hash(&mut self, code_hash: &[u8; 32], code: &[u8]) -> Result<(), String> {
+        self.context.set(&code_by_hash_key(code_hash), code)
+    }
+
     pub fn read_storage(&self, address: &[u8; 20], slot: &[u8; 32]) -> Result<[u8; 32], String> {
         match self.context.get(&account_storage_key(address, slot))? {
             Some(bytes) => decode_u256(&bytes, "invalid stored EVM storage slot"),
@@ -195,6 +207,13 @@ pub fn account_storage_key(address: &[u8; 20], slot: &[u8; 32]) -> Vec<u8> {
     key.extend_from_slice(address);
     key.extend_from_slice(EVM_STORAGE_SUFFIX);
     key.extend_from_slice(slot);
+    key
+}
+
+pub fn code_by_hash_key(code_hash: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(EVM_CODE_BY_HASH_PREFIX.len() + code_hash.len());
+    key.extend_from_slice(EVM_CODE_BY_HASH_PREFIX);
+    key.extend_from_slice(code_hash);
     key
 }
 

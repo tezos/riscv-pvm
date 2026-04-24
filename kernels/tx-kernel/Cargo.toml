@@ -17,7 +17,13 @@ features = [
 ]
 
 [dependencies]
+alloy-eip2930 = "=0.2.1"
+alloy-eip7702 = "=0.6.1"
+alloy-eips = "=1.0.38"
+alloy-primitives = "=1.4.1"
+revm = { version = "=33.1.0", default-features = false, features = ["std"] }
 rlp = { version = "0.5", default-features = false }
+ruint = "=1.17.0"
 
 [dependencies.tezos-smart-rollup-constants]
 git = "https://gitlab.com/tezos/tezos.git"
