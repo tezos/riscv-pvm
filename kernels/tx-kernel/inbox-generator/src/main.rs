@@ -62,7 +62,7 @@ use sha3::Keccak256;
 const BLOCK_CHUNK_MAGIC: [u8; 4] = *b"TXC1";
 const KEYSPACE_INDEX_PREFIX: &[u8] = b"/keyspaces/";
 const KEYSPACE_INDEX_DATABASE: usize = 0;
-const DEFAULT_INITIAL_BALANCE: u64 = 1_000_000_000_000_000_000;
+const DEFAULT_INITIAL_BALANCE: u64 = 10_000_000_000_000_000_000;
 const DURABLE_STORAGE_HEAD_FILE: &str = "registry-head";
 const LEGACY_META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
 const PREPARE_CONTEXT_PROGRESS_INTERVAL: usize = 1_000;
@@ -252,7 +252,10 @@ fn sequencer_secret_key(index: usize) -> SecretKey {
 fn make_account(index: usize) -> Account {
     let secret_key = sequencer_secret_key(index);
     let address = address_from_public_key(&PublicKey::from_secret_key(&secret_key).serialize());
-    Account { secret_key, address }
+    Account {
+        secret_key,
+        address,
+    }
 }
 
 fn address_from_public_key(public_key: &[u8; 65]) -> [u8; 20] {
@@ -426,8 +429,7 @@ fn build_inbox_with_state(
 }
 
 fn erc20_init_bytecode() -> Vec<u8> {
-    hex::decode(ERC20_INIT_BYTECODE_HEX)
-        .expect("embedded ERC-20 init code must be valid hex")
+    hex::decode(ERC20_INIT_BYTECODE_HEX).expect("embedded ERC-20 init code must be valid hex")
 }
 
 /// Compute the address where CREATE will deploy a contract.
@@ -465,6 +467,7 @@ fn build_erc20_transactions(
     nonces: &mut [u64],
 ) -> Vec<Vec<u8>> {
     let deployer = accounts[0];
+    let account_count = accounts.len();
     let deploy_nonce = nonces[0];
     let contract_address = compute_create_address(&deployer.address, deploy_nonce);
 
@@ -494,23 +497,29 @@ fn build_erc20_transactions(
     ));
     nonces[0] += 1;
 
-    // 3. Transfer txs — the benchmark payload proper.
+    // 3. Transfer txs — spread gas payment across all available senders.
     for transfer_index in 0..transfers {
-        let recipient = if accounts.len() == 1 {
-            deployer.address
+        let sender_index = if account_count == 1 {
+            0
         } else {
-            accounts[(transfer_index % (accounts.len() - 1)) + 1].address
+            transfer_index % account_count
+        };
+        let sender = accounts[sender_index];
+        let recipient = if account_count == 1 {
+            sender.address
+        } else {
+            accounts[(sender_index + 1) % account_count].address
         };
         transactions.push(build_eip1559_transaction(
-            deployer,
+            sender,
             Some(contract_address),
             0,
-            nonces[0],
+            nonces[sender_index],
             DEFAULT_EVM_CHAIN_ID,
             ERC20_TRANSFER_GAS_LIMIT,
             erc20_transfer_call_data(recipient, 1),
         ));
-        nonces[0] += 1;
+        nonces[sender_index] += 1;
     }
 
     transactions
@@ -1488,6 +1497,9 @@ mod tests {
 
         let outcome = run_native_with_inbox(&dir, &inbox).expect("run failed");
         assert_eq!(outcome.tx_count, 3, "deploy + mint + 1 transfer");
-        assert_eq!(outcome.applied_count, 3, "all three transactions should succeed");
+        assert_eq!(
+            outcome.applied_count, 3,
+            "all three transactions should succeed"
+        );
     }
 }

@@ -9,9 +9,10 @@ endif
 
 TRANSACTIONS ?= 1000
 BLOCK_FREQUENCY ?= 100
-PREPOPULATED_ACCOUNTS ?= 1024
+NUMBER_OF_ACCOUNTS ?= 1024
+PREPOPULATED_ACCOUNTS ?= $(NUMBER_OF_ACCOUNTS)
 DURABLE_STORAGE_DIR ?= /tmp/tx-kernel-bench-db
-BENCHMARK_SCENARIO ?= erc20
+BENCHMARK_SCENARIO ?= eth-transfer
 INBOX_FILE ?=
 
 all: check build
@@ -60,7 +61,7 @@ benchmark: cargo-build cargo-build-bench cargo-build-sandbox
 		benchmark \
 		--transactions $(TRANSACTIONS) \
 		--block-frequency $(BLOCK_FREQUENCY) \
-		--accounts $(PREPOPULATED_ACCOUNTS) \
+		--accounts $(NUMBER_OF_ACCOUNTS) \
 		--scenario $(BENCHMARK_SCENARIO) \
 		--durable-storage-dir "$(DURABLE_STORAGE_DIR)" \
 		$(if $(strip $(INBOX_FILE)),--inbox-file "$(INBOX_FILE)")
@@ -71,7 +72,7 @@ benchmark-native: cargo-build-bench
 		--native \
 		--transactions $(TRANSACTIONS) \
 		--block-frequency $(BLOCK_FREQUENCY) \
-		--accounts $(PREPOPULATED_ACCOUNTS) \
+		--accounts $(NUMBER_OF_ACCOUNTS) \
 		--scenario $(BENCHMARK_SCENARIO) \
 		--durable-storage-dir "$(DURABLE_STORAGE_DIR)" \
 		$(if $(strip $(INBOX_FILE)),--inbox-file "$(INBOX_FILE)")
