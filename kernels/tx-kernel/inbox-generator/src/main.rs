@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::cell::RefCell;
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -9,7 +10,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
-use std::cell::RefCell;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -29,17 +29,30 @@ use regex::Regex;
 use riscv_tx_kernel::AsyncKeccak;
 use riscv_tx_kernel::AsyncSecp256k1;
 use riscv_tx_kernel::AsyncSecp256k1Recover;
+use riscv_tx_kernel::CONTEXT_NAME;
 use riscv_tx_kernel::ChainKernel;
 use riscv_tx_kernel::ContextLoader;
+use riscv_tx_kernel::ContextStore;
+use riscv_tx_kernel::Crypto;
+use riscv_tx_kernel::DEFAULT_EVM_BASE_FEE;
+use riscv_tx_kernel::DEFAULT_EVM_BLOCK_GAS_LIMIT;
+use riscv_tx_kernel::DEFAULT_EVM_CHAIN_ID;
+use riscv_tx_kernel::DEFAULT_EVM_SPEC_ID;
+use riscv_tx_kernel::DEFAULT_EVM_TIMESTAMP;
+use riscv_tx_kernel::EVM_META_BASE_FEE_KEY;
+use riscv_tx_kernel::EVM_META_BLOCK_GAS_LIMIT_KEY;
+use riscv_tx_kernel::EVM_META_BOOTSTRAPPED_KEY;
+use riscv_tx_kernel::EVM_META_CHAIN_ID_KEY;
+use riscv_tx_kernel::EVM_META_HEAD_KEY;
+use riscv_tx_kernel::EVM_META_SPEC_ID_KEY;
+use riscv_tx_kernel::EVM_META_TIMESTAMP_KEY;
 use riscv_tx_kernel::Eip1559Transaction;
+use riscv_tx_kernel::Logger;
+use riscv_tx_kernel::META_HEAD_KEY as LEGACY_META_HEAD_KEY;
+use riscv_tx_kernel::account_nonce_key;
 use riscv_tx_kernel::build_ethereum_block_blueprint;
 use riscv_tx_kernel::ethereum_block_preimage;
 use riscv_tx_kernel::u64_to_be_u256;
-use riscv_tx_kernel::ContextStore;
-use riscv_tx_kernel::Crypto;
-use riscv_tx_kernel::Logger;
-use riscv_tx_kernel::CONTEXT_NAME;
-use riscv_tx_kernel::META_HEAD_KEY as META_HEAD_KEY_SHARED;
 use serde::Deserialize;
 use serde::Serialize;
 use sha3::Digest;
@@ -47,13 +60,11 @@ use sha3::Keccak256;
 
 const BLOCK_BLUEPRINT_MAGIC: [u8; 4] = *b"TXB1";
 const BLOCK_CHUNK_MAGIC: [u8; 4] = *b"TXC1";
-const ACCOUNT_KEY_PREFIX: &[u8] = b"/acct/";
 const KEYSPACE_INDEX_PREFIX: &[u8] = b"/keyspaces/";
 const KEYSPACE_INDEX_DATABASE: usize = 0;
-const DEFAULT_INITIAL_BALANCE: u64 = 1_000_000;
+const DEFAULT_INITIAL_BALANCE: u64 = 1_000_000_000_000_000_000;
 const DURABLE_STORAGE_HEAD_FILE: &str = "registry-head";
-const META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
-const META_HEAD_KEY: &[u8] = META_HEAD_KEY_SHARED;
+const LEGACY_META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
 const PREPARE_CONTEXT_PROGRESS_INTERVAL: usize = 1_000;
 const ROOT_TX_KERNEL_DIR_COMPONENTS: usize = 3;
 const BLOCK_CHUNK_HEADER_SIZE: usize = 4 + 8 + 2 + 2;
@@ -420,15 +431,18 @@ fn build_inbox_with_state(
             let recipient_idx = (sender_idx + 1) % account_count;
             let nonce = nonces[sender_idx];
             nonces[sender_idx] += 1;
-            block_transactions.push(build_transaction(
+            block_transactions.push(build_eip1559_transaction(
                 accounts[sender_idx],
-                accounts[recipient_idx],
+                Some(accounts[recipient_idx].address),
                 1,
                 nonce,
+                DEFAULT_EVM_CHAIN_ID,
+                21_000,
+                vec![],
             ));
         }
 
-        let block = build_block(block_number, &block_transactions, &sequencer);
+        let block = build_ethereum_block(block_number, &block_transactions, &sequencer);
         for chunk in chunk_block(block_number, &block) {
             messages.push(InboxMessageFile::External { external: chunk });
         }
@@ -440,10 +454,34 @@ fn build_inbox_with_state(
     InboxFile(levels)
 }
 
-fn account_key_bytes(address: &[u8; 20]) -> [u8; 26] {
+fn legacy_account_key_bytes(address: &[u8; 20]) -> [u8; 26] {
     let mut key = [0u8; 26];
-    key[..ACCOUNT_KEY_PREFIX.len()].copy_from_slice(ACCOUNT_KEY_PREFIX);
-    key[ACCOUNT_KEY_PREFIX.len()..].copy_from_slice(address);
+    key[..b"/acct/".len()].copy_from_slice(b"/acct/");
+    key[b"/acct/".len()..].copy_from_slice(address);
+    key
+}
+
+fn account_balance_key_bytes(address: &[u8; 20]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(b"/evm/accounts/".len() + address.len() + b"/balance".len());
+    key.extend_from_slice(b"/evm/accounts/");
+    key.extend_from_slice(address);
+    key.extend_from_slice(b"/balance");
+    key
+}
+
+fn account_code_key_bytes(address: &[u8; 20]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(b"/evm/accounts/".len() + address.len() + b"/code".len());
+    key.extend_from_slice(b"/evm/accounts/");
+    key.extend_from_slice(address);
+    key.extend_from_slice(b"/code");
+    key
+}
+
+fn account_code_hash_key_bytes(address: &[u8; 20]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(b"/evm/accounts/".len() + address.len() + b"/code_hash".len());
+    key.extend_from_slice(b"/evm/accounts/");
+    key.extend_from_slice(address);
+    key.extend_from_slice(b"/code_hash");
     key
 }
 
@@ -471,6 +509,10 @@ fn account_state_bytes(balance: u64, nonce: u64) -> [u8; 16] {
     state
 }
 
+fn evm_balance_bytes(balance: u64) -> [u8; 32] {
+    u64_to_be_u256(balance)
+}
+
 fn ensure_registry_size(
     registry: &mut Registry<PersistenceLayer, Normal>,
     size: usize,
@@ -481,7 +523,12 @@ fn ensure_registry_size(
     Ok(())
 }
 
-fn prepare_context(durable_storage_dir: &Path, accounts: usize, initial_balance: u64, rebuild: bool) -> Result<()> {
+fn prepare_context(
+    durable_storage_dir: &Path,
+    accounts: usize,
+    initial_balance: u64,
+    rebuild: bool,
+) -> Result<()> {
     if rebuild && durable_storage_dir.exists() {
         fs::remove_dir_all(durable_storage_dir)?;
     }
@@ -498,12 +545,40 @@ fn prepare_context(durable_storage_dir: &Path, accounts: usize, initial_balance:
 
     let context = registry.database_mut(1)?;
     context.set(
-        Key::new(META_BOOTSTRAPPED_KEY)?,
+        Key::new(LEGACY_META_BOOTSTRAPPED_KEY)?,
         Bytes::copy_from_slice(&[1u8]),
     )?;
     context.set(
-        Key::new(META_HEAD_KEY)?,
+        Key::new(LEGACY_META_HEAD_KEY)?,
         Bytes::copy_from_slice(&0u64.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_BOOTSTRAPPED_KEY)?,
+        Bytes::copy_from_slice(&[1u8]),
+    )?;
+    context.set(
+        Key::new(EVM_META_HEAD_KEY)?,
+        Bytes::copy_from_slice(&0u64.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_CHAIN_ID_KEY)?,
+        Bytes::copy_from_slice(&DEFAULT_EVM_CHAIN_ID.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_BASE_FEE_KEY)?,
+        Bytes::copy_from_slice(&DEFAULT_EVM_BASE_FEE.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_BLOCK_GAS_LIMIT_KEY)?,
+        Bytes::copy_from_slice(&DEFAULT_EVM_BLOCK_GAS_LIMIT.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_TIMESTAMP_KEY)?,
+        Bytes::copy_from_slice(&DEFAULT_EVM_TIMESTAMP.to_le_bytes()),
+    )?;
+    context.set(
+        Key::new(EVM_META_SPEC_ID_KEY)?,
+        Bytes::copy_from_slice(DEFAULT_EVM_SPEC_ID),
     )?;
 
     let total_accounts = accounts.max(1);
@@ -514,13 +589,26 @@ fn prepare_context(durable_storage_dir: &Path, accounts: usize, initial_balance:
         } else {
             initial_balance
         };
-        let key = Key::new(&account_key_bytes(&account.address))?;
-        context.set(key, Bytes::copy_from_slice(&account_state_bytes(balance, 0)))?;
+        let legacy_key = Key::new(&legacy_account_key_bytes(&account.address))?;
+        context.set(
+            legacy_key,
+            Bytes::copy_from_slice(&account_state_bytes(balance, 0)),
+        )?;
+
+        let nonce_key = Key::new(&account_nonce_key(&account.address))?;
+        context.set(nonce_key, Bytes::copy_from_slice(&0u64.to_le_bytes()))?;
+        let balance_key = Key::new(&account_balance_key_bytes(&account.address))?;
+        context.set(
+            balance_key,
+            Bytes::copy_from_slice(&evm_balance_bytes(balance)),
+        )?;
+        let code_hash_key = Key::new(&account_code_hash_key_bytes(&account.address))?;
+        context.set(code_hash_key, Bytes::copy_from_slice(&[0u8; 32]))?;
+        let code_key = Key::new(&account_code_key_bytes(&account.address))?;
+        context.set(code_key, Bytes::copy_from_slice(&[]))?;
 
         let populated = index + 1;
-        if populated == total_accounts
-            || populated % PREPARE_CONTEXT_PROGRESS_INTERVAL == 0
-        {
+        if populated == total_accounts || populated % PREPARE_CONTEXT_PROGRESS_INTERVAL == 0 {
             let remaining = total_accounts - populated;
             let percent = (populated as f64 / total_accounts as f64) * 100.0;
             println!(
@@ -574,7 +662,9 @@ impl ContextStore for NativeKeySpace {
     fn get(&self, key: &[u8]) -> std::result::Result<Option<Vec<u8>>, String> {
         let key = Key::new(key).map_err(|error| error.to_string())?;
         let registry = self.registry.borrow();
-        let database = registry.database(self.index).map_err(|error| error.to_string())?;
+        let database = registry
+            .database(self.index)
+            .map_err(|error| error.to_string())?;
         read_database_value(database, &key).map_err(|error| error.to_string())
     }
 
@@ -619,7 +709,9 @@ impl ContextLoader for NativeKeySpaceLoader {
         let mut registry_mut = registry.borrow_mut();
         let mut registry_len = registry_mut.len();
         if registry_len == 0 {
-            registry_mut.resize_tick(1).map_err(|error| error.to_string())?;
+            registry_mut
+                .resize_tick(1)
+                .map_err(|error| error.to_string())?;
             registry_len = 1;
         }
 
@@ -646,7 +738,10 @@ impl ContextLoader for NativeKeySpaceLoader {
             registry_mut
                 .database_mut(KEYSPACE_INDEX_DATABASE)
                 .map_err(|error| error.to_string())?
-                .set(mapping_key, Bytes::copy_from_slice(&(new_index as u64).to_le_bytes()))
+                .set(
+                    mapping_key,
+                    Bytes::copy_from_slice(&(new_index as u64).to_le_bytes()),
+                )
                 .map_err(|error| error.to_string())?;
             new_index
         };
@@ -670,8 +765,7 @@ impl Crypto for NativeCrypto {
         let message = Message::parse(message_hash);
         let signature = libsecp256k1::Signature::parse_standard(signature)
             .expect("benchmark signatures must be canonical");
-        let public_key =
-            PublicKey::parse(public_key).expect("benchmark public keys must be valid");
+        let public_key = PublicKey::parse(public_key).expect("benchmark public keys must be valid");
         libsecp256k1::verify(&message, &signature, &public_key)
     }
 }
@@ -766,9 +860,8 @@ impl Logger for NativeLogger {
             },
             message: message.trim_end_matches('\n').to_string(),
         };
-        self.lines.push_str(
-            &serde_json::to_string(&line).expect("native log line should serialize"),
-        );
+        self.lines
+            .push_str(&serde_json::to_string(&line).expect("native log line should serialize"));
         self.lines.push('\n');
     }
 }
@@ -803,10 +896,10 @@ fn read_database_value(
 }
 
 fn decode_account_nonce(bytes: &[u8]) -> Result<u64> {
-    let raw: [u8; 16] = bytes
+    let raw: [u8; 8] = bytes
         .try_into()
-        .map_err(|_| "stored account state must be 16 bytes")?;
-    Ok(u64::from_le_bytes(raw[8..].try_into().expect("slice has fixed length")))
+        .map_err(|_| "stored account nonce must be 8 bytes")?;
+    Ok(u64::from_le_bytes(raw))
 }
 
 fn decode_database_index(bytes: &[u8]) -> usize {
@@ -828,7 +921,7 @@ fn read_existing_context_state(
     let registry = Registry::<PersistenceLayer, Normal>::checkout(repo, commit_id)?;
     let context = registry.database(1)?;
 
-    let head_key = Key::new(META_HEAD_KEY)?;
+    let head_key = Key::new(EVM_META_HEAD_KEY)?;
     let current_head = match read_database_value(context, &head_key)? {
         Some(bytes) => {
             let raw: [u8; 8] = bytes
@@ -842,7 +935,7 @@ fn read_existing_context_state(
     let mut nonces = Vec::with_capacity(account_count.max(1));
     for index in 0..account_count.max(1) {
         let account = make_account(index);
-        let key = Key::new(&account_key_bytes(&account.address))?;
+        let key = Key::new(&account_nonce_key(&account.address))?;
         let nonce = match read_database_value(context, &key)? {
             Some(bytes) => decode_account_nonce(&bytes)?,
             None => 0,
@@ -862,7 +955,8 @@ fn default_repo_root() -> PathBuf {
 }
 
 fn default_kernel_path() -> PathBuf {
-    default_repo_root().join("kernels/tx-kernel/target/riscv64gc-unknown-linux-musl/release/riscv-tx-kernel")
+    default_repo_root()
+        .join("kernels/tx-kernel/target/riscv64gc-unknown-linux-musl/release/riscv-tx-kernel")
 }
 
 fn default_sandbox_path() -> PathBuf {
@@ -873,8 +967,9 @@ fn parse_benchmark_logs(stdout: &str) -> Result<BenchmarkOutcome> {
     let block_regex = Regex::new(
         r"^applied block (?P<block>\d+) with (?P<txs>\d+) txs \((?P<applied>\d+) applied\), state root \[(?P<root>.+)\]$",
     )?;
-    let first_tx_regex =
-        Regex::new(r"^first processed tx block=(?P<block>\d+) tx_index=(?P<tx>\d+) total_processed=0$")?;
+    let first_tx_regex = Regex::new(
+        r"^first processed tx block=(?P<block>\d+) tx_index=(?P<tx>\d+) total_processed=0$",
+    )?;
     let last_tx_regex = Regex::new(
         r"^last processed tx block=(?P<block>\d+) tx_index=(?P<tx>\d+) total_processed=(?P<total>\d+)$",
     )?;
@@ -955,7 +1050,9 @@ fn parse_benchmark_logs(stdout: &str) -> Result<BenchmarkOutcome> {
     let block_window = first_block
         .zip(last_block)
         .and_then(|(start, end)| end.checked_sub(start));
-    let tx_window = first_tx.zip(last_tx).and_then(|(start, end)| end.checked_sub(start));
+    let tx_window = first_tx
+        .zip(last_tx)
+        .and_then(|(start, end)| end.checked_sub(start));
     Ok(BenchmarkOutcome {
         wall_duration: Duration::ZERO,
         block_count: blocks,
@@ -976,7 +1073,8 @@ fn write_inbox(path: &Path, inbox: &InboxFile) -> Result<()> {
 }
 
 fn inbox_payloads(inbox: &InboxFile) -> Vec<Vec<u8>> {
-    inbox.0
+    inbox
+        .0
         .iter()
         .flat_map(|level| level.iter())
         .map(|message| match message {
@@ -985,7 +1083,10 @@ fn inbox_payloads(inbox: &InboxFile) -> Vec<Vec<u8>> {
         .collect()
 }
 
-fn run_native_benchmark(inbox: &InboxFile, durable_storage_dir: &Path) -> Result<(String, Duration)> {
+fn run_native_benchmark(
+    inbox: &InboxFile,
+    durable_storage_dir: &Path,
+) -> Result<(String, Duration)> {
     let payloads = inbox_payloads(inbox);
     let mut loader = NativeKeySpaceLoader::open(durable_storage_dir)?;
     let crypto = NativeCrypto;
@@ -1015,7 +1116,12 @@ fn run_benchmark(
     native: bool,
 ) -> Result<()> {
     if rebuild_context || !durable_storage_dir.exists() {
-        prepare_context(&durable_storage_dir, accounts, initial_balance, rebuild_context)?;
+        prepare_context(
+            &durable_storage_dir,
+            accounts,
+            initial_balance,
+            rebuild_context,
+        )?;
     }
 
     let inbox_path =

@@ -1,6 +1,6 @@
 # tx-kernel
 
-`tx-kernel` is a simple payment-chain kernel backed by durable storage.
+`tx-kernel` is a simple Ethereum transaction kernel backed by durable storage.
 
 The quickest workflow is:
 1. create a persistent RocksDB context once
@@ -17,7 +17,7 @@ make -C kernels/tx-kernel prepare-context \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
 ```
 
-This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` accounts.
+This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs for the ETH-transfer benchmark.
 
 Run the benchmark in `riscv-sandbox` against that database:
 
@@ -42,13 +42,13 @@ make -C kernels/tx-kernel benchmark-native \
 ## What The Parameters Mean
 
 - `PREPOPULATED_ACCOUNTS`
-  Number of accounts inserted when the persistent database is created.
+  Number of funded EOAs inserted when the persistent database is created.
 
 - `DURABLE_STORAGE_DIR`
   Directory containing the persistent RocksDB durable-storage state.
 
 - `TRANSACTIONS`
-  Total number of transactions in the benchmark run.
+  Total number of EIP-1559 ETH-transfer transactions in the benchmark run.
 
 - `BLOCK_FREQUENCY`
   Number of transactions per block.
