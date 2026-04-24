@@ -131,6 +131,19 @@ pub fn ethereum_block_preimage(number: u64, transactions: &[Vec<u8>]) -> Vec<u8>
     out
 }
 
+/// Returns the compact 14-byte block header used as the seed for the chained block hash.
+///
+/// The chained block hash avoids large keccak inputs (capped at 4096 bytes in the PVM):
+///   `h = keccak(header)`, then for each tx: `h = keccak(h || keccak(tx_bytes))`
+/// Each individual keccak input is ≤ 64 bytes regardless of block size.
+pub fn ethereum_block_hash_header(number: u64, tx_count: usize) -> [u8; 14] {
+    let mut header = [0u8; 14];
+    header[..4].copy_from_slice(&ETH_BLOCK_BLUEPRINT_MAGIC);
+    header[4..12].copy_from_slice(&number.to_le_bytes());
+    header[12..14].copy_from_slice(&(tx_count as u16).to_le_bytes());
+    header
+}
+
 pub fn build_ethereum_block_blueprint(
     number: u64,
     transactions: &[Vec<u8>],

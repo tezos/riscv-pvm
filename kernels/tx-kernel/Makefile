@@ -11,7 +11,7 @@ TRANSACTIONS ?= 1000
 BLOCK_FREQUENCY ?= 100
 PREPOPULATED_ACCOUNTS ?= 1024
 DURABLE_STORAGE_DIR ?= /tmp/tx-kernel-bench-db
-BENCHMARK_SCENARIO ?= eth-transfer
+BENCHMARK_SCENARIO ?= erc20
 INBOX_FILE ?=
 
 all: check build
@@ -48,7 +48,7 @@ cargo-check-bench:
 	@cargo check $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml
 
 prepare-context: cargo-build-bench
-	@cargo run $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml -- \
+	@cargo run $(NATIVE_OPT) --release --manifest-path inbox-generator/Cargo.toml -- \
 		prepare-context \
 		--durable-storage-dir "$(DURABLE_STORAGE_DIR)" \
 		--accounts $(PREPOPULATED_ACCOUNTS) \
@@ -56,7 +56,7 @@ prepare-context: cargo-build-bench
 		--rebuild
 
 benchmark: cargo-build cargo-build-bench cargo-build-sandbox
-	@cargo run $(NATIVE_OPT) --manifest-path inbox-generator/Cargo.toml -- \
+	@cargo run $(NATIVE_OPT) --release --manifest-path inbox-generator/Cargo.toml -- \
 		benchmark \
 		--transactions $(TRANSACTIONS) \
 		--block-frequency $(BLOCK_FREQUENCY) \

@@ -7,7 +7,11 @@ The quickest workflow is:
 2. run the benchmark against that context in `riscv-sandbox`
 3. run the same benchmark natively on the host for comparison
 
-## Quick Start
+The default scenario is `erc20`. It deploys a benchmark contract via a CREATE transaction in the
+first inbox block, then drives it with EIP-1559 contract calls. This exercises the full
+deploy → call path through the kernel.
+
+## Quick Start (ERC-20, RISC-V)
 
 Create a new persistent database with a chosen number of accounts:
 
@@ -17,9 +21,9 @@ make -C kernels/tx-kernel prepare-context \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
 ```
 
-This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs. By default this prepares the `eth-transfer` benchmark scenario; set `BENCHMARK_SCENARIO=erc20` to prepare the ERC-20 benchmark scenario instead.
+This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs.
 
-Run the benchmark in `riscv-sandbox` against that database:
+Run the ERC-20 benchmark in `riscv-sandbox`:
 
 ```bash
 make -C kernels/tx-kernel benchmark \
@@ -29,7 +33,7 @@ make -C kernels/tx-kernel benchmark \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
 ```
 
-Run the same benchmark natively on the host against the same database:
+Run the same benchmark natively on the host for comparison:
 
 ```bash
 make -C kernels/tx-kernel benchmark-native \
@@ -37,6 +41,32 @@ make -C kernels/tx-kernel benchmark-native \
   BLOCK_FREQUENCY=100 \
   PREPOPULATED_ACCOUNTS=1024 \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
+```
+
+## ETH Transfer Benchmark
+
+To run the simpler ETH transfer scenario instead, pass `BENCHMARK_SCENARIO=eth-transfer` to every
+`make` invocation:
+
+```bash
+make -C kernels/tx-kernel prepare-context \
+  BENCHMARK_SCENARIO=eth-transfer \
+  PREPOPULATED_ACCOUNTS=1024 \
+  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
+
+make -C kernels/tx-kernel benchmark \
+  BENCHMARK_SCENARIO=eth-transfer \
+  TRANSACTIONS=1000 \
+  BLOCK_FREQUENCY=100 \
+  PREPOPULATED_ACCOUNTS=1024 \
+  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
+
+make -C kernels/tx-kernel benchmark-native \
+  BENCHMARK_SCENARIO=eth-transfer \
+  TRANSACTIONS=1000 \
+  BLOCK_FREQUENCY=100 \
+  PREPOPULATED_ACCOUNTS=1024 \
+  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
 ```
 
 ## What The Parameters Mean
@@ -49,19 +79,15 @@ make -C kernels/tx-kernel benchmark-native \
 
 - `TRANSACTIONS`
   Total number of benchmark transactions in the selected scenario.
-  - `eth-transfer`: total number of EIP-1559 ETH transfers.
-  - `erc20`: total number of ERC-20-style transfer calls. The first block also contains a
+  - `erc20`: total number of ERC-20 `transfer` calls. The first block also contains a
     contract-creation transaction (CREATE) and a mint call, so the actual transaction count
     is `TRANSACTIONS + 2`.
+  - `eth-transfer`: total number of EIP-1559 ETH transfers.
 
 - `BENCHMARK_SCENARIO`
   Benchmark workload to generate.
-  - `eth-transfer` (default)
-  - `erc20`
-
-The `erc20` scenario deploys the benchmark contract via a CREATE transaction in the first inbox
-block, then drives it with EIP-1559 contract calls. No contract bootstrapping is done in
-`prepare-context`; the full deploy → call flow runs through the kernel.
+  - `erc20` (default)
+  - `eth-transfer`
 
 - `BLOCK_FREQUENCY`
   Number of transactions per block.
@@ -69,7 +95,7 @@ block, then drives it with EIP-1559 contract calls. No contract bootstrapping is
 
 ## Recommended Smoke Test
 
-Use a small database first:
+Use a small database first to verify the full ERC-20 path (deploy + call) in both RISC-V and native:
 
 ```bash
 make -C kernels/tx-kernel prepare-context \
@@ -77,37 +103,25 @@ make -C kernels/tx-kernel prepare-context \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
 
 make -C kernels/tx-kernel benchmark \
-  TRANSACTIONS=1000 \
-  BLOCK_FREQUENCY=100 \
+  TRANSACTIONS=100 \
+  BLOCK_FREQUENCY=50 \
   PREPOPULATED_ACCOUNTS=100 \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
 
 make -C kernels/tx-kernel benchmark-native \
-  TRANSACTIONS=1000 \
-  BLOCK_FREQUENCY=100 \
+  TRANSACTIONS=100 \
+  BLOCK_FREQUENCY=50 \
   PREPOPULATED_ACCOUNTS=100 \
   DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
 ```
 
-ERC-20 smoke test:
-
-```bash
-make -C kernels/tx-kernel prepare-context \
-  BENCHMARK_SCENARIO=erc20 \
-  PREPOPULATED_ACCOUNTS=100 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-erc20-smoke-db
-
-make -C kernels/tx-kernel benchmark-native \
-  BENCHMARK_SCENARIO=erc20 \
-  TRANSACTIONS=1000 \
-  BLOCK_FREQUENCY=100 \
-  PREPOPULATED_ACCOUNTS=100 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-erc20-smoke-db
-```
+The RISC-V run reports a state root at the end of each block. The native run should produce
+identical state roots, confirming deterministic execution across both environments.
 
 ## Measuring Context Size Impact
 
-To compare the effect of context size, repeat the same benchmark with different values of `PREPOPULATED_ACCOUNTS`, for example:
+To compare the effect of context size, repeat the same benchmark with different values of
+`PREPOPULATED_ACCOUNTS`, for example:
 
 - `100`
 - `1024`

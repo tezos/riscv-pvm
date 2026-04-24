@@ -182,9 +182,26 @@ But the "deploy contract in the inbox, then benchmark calls" flow is not yet exe
 3. Native flow verified: 12/12 applied (deploy + mint + 10 transfers across 3 blocks).
 4. README updated; dead legacy transaction code removed from both lib.rs and main.rs.
 
-### Remaining open item
+### Sandbox validation (complete)
 
-- [ ] RISC-V/sandbox path validation (requires a riscv-sandbox binary build)
+Both scenarios verified end-to-end in the riscv-sandbox:
+
+- ETH transfer: 20/20 applied across 4 blocks — state roots match native run.
+- ERC-20 (deploy-in-inbox): 12/12 applied across 3 blocks (deploy + mint + 10 transfers) — state roots identical to native run, confirming deterministic execution.
+
+### Sandbox keccak size limit fix
+
+The PVM sandbox limits all keccak operations (both synchronous and async enqueue) to 4096 bytes per call. The full block preimage for 100 ERC-20 transactions (each with 68 bytes of ABI data) exceeds this limit (~18KB). The fix changes the block signing scheme from hashing the full preimage to a chained hash:
+
+```
+h = keccak(header)  // 14 bytes
+for each tx: h = keccak(h || keccak(tx_bytes))  // 64 bytes per step
+```
+
+Both the kernel (verifier) and inbox generator (signer) were updated. Re-validated:
+
+- ETH transfer: 200/200 applied in sandbox (2 blocks of 100).
+- ERC-20 (1000 txs, 100 per block): 1002/1002 applied in sandbox (11 blocks).
 
 ## Commit plan
 
@@ -314,7 +331,7 @@ The final stack should satisfy all of the following:
 - [x] durable world-state stored in keyspace
 - [x] REVM executes txs against durable storage
 - [x] host/native benchmark path works
-- [ ] RISC-V/sandbox benchmark path works
+- [x] RISC-V/sandbox benchmark path works
 - [x] ETH transfer TPS benchmark works
 - [x] ERC-20 TPS benchmark works
 - [x] ERC-20 scenario uses deploy-in-inbox flow

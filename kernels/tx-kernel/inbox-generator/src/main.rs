@@ -52,7 +52,7 @@ use riscv_tx_kernel::Logger;
 use riscv_tx_kernel::META_HEAD_KEY as LEGACY_META_HEAD_KEY;
 use riscv_tx_kernel::account_nonce_key;
 use riscv_tx_kernel::build_ethereum_block_blueprint;
-use riscv_tx_kernel::ethereum_block_preimage;
+use riscv_tx_kernel::ethereum_block_hash_header;
 use riscv_tx_kernel::u64_to_be_u256;
 use serde::Deserialize;
 use serde::Serialize;
@@ -305,8 +305,18 @@ fn build_eip1559_transaction(
 }
 
 fn build_ethereum_block(number: u64, transactions: &[Vec<u8>], sequencer: &Account) -> Vec<u8> {
-    let preimage = ethereum_block_preimage(number, transactions);
-    let signature = sign_hash(&sequencer.secret_key, &keccak256(&preimage));
+    // Chained block hash: h = keccak(header), then for each tx: h = keccak(h || keccak(tx_bytes))
+    // This keeps every individual keccak input small so it fits within the PVM keccak size limit.
+    let header = ethereum_block_hash_header(number, transactions.len());
+    let mut h = keccak256(&header);
+    for tx in transactions {
+        let tx_hash = keccak256(tx);
+        let mut buf = [0u8; 64];
+        buf[..32].copy_from_slice(&h);
+        buf[32..].copy_from_slice(&tx_hash);
+        h = keccak256(&buf);
+    }
+    let signature = sign_hash(&sequencer.secret_key, &h);
     build_ethereum_block_blueprint(number, transactions, &signature)
 }
 

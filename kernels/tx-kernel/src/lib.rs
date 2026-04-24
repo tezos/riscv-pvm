@@ -698,17 +698,6 @@ fn apply_block_blueprint(
     Ok(())
 }
 
-fn verify_ethereum_block_signature(
-    crypto: &impl Crypto,
-    block: &EthereumBlockBlueprint,
-) -> Result<(), String> {
-    let digest = crypto.keccak256(&ethereum_block_preimage(block.number, &block.transactions))?;
-    if crypto.verify_signature(&SEQUENCER_PUBLIC_KEY, &block.signature, &digest) {
-        Ok(())
-    } else {
-        Err("invalid sequencer signature".to_string())
-    }
-}
 
 fn apply_ethereum_block_blueprint(
     logger: &mut impl Logger,
@@ -732,11 +721,19 @@ fn apply_ethereum_block_blueprint(
         transactions.push(EthereumTransaction::parse(transaction_bytes)?);
     }
 
+    // Enqueue all async keccak work upfront:
+    //   - keccak(raw tx bytes) for each tx — used to compute the chained block hash
+    //   - keccak(signing payload) for each tx — used for secp256k1 sender recovery
+    //
+    // Each keccak input is at most the size of one encoded transaction (well under the
+    // 4096-byte PVM keccak limit), unlike the full block preimage which would exceed
+    // that limit for blocks with many transactions containing non-trivial data fields.
+    for raw_tx in &block.transactions {
+        crypto.enqueue(raw_tx)?;
+    }
     for transaction in &transactions {
         crypto.enqueue(&transaction.signing_payload())?;
     }
-
-    verify_ethereum_block_signature(crypto, &block)?;
 
     let current_head = read_block_head(context)?;
     if block.number != current_head + 1 {
@@ -745,6 +742,24 @@ fn apply_ethereum_block_blueprint(
             block.number,
             current_head + 1
         ));
+    }
+
+    // Dequeue the per-tx raw-bytes hashes and compute the chained block hash.
+    //
+    // Chain: h = keccak(header), then for each tx: h = keccak(h || keccak(tx_bytes))
+    // The synchronous keccak calls here are on 14-byte (header) and 64-byte (chain step)
+    // inputs — always within the PVM limit.
+    let header = ethereum_block_hash_header(block.number, n);
+    let mut chain_hash = crypto.keccak256(&header)?;
+    for _ in 0..n {
+        let tx_hash = crypto.dequeue()?;
+        let mut buf = [0u8; 64];
+        buf[..32].copy_from_slice(&chain_hash);
+        buf[32..].copy_from_slice(&tx_hash);
+        chain_hash = crypto.keccak256(&buf)?;
+    }
+    if !crypto.verify_signature(&SEQUENCER_PUBLIC_KEY, &block.signature, &chain_hash) {
+        return Err("invalid sequencer signature".to_string());
     }
 
     let mut sighashes = Vec::with_capacity(n);
