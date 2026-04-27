@@ -393,13 +393,21 @@ struct NormalImpl<KV: KeyValueStore> {
 #[cfg(test)]
 pub(super) mod tests {
     use bytes::Bytes;
+    use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::serialise;
 
     use super::Registry;
+    use super::RegistryManifest;
+    use crate::commit::CommitId;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
+    use crate::errors::OperationalError;
     use crate::key::Key;
     use crate::merkle_worker::BackgroundKeyValueStore;
+    use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+    use crate::repo::RegistryRepo;
     use crate::storage::kv_test;
 
     pub(super) fn setup_registry<KV: BackgroundKeyValueStore>(
@@ -658,47 +666,32 @@ pub(super) mod tests {
             "Key should not exist after clearing the database."
         );
     });
-}
 
-#[cfg(feature = "rocksdb")]
-#[cfg(test)]
-mod rocksdb_tests {
-    use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::serialisation::deserialise;
-    use octez_riscv_data::serialisation::serialise;
+    impl<KV> Registry<KV, Normal>
+    where
+        KV: BackgroundPersistentKeyValueStore,
+        KV::Repo: RegistryRepo,
+    {
+        /// Read and deserialise the manifest for `commit_id`.
+        fn read_manifest(&self, commit_id: &CommitId) -> RegistryManifest {
+            let bytes = self
+                .inner
+                .repo
+                .read_registry_commit(commit_id)
+                .expect("Manifest should be readable");
+            deserialise(&bytes).expect("Manifest should be deserialisable")
+        }
 
-    use super::Registry;
-    use super::RegistryManifest;
-    use super::tests::populate_database_with_key_value;
-    use super::tests::setup_registry;
-    use super::tests::setup_size_2_registry;
-    use crate::commit::CommitId;
-    use crate::errors::Error;
-    use crate::errors::OperationalError;
-    use crate::key::Key;
-    use crate::storage::TestKeyValueStore;
-    use crate::storage::setup_repo;
-
-    impl Registry<TestKeyValueStore, Normal> {
         /// Assert that the manifest written for `commit_id` contains the expected database commit IDs.
-        fn verify_manifest(
-            &self,
-            commit_id: &super::CommitId,
-            expected_db_hashes: &[super::CommitId],
-        ) {
-            let commit_path = self.inner.repo.registry_commit_file(commit_id);
-            let commit_bytes = std::fs::read(&commit_path).expect("Manifest should be written");
-            let commit: RegistryManifest =
-                deserialise(&commit_bytes).expect("Manifest should be deserialisable");
-            assert_eq!(commit.database_hashes, expected_db_hashes);
+        fn verify_manifest(&self, commit_id: &CommitId, expected_db_hashes: &[CommitId]) {
+            let manifest = self.read_manifest(commit_id);
+            assert_eq!(manifest.database_hashes, expected_db_hashes);
         }
     }
 
-    #[test]
-    fn test_registry_commit_empty() {
-        let (_keepalive, repo) = setup_repo();
-        let registry = setup_registry::<TestKeyValueStore>(repo);
+    kv_test!(test_registry_commit_empty, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_registry::<KV>(repo.clone());
 
         let expected_db_hashes: Vec<CommitId> = Vec::new();
         let expected_root = CommitId::from(Hash::hash_bytes(&[]));
@@ -707,19 +700,18 @@ mod rocksdb_tests {
         assert_eq!(root_commit, expected_root);
 
         registry.verify_manifest(&root_commit, &expected_db_hashes);
-    }
+    });
 
-    #[test]
-    fn test_registry_commit_size_1() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry::<TestKeyValueStore>(repo);
+    kv_test!(test_registry_commit_size_1, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo.clone());
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"singleton");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"singleton");
 
-        let expected_db_hashes: Vec<super::CommitId> = registry
+        let expected_db_hashes: Vec<CommitId> = registry
             .databases
             .iter()
             .map(|db| db.hash().unwrap().into())
@@ -730,17 +722,16 @@ mod rocksdb_tests {
         assert_eq!(root_commit, expected_root);
 
         registry.verify_manifest(&root_commit, &expected_db_hashes);
-    }
+    });
 
-    #[test]
-    fn test_committing_identical_registry_succeeds() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry::<TestKeyValueStore>(repo);
+    kv_test!(test_committing_identical_registry_succeeds, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo);
         registry
             .resize_tick(1)
             .expect("Growing the registry should succeed.");
 
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"singleton");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"singleton");
 
         let first_commit = registry.commit().expect("First commit should succeed");
         let second_commit = registry.commit().expect("Second commit should succeed");
@@ -749,17 +740,16 @@ mod rocksdb_tests {
             first_commit, second_commit,
             "Committing identical registry states should yield the same commit ID."
         );
-    }
+    });
 
-    #[test]
-    fn test_registry_commit_writes_manifest() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry::<TestKeyValueStore>(repo);
+    kv_test!(test_registry_commit_writes_manifest, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
 
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"alpha");
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 1, &[2], b"beta");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"beta");
 
-        let expected_db_hashes: Vec<super::CommitId> = registry
+        let expected_db_hashes: Vec<CommitId> = registry
             .databases
             .iter()
             .map(|db| db.hash().unwrap().into())
@@ -772,15 +762,14 @@ mod rocksdb_tests {
         assert_eq!(root_commit, expected_root);
 
         registry.verify_manifest(&root_commit, &expected_db_hashes);
-    }
+    });
 
-    #[test]
-    fn test_registry_checkout_roundtrip_empty() {
-        let (_keepalive, repo) = setup_repo();
-        let registry = setup_registry::<TestKeyValueStore>(repo.clone());
+    kv_test!(test_registry_checkout_roundtrip_empty, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_registry::<KV>(repo.clone());
 
         let root_commit = registry.commit().expect("Commit should succeed");
-        let checked_out = Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit)
+        let checked_out = Registry::<KV, Normal>::checkout(repo, root_commit)
             .expect("Checkout should succeed");
 
         assert!(checked_out.is_empty());
@@ -788,21 +777,20 @@ mod rocksdb_tests {
             CommitId::from(Hash::from_foldable(&checked_out)),
             root_commit
         );
-    }
+    });
 
-    #[test]
-    fn test_registry_checkout_roundtrip_populated() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_size_2_registry::<TestKeyValueStore>(repo.clone());
+    kv_test!(test_registry_checkout_roundtrip_populated, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
 
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"alpha");
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 1, &[2], b"beta");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"beta");
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
 
         let root_commit = registry.commit().expect("Commit should succeed");
-        let checked_out = Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit)
+        let checked_out = Registry::<KV, Normal>::checkout(repo, root_commit)
             .expect("Checkout should succeed");
 
         assert_eq!(checked_out.len(), 2);
@@ -812,18 +800,57 @@ mod rocksdb_tests {
             CommitId::from(Hash::from_foldable(&checked_out)),
             root_commit
         );
-    }
+    });
 
-    #[test]
-    fn test_registry_checkout_missing_commit_fails() {
-        let (_keepalive, repo) = setup_repo();
+    kv_test!(test_registry_checkout_missing_commit_fails, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
         let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-registry-commit"));
 
         assert!(matches!(
-            Registry::<TestKeyValueStore, Normal>::checkout(repo, missing_commit),
+            Registry::<KV, Normal>::checkout(repo, missing_commit),
             Err(Error::Operational(OperationalError::CommitNotFound))
         ));
-    }
+    });
+
+    kv_test!(test_registry_checkout_detects_manifest_root_mismatch, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo.clone());
+        registry
+            .resize_tick(1)
+            .expect("Growing the registry should succeed.");
+
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"value");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let manifest = registry.read_manifest(&root_commit);
+
+        let fake_commit = CommitId::from(Hash::hash_bytes(b"fake-registry-commit"));
+        let fake_manifest_bytes =
+            serialise(&manifest).expect("Manifest should be serialisable");
+        repo.write_registry_commit(&fake_commit, &fake_manifest_bytes)
+            .expect("Writing the fake manifest should succeed");
+
+        assert!(matches!(
+            Registry::<KV, Normal>::checkout(repo, fake_commit),
+            Err(Error::Operational(OperationalError::RegistryCommitMismatch))
+        ));
+    });
+}
+
+#[cfg(feature = "rocksdb")]
+#[cfg(test)]
+mod rocksdb_tests {
+    use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::serialisation::deserialise;
+
+    use super::Registry;
+    use super::RegistryManifest;
+    use super::tests::populate_database_with_key_value;
+    use super::tests::setup_registry;
+    use crate::errors::Error;
+    use crate::errors::OperationalError;
+    use crate::storage::TestKeyValueStore;
+    use crate::storage::setup_repo;
 
     #[test]
     fn test_registry_checkout_missing_database_commit_fails() {
@@ -846,34 +873,6 @@ mod rocksdb_tests {
         assert!(matches!(
             Registry::<TestKeyValueStore, Normal>::checkout(repo, root_commit),
             Err(Error::Operational(OperationalError::CommitNotFound))
-        ));
-    }
-
-    #[test]
-    fn test_registry_checkout_detects_manifest_root_mismatch() {
-        let (_keepalive, repo) = setup_repo();
-        let mut registry = setup_registry::<TestKeyValueStore>(repo.clone());
-        registry
-            .resize_tick(1)
-            .expect("Growing the registry should succeed.");
-
-        populate_database_with_key_value::<TestKeyValueStore>(&mut registry, 0, &[1], b"value");
-
-        let root_commit = registry.commit().expect("Commit should succeed");
-        let manifest_path = repo.registry_commit_file(&root_commit);
-        let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
-        let manifest: RegistryManifest =
-            deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
-
-        let fake_commit = CommitId::from(Hash::hash_bytes(b"fake-registry-commit"));
-        let fake_manifest_path = repo.registry_commit_file(&fake_commit);
-        let fake_manifest_bytes = serialise(&manifest).expect("Manifest should be serialisable");
-        std::fs::write(&fake_manifest_path, fake_manifest_bytes)
-            .expect("Writing the fake manifest should succeed");
-
-        assert!(matches!(
-            Registry::<TestKeyValueStore, Normal>::checkout(repo, fake_commit),
-            Err(Error::Operational(OperationalError::RegistryCommitMismatch))
         ));
     }
 }
