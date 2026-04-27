@@ -160,7 +160,10 @@ cfg_if::cfg_if! {
                     $(#[$attr])*
                     #[test]
                     fn [<$fun_name _in_memory>]() {
-                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>() $body
+                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>()
+                        where
+                            <$ty_name as $crate::storage::KeyValueStore>::Repo: $crate::repo::RegistryRepo,
+                        $body
                         inner::<$crate::storage::in_memory::InMemoryKeyValueStore>();
                     }
 
@@ -168,7 +171,10 @@ cfg_if::cfg_if! {
                     $(#[$attr])*
                     #[test]
                     fn [<$fun_name _rocksdb>]() {
-                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>() $body
+                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>()
+                        where
+                            <$ty_name as $crate::storage::KeyValueStore>::Repo: $crate::repo::RegistryRepo,
+                        $body
                         inner::<$crate::persistence_layer::PersistenceLayer>();
                     }
                 }
