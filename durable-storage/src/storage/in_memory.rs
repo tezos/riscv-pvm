@@ -23,6 +23,9 @@ use crate::errors::OperationalError;
 pub struct InMemoryRepo {
     #[cfg(test)]
     commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, InMemorySnapshot>>>,
+
+    #[cfg(test)]
+    registry_commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, Vec<u8>>>>,
 }
 
 /// In-memory key-value store
@@ -248,5 +251,35 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
             blobs: RwLock::new(snapshot.blobs.clone()),
             values: RwLock::new(snapshot.values.clone()),
         })
+    }
+}
+
+#[cfg(test)]
+impl crate::repo::RegistryRepo for InMemoryRepo {
+    fn read_registry_commit(
+        &self,
+        id: &crate::commit::CommitId,
+    ) -> Result<Vec<u8>, OperationalError> {
+        let commits = self
+            .registry_commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+        commits
+            .get(id)
+            .cloned()
+            .ok_or(OperationalError::CommitNotFound)
+    }
+
+    fn write_registry_commit(
+        &self,
+        id: &crate::commit::CommitId,
+        bytes: &[u8],
+    ) -> Result<(), OperationalError> {
+        let mut commits = self
+            .registry_commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+        commits.insert(*id, bytes.to_vec());
+        Ok(())
     }
 }
