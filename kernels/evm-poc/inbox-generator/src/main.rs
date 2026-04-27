@@ -27,33 +27,33 @@ use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_durable_storage::repo::DirectoryManager;
 use regex::Regex;
-use riscv_tx_kernel::AsyncKeccak;
-use riscv_tx_kernel::AsyncSecp256k1;
-use riscv_tx_kernel::AsyncSecp256k1Recover;
-use riscv_tx_kernel::CONTEXT_NAME;
-use riscv_tx_kernel::ChainKernel;
-use riscv_tx_kernel::ContextLoader;
-use riscv_tx_kernel::ContextStore;
-use riscv_tx_kernel::Crypto;
-use riscv_tx_kernel::DEFAULT_EVM_BASE_FEE;
-use riscv_tx_kernel::DEFAULT_EVM_BLOCK_GAS_LIMIT;
-use riscv_tx_kernel::DEFAULT_EVM_CHAIN_ID;
-use riscv_tx_kernel::DEFAULT_EVM_SPEC_ID;
-use riscv_tx_kernel::DEFAULT_EVM_TIMESTAMP;
-use riscv_tx_kernel::EVM_META_BASE_FEE_KEY;
-use riscv_tx_kernel::EVM_META_BLOCK_GAS_LIMIT_KEY;
-use riscv_tx_kernel::EVM_META_BOOTSTRAPPED_KEY;
-use riscv_tx_kernel::EVM_META_CHAIN_ID_KEY;
-use riscv_tx_kernel::EVM_META_HEAD_KEY;
-use riscv_tx_kernel::EVM_META_SPEC_ID_KEY;
-use riscv_tx_kernel::EVM_META_TIMESTAMP_KEY;
-use riscv_tx_kernel::Eip1559Transaction;
-use riscv_tx_kernel::Logger;
-use riscv_tx_kernel::META_HEAD_KEY as LEGACY_META_HEAD_KEY;
-use riscv_tx_kernel::account_nonce_key;
-use riscv_tx_kernel::build_ethereum_block_blueprint;
-use riscv_tx_kernel::ethereum_block_hash_header;
-use riscv_tx_kernel::u64_to_be_u256;
+use riscv_evm_poc::AsyncKeccak;
+use riscv_evm_poc::AsyncSecp256k1;
+use riscv_evm_poc::AsyncSecp256k1Recover;
+use riscv_evm_poc::CONTEXT_NAME;
+use riscv_evm_poc::ChainKernel;
+use riscv_evm_poc::ContextLoader;
+use riscv_evm_poc::ContextStore;
+use riscv_evm_poc::Crypto;
+use riscv_evm_poc::DEFAULT_EVM_BASE_FEE;
+use riscv_evm_poc::DEFAULT_EVM_BLOCK_GAS_LIMIT;
+use riscv_evm_poc::DEFAULT_EVM_CHAIN_ID;
+use riscv_evm_poc::DEFAULT_EVM_SPEC_ID;
+use riscv_evm_poc::DEFAULT_EVM_TIMESTAMP;
+use riscv_evm_poc::EVM_META_BASE_FEE_KEY;
+use riscv_evm_poc::EVM_META_BLOCK_GAS_LIMIT_KEY;
+use riscv_evm_poc::EVM_META_BOOTSTRAPPED_KEY;
+use riscv_evm_poc::EVM_META_CHAIN_ID_KEY;
+use riscv_evm_poc::EVM_META_HEAD_KEY;
+use riscv_evm_poc::EVM_META_SPEC_ID_KEY;
+use riscv_evm_poc::EVM_META_TIMESTAMP_KEY;
+use riscv_evm_poc::Eip1559Transaction;
+use riscv_evm_poc::Logger;
+use riscv_evm_poc::META_HEAD_KEY as LEGACY_META_HEAD_KEY;
+use riscv_evm_poc::account_nonce_key;
+use riscv_evm_poc::build_ethereum_block_blueprint;
+use riscv_evm_poc::ethereum_block_hash_header;
+use riscv_evm_poc::u64_to_be_u256;
 use serde::Deserialize;
 use serde::Serialize;
 use sha3::Digest;
@@ -66,7 +66,7 @@ const DEFAULT_INITIAL_BALANCE: u64 = 10_000_000_000_000_000_000;
 const DURABLE_STORAGE_HEAD_FILE: &str = "registry-head";
 const LEGACY_META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
 const PREPARE_CONTEXT_PROGRESS_INTERVAL: usize = 1_000;
-const ROOT_TX_KERNEL_DIR_COMPONENTS: usize = 3;
+const ROOT_EVM_POC_DIR_COMPONENTS: usize = 3;
 const BLOCK_CHUNK_HEADER_SIZE: usize = 4 + 8 + 2 + 2;
 const MAX_INPUT_MESSAGE_SIZE: usize = 4096;
 const EXTERNAL_FRAME_SIZE: usize = 21;
@@ -98,7 +98,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Generate a tx-kernel inbox.json file")]
+    #[command(about = "Generate a evm-poc inbox.json file")]
     Generate {
         #[arg(long)]
         transactions: usize,
@@ -108,7 +108,7 @@ enum Commands {
         accounts: usize,
         #[arg(long, value_enum, default_value_t = BenchmarkScenario::EthTransfer)]
         scenario: BenchmarkScenario,
-        #[arg(long, default_value = "tx-kernel-inbox.json")]
+        #[arg(long, default_value = "evm-poc-inbox.json")]
         inbox_file: PathBuf,
     },
     #[command(about = "Prepare a durable-storage context with prepopulated accounts")]
@@ -124,7 +124,7 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         rebuild: bool,
     },
-    #[command(about = "Run the tx-kernel benchmark in the sandbox and report TPS")]
+    #[command(about = "Run the evm-poc benchmark in the sandbox and report TPS")]
     Benchmark {
         #[arg(long)]
         transactions: usize,
@@ -1024,7 +1024,7 @@ fn read_existing_context_state(
 
 fn default_repo_root() -> PathBuf {
     let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for _ in 0..ROOT_TX_KERNEL_DIR_COMPONENTS {
+    for _ in 0..ROOT_EVM_POC_DIR_COMPONENTS {
         root.pop();
     }
     root
@@ -1032,7 +1032,7 @@ fn default_repo_root() -> PathBuf {
 
 fn default_kernel_path() -> PathBuf {
     default_repo_root()
-        .join("kernels/tx-kernel/target/riscv64gc-unknown-linux-musl/release/riscv-tx-kernel")
+        .join("kernels/evm-poc/target/riscv64gc-unknown-linux-musl/release/riscv-evm-poc")
 }
 
 fn default_sandbox_path() -> PathBuf {
@@ -1203,7 +1203,7 @@ fn run_benchmark(
     }
 
     let inbox_path =
-        inbox_file.unwrap_or_else(|| std::env::temp_dir().join("tx-kernel-benchmark-inbox.json"));
+        inbox_file.unwrap_or_else(|| std::env::temp_dir().join("evm-poc-benchmark-inbox.json"));
     let inbox = match read_existing_context_state(&durable_storage_dir, accounts)? {
         Some((first_block_number, nonces)) => build_inbox_with_state(
             scenario,
@@ -1407,7 +1407,7 @@ mod tests {
 
     /// Create a fresh (empty) temporary directory for a test.
     fn fresh_test_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tx-kernel-test-{name}"));
+        let dir = std::env::temp_dir().join(format!("evm-poc-test-{name}"));
         if dir.exists() {
             fs::remove_dir_all(&dir).expect("failed to remove stale test directory");
         }

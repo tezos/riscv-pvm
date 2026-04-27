@@ -1,8 +1,8 @@
-# tx-kernel Ethereum/REVM implementation plan
+# evm-poc Ethereum/REVM implementation plan
 
 ## Goals
 
-Extend `kernels/tx-kernel` to execute Ethereum transactions using a simple REVM-backed EVM engine while preserving the kernel's existing performance-oriented crypto model:
+Extend `kernels/evm-poc` to execute Ethereum transactions using a simple REVM-backed EVM engine while preserving the kernel's existing performance-oriented crypto model:
 
 - use standard Ethereum transactions
 - support **EIP-1559** transactions
@@ -28,7 +28,7 @@ Legacy/EIP-2930 support can be added later if useful.
 
 ### 1. Preserve outer block/chunk ingestion
 
-Keep the current tx-kernel outer ingestion model:
+Keep the current evm-poc outer ingestion model:
 
 - block chunks (`TXC1`)
 - block blueprints / block payloads
@@ -75,7 +75,7 @@ A custom REVM DB adapter will back account/code/storage reads and writes with `C
 
 ## Planned durable-storage layout
 
-Tentative layout under the tx-kernel context:
+Tentative layout under the evm-poc context:
 
 - `/evm/meta/bootstrapped`
 - `/evm/meta/head`
@@ -129,7 +129,7 @@ Initial EVM environment should be close to real execution but intentionally mini
 
 ## Benchmark plan
 
-The benchmark tool in `kernels/tx-kernel/inbox-generator` will be extended with scenarios:
+The benchmark tool in `kernels/evm-poc/inbox-generator` will be extended with scenarios:
 
 ### Scenario A: ETH transfers
 
@@ -152,12 +152,12 @@ The benchmark tool in `kernels/tx-kernel/inbox-generator` will be extended with 
 All planned commits through commit 9 are done and smoke-tested:
 
 ```bash
-cargo run --manifest-path kernels/tx-kernel/inbox-generator/Cargo.toml -- \
-  prepare-context --scenario erc20 --durable-storage-dir /tmp/tx-kernel-erc20-smoke --accounts 10 --rebuild
+cargo run --manifest-path kernels/evm-poc/inbox-generator/Cargo.toml -- \
+  prepare-context --scenario erc20 --durable-storage-dir /tmp/evm-poc-erc20-smoke --accounts 10 --rebuild
 
-cargo run --manifest-path kernels/tx-kernel/inbox-generator/Cargo.toml -- \
+cargo run --manifest-path kernels/evm-poc/inbox-generator/Cargo.toml -- \
   benchmark --native --scenario erc20 --transactions 10 --block-frequency 4 --accounts 10 \
-  --durable-storage-dir /tmp/tx-kernel-erc20-smoke
+  --durable-storage-dir /tmp/evm-poc-erc20-smoke
 ```
 
 Result: 11/11 applied. Native ERC-20 benchmark path works end-to-end.
@@ -209,55 +209,55 @@ The work should be split into self-contained commits so it is easy to review and
 
 ### ~~Commit 1: Planning and scaffolding~~ ✓ DONE
 
-`tx-kernel: add Ethereum/REVM implementation plan`
+`evm-poc: add Ethereum/REVM implementation plan`
 
 ---
 
 ### ~~Commit 2: Extend crypto traits for async sender recovery~~ ✓ DONE
 
-`tx-kernel: add async secp256k1 recovery support`
+`evm-poc: add async secp256k1 recovery support`
 
 ---
 
 ### ~~Commit 3: Introduce Ethereum world-state keyspace model~~ ✓ DONE
 
-`tx-kernel: add Ethereum world-state durable storage`
+`evm-poc: add Ethereum world-state durable storage`
 
 ---
 
 ### ~~Commit 4: Add Ethereum transaction/block payload parsing~~ ✓ DONE
 
-`tx-kernel: parse sequenced EIP-1559 Ethereum transactions`
+`evm-poc: parse sequenced EIP-1559 Ethereum transactions`
 
 ---
 
 ### ~~Commit 5: Build async Ethereum prevalidation pipeline~~ ✓ DONE
 
-`tx-kernel: prevalidate Ethereum txs with async crypto pipeline`
+`evm-poc: prevalidate Ethereum txs with async crypto pipeline`
 
 ---
 
 ### ~~Commit 6: Introduce REVM durable DB adapter~~ ✓ DONE
 
-`tx-kernel: add REVM durable-storage backend`
+`evm-poc: add REVM durable-storage backend`
 
 ---
 
 ### ~~Commit 7: Execute Ethereum txs through REVM~~ ✓ DONE
 
-`tx-kernel: execute Ethereum transactions with REVM`
+`evm-poc: execute Ethereum transactions with REVM`
 
 ---
 
 ### ~~Commit 8: Migrate benchmark generator to Ethereum ETH-transfer scenario~~ ✓ DONE
 
-`tx-kernel-bench: add EIP-1559 ETH transfer benchmark`
+`evm-poc-bench: add EIP-1559 ETH transfer benchmark`
 
 ---
 
 ### ~~Commit 9: Add ERC-20 benchmark scenario~~ ✓ DONE (bootstrap path)
 
-`tx-kernel-bench: add ERC-20 benchmark scenario`
+`evm-poc-bench: add ERC-20 benchmark scenario`
 
 Native ERC-20 benchmark smoke-tested end-to-end (11/11 applied). Current implementation bootstraps
 the contract into durable state rather than deploying via an inbox transaction.
@@ -289,7 +289,7 @@ the contract into durable state rather than deploying via an inbox transaction.
 **Suggested `jj` flow**
 - `jj new`
 - add e2e tests, switch ERC-20 to deploy-in-inbox, validate sandbox
-- `jj describe -m "tx-kernel: e2e tests and ERC-20 deploy-in-inbox flow"`
+- `jj describe -m "evm-poc: e2e tests and ERC-20 deploy-in-inbox flow"`
 
 ## Recommended `jj` workflow during implementation
 
@@ -324,7 +324,7 @@ When ready to publish stacked work, use the repo's normal `jj`/git export flow.
 
 The final stack should satisfy all of the following:
 
-- [x] standard Ethereum EIP-1559 transactions accepted by tx-kernel
+- [x] standard Ethereum EIP-1559 transactions accepted by evm-poc
 - [x] contract creation supported
 - [x] contract calls supported
 - [x] sender recovery uses async enqueue/dequeue host crypto path

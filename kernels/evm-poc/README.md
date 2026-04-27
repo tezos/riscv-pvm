@@ -1,6 +1,6 @@
-# tx-kernel
+# evm-poc
 
-`tx-kernel` is a simple Ethereum transaction kernel backed by durable storage.
+`evm-poc` is a simple Ethereum transaction kernel backed by durable storage.
 
 The quickest workflow is:
 1. create a persistent RocksDB context once
@@ -18,34 +18,34 @@ through the kernel.
 Create a new persistent database with a chosen number of accounts:
 
 ```bash
-make -C kernels/tx-kernel prepare-context \
+make -C kernels/evm-poc prepare-context \
   BENCHMARK_SCENARIO=erc20 \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db
 ```
 
-This rebuilds `/tmp/tx-kernel-db` from scratch and prepopulates it with `1024` funded EOAs.
+This rebuilds `/tmp/evm-poc-db` from scratch and prepopulates it with `1024` funded EOAs.
 
 Run the ERC-20 benchmark in `riscv-sandbox`:
 
 ```bash
-make -C kernels/tx-kernel benchmark \
+make -C kernels/evm-poc benchmark \
   BENCHMARK_SCENARIO=erc20 \
   TRANSACTIONS=1000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db
 ```
 
 Run the same benchmark natively on the host for comparison:
 
 ```bash
-make -C kernels/tx-kernel benchmark-native \
+make -C kernels/evm-poc benchmark-native \
   BENCHMARK_SCENARIO=erc20 \
   TRANSACTIONS=1000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db
 ```
 
 ## ETH Transfer Benchmark
@@ -54,21 +54,21 @@ make -C kernels/tx-kernel benchmark-native \
 `BENCHMARK_SCENARIO`:
 
 ```bash
-make -C kernels/tx-kernel prepare-context \
+make -C kernels/evm-poc prepare-context \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-eth-db
 
-make -C kernels/tx-kernel benchmark \
+make -C kernels/evm-poc benchmark \
   TRANSACTIONS=1000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-eth-db
 
-make -C kernels/tx-kernel benchmark-native \
+make -C kernels/evm-poc benchmark-native \
   TRANSACTIONS=1000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1024 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-eth-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-eth-db
 ```
 
 ## What The Parameters Mean
@@ -106,24 +106,24 @@ Use a small database first to verify the full ERC-20 path (deploy + call) in bot
 native:
 
 ```bash
-make -C kernels/tx-kernel prepare-context \
+make -C kernels/evm-poc prepare-context \
   BENCHMARK_SCENARIO=erc20 \
   NUMBER_OF_ACCOUNTS=100 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-smoke-db
 
-make -C kernels/tx-kernel benchmark \
+make -C kernels/evm-poc benchmark \
   BENCHMARK_SCENARIO=erc20 \
   TRANSACTIONS=100 \
   BLOCK_FREQUENCY=50 \
   NUMBER_OF_ACCOUNTS=100 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-smoke-db
 
-make -C kernels/tx-kernel benchmark-native \
+make -C kernels/evm-poc benchmark-native \
   BENCHMARK_SCENARIO=erc20 \
   TRANSACTIONS=100 \
   BLOCK_FREQUENCY=50 \
   NUMBER_OF_ACCOUNTS=100 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-smoke-db
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-smoke-db
 ```
 
 The RISC-V run reports a state root at the end of each block. The native run should produce
@@ -142,19 +142,19 @@ To compare the effect of context size, repeat the same benchmark with different 
 Example:
 
 ```bash
-make -C kernels/tx-kernel prepare-context \
+make -C kernels/evm-poc prepare-context \
   NUMBER_OF_ACCOUNTS=1000000 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db-1m
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db-1m
 
-make -C kernels/tx-kernel benchmark \
+make -C kernels/evm-poc benchmark \
   TRANSACTIONS=10000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1000000 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db-1m
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db-1m
 
-make -C kernels/tx-kernel benchmark-native \
+make -C kernels/evm-poc benchmark-native \
   TRANSACTIONS=10000 \
   BLOCK_FREQUENCY=100 \
   NUMBER_OF_ACCOUNTS=1000000 \
-  DURABLE_STORAGE_DIR=/tmp/tx-kernel-db-1m
+  DURABLE_STORAGE_DIR=/tmp/evm-poc-db-1m
 ```

@@ -1,5 +1,5 @@
 [package]
-name = "riscv-tx-kernel"
+name = "riscv-evm-poc"
 version = "0.0.0"
 edition = "2021"
 

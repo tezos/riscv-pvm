@@ -14,14 +14,14 @@ use keyspace::Key;
 use keyspace::KeySpace;
 use keyspace::KeySpaceLoader;
 use keyspace::Name;
-use riscv_tx_kernel::AsyncKeccak;
-use riscv_tx_kernel::AsyncSecp256k1;
-use riscv_tx_kernel::AsyncSecp256k1Recover;
-use riscv_tx_kernel::ChainKernel;
-use riscv_tx_kernel::ContextLoader;
-use riscv_tx_kernel::ContextStore;
-use riscv_tx_kernel::Crypto;
-use riscv_tx_kernel::Logger;
+use riscv_evm_poc::AsyncKeccak;
+use riscv_evm_poc::AsyncSecp256k1;
+use riscv_evm_poc::AsyncSecp256k1Recover;
+use riscv_evm_poc::ChainKernel;
+use riscv_evm_poc::ContextLoader;
+use riscv_evm_poc::ContextStore;
+use riscv_evm_poc::Crypto;
+use riscv_evm_poc::Logger;
 use tezos_smart_rollup::entrypoint;
 use tezos_smart_rollup::inbox::InboxMessage;
 use tezos_smart_rollup::inbox::InternalInboxMessage;
@@ -139,7 +139,7 @@ pub fn entry(host: &mut impl Runtime) {
     let mut loader = DurableKeySpaceLoader::default();
     let crypto = SbiCrypto;
     let mut kernel =
-        ChainKernel::new(&mut loader, &crypto).expect("Could not create tx-kernel durable context");
+        ChainKernel::new(&mut loader, &crypto).expect("Could not create evm-poc durable context");
 
     while let Some(input) = host.read_input().expect("Could not read inbox message") {
         let (_, message) =
