@@ -34,7 +34,7 @@ use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
-use crate::repo::DirectoryManager;
+use crate::repo::RegistryRepo;
 use crate::storage::KeyValueStore;
 
 pub(super) const REGISTRY_ARITY: usize = 2;
@@ -45,7 +45,8 @@ struct RegistryManifest {
     database_hashes: Vec<CommitId>,
 }
 
-/// Registry that owns a set of databases backed by a directory manager.
+/// Registry that owns a set of databases and the repository used to manage
+/// registry state.
 pub struct Registry<KV: KeyValueStore, M: Mode> {
     inner: M::Select<RegistryTemplate<KV>>,
     databases: Vector<Database<KV, M>, M>,
@@ -54,8 +55,7 @@ pub struct Registry<KV: KeyValueStore, M: Mode> {
 impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
     /// Creates a new, empty Registry.
     ///
-    /// The registry owns a Tokio [`Runtime`] and a [`DirectoryManager`] rooted at
-    /// `base_dir`.
+    /// The registry owns a Tokio [`Runtime`] and a register state repository.
     pub fn new(repo: KV::Repo) -> Result<Self, OperationalError> {
         let runtime = Self::build_runtime()?;
 
@@ -74,13 +74,16 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
     }
 }
 
-impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV, Normal> {
+impl<KV: BackgroundPersistentKeyValueStore> Registry<KV, Normal>
+where
+    KV::Repo: RegistryRepo,
+{
     /// Restore a registry from a previously committed manifest.
     ///
     /// The restored databases are checked out from the database commits referenced by the
     /// manifest, then the reconstructed registry root is verified against the requested
     /// `commit_id`.
-    pub fn checkout(repo: DirectoryManager, commit_id: CommitId) -> Result<Self, Error> {
+    pub fn checkout(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
         let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
         let runtime = Self::build_runtime()?;
         let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
@@ -99,24 +102,16 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
     }
 
     fn read_checkout_manifest(
-        repo: &DirectoryManager,
+        repo: &KV::Repo,
         commit_id: &CommitId,
     ) -> Result<RegistryManifest, OperationalError> {
-        let commit_path = repo.registry_commit_file(commit_id);
-        let commit_bytes = std::fs::read(&commit_path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                OperationalError::CommitNotFound
-            } else {
-                OperationalError::FileReadFailed { error }
-            }
-        })?;
-
+        let commit_bytes = repo.read_registry_commit(commit_id)?;
         deserialise(&commit_bytes).map_err(OperationalError::from)
     }
 
     fn checkout_databases(
         runtime: &Arc<Runtime>,
-        repo: &DirectoryManager,
+        repo: &KV::Repo,
         database_hashes: &[CommitId],
     ) -> Result<Vec<Database<KV, Normal>>, Error> {
         // TODO RV-946: Investigate parallelising the checkouts of individual databases.
@@ -145,9 +140,9 @@ impl<KV: BackgroundPersistentKeyValueStore<Repo = DirectoryManager>> Registry<KV
         let encoded =
             serialise(&manifest).expect("Serialising the registry manifest should not fail");
 
-        let commit_path = self.inner.repo.registry_commit_file(&registry_commit);
-        std::fs::write(&commit_path, &encoded)
-            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+        self.inner
+            .repo
+            .write_registry_commit(&registry_commit, &encoded)?;
 
         Ok(registry_commit)
     }

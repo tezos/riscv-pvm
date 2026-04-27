@@ -102,3 +102,33 @@ impl DirectoryManager {
         self.registry_commits_dir.join(id.hex_encode())
     }
 }
+
+/// Persistence interface for a [`crate::registry::Registry`] repo.
+pub trait RegistryRepo: Clone {
+    /// Read the registry manifest bytes associated with `id`.
+    ///
+    /// Fails with [`OperationalError::CommitNotFound`] if no manifest exists for `id`.
+    fn read_registry_commit(&self, id: &CommitId) -> Result<Vec<u8>, OperationalError>;
+
+    /// Write `bytes` as the registry manifest for `id`.
+    fn write_registry_commit(&self, id: &CommitId, bytes: &[u8]) -> Result<(), OperationalError>;
+}
+
+impl RegistryRepo for DirectoryManager {
+    fn read_registry_commit(&self, id: &CommitId) -> Result<Vec<u8>, OperationalError> {
+        let commit_path = self.registry_commit_file(id);
+        std::fs::read(&commit_path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                OperationalError::CommitNotFound
+            } else {
+                OperationalError::FileReadFailed { error }
+            }
+        })
+    }
+
+    fn write_registry_commit(&self, id: &CommitId, bytes: &[u8]) -> Result<(), OperationalError> {
+        let commit_path = self.registry_commit_file(id);
+        std::fs::write(&commit_path, bytes)
+            .map_err(|error| OperationalError::FileWriteFailed { error })
+    }
+}
