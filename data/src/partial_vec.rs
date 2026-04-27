@@ -231,6 +231,7 @@ impl<T> PartialVec<T> {
         let mut start_idx = self
             .entries
             .partition_point(|entry| entry.end() <= new_entry.start);
+        let initial_idx = start_idx;
 
         while !new_entry.data.is_empty() {
             // Insert or merge the new entry at the current index.
@@ -238,6 +239,43 @@ impl<T> PartialVec<T> {
             self.insert_entry(start_idx, &mut new_entry);
             start_idx += 1;
         }
+
+        self.coalesce_adjacent(
+            initial_idx.saturating_sub(1),
+            (start_idx + 1).min(self.entries.len()),
+        );
+    }
+
+    /// Merge any consecutive entries in `[from, to_exclusive)` whose ranges touch.
+    ///
+    /// Entries outside that window are assumed to already satisfy the no-adjacency invariant.
+    ///
+    /// Merging leaves emptied entries scattered through the window, but the `swap` below pushes
+    /// them all past `write_ptr` so a single `drain` at the end cleans them up.
+    fn coalesce_adjacent(&mut self, from: usize, to_exclusive: usize) {
+        let to = to_exclusive.min(self.entries.len());
+        if from + 1 >= to {
+            return;
+        }
+
+        let mut write_ptr = from;
+        let mut read_ptr = from + 1;
+
+        while read_ptr < to {
+            if self.entries[write_ptr].end() == self.entries[read_ptr].start {
+                let mut absorbed = std::mem::take(&mut self.entries[read_ptr].data);
+                self.entries[write_ptr].data.append(&mut absorbed);
+            } else {
+                // Keeps emptied entries behind `write_ptr`; see the partition note above.
+                write_ptr += 1;
+                if write_ptr != read_ptr {
+                    self.entries.swap(write_ptr, read_ptr);
+                }
+            }
+            read_ptr += 1;
+        }
+
+        self.entries.drain(write_ptr + 1..to);
     }
 
     /// Mark everything beyond `keep_length` as undefined.
@@ -361,12 +399,12 @@ impl<T> PartialVec<T> {
         self.entries.iter().all(|entry| entry.data.is_empty())
     }
 
-    /// Returns the given range as a contiguous slice if it is fully contained in a single
-    /// defined entry.
+    /// Returns the given range as a contiguous slice if every position in it is defined.
     ///
-    /// Returns `None` if the range spans multiple entries, includes any undefined data, or is empty
-    /// and out-of-bounds.
+    /// Returns `None` if the range includes any undefined data, or is empty and out-of-bounds.
     pub(crate) fn contiguous_range(&self, range: Range<usize>) -> Option<&[T]> {
+        // Relies on `define` coalescing touching entries, so any fully-defined range lives in a
+        // single entry.
         let idx = self
             .entries
             .partition_point(|entry| entry.end() < range.end);

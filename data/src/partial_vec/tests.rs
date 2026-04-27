@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use proptest::arbitrary::any;
 use proptest::collection::vec;
 use proptest::prelude::Strategy;
+use proptest::prop_assert;
 use proptest::proptest;
 
 use crate::partial_vec::PartialVec;
@@ -46,6 +47,22 @@ proptest! {
 
         for (index, data) in init_data {
             vec.define(index, data);
+        }
+    }
+
+    /// After any sequence of `define` calls, no two consecutive entries should be touching:
+    /// `entries[i].end()` must be strictly less than `entries[i + 1].start`.
+    #[test]
+    fn entries_never_touching(init_data in vec((any::<usize>(), data_vec()), ..1024)) {
+        let mut vec: PartialVec<u8> = PartialVec::empty();
+
+        for (index, data) in init_data {
+            vec.define(index, data);
+        }
+
+        for pair in vec.entries.windows(2) {
+            // `DefinedEntry::end` is an exclusive end of the contained range.
+            prop_assert!(pair[0].end() < pair[1].start);
         }
     }
 
@@ -653,4 +670,129 @@ fn contiguous_range_empty() {
     assert_eq!(vec.contiguous_range(5..5), Some(&[][..]));
     assert_eq!(vec.contiguous_range(7..7), Some(&[][..]));
     assert_eq!(vec.contiguous_range(10..10), Some(&[][..]));
+}
+
+/// Two writes that meet exactly should collapse into a single defined entry.
+#[test]
+fn define_merges_with_left_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(3, vec![4, 5, 6]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(vec.contiguous_range(0..6), Some(&[1, 2, 3, 4, 5, 6][..]));
+}
+
+/// A write that fills the gap between two existing entries should collapse all three into one.
+#[test]
+fn define_bridges_two_entries() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(5, vec![6, 7, 8]);
+    vec.define(3, vec![4, 5]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(
+        vec.contiguous_range(0..8),
+        Some(&[1, 2, 3, 4, 5, 6, 7, 8][..])
+    );
+}
+
+/// Triggers the `insert_entry` path where an existing entry is grown up to its right neighbour's
+/// start, and the remainder of the new data overlaps that neighbour.
+#[test]
+fn define_extension_meets_right_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(10, vec![11]);
+    vec.define(2, vec![3, 4, 5, 6, 7, 8, 9, 10, 11]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(
+        vec.contiguous_range(0..11),
+        Some(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11][..])
+    );
+}
+
+/// A write that starts inside an existing entry and extends past its end should overwrite the
+/// overlapping suffix and grow the entry with the remainder.
+#[test]
+fn define_partially_overwrites_left_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(2, vec![30, 40, 50]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(vec.contiguous_range(0..5), Some(&[1, 2, 30, 40, 50][..]));
+}
+
+/// A write that covers an existing entry completely and continues past it should replace that
+/// entry's contents wholesale, then keep going.
+#[test]
+fn define_fully_overwrites_left_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(0, vec![10, 20, 30, 40, 50]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(vec.contiguous_range(0..5), Some(&[10, 20, 30, 40, 50][..]));
+}
+
+/// A write that ends inside an existing right-hand entry should overwrite that entry's prefix
+/// and leave its suffix intact, coalescing the two entries into one.
+#[test]
+fn define_partially_overwrites_right_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(10, vec![11, 12, 13, 14, 15]);
+    vec.define(2, vec![3, 4, 5, 6, 7, 8, 9, 10, 110, 120]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(
+        vec.contiguous_range(0..15),
+        Some(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 110, 120, 13, 14, 15][..])
+    );
+}
+
+/// A write that fully overlaps a right-hand entry should replace it entirely while merging it
+/// into the growing entry on the left.
+#[test]
+fn define_fully_overwrites_right_neighbour() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(10, vec![11, 12, 13]);
+    vec.define(2, vec![3, 4, 5, 6, 7, 8, 9, 10, 110, 120, 130, 140]);
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(
+        vec.contiguous_range(0..14),
+        Some(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 110, 120, 130, 140][..])
+    );
+}
+
+/// A single write that spans several existing entries on the right should overwrite each of them
+/// in turn and coalesce the lot into one entry.
+#[test]
+fn define_spans_multiple_right_neighbours() {
+    let mut vec: PartialVec<u8> = PartialVec::empty();
+    vec.define(0, vec![1, 2, 3]);
+    vec.define(10, vec![11, 12, 13]);
+    vec.define(20, vec![21, 22, 23, 24, 25]);
+    vec.define(
+        2,
+        vec![
+            3, 4, 5, 6, 7, 8, 9, 10, 110, 120, 130, 14, 15, 16, 17, 18, 19, 20, 210, 220,
+        ],
+    );
+
+    assert_eq!(vec.entries.len(), 1);
+    assert_eq!(
+        vec.contiguous_range(0..25),
+        Some(
+            &[
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 110, 120, 130, 14, 15, 16, 17, 18, 19, 20, 210, 220,
+                23, 24, 25
+            ][..]
+        )
+    );
 }

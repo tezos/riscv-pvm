@@ -218,9 +218,9 @@ impl Bytes<Verify> {
 
     /// Returns the given range as a contiguous byte slice.
     ///
-    /// Panics (via [`not_found`]) if the range extends beyond the length, or is not fully
-    /// contained within a single defined entry, indicating the Merkle proof did not include the
-    /// data required for this access.
+    /// Panics (via [`not_found`]) if the range extends beyond the length, or includes any
+    /// undefined data, indicating the Merkle proof did not include the data required for this
+    /// access.
     pub fn partial_slice(&self, range: Range<usize>) -> &[u8] {
         if range.is_empty() {
             return &[];
