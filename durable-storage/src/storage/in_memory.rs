@@ -19,10 +19,10 @@ use crate::errors::OperationalError;
 /// Repository used by [`InMemoryKeyValueStore`].
 ///
 /// Will never write to disk.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryRepo {
     #[cfg(test)]
-    commits: RwLock<HashMap<crate::commit::CommitId, InMemorySnapshot>>,
+    commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, InMemorySnapshot>>>,
 }
 
 /// In-memory key-value store
