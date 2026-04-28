@@ -107,7 +107,7 @@ version = "4.6.1"
 features = ["derive"]
 
 [workspace.dependencies.datadog-api-client]
-version = "0.28.0"
+version = "0.29.0"
 default-features = false
 features = ["rustls-tls"]
 
