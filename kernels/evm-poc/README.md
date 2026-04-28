@@ -31,8 +31,8 @@ Run the ERC-20 benchmark in `riscv-sandbox`:
 ```bash
 make -C kernels/evm-poc benchmark \
   BENCHMARK_SCENARIO=erc20 \
-  TRANSACTIONS=1000 \
-  BLOCK_FREQUENCY=100 \
+  TRANSACTIONS=10000 \
+  BLOCK_FREQUENCY=1000 \
   NUMBER_OF_ACCOUNTS=1024 \
   DURABLE_STORAGE_DIR=/tmp/evm-poc-db
 ```
@@ -42,8 +42,8 @@ Run the same benchmark natively on the host for comparison:
 ```bash
 make -C kernels/evm-poc benchmark-native \
   BENCHMARK_SCENARIO=erc20 \
-  TRANSACTIONS=1000 \
-  BLOCK_FREQUENCY=100 \
+  TRANSACTIONS=10000 \
+  BLOCK_FREQUENCY=1000 \
   NUMBER_OF_ACCOUNTS=1024 \
   DURABLE_STORAGE_DIR=/tmp/evm-poc-db
 ```

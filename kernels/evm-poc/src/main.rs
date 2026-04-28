@@ -44,6 +44,18 @@ impl ContextStore for DurableKeySpace {
         KeySpace::contains(self, key).map_err(|error| error.to_string())
     }
 
+    fn clear(&mut self) -> Result<(), String> {
+        KeySpace::clear(self).map_err(|error| error.to_string())
+    }
+
+    fn copy_from(&mut self, other: &Self) -> Result<(), String> {
+        KeySpace::copy_from(self, other).map_err(|error| error.to_string())
+    }
+
+    fn move_from(&mut self, other: &mut Self) -> Result<(), String> {
+        KeySpace::move_from(self, other).map_err(|error| error.to_string())
+    }
+
     fn hash(&self) -> Result<Vec<u8>, String> {
         KeySpace::hash(self).map_err(|error| error.to_string())
     }

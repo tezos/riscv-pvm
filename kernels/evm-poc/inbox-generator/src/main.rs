@@ -764,6 +764,27 @@ impl ContextStore for NativeKeySpace {
             .map_err(|error| error.to_string())
     }
 
+    fn clear(&mut self) -> std::result::Result<(), String> {
+        self.registry
+            .borrow_mut()
+            .clear_database(self.index)
+            .map_err(|error| error.to_string())
+    }
+
+    fn copy_from(&mut self, other: &Self) -> std::result::Result<(), String> {
+        self.registry
+            .borrow_mut()
+            .copy_database(other.index, self.index)
+            .map_err(|error| error.to_string())
+    }
+
+    fn move_from(&mut self, other: &mut Self) -> std::result::Result<(), String> {
+        self.registry
+            .borrow_mut()
+            .move_database(other.index, self.index)
+            .map_err(|error| error.to_string())
+    }
+
     fn hash(&self) -> std::result::Result<Vec<u8>, String> {
         self.registry
             .borrow()

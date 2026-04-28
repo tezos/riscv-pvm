@@ -16,6 +16,7 @@ pub const ACCOUNT_KEY_PREFIX: &[u8] = b"/acct/";
 pub const META_BOOTSTRAPPED_KEY: &[u8] = b"/meta/bootstrapped";
 pub const META_HEAD_KEY: &[u8] = b"/meta/head";
 pub const CONTEXT_NAME: &str = "/evm-poc/context";
+pub const STAGING_CONTEXT_NAME: &str = "/evm-poc/context-staging";
 pub const BOOTSTRAP_BALANCE: u64 = 1_000_000;
 pub const TX_TIMING_SAMPLE_INTERVAL: usize = 100;
 pub const SEQUENCER_PUBLIC_KEY: [u8; 65] = [
@@ -30,6 +31,9 @@ pub trait ContextStore: Clone {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String>;
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<(), String>;
     fn contains(&self, key: &[u8]) -> Result<bool, String>;
+    fn clear(&mut self) -> Result<(), String>;
+    fn copy_from(&mut self, other: &Self) -> Result<(), String>;
+    fn move_from(&mut self, other: &mut Self) -> Result<(), String>;
     fn hash(&self) -> Result<Vec<u8>, String>;
 }
 
@@ -169,6 +173,7 @@ pub struct BlockChunkAccumulator {
 
 pub struct ChainKernel<C: ContextStore> {
     context: C,
+    staging_context: C,
     processed_transactions: usize,
     block_chunks: BlockChunkAccumulator,
 }
@@ -284,8 +289,11 @@ impl<C: ContextStore> ChainKernel<C> {
     ) -> Result<Self, String> {
         let mut context = loader.load_or_create(CONTEXT_NAME)?;
         bootstrap_context(&mut context, crypto)?;
+        let mut staging_context = loader.load_or_create(STAGING_CONTEXT_NAME)?;
+        staging_context.clear()?;
         Ok(Self {
             context,
+            staging_context,
             processed_transactions: 0,
             block_chunks: BlockChunkAccumulator::new(),
         })
@@ -322,11 +330,18 @@ impl<C: ContextStore> ChainKernel<C> {
         crypto: &(impl Crypto + AsyncKeccak + AsyncSecp256k1 + AsyncSecp256k1Recover),
         payload: &[u8],
     ) {
+        if let Err(error) = self.staging_context.copy_from(&self.context) {
+            logger.log(&format!(
+                "rejected block blueprint: could not stage context: {error}\n"
+            ));
+            return;
+        }
+
         let result = if payload.starts_with(&ETH_BLOCK_BLUEPRINT_MAGIC) {
             apply_ethereum_block_blueprint(
                 logger,
                 crypto,
-                &mut self.context,
+                &mut self.staging_context,
                 payload,
                 &mut self.processed_transactions,
             )
@@ -334,14 +349,23 @@ impl<C: ContextStore> ChainKernel<C> {
             apply_block_blueprint(
                 logger,
                 crypto,
-                &mut self.context,
+                &mut self.staging_context,
                 payload,
                 &mut self.processed_transactions,
             )
         };
 
-        if let Err(error) = result {
-            logger.log(&format!("rejected block blueprint: {error}\n"));
+        match result {
+            Ok(()) => {
+                if let Err(error) = self.context.move_from(&mut self.staging_context) {
+                    logger.log(&format!(
+                        "rejected block blueprint: could not commit staged context: {error}\n"
+                    ));
+                }
+            }
+            Err(error) => {
+                logger.log(&format!("rejected block blueprint: {error}\n"));
+            }
         }
     }
 }
@@ -697,7 +721,6 @@ fn apply_block_blueprint(
 
     Ok(())
 }
-
 
 fn apply_ethereum_block_blueprint(
     logger: &mut impl Logger,
