@@ -366,7 +366,7 @@ impl<T> PartialVec<T> {
     ///
     /// Returns `None` if the range spans multiple entries, includes any undefined data, or is empty
     /// and out-of-bounds.
-    pub fn contiguous_range(&self, range: Range<usize>) -> Option<&[T]> {
+    pub(crate) fn contiguous_range(&self, range: Range<usize>) -> Option<&[T]> {
         let idx = self
             .entries
             .partition_point(|entry| entry.end() < range.end);
