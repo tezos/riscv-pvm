@@ -116,7 +116,7 @@ jobs:
             ~/.cargo/git/db
 
       - name: Rust compilation cache
-        uses: Mozilla-Actions/sccache-action@v0.0.9
+        uses: Mozilla-Actions/sccache-action@v0.0.10
 
       - name: Pre-build Nix development shell
         run: |
