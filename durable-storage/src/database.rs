@@ -1979,4 +1979,32 @@ mod tests {
 
         database.into_trace()
     });
+
+    #[cfg(feature = "rocksdb")]
+    kv_test!(
+        #[should_panic(expected = "trace mismatch")]
+        test_database_trace_comparison_detects_divergence,
+        KV: BackgroundKeyValueStore,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_database::<KV>(handle, &repo);
+
+        // Force a per-backend divergence in the recorded trace
+        let value: &[u8] =
+            if std::any::type_name::<KV>().contains("InMemoryKeyValueStore") {
+                b"in-memory"
+            } else {
+                b"rocksdb"
+            };
+        let key = Key::new(b"divergence-probe").expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key, Bytes::copy_from_slice(value))
+            .expect("Setting should succeed");
+
+        database.into_trace()
+    });
 }
