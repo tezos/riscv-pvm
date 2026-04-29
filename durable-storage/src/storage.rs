@@ -149,34 +149,183 @@ cfg_if::cfg_if! {
             }
         }
 
-        /// Macro that runs a test against every available KV backend.
+        /// Macro which runs a test against every available KV backend and compares traces.
         ///
-        /// Without the `rocksdb` feature this expands to a single `#[test]` using the in-memory store.
-        /// With the `rocksdb` feature it expands to 2 tests, one using the in-memory store and one
-        /// using the persistence layer.
+        /// It can be used in 3 ways, one for unit tests, one for property-based tests with no
+        /// setup before the proptest loop, and one for property-based tests with setup:
+        ///
+        /// 1. `kv_test!(name, KV: Bound, { body })`:
+        ///    Expands to a single `#[test]` whose body runs once per available backend.
+        ///    When the `rocksdb` flag is off the test only runs with the in-memory backend.
+        ///    When it is on, the test runs twice, once with the persistence layer and once
+        ///    with the in-memory backend.
+        ///
+        /// 2. `kv_test!(name, KV: Bound, [args in strategies], { body })`:
+        ///    Expands to a single `#[test]` running one `proptest!` over the given strategies.
+        ///    Each iteration runs the body once per available backend with the same
+        ///    proptest-generated inputs.
+        ///
+        /// 3. `kv_test!(name, KV: Bound, <setup>, [args in strategies], { body })`:
+        ///    Same as 2, with `<setup>` which runs once per backend before the proptest loop.
+        ///    It must be one of:
+        ///    - `setup |repo| = { ... }` for tests that only need a repo. The block
+        ///      must return `(KV::Keepalive, KV::Repo)`. Inside the test body only
+        ///      `repo: &KV::Repo` is exposed.
+        ///    - `setup_runtime |handle, repo| = { ... }` for tests that need a Tokio
+        ///      runtime. The block must return `(Runtime, Handle, KV::Keepalive, KV::Repo)`.
+        ///      Inside the test body, `handle: &Handle` and `repo: &KV::Repo` are exposed.
+        ///
+        /// Note: For PBTs, in order to run the test body twice, the generated inputs are cloned.
+        /// For this to be valid, cloning must create a deep copy. This means that proptests over
+        /// pointers should not be run with this macro.
+        ///
+        /// In both cases, the "return" value of the body is taken to be a trace. The traces
+        /// produced by the 2 runs / iterations are then compared.
         macro_rules! kv_test {
-            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?, $body:block) => {
-                paste::paste! {
-                    $(#[$attr])*
-                    #[test]
-                    fn [<$fun_name _in_memory>]() {
-                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>()
-                        where
-                            <$ty_name as $crate::storage::KeyValueStore>::Repo: $crate::repo::RegistryRepo,
-                        $body
-                        inner::<$crate::storage::in_memory::InMemoryKeyValueStore>();
+            // Property-based test variant with no setup.
+            // Forwards to the shared `@prop_test` arm with an empty setup.
+            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?,
+             [$($arg:ident in $strat:expr),* $(,)?],
+             $body:block) => {
+                $crate::storage::kv_test!(@prop_test
+                    $(#[$attr])* $fun_name, $ty_name $(: $ty_bound)?,
+                    ret_ty = (),
+                    setup_values = _unused,
+                    setup = {},
+                    args = [$($arg in $strat),*],
+                    body = $body
+                );
+            };
+
+            // Property-based test variant with `setup`.
+            // Forwards to the shared `@prop_test` arm with the setup tuple shape.
+            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?,
+             setup |$repo:ident| = $setup:block,
+             [$($arg:ident in $strat:expr),* $(,)?],
+             $body:block) => {
+                $crate::storage::kv_test!(@prop_test
+                    $(#[$attr])* $fun_name, $ty_name $(: $ty_bound)?,
+                    ret_ty = (
+                        <$ty_name as $crate::storage::TestKeyValueStoreSetup>::Keepalive,
+                        <$ty_name as $crate::storage::KeyValueStore>::Repo,
+                    ),
+                    setup_values = (_keepalive, $repo),
+                    setup = $setup,
+                    args = [$($arg in $strat),*],
+                    body = $body
+                );
+            };
+
+            // Property-based test variant with `setup_runtime`.
+            // Forwards to the shared `@prop_test` arm with the setup tuple shape.
+            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?,
+             setup_runtime |$handle:ident, $repo:ident| = $setup:block,
+             [$($arg:ident in $strat:expr),* $(,)?],
+             $body:block) => {
+                $crate::storage::kv_test!(@prop_test
+                    $(#[$attr])* $fun_name, $ty_name $(: $ty_bound)?,
+                    ret_ty = (
+                        ::tokio::runtime::Runtime,
+                        ::tokio::runtime::Handle,
+                        <$ty_name as $crate::storage::TestKeyValueStoreSetup>::Keepalive,
+                        <$ty_name as $crate::storage::KeyValueStore>::Repo,
+                    ),
+                    setup_values = (_runtime, $handle, _keepalive, $repo),
+                    setup = $setup,
+                    args = [$($arg in $strat),*],
+                    body = $body
+                );
+            };
+
+            // Internal arm for property-based tests
+            (@prop_test
+             $(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?,
+             ret_ty = $ret_ty:ty,
+             setup_values = $setup_values:tt,
+             setup = $setup:block,
+             args = [$($arg:ident in $strat:expr),* $(,)?],
+             body = $body:block) => {
+                $(#[$attr])*
+                #[test]
+                fn $fun_name() {
+                    fn _kv_test_setup<
+                        $ty_name: $crate::storage::TestKeyValueStoreSetup
+                                $(+ $ty_bound)?,
+                    >() -> $ret_ty
+                    where
+                        <$ty_name as $crate::storage::KeyValueStore>::Repo:
+                            $crate::repo::RegistryRepo,
+                    {
+                        $setup
                     }
 
                     #[cfg(feature = "rocksdb")]
-                    $(#[$attr])*
-                    #[test]
-                    fn [<$fun_name _rocksdb>]() {
-                        fn inner<$ty_name: $crate::storage::TestKeyValueStoreSetup $(+ $ty_bound)?>()
-                        where
-                            <$ty_name as $crate::storage::KeyValueStore>::Repo: $crate::repo::RegistryRepo,
+                    let rocksdb_setup =
+                        _kv_test_setup::<$crate::persistence_layer::PersistenceLayer>();
+
+                    let in_memory_setup =
+                        _kv_test_setup::<$crate::storage::in_memory::InMemoryKeyValueStore>();
+
+                    ::proptest::proptest!(|($($arg in $strat),*)| {
+                        #[cfg(feature = "rocksdb")]
+                        let rocksdb_trace = {
+                            type $ty_name = $crate::persistence_layer::PersistenceLayer;
+                            let $setup_values = &rocksdb_setup;
+                            eprintln!("Running test with persistence layer");
+                            $(let $arg = ::std::clone::Clone::clone(&$arg);)*
+                            $body
+                        };
+
+                        let _in_memory_trace = {
+                            type $ty_name = $crate::storage::in_memory::InMemoryKeyValueStore;
+                            let $setup_values = &in_memory_setup;
+                            eprintln!("Running test with in-memory backend");
+                            $body
+                        };
+
+                        #[cfg(feature = "rocksdb")]
+                        ::proptest::prop_assert_eq!(
+                            rocksdb_trace, _in_memory_trace,
+                            "trace mismatch"
+                        );
+                    });
+                }
+            };
+
+            // Unit test variant
+            ($(#[$attr:meta])* $fun_name:ident, $ty_name:ident $(: $ty_bound:path)?, $body:block) => {
+                $(#[$attr])*
+                #[test]
+                fn $fun_name() {
+                    fn _bound_check<
+                        $ty_name: $crate::storage::TestKeyValueStoreSetup
+                                $(+ $ty_bound)?,
+                    >()
+                    where
+                        <$ty_name as $crate::storage::KeyValueStore>::Repo:
+                            $crate::repo::RegistryRepo,
+                    {}
+
+                    #[cfg(feature = "rocksdb")]
+                    let rocksdb_trace = {
+                        type $ty_name = $crate::persistence_layer::PersistenceLayer;
+                        _bound_check::<$ty_name>();
+                        eprintln!("Running test with persistence layer");
                         $body
-                        inner::<$crate::persistence_layer::PersistenceLayer>();
-                    }
+                    };
+
+                    let _in_memory_trace = {
+                        type $ty_name = $crate::storage::in_memory::InMemoryKeyValueStore;
+                        _bound_check::<$ty_name>();
+                        eprintln!("Running test with in-memory backend");
+                        $body
+                    };
+
+                    #[cfg(feature = "rocksdb")]
+                    assert_eq!(
+                        rocksdb_trace, _in_memory_trace,
+                        "trace mismatch"
+                    );
                 }
             };
         }
